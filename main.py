@@ -7,6 +7,7 @@ import sys
 import importlib
 import json
 import tkinter as tk
+from tkinter import messagebox
 import ttkbootstrap as tb
 from ttkbootstrap.constants import *
 from modules.theme_manager import apply_readability_overrides, normalize_theme, DEFAULT_THEME
@@ -76,6 +77,7 @@ class Dispatcher:
         self.root.bind('<Control-i>', self.menu_import)
 
         help_menu = tk.Menu(menubar, tearoff=0)
+        help_menu.add_command(label="User Guide", command=lambda: self.load_module("help_viewer"))
         help_menu.add_command(label="About", command=lambda: self.load_module("about"))
         menubar.add_cascade(label="Help", menu=help_menu)
 
@@ -104,7 +106,7 @@ class Dispatcher:
             self.active_module_instance.import_from_excel_ui()
 
     def pre_load_manifest(self):
-        module_list = ["production_log", "layout_manager", "data_handler", "about", "settings_manager", "theme_manager"]
+        module_list = ["production_log", "layout_manager", "data_handler", "about", "settings_manager", "theme_manager", "help_viewer"]
         for mod_name in module_list:
             try:
                 full_path = f"modules.{mod_name}"
@@ -150,7 +152,7 @@ class Dispatcher:
         for filename in sorted(os.listdir(self.modules_path)):
             if filename.endswith(".py") and filename != "__init__.py":
                 module_name = filename[:-3]
-                if module_name in ["about", "data_handler", "splash", "example_modules", "theme_manager"]: continue 
+                if module_name in ["about", "data_handler", "splash", "example_modules", "theme_manager", "help_viewer"]: continue 
                 display_name = module_name.replace("_", " ").title()
                 
                 tb.Button(self.nav_container, text=display_name,
@@ -181,6 +183,28 @@ class Dispatcher:
         except Exception as e:
             print(f"LOAD ERROR: {e}")
             tb.Label(self.content_area, text=f"Error loading {module_name}: {e}", bootstyle=DANGER).pack(pady=20)
+
+    def open_help_document(self, relative_path):
+        try:
+            if getattr(sys, 'frozen', False):
+                internal_root = sys._MEIPASS
+                external_root = os.path.dirname(sys.executable)
+            else:
+                internal_root = os.path.abspath(".")
+                external_root = os.path.abspath(".")
+
+            candidate_paths = [
+                os.path.join(external_root, relative_path),
+                os.path.join(internal_root, relative_path),
+            ]
+            for candidate in candidate_paths:
+                if os.path.exists(candidate):
+                    os.startfile(candidate)
+                    return
+
+            raise FileNotFoundError(relative_path)
+        except Exception as e:
+            messagebox.showerror("Help Document Error", f"Could not open help document: {e}")
 
     def apply_theme(self, theme_name, redraw=False):
         normalized_theme = normalize_theme(theme_name)
