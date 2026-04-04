@@ -87,6 +87,7 @@ class RateManager:
         
         self.tree.pack(side=LEFT, fill=BOTH, expand=True)
         scrollbar.pack(side=RIGHT, fill=Y)
+        self.tree.bind("<<TreeviewSelect>>", self.on_tree_select)
 
         # --- Form & Buttons ---
         # [Form layout remains the same as your draft]
@@ -113,6 +114,9 @@ class RateManager:
         self.del_btn = tb.Button(self.btn_frame, text="Delete", bootstyle=DANGER, command=self.delete_rate)
         self.del_btn.pack(side=LEFT, padx=2)
 
+        self.clear_btn = tb.Button(self.btn_frame, text="Clear", bootstyle=SECONDARY, command=self.clear_form)
+        self.clear_btn.pack(side=LEFT, padx=2)
+
         self.form.columnconfigure((1, 3), weight=1)
         self.refresh_table()
 
@@ -122,8 +126,19 @@ class RateManager:
         sorted_parts = sorted(self.rates.items())
         for part, rate in sorted_parts:
             self.tree.insert("", END, iid=str(part), values=(part, rate))
+
+    def get_selected_part_key(self):
+        selection = self.tree.selection()
+        if selection:
+            return selection[0]
+        return self.tree.focus()
+
+    def on_tree_select(self, _event=None):
+        if self.tree.selection():
+            self.prepare_edit()
+
     def prepare_edit(self):
-        part_key = self.tree.focus()
+        part_key = self.get_selected_part_key()
         if not part_key: return
         
         self.editing_part = part_key
@@ -152,6 +167,12 @@ class RateManager:
         self.primary_btn.config(text="Add", bootstyle=SUCCESS, command=self.add_rate)
         self.edit_btn.config(text="Edit", bootstyle=WARNING, command=self.prepare_edit)
 
+    def clear_form(self):
+        self.cancel_edit()
+        self.tree.selection_remove(self.tree.selection())
+        self.tree.focus("")
+        self.part_ent.focus_set()
+
     def add_rate(self):
         part = self.part_ent.get().strip()
         rate = self.rate_ent.get().strip()
@@ -168,9 +189,10 @@ class RateManager:
                 Messagebox.show_error("Rate must be a number (e.g., 240 or 240.5)", "Input Error")
 
     def delete_rate(self):
-        part_key = self.tree.focus()
+        part_key = self.get_selected_part_key()
         if part_key in self.rates:
             del self.rates[part_key]
             self.save_data(); self.refresh_table()
+            self.clear_form()
 def get_ui(parent, dispatcher):
     RateManager(parent, dispatcher)

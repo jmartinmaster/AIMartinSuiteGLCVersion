@@ -38,14 +38,16 @@ class LayoutManager:
         self.parent = parent
         self.dispatcher = dispatcher
         
-        # 1. Logic: If local config exists, use it. Else, use the one inside the EXE.
+        # 1. Logic: Read from local config when present, otherwise fall back to the packaged default.
         self.local_config = "layout_config.json"
         self.internal_config = resource_path("layout_config.json")
         
-        # Use local if it exists, otherwise use internal
+        # Save operations always target the local config so packaged builds remain editable.
         self.config_path = self.local_config if os.path.exists(self.local_config) else self.internal_config
+        self.save_path = self.local_config
         
         self.setup_ui()
+
     def setup_ui(self):
         self.main_container = tb.Frame(self.parent, padding=10)
         self.main_container.pack(fill=BOTH, expand=True)
@@ -55,6 +57,8 @@ class LayoutManager:
         editor_frame.pack(side=LEFT, fill=BOTH, expand=True, padx=5)
 
         tb.Label(editor_frame, text="JSON Editor", font=("-size 12 -weight bold")).pack(anchor=W)
+        self.source_label = tb.Label(editor_frame, bootstyle=SECONDARY)
+        self.source_label.pack(anchor=W)
         self.text_area = tk.Text(editor_frame, wrap=NONE, font=("Monospace", 10), undo=True)
         self.text_area.pack(fill=BOTH, expand=True, pady=5)
 
@@ -69,11 +73,24 @@ class LayoutManager:
         btn_frame = tb.Frame(editor_frame)
         btn_frame.pack(fill=X, pady=5)
 
+        tb.Button(btn_frame, text="Reload Current", bootstyle=SECONDARY, command=self.load_config).pack(side=LEFT, padx=5)
+        tb.Button(btn_frame, text="Load Default", bootstyle=WARNING, command=self.load_default_config).pack(side=LEFT, padx=5)
         tb.Button(btn_frame, text="Update Preview", bootstyle=INFO, command=self.update_preview).pack(side=LEFT, padx=5)
         tb.Button(btn_frame, text="Save to File", bootstyle=SUCCESS, command=self.save_config).pack(side=RIGHT, padx=5)
 
         self.load_config()
         self.update_preview()
+
+    def set_editor_text(self, config_data):
+        self.text_area.delete("1.0", END)
+        self.text_area.insert("1.0", json.dumps(config_data, indent=4))
+
+    def update_source_label(self):
+        if self.config_path == self.local_config:
+            source_text = f"Editing local config: {self.local_config}"
+        else:
+            source_text = f"Editing packaged default: {self.internal_config}"
+        self.source_label.config(text=source_text)
 
     def update_preview(self):
         """Renders the current text area JSON into a visual grid."""
@@ -105,15 +122,27 @@ class LayoutManager:
         if os.path.exists(self.config_path):
             with open(self.config_path, 'r') as f:
                 data = json.load(f)
-                self.text_area.delete("1.0", END)
-                self.text_area.insert("1.0", json.dumps(data, indent=4))
+                self.set_editor_text(data)
+                self.update_source_label()
+                self.update_preview()
+
+    def load_default_config(self):
+        if os.path.exists(self.internal_config):
+            with open(self.internal_config, 'r') as f:
+                data = json.load(f)
+            self.config_path = self.internal_config
+            self.set_editor_text(data)
+            self.update_source_label()
+            self.update_preview()
 
     def save_config(self):
         try:
             raw_data = self.text_area.get("1.0", END).strip()
             json_data = json.loads(raw_data)
-            with open(self.config_path, 'w') as f:
+            with open(self.save_path, 'w') as f:
                 json.dump(json_data, f, indent=4)
+            self.config_path = self.save_path
+            self.update_source_label()
             Messagebox.show_info("Layout saved! Production Log will update next time it's opened.", "Success")
             self.update_preview()
         except Exception as e:
