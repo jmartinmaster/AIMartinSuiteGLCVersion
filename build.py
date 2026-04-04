@@ -36,6 +36,7 @@ PyInstaller.__main__.run([
     '--windowed',
     # Folders to include
     '--add-data=modules;modules',
+    '--add-data=docs;docs',
     '--add-data=templates;templates',
     # Files to include
     '--add-data=layout_config.json;.',

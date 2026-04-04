@@ -4,6 +4,9 @@
 
 import ttkbootstrap as tb
 
+__module_name__ = "Theme Manager"
+__version__ = "1.0.0"
+
 DEFAULT_THEME = "flatly"
 
 # Curated for readable contrast and generally consistent widget styling.

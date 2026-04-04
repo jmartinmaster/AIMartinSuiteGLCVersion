@@ -10,7 +10,7 @@ a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
-    datas=[('modules', 'modules'), ('templates', 'templates'), ('layout_config.json', '.'), ('rates.json', '.')],
+    datas=[('modules', 'modules'), ('docs', 'docs'), ('templates', 'templates'), ('layout_config.json', '.'), ('rates.json', '.')],
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
