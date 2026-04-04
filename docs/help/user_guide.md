@@ -11,6 +11,8 @@ The suite is built around four day-to-day jobs:
 3. Maintain part-number rate values used for time and efficiency calculations.
 4. Adjust the layout and settings without editing code.
 
+It also includes a packaged-release Update Manager and direct access to the GPL license from the Help Center and About screen.
+
 ## Main Areas Of The Program
 
 ### Production Log
@@ -58,6 +60,17 @@ Use Settings Manager to configure application defaults.
 - Default Goal MPH sets the default shift target.
 - Export settings control where generated Excel files are written.
 
+### Update Manager
+
+Use Update Manager to compare the local Dispatcher Core version with the repository release version.
+
+- Check Repository compares the local Dispatcher version against the current branch version.
+- Two-part versions such as `1.07` can trigger an executable update when greater than the local version.
+- Three-part versions only trigger updates when the third number is even, such as `1.07.2`.
+- Odd patch versions such as `1.07.1` are ignored.
+- In the Python/source workflow, updated EXEs are still best handled by rebuilding manually.
+- In the packaged EXE workflow, automatic self-replacement is still experimental and may require manual EXE replacement.
+
 ## Typical Workflow
 
 1. Open Production Log at the start of the shift.
@@ -98,3 +111,9 @@ Manual JSON editing is still possible, but the built-in editors are safer becaus
 ## JSON Reference
 
 Use the other Help tabs for the detailed structure of each JSON file used by the application.
+
+## License Access
+
+- The full GNU GPL license text is available from the Help Center.
+- The About screen also provides an Open License button.
+- Packaged builds include `LICENSE.txt` so the license opens cleanly in Windows.

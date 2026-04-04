@@ -1,6 +1,6 @@
 # The Martin Suite (GLC Edition)
 
-The Martin Suite is a comprehensive desktop application designed for logging Disamatic production and managing manufacturing rates. Built with Python, Tkinter, and `ttkbootstrap`, it provides a modern, dark-theme-friendly interface for floor operators and managers to track production efficiency, manage downtime, and interface directly with Excel reports.
+The Martin Suite is a desktop application for logging Disamatic production, managing rates, editing layout mappings, and packaging a Windows executable release. Built with Python, Tkinter, and `ttkbootstrap`, it supports both source-based development and a packaged EXE workflow.
 
 ## Features
 
@@ -12,8 +12,9 @@ The Martin Suite is a comprehensive desktop application designed for logging Dis
   * Export production logs to formatted Excel sheets.
   * Import existing Excel sheets to resume or edit logged data.
 * **Layout Manager:** A built-in JSON editor to dynamically adjust the UI grid layout of the production form.
-* **Theme & Settings Management:** Support for various `ttkbootstrap` themes and customizable default targets.
-* **Hot-Swap Repacking:** Built-in utility to bake layout and rate changes directly into a portable standalone executable.
+* **Theme & Settings Management:** Support for curated readable themes and configurable production defaults.
+* **Help & License Access:** Built-in Help Center tabs plus bundled GPL license access from Help and About.
+* **Update Manager:** Checks Dispatcher Core version against the repository and can target packaged EXE updates.
 
 ## Prerequisites
 
@@ -33,16 +34,24 @@ python main.py
 
 ## Building the Executable
 
-The Martin Suite is designed to be bundled into a portable `.exe` for deployment on factory floors without requiring a Python environment. To build the executable, run the included build script:
+The Martin Suite is designed to be bundled into a standalone `.exe` for deployment on factory floors without requiring a Python environment. To build the executable, run the included build script:
 
 ```bash
 python build.py
 ```
 
-The compiled executable will be located in the `dist/` directory.
+The compiled executable will be located in the `dist/` directory as `TheMartinSuite_GLC.exe`.
+
+## Update Behavior
+
+- Source / Python mode can inspect repository versions, but new executable releases are still best produced by rebuilding manually.
+- Packaged EXE mode uses Dispatcher Core as the master version check.
+- Two-part versions such as `1.07` are valid update targets.
+- Three-part versions only update when the third number is even, such as `1.07.2`.
+- Automatic EXE self-replacement is still experimental and may require manual replacement during testing.
 
 ## License
 
 Copyright (C) 2026 Jamie Martin
 
-This program is free software: you can redistribute it and/or modify it under the terms of the **GNU General Public License v3.0**. See the `LICENSE` file for details.
+This program is free software: you can redistribute it and/or modify it under the terms of the **GNU General Public License v3.0**. See the `LICENSE.txt` file for the packaged user-facing copy and `LICENSE` for the repository copy.
