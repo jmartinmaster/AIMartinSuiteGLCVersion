@@ -31,7 +31,7 @@ from modules.theme_manager import apply_readability_overrides, normalize_theme, 
 from modules.utils import external_path, local_or_resource_path, resource_path
 
 __module_name__ = "Dispatcher Core"
-__version__ = "1.1.4"
+__version__ = "1.2"
 WINDOWS_APP_ID = "JamieMartin.TheMartinSuite.GLC"
 APP_ICON_RELATIVE_PATH = "icon.ico"
 APP_ICON_IMAGE_RELATIVE_PATHS = [

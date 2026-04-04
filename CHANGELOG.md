@@ -4,6 +4,16 @@ This changelog tracks the main branch release line for The Martin Suite (GLC Edi
 
 Version headings below are aligned to the current `1.x` release line used by Dispatcher Core. Earlier work has been grouped into practical release milestones so the shipped feature history is easier to follow without rewriting older module version markers.
 
+## [1.2] - 2026-04-04
+
+### Changed
+
+- Promoted Dispatcher Core to stable version `1.2` for the Production Log workflow polish release.
+- Restored the splash screen footer so copyright and GPL license text remain visible even when the logo is present.
+- Replaced manual Production Log add-row buttons with automatic keep-one-open row behavior for both production and downtime entry.
+- Moved Balance Downtime into the main footer action row.
+- Updated Ghost Time so missing time is highlighted in red, extra time is highlighted in green, and over-shift cases require manual downtime removal instead of automatic subtraction.
+
 ## [1.1.4] - 2026-04-04
 
 ### Added

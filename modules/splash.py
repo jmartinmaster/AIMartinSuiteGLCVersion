@@ -38,8 +38,8 @@ def show_splash_screen(root, duration=5000, logo_path=None):
     splash.attributes('-topmost', True) # Keep it on top of other windows
     apply_app_icon(splash)
     
-    width = 500
-    height = 420 if logo_path else 250
+    width = 520
+    height = 470 if logo_path else 280
     
     # Center the splash screen on the monitor
     screen_width = splash.winfo_screenwidth()
@@ -48,26 +48,39 @@ def show_splash_screen(root, duration=5000, logo_path=None):
     y = (screen_height // 2) - (height // 2)
     splash.geometry(f'{width}x{height}+{x}+{y}')
     
-    frame = tb.Frame(splash, padding=30)
+    frame = tb.Frame(splash, padding=(30, 24))
     frame.pack(fill=BOTH, expand=True)
+
+    content = tb.Frame(frame)
+    content.pack(fill=BOTH, expand=True)
+
+    footer = tb.Frame(frame)
+    footer.pack(fill=X, side=BOTTOM, pady=(12, 0))
     
     # Dynamically load and display a custom logo if provided
     if logo_path and os.path.exists(logo_path):
         try:
             img = tk.PhotoImage(file=logo_path)
+            max_logo_width = 400
+            max_logo_height = 180
+            width_scale = max(1, (img.width() + max_logo_width - 1) // max_logo_width)
+            height_scale = max(1, (img.height() + max_logo_height - 1) // max_logo_height)
+            subsample = max(width_scale, height_scale)
+            if subsample > 1:
+                img = img.subsample(subsample, subsample)
             splash.logo_img = img # Keep a reference to prevent Python's garbage collector from deleting it
-            tb.Label(frame, image=img).pack(pady=(0, 12))
+            tb.Label(content, image=img).pack(pady=(0, 12))
         except Exception as e:
             print(f"Error loading splash logo: {e}")
 
-    tb.Label(frame, text="THE MARTIN SUITE", font=("-size 24 -weight bold")).pack(pady=(8, 0))
-    tb.Label(frame, text="GLC Edition", font=("-size 14 -slant italic"), bootstyle=INFO).pack(pady=5)
+    tb.Label(content, text="THE MARTIN SUITE", font=("-size 24 -weight bold")).pack(pady=(8, 0))
+    tb.Label(content, text="GLC Edition", font=("-size 14 -slant italic"), bootstyle=INFO).pack(pady=5)
     
-    tb.Label(frame, text="Copyright © 2026 Jamie Martin", font=("-size 10")).pack(pady=(20, 0))
-    tb.Label(frame, text="Licensed under GNU GPLv3", font=("-size 9"), bootstyle=SECONDARY).pack(pady=5)
+    tb.Label(footer, text="Copyright © 2026 Jamie Martin", font=("-size 10")).pack()
+    tb.Label(footer, text="Licensed under GNU GPLv3", font=("-size 9"), bootstyle=SECONDARY).pack(pady=(4, 8))
     
-    progress = tb.Progressbar(frame, bootstyle=SUCCESS, mode="indeterminate")
-    progress.pack(fill=X, pady=(20, 0), padx=20)
+    progress = tb.Progressbar(footer, bootstyle=SUCCESS, mode="indeterminate")
+    progress.pack(fill=X, pady=(6, 0), padx=20)
     progress.start(15)
     
     # Schedule the splash screen to close and reveal the main app
