@@ -3,6 +3,7 @@
 # Licensed under GNU GPLv3.
 
 import tkinter as tk
+from tkinter import messagebox
 import ttkbootstrap as tb
 from ttkbootstrap.constants import *
 from ttkbootstrap.dialogs import Messagebox
@@ -12,7 +13,7 @@ import os
 import sys
 
 __module_name__ = "Production Log"
-__version__ = "1.0.2"
+__version__ = "1.0.3"
 
 def resource_path(relative_path):
     """ Get absolute path to internal resource (Read-Only) """
@@ -58,39 +59,111 @@ class ProductionLog:
         self.default_hours = str(self.settings.get("default_shift_hours", 8.0))
         self.default_goal = str(self.settings.get("default_goal_mph", 240))
         self.auto_save_interval = int(self.settings.get("auto_save_interval_min", 5)) * 60000
+        self.current_draft_path = None
+        self.latest_draft_path = None
+        self.has_unsaved_changes = False
+        self.last_saved_signature = None
 
         self.setup_ui()
         self.parent.after(self.auto_save_interval, self.auto_save)
 
     def auto_save(self):
-        self.save_draft(is_auto=True)
+        if self.has_unsaved_changes and not self.is_form_blank():
+            self.save_draft(is_auto=True)
         self.parent.after(self.auto_save_interval, self.auto_save) 
+
+    def get_pending_dir(self):
+        pending_dir = external_path("data/pending")
+        os.makedirs(pending_dir, exist_ok=True)
+        return pending_dir
+
+    def collect_ui_data(self):
+        header_data = {fid: ent.get() for fid, ent in self.entries.items()}
+        prod_data = [{k: (v.get() if hasattr(v, 'get') else v.cget("text")) for k, v in row.items()} for row in self.production_rows]
+        dt_data = [{k: (v.get() if hasattr(v, 'get') else v.cget("text")) for k, v in row.items()} for row in self.downtime_rows]
+        return {"header": header_data, "production": prod_data, "downtime": dt_data}
+
+    def serialize_ui_data(self, data=None):
+        if data is None:
+            data = self.collect_ui_data()
+        return json.dumps(data, sort_keys=True, default=str)
+
+    def is_form_blank(self):
+        data = self.collect_ui_data()
+        header = data["header"]
+        significant_header_values = [
+            value for key, value in header.items()
+            if key not in {"hours", "goal_mph", "cast_date"} and str(value).strip()
+        ]
+        production_has_data = any(
+            any(str(row.get(key, "")).strip() for key in ("shop_order", "part_number", "molds"))
+            for row in data["production"]
+        )
+        downtime_has_data = any(
+            any(str(row.get(key, "")).strip() for key in ("start", "stop", "code", "cause"))
+            for row in data["downtime"]
+        )
+        return not significant_header_values and not production_has_data and not downtime_has_data
+
+    def mark_dirty(self, _event=None):
+        self.has_unsaved_changes = True
+        self.update_recovery_ui()
+
+    def mark_clean(self, data=None):
+        self.has_unsaved_changes = False
+        self.last_saved_signature = self.serialize_ui_data(data)
+        self.update_recovery_ui()
+
+    def bind_dirty_tracking(self, widget, events):
+        for event_name in events:
+            widget.bind(event_name, self.mark_dirty, add="+")
+
+    def build_draft_path(self, header_data):
+        raw_date = str(header_data.get("date", "unsaved") or "unsaved").replace("/", "-")
+        shift_str = str(header_data.get("shift", "0") or "0")
+        filename = f"draft_{raw_date}_shift{shift_str}.json"
+        return os.path.join(self.get_pending_dir(), filename)
 
     def save_draft(self, is_auto=False):
         try:
-            header_data = {fid: ent.get() for fid, ent in self.entries.items()}
-            prod_data = [{k: (v.get() if hasattr(v, 'get') else v.cget("text")) for k, v in row.items()} for row in self.production_rows]
-            dt_data = [{k: (v.get() if hasattr(v, 'get') else v.cget("text")) for k, v in row.items()} for row in self.downtime_rows]
+            data = self.collect_ui_data()
+            if is_auto and not self.has_unsaved_changes:
+                return
+            if self.is_form_blank():
+                return
 
-            data = {"header": header_data, "production": prod_data, "downtime": dt_data}
+            draft_path = self.build_draft_path(data["header"])
+            payload = {
+                "meta": {
+                    "saved_at": datetime.now().isoformat(timespec="seconds"),
+                    "auto_save": is_auto,
+                    "version": __version__,
+                },
+                **data,
+            }
 
-            raw_date = header_data.get("date", "unsaved").replace("/", "-")
-            shift_str = header_data.get("shift", "0")
-            filename = f"draft_{raw_date}_shift{shift_str}.json"
-            
-            # FORCE EXTERNAL SAVE
-            pending_dir = external_path("data/pending")
-            os.makedirs(pending_dir, exist_ok=True)
-            
-            with open(os.path.join(pending_dir, filename), "w") as f:
-                json.dump(data, f, indent=4)
-            
+            with open(draft_path, "w", encoding="utf-8") as f:
+                json.dump(payload, f, indent=4)
+
+            self.current_draft_path = draft_path
+            self.mark_clean(data)
+
             if not is_auto:
-                print(f"Saved to: {filename}")
+                Messagebox.show_info(f"Draft saved to {os.path.basename(draft_path)}", "Draft Saved")
         except Exception as e:
             print(f"Save Error: {e}")
 
     def setup_ui(self):
+        recovery_wrapper = tb.Labelframe(self.parent, text=" Draft Recovery ", padding=10, style="Martin.Recovery.TLabelframe")
+        recovery_wrapper.pack(fill=X, padx=10, pady=(10, 0))
+        self.recovery_status_lbl = tb.Label(recovery_wrapper, text="Checking draft state...", style="Martin.Muted.TLabel")
+        self.recovery_status_lbl.pack(side=LEFT, padx=(0, 10))
+        self.resume_latest_btn = tb.Button(recovery_wrapper, text="Resume Latest", bootstyle=PRIMARY, command=self.resume_latest_draft)
+        self.resume_latest_btn.pack(side=LEFT, padx=5)
+        tb.Button(recovery_wrapper, text="Browse Drafts", bootstyle=PRIMARY, command=self.show_pending).pack(side=LEFT, padx=5)
+        self.delete_current_draft_btn = tb.Button(recovery_wrapper, text="Delete Current Draft", bootstyle=DANGER, command=self.delete_current_draft)
+        self.delete_current_draft_btn.pack(side=LEFT, padx=5)
+
         header_wrapper = tb.Labelframe(self.parent, text=" Form 510-09: Production Header ", padding=15)
         header_wrapper.pack(fill=X, padx=10, pady=10)
         
@@ -111,6 +184,8 @@ class ProductionLog:
                 if field.get("readonly"): ent.config(state="readonly", bootstyle=INFO)
                 ent.grid(row=field["row"], column=field["col"]+1, padx=5, pady=5, sticky=W)
                 self.entries[field["id"]] = ent
+                if not field.get("readonly"):
+                    self.bind_dirty_tracking(ent, ("<KeyRelease>",))
 
             if "date" in self.entries:
                 self.entries["date"].bind("<FocusOut>", self.sync_julian_cast_date)
@@ -138,9 +213,11 @@ class ProductionLog:
         tb.Button(footer, text="Save Draft", command=self.save_draft, bootstyle=SECONDARY).pack(side=LEFT, padx=5)
         tb.Button(footer, text="Export Excel", command=self.export_to_excel, bootstyle=SUCCESS).pack(side=LEFT, padx=5)
         tb.Button(footer, text="Import Excel", command=self.import_from_excel_ui, bootstyle=INFO).pack(side=LEFT, padx=5)
-        tb.Button(footer, text="📁 Pending", command=self.show_pending, bootstyle=OUTLINE).pack(side=LEFT, padx=5)
+        tb.Button(footer, text="📁 Pending", command=self.show_pending, bootstyle=SECONDARY).pack(side=LEFT, padx=5)
 
         self.add_production_row()
+        self.mark_clean()
+        self.update_recovery_ui()
 
     def add_production_row(self):
         row_frame = tb.Frame(self.production_container)
@@ -155,9 +232,13 @@ class ProductionLog:
             if k != "time_calc": w.pack(side=LEFT, padx=5)
         row["time_calc"].pack(side=RIGHT, padx=10)
         
-        row["part_number"].bind("<KeyRelease>", lambda e: self.update_row_math())
-        row["molds"].bind("<KeyRelease>", lambda e: self.update_row_math())
+        row["part_number"].bind("<KeyRelease>", lambda e: self.update_row_math(), add="+")
+        row["molds"].bind("<KeyRelease>", lambda e: self.update_row_math(), add="+")
+        self.bind_dirty_tracking(row["shop_order"], ("<KeyRelease>",))
+        self.bind_dirty_tracking(row["part_number"], ("<KeyRelease>",))
+        self.bind_dirty_tracking(row["molds"], ("<KeyRelease>",))
         self.production_rows.append(row)
+        return row
 
     def add_downtime_row(self):
         row_frame = tb.Frame(self.downtime_container)
@@ -175,9 +256,163 @@ class ProductionLog:
         row["time_calc"].pack(side=RIGHT, padx=10)
         row["cause"].pack(side=LEFT, fill=X, expand=True, padx=5)
         
-        row["start"].bind("<KeyRelease>", lambda e: self.update_row_math())
-        row["stop"].bind("<KeyRelease>", lambda e: self.update_row_math())
+        row["start"].bind("<KeyRelease>", lambda e: self.update_row_math(), add="+")
+        row["stop"].bind("<KeyRelease>", lambda e: self.update_row_math(), add="+")
+        row["code"].bind("<<ComboboxSelected>>", self.mark_dirty, add="+")
+        self.bind_dirty_tracking(row["start"], ("<KeyRelease>",))
+        self.bind_dirty_tracking(row["stop"], ("<KeyRelease>",))
+        self.bind_dirty_tracking(row["cause"], ("<KeyRelease>",))
         self.downtime_rows.append(row)
+        return row
+
+    def set_entry_value(self, field_id, value):
+        if field_id not in self.entries:
+            return
+        entry = self.entries[field_id]
+        original_state = entry.cget("state")
+        if original_state == "readonly":
+            entry.config(state="normal")
+        entry.delete(0, END)
+        entry.insert(0, str(value) if value is not None else "")
+        if original_state == "readonly":
+            entry.config(state="readonly")
+
+    def clear_dynamic_rows(self):
+        for widget in self.production_container.winfo_children():
+            widget.destroy()
+        self.production_rows.clear()
+
+        for widget in self.downtime_container.winfo_children():
+            widget.destroy()
+        self.downtime_rows.clear()
+
+    def populate_from_data(self, data, source_path=None, mark_dirty_after_load=False):
+        for fid, val in data.get("header", {}).items():
+            self.set_entry_value(fid, val)
+
+        self.clear_dynamic_rows()
+
+        for p_data in data.get("production", []):
+            current_row = self.add_production_row()
+            for key, val in p_data.items():
+                if key in current_row and hasattr(current_row[key], 'insert'):
+                    current_row[key].delete(0, END)
+                    current_row[key].insert(0, str(val) if val is not None else "")
+
+        for d_data in data.get("downtime", []):
+            current_row = self.add_downtime_row()
+            for key, val in d_data.items():
+                if key in current_row:
+                    widget = current_row[key]
+                    if hasattr(widget, 'set'):
+                        widget.set(str(val) if val is not None else "")
+                    elif hasattr(widget, 'insert'):
+                        widget.delete(0, END)
+                        widget.insert(0, str(val) if val is not None else "")
+
+        if not self.production_rows:
+            self.add_production_row()
+
+        self.update_row_math()
+        self.calculate_metrics()
+        self.current_draft_path = source_path
+        if mark_dirty_after_load:
+            self.mark_dirty()
+        else:
+            self.mark_clean(data)
+
+    def list_pending_drafts(self):
+        drafts = []
+        pending_dir = self.get_pending_dir()
+        for filename in os.listdir(pending_dir):
+            if not filename.endswith(".json"):
+                continue
+            path = os.path.join(pending_dir, filename)
+            try:
+                with open(path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                meta = data.get("meta", {})
+                saved_at = meta.get("saved_at") or datetime.fromtimestamp(os.path.getmtime(path)).isoformat(timespec="seconds")
+                header = data.get("header", {})
+                drafts.append({
+                    "path": path,
+                    "filename": filename,
+                    "saved_at": saved_at,
+                    "date": header.get("date", ""),
+                    "shift": header.get("shift", ""),
+                })
+            except Exception:
+                drafts.append({
+                    "path": path,
+                    "filename": filename,
+                    "saved_at": datetime.fromtimestamp(os.path.getmtime(path)).isoformat(timespec="seconds"),
+                    "date": "",
+                    "shift": "",
+                })
+        drafts.sort(key=lambda item: item["saved_at"], reverse=True)
+        return drafts
+
+    def get_latest_pending_draft(self):
+        drafts = self.list_pending_drafts()
+        return drafts[0] if drafts else None
+
+    def update_recovery_ui(self):
+        drafts = self.list_pending_drafts()
+        latest = drafts[0] if drafts else None
+        self.latest_draft_path = latest["path"] if latest else None
+        current_name = os.path.basename(self.current_draft_path) if self.current_draft_path else "No active draft"
+        pending_count = len(drafts)
+        dirty_text = "Unsaved changes" if self.has_unsaved_changes else "Saved"
+
+        if latest:
+            latest_text = f"Latest: {latest['filename']} ({latest['saved_at']})"
+        else:
+            latest_text = "No pending drafts"
+
+        self.recovery_status_lbl.config(text=f"{latest_text} | Current: {current_name} | State: {dirty_text} | Pending: {pending_count}")
+        self.resume_latest_btn.config(state=(NORMAL if latest else DISABLED))
+        self.delete_current_draft_btn.config(state=(NORMAL if self.current_draft_path and os.path.exists(self.current_draft_path) else DISABLED))
+
+    def confirm_discard_unsaved_changes(self):
+        if not self.has_unsaved_changes:
+            return True
+        return messagebox.askyesno("Unsaved Changes", "You have unsaved changes in the current session. Continue and discard them?")
+
+    def resume_latest_draft(self):
+        latest = self.get_latest_pending_draft()
+        if not latest:
+            Messagebox.show_info("No pending drafts are available.", "Resume Latest")
+            return
+        self.load_draft_path(latest["path"])
+
+    def delete_current_draft(self):
+        if not self.current_draft_path or not os.path.exists(self.current_draft_path):
+            Messagebox.show_info("There is no saved draft attached to the current session.", "Delete Draft")
+            return
+        if not messagebox.askyesno("Delete Current Draft", f"Delete {os.path.basename(self.current_draft_path)}?"):
+            return
+        self.delete_draft_file(self.current_draft_path)
+        self.current_draft_path = None
+        self.mark_dirty()
+
+    def delete_draft_file(self, draft_path):
+        if os.path.exists(draft_path):
+            os.remove(draft_path)
+        if self.current_draft_path == draft_path:
+            self.current_draft_path = None
+        self.update_recovery_ui()
+
+    def load_draft_path(self, draft_path, window=None):
+        if not self.confirm_discard_unsaved_changes():
+            return
+        try:
+            with open(draft_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            self.populate_from_data(data, source_path=draft_path, mark_dirty_after_load=False)
+        except Exception as e:
+            Messagebox.show_error(f"Error loading draft: {e}", "Draft Load Error")
+        if window is not None:
+            window.destroy()
 
     def update_row_math(self):
         rates_data = {}
@@ -238,69 +473,61 @@ class ProductionLog:
 
     def show_pending(self):
         top = tb.Toplevel(title="Pending Shifts")
-        top.geometry("400x400")
-        p_dir = external_path("data/pending")
-        os.makedirs(p_dir, exist_ok=True)
-        files = os.listdir(p_dir)
-        if not files:
+        top.geometry("560x420")
+        drafts = self.list_pending_drafts()
+        if not drafts:
             tb.Label(top, text="No pending shifts found.").pack(pady=20)
             return
-        for f in files:
-            tb.Button(top, text=f, bootstyle=LINK, command=lambda fn=f: self.load_from_file(fn, top)).pack(fill=X, padx=10, pady=2)
+
+        outer = tb.Frame(top, padding=10)
+        outer.pack(fill=BOTH, expand=True)
+
+        canvas = tk.Canvas(outer, highlightthickness=0)
+        canvas.pack(side=LEFT, fill=BOTH, expand=True)
+
+        scrollbar = tb.Scrollbar(outer, orient=VERTICAL, command=canvas.yview)
+        scrollbar.pack(side=RIGHT, fill=Y)
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        container = tb.Frame(canvas)
+        window_id = canvas.create_window((0, 0), window=container, anchor="nw")
+
+        def sync_scroll_region(_event=None):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+
+        def sync_window_width(event):
+            canvas.itemconfigure(window_id, width=event.width)
+
+        def on_mousewheel(event):
+            delta = -1 * int(event.delta / 120) if event.delta else 0
+            if delta:
+                canvas.yview_scroll(delta, "units")
+
+        container.bind("<Configure>", sync_scroll_region)
+        canvas.bind("<Configure>", sync_window_width)
+        canvas.bind_all("<MouseWheel>", on_mousewheel)
+        top.bind("<Destroy>", lambda _event: canvas.unbind_all("<MouseWheel>"), add="+")
+
+        for draft in drafts:
+            card = tb.Labelframe(container, text=f" {draft['filename']} ", padding=10, style="Martin.Card.TLabelframe")
+            card.pack(fill=X, pady=5)
+            tb.Label(card, text=f"Saved: {draft['saved_at']}", style="Martin.Muted.TLabel").pack(anchor=W)
+            tb.Label(card, text=f"Date: {draft['date'] or '(unknown)'} | Shift: {draft['shift'] or '(unknown)'}", style="Martin.Muted.TLabel").pack(anchor=W)
+            actions = tb.Frame(card)
+            actions.pack(fill=X, pady=(8, 0))
+            tb.Button(actions, text="Resume", bootstyle=SUCCESS, command=lambda path=draft['path'], win=top: self.load_draft_path(path, win)).pack(side=LEFT, padx=(0, 6))
+            tb.Button(actions, text="Delete", bootstyle=DANGER, command=lambda path=draft['path'], win=top: self.delete_pending_from_window(path, win)).pack(side=LEFT)
+
+    def delete_pending_from_window(self, draft_path, window):
+        if not messagebox.askyesno("Delete Draft", f"Delete {os.path.basename(draft_path)}?"):
+            return
+        self.delete_draft_file(draft_path)
+        window.destroy()
+        self.show_pending()
 
     def load_from_file(self, filename, window):
-        path = os.path.join(external_path("data/pending"), filename)
-        try:
-            with open(path, 'r') as f:
-                data = json.load(f)
-                
-            # 1. Load Header
-            if 'header' in data:
-                for fid, val in data['header'].items():
-                    if fid in self.entries:
-                        self.entries[fid].config(state="normal")
-                        self.entries[fid].delete(0, END)
-                        self.entries[fid].insert(0, str(val) if val is not None else "")
-            
-            # 2. Clear current rows
-            for widget in self.production_container.winfo_children():
-                widget.destroy()
-            self.production_rows.clear()
-            
-            for widget in self.downtime_container.winfo_children():
-                widget.destroy()
-            self.downtime_rows.clear()
-            
-            # 3. Rebuild Production Rows
-            for p_data in data.get('production', []):
-                self.add_production_row()
-                current_row = self.production_rows[-1]
-                for key, val in p_data.items():
-                    if key in current_row:
-                        widget = current_row[key]
-                        if hasattr(widget, 'insert'):
-                            widget.delete(0, END)
-                            widget.insert(0, str(val) if val is not None else "")
-                            
-            # 4. Rebuild Downtime Rows
-            for d_data in data.get('downtime', []):
-                self.add_downtime_row()
-                current_row = self.downtime_rows[-1]
-                for key, val in d_data.items():
-                    if key in current_row:
-                        widget = current_row[key]
-                        if hasattr(widget, 'set'):
-                            widget.set(str(val) if val is not None else "")
-                        elif hasattr(widget, 'insert'):
-                            widget.delete(0, END)
-                            widget.insert(0, str(val) if val is not None else "")
-                            
-            self.update_row_math()
-            self.calculate_metrics()
-        except Exception as e:
-            print(f"Error loading draft: {e}")
-        
-        window.destroy()
+        path = os.path.join(self.get_pending_dir(), filename)
+        self.load_draft_path(path, window)
 
     def import_from_excel_ui(self):
         from tkinter import filedialog
@@ -309,50 +536,13 @@ class ProductionLog:
             filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")]
         )
         if file_path:
+            if not self.confirm_discard_unsaved_changes():
+                return
             try:
                 from modules.data_handler import DataHandler
                 handler = DataHandler()
                 data = handler.import_from_excel(file_path)
-                
-                if 'header' in data:
-                    for fid, val in data['header'].items():
-                        if fid in self.entries:
-                            self.entries[fid].config(state="normal")
-                            self.entries[fid].delete(0, END)
-                            self.entries[fid].insert(0, str(val) if val is not None else "")
-                
-                for widget in self.production_container.winfo_children():
-                    widget.destroy()
-                self.production_rows.clear()
-                
-                for widget in self.downtime_container.winfo_children():
-                    widget.destroy()
-                self.downtime_rows.clear()
-                
-                for p_data in data.get('production', []):
-                    self.add_production_row()
-                    current_row = self.production_rows[-1]
-                    for key, val in p_data.items():
-                        if key in current_row:
-                            widget = current_row[key]
-                            if hasattr(widget, 'insert'):
-                                widget.delete(0, END)
-                                widget.insert(0, str(val) if val is not None else "")
-                                
-                for d_data in data.get('downtime', []):
-                    self.add_downtime_row()
-                    current_row = self.downtime_rows[-1]
-                    for key, val in d_data.items():
-                        if key in current_row:
-                            widget = current_row[key]
-                            if hasattr(widget, 'set'):
-                                widget.set(str(val) if val is not None else "")
-                            elif hasattr(widget, 'insert'):
-                                widget.delete(0, END)
-                                widget.insert(0, str(val) if val is not None else "")
-                                
-                self.update_row_math()
-                self.calculate_metrics()
+                self.populate_from_data(data, source_path=None, mark_dirty_after_load=True)
                 Messagebox.show_info("Excel Import Successful!", "Success")
             except Exception as e:
                 Messagebox.show_error(f"Failed to import Excel: {e}", "Import Error")
@@ -366,7 +556,9 @@ class ProductionLog:
             cast_box.config(state="normal")
             cast_box.delete(0, END); cast_box.insert(0, julian)
             cast_box.config(state="readonly")
-        except: pass
+            self.mark_dirty()
+        except:
+            pass
 
 def get_ui(parent, dispatcher):
     return ProductionLog(parent, dispatcher)

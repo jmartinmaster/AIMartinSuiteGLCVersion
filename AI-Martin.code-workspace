@@ -10,6 +10,16 @@
 	"settings": {
 		"cSpell.words": [
 			"yday"
-		]
+		],
+		"chat.tools.terminal.autoApprove": {
+			"/^& \\.\\\\\\.venv\\\\Scripts\\\\python\\.exe \\.\\\\build\\.py$/": {
+				"approve": true,
+				"matchCommandLine": true
+			},
+			"/^& \\.\\\\dist\\\\TheMartinSuite_GLC\\\\TheMartinSuite_GLC\\.exe$/": {
+				"approve": true,
+				"matchCommandLine": true
+			}
+		}
 	}
 }

@@ -56,6 +56,8 @@ def apply_readability_overrides(root):
     style.configure("Martin.Content.TFrame", background=surface_bg)
     style.configure("Martin.Card.TLabelframe", background=surface_bg, foreground=surface_fg, bordercolor=border_color)
     style.configure("Martin.Card.TLabelframe.Label", background=surface_bg, foreground=surface_fg)
+    style.configure("Martin.Recovery.TLabelframe", background=surface_bg, foreground=surface_fg, bordercolor=border_color)
+    style.configure("Martin.Recovery.TLabelframe.Label", background=surface_bg, foreground=surface_fg)
     style.configure("Martin.Section.TLabel", background=surface_bg, foreground=surface_fg)
     style.configure("Martin.Muted.TLabel", background=surface_bg, foreground=muted_fg)
 
