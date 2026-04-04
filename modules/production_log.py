@@ -31,7 +31,7 @@ from modules.persistence import write_json_with_backup
 from modules.utils import external_path, local_or_resource_path, resource_path
 
 __module_name__ = "Production Log"
-__version__ = "1.1.0"
+__version__ = "1.2"
 BALANCE_DOWNTIME_CAUSE = "Time Balance Adjustment"
 DEFAULT_GHOST_LABEL = "Ghost Time: 0 min"
 
@@ -126,6 +126,37 @@ class ProductionLog:
     def bind_dirty_tracking(self, widget, events):
         for event_name in events:
             widget.bind(event_name, self.mark_dirty, add="+")
+
+    def row_has_input(self, row, field_names):
+        for field_name in field_names:
+            widget = row.get(field_name)
+            if widget is None or not hasattr(widget, "get"):
+                continue
+            if str(widget.get()).strip():
+                return True
+        return False
+
+    def ensure_open_production_row(self):
+        if not self.production_rows:
+            self.add_production_row()
+            return
+        if any(not self.row_has_input(row, ("shop_order", "part_number", "molds")) for row in self.production_rows):
+            return
+        self.add_production_row()
+
+    def ensure_open_downtime_row(self):
+        if not self.downtime_rows:
+            self.add_downtime_row()
+            return
+        if any(not self.row_has_input(row, ("start", "stop", "code", "cause")) for row in self.downtime_rows):
+            return
+        self.add_downtime_row()
+
+    def on_production_row_edited(self, _event=None):
+        self.ensure_open_production_row()
+
+    def on_downtime_row_edited(self, _event=None):
+        self.ensure_open_downtime_row()
 
     def build_draft_path(self, header_data):
         raw_date = str(header_data.get("date", "unsaved") or "unsaved").replace("/", "-")
@@ -231,16 +262,11 @@ class ProductionLog:
             tb.Label(prod_columns, text=text, width=width, anchor=W if side == LEFT else E, style="Martin.Muted.TLabel").pack(side=side, padx=5)
         self.production_container = tb.Frame(prod_wrapper)
         self.production_container.pack(fill=X)
-        tb.Button(prod_wrapper, text="+ Add Production", command=self.add_production_row, bootstyle=SUCCESS).pack(pady=5)
 
         dt_wrapper = tb.Labelframe(self.parent, text=" Downtime Issues ", padding=10)
         dt_wrapper.pack(fill=X, padx=10, pady=5)
         self.downtime_container = tb.Frame(dt_wrapper)
         self.downtime_container.pack(fill=X)
-        dt_actions = tb.Frame(dt_wrapper)
-        dt_actions.pack(fill=X, pady=5)
-        tb.Button(dt_actions, text="+ Add Downtime", command=self.add_downtime_row, bootstyle=SUCCESS).pack(side=LEFT)
-        tb.Button(dt_actions, text="Balance Downtime", command=self.balance_downtime_to_shift, bootstyle=WARNING).pack(side=LEFT, padx=5)
 
         footer = tb.Frame(self.parent, padding=20)
         footer.pack(fill=X)
@@ -256,9 +282,11 @@ class ProductionLog:
         self.open_export_btn.pack(side=LEFT, padx=5)
         self.print_export_btn = tb.Button(footer, text="Print Last Export", command=self.print_last_exported_file, bootstyle=WARNING)
         self.print_export_btn.pack(side=LEFT, padx=5)
+        tb.Button(footer, text="Balance Downtime", command=self.balance_downtime_to_shift, bootstyle=WARNING).pack(side=LEFT, padx=5)
         tb.Button(footer, text="Import Excel", command=self.import_from_excel_ui, bootstyle=INFO).pack(side=LEFT, padx=5)
 
         self.add_production_row()
+        self.add_downtime_row()
         self.update_target_time_display()
         self.update_ghost_total_display()
         self.update_export_action_state()
@@ -280,6 +308,7 @@ class ProductionLog:
         
         row["part_number"].bind("<KeyRelease>", lambda e: self.update_row_math(), add="+")
         row["molds"].bind("<KeyRelease>", lambda e: self.update_row_math(), add="+")
+        row["shop_order"].bind("<KeyRelease>", self.on_production_row_edited, add="+")
         self.bind_dirty_tracking(row["shop_order"], ("<KeyRelease>",))
         self.bind_dirty_tracking(row["part_number"], ("<KeyRelease>",))
         self.bind_dirty_tracking(row["molds"], ("<KeyRelease>",))
@@ -306,6 +335,8 @@ class ProductionLog:
         row["start"].bind("<KeyRelease>", lambda e: self.update_row_math(), add="+")
         row["stop"].bind("<KeyRelease>", lambda e: self.update_row_math(), add="+")
         row["code"].bind("<<ComboboxSelected>>", self.mark_dirty, add="+")
+        row["code"].bind("<<ComboboxSelected>>", self.on_downtime_row_edited, add="+")
+        row["cause"].bind("<KeyRelease>", self.on_downtime_row_edited, add="+")
         self.bind_dirty_tracking(row["start"], ("<KeyRelease>",))
         self.bind_dirty_tracking(row["stop"], ("<KeyRelease>",))
         self.bind_dirty_tracking(row["cause"], ("<KeyRelease>",))
@@ -349,11 +380,14 @@ class ProductionLog:
         ghost_minutes = self.get_ghost_time_minutes()
         if ghost_minutes > 0:
             message = f"Ghost Time: {ghost_minutes} min missing"
+            bootstyle = DANGER
         elif ghost_minutes < 0:
             message = f"Ghost Time: {abs(ghost_minutes)} min extra"
+            bootstyle = SUCCESS
         else:
             message = "Ghost Time: 0 min"
-        self.ghost_total_lbl.config(text=message)
+            bootstyle = SECONDARY
+        self.ghost_total_lbl.config(text=message, bootstyle=bootstyle)
 
     def parse_clock_value(self, value):
         text = str(value or "").strip()
@@ -532,6 +566,7 @@ class ProductionLog:
         shift_total = self.get_shift_total_minutes()
         production_total = self.get_production_total_minutes()
         current_downtime_total = self.get_total_downtime_minutes()
+        ghost_minutes = self.get_ghost_time_minutes()
         target_downtime_total = shift_total - production_total
         delta_minutes = target_downtime_total - current_downtime_total
         balance_row = self.find_balance_downtime_row()
@@ -540,28 +575,27 @@ class ProductionLog:
             self.dispatcher.show_toast("Balance Downtime", "Enter a valid shift hour value before balancing.", WARNING)
             return
 
-        if target_downtime_total < 0:
-            if balance_row is not None:
-                self.remove_downtime_row(balance_row)
-                self.update_row_math()
-                self.mark_dirty()
+        if ghost_minutes < 0:
             self.dispatcher.show_toast(
                 "Balance Downtime",
-                f"Recorded production time exceeds the shift total by {abs(target_downtime_total)} minutes. Review molds, rates, or shift hours before export.",
+                f"Accounted time exceeds the shift total by {abs(ghost_minutes)} minutes. Review or remove downtime manually before export.",
                 WARNING,
             )
             return
 
         if target_downtime_total == 0:
-            if balance_row is not None:
-                self.remove_downtime_row(balance_row)
-            if self.apply_weighted_downtime_balance(0):
-                self.update_row_math()
-                self.mark_dirty()
             self.dispatcher.show_toast(
                 "Balance Downtime",
-                "Downtime was adjusted to zero so production time now matches the shift total.",
-                SUCCESS,
+                "Accounted time already matches the shift total.",
+                INFO,
+            )
+            return
+
+        if delta_minutes < 0:
+            self.dispatcher.show_toast(
+                "Balance Downtime",
+                f"Recorded downtime exceeds the remaining shift time by {abs(delta_minutes)} minutes. Remove downtime manually if you want to rebalance.",
+                WARNING,
             )
             return
 
@@ -570,8 +604,6 @@ class ProductionLog:
             self.mark_dirty()
             if delta_minutes > 0:
                 message = f"Added {delta_minutes} downtime minutes across the existing downtime rows to match the shift total."
-            elif delta_minutes < 0:
-                message = f"Removed {abs(delta_minutes)} downtime minutes across the existing downtime rows to match the shift total."
             else:
                 message = "Existing downtime rows already matched the shift total."
             self.dispatcher.show_toast(
@@ -649,6 +681,8 @@ class ProductionLog:
 
         if not self.production_rows:
             self.add_production_row()
+        if not self.downtime_rows:
+            self.add_downtime_row()
 
         self.update_row_math()
         self.calculate_metrics()
@@ -829,6 +863,8 @@ class ProductionLog:
             except Exception:
                 row["time_calc"].config(text="--")
 
+        self.ensure_open_production_row()
+        self.ensure_open_downtime_row()
         self.update_target_time_display()
         self.update_ghost_total_display()
 

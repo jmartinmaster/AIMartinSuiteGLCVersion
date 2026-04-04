@@ -12,7 +12,9 @@ The Martin Suite is a desktop application for logging Disamatic production, mana
   * Export production logs to formatted Excel sheets.
   * Import existing Excel sheets to resume or edit logged data.
   * Pull workbook summary header fields into Production Log without overwriting formula-driven cells on export.
-  * Balance downtime against the shift total before export by redistributing time proportionally across existing downtime rows, with a dedicated adjustment row as fallback.
+  * Balance missing downtime against the shift total before export by redistributing time proportionally across existing downtime rows, with a dedicated adjustment row as fallback.
+* **Continuous Row Entry:** Production and downtime sections automatically keep one blank row available so operators can continue typing without manually adding rows.
+* **Ghost Time Feedback:** The footer highlights missing time in red and extra time in green while leaving overtime cleanup to the operator.
 * **Draft Recovery & Restore:** Save drafts, retain recovery snapshots when drafts are overwritten, and restore them from the Backup / Recovery view.
 * **Layout Manager:** A built-in JSON editor to dynamically adjust the UI grid layout of the production form.
 * **Theme & Settings Management:** Support for curated readable themes, configurable production defaults, and editable downtime code labels.
@@ -52,7 +54,7 @@ The compiled executable will be located in the `dist/` directory as `TheMartinSu
 
 - Source / Python mode can inspect repository versions, but new executable releases are still best produced by rebuilding manually.
 - Packaged EXE mode uses Dispatcher Core as the master version check.
-- The current stable Dispatcher Core release is `1.1.4`.
+- The current stable Dispatcher Core release is `1.2`.
 - Two-part versions such as `1.07` are valid update targets.
 - Three-part versions only update when the third number is even, such as `1.07.2`.
 - Automatic EXE self-replacement is still experimental and may require manual replacement during testing.

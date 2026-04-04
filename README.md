@@ -17,9 +17,10 @@ These two forms do not have identical behavior. The Python version has access to
 - Production Log tracks shop orders, part numbers, and molds during shift entry.
 - Automatic recovery snapshots for overwritten drafts.
 - Excel export and import support for production sheet work.
-- A manual balance action that redistributes downtime proportionally across existing downtime rows before export, with a fallback adjustment row when needed.
+- A footer-level Balance Downtime action that fills in missing downtime proportionally across existing downtime rows before export, with a fallback adjustment row when needed.
+- Production and downtime sections keep one blank row open automatically while you enter the current shift.
 - Exported workbooks can be opened in the default application for review, and the latest export can then be printed from the app once it has been checked.
-- A derived target-time field in the header plus a live Ghost Time indicator in the footer so operators can see the shift goal and the missing or extra time while entering the sheet.
+- A derived target-time field in the header plus a live color-coded Ghost Time indicator in the footer so operators can see missing time in red and extra time in green while entering the sheet.
 - Workbook-linked summary header import without overwriting formula cells on export.
 - Layout Manager and Rate Manager tools.
 - Backup / Recovery viewer for browsing and restoring draft snapshots and configuration backups.
@@ -59,7 +60,7 @@ These two forms do not have identical behavior. The Python version has access to
 ## Update Manager Status
 
 - The updater checks only the Dispatcher Core version in `main.py` as the master version.
-- The current stable Dispatcher Core release is `1.1.4`.
+- The current stable Dispatcher Core release is `1.2`.
 - Two-part versions such as `1.07` trigger an executable update when greater than the local version.
 - Three-part versions only trigger an executable update when the third number is even, such as `1.07.2`.
 - Odd patch versions such as `1.07.1` are ignored.
