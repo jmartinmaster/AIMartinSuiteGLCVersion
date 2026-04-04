@@ -21,7 +21,7 @@ def show_splash_screen(root, duration=5000, logo_path=None):
     splash.overrideredirect(True) # Removes window borders and title bar
     splash.attributes('-topmost', True) # Keep it on top of other windows
     
-    width = 450
+    width = 500
     height = 350 if logo_path else 250
     
     # Center the splash screen on the monitor
@@ -43,7 +43,7 @@ def show_splash_screen(root, duration=5000, logo_path=None):
         except Exception as e:
             print(f"Error loading splash logo: {e}")
 
-    tb.Label(frame, text="THE MARTIN SUITE", font=("-size 26 -weight bold")).pack(pady=(20, 0))
+    tb.Label(frame, text="THE MARTIN SUITE", font=("-size 24 -weight bold")).pack(pady=(20, 0))
     tb.Label(frame, text="GLC Edition", font=("-size 14 -slant italic"), bootstyle=INFO).pack(pady=5)
     
     tb.Label(frame, text="Copyright © 2026 Jamie Martin", font=("-size 10")).pack(pady=(20, 0))
