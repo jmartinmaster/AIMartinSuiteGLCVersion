@@ -58,6 +58,7 @@ Use Settings Manager to configure application defaults.
 
 - Theme controls the UI theme.
 - Auto Save Interval controls how often draft autosave runs.
+- Toast Duration controls how long non-blocking status notifications stay visible.
 - Default Shift Hours sets the default value loaded into the production form.
 - Default Goal MPH sets the default shift target.
 - Export settings control where generated Excel files are written.
@@ -71,6 +72,7 @@ Use Backup / Recovery to inspect saved drafts, recovery snapshots, and JSON back
 - Recovery Snapshots can be restored back into `data/pending` and opened immediately.
 - Settings, layout, and rate backups can be restored back into their live JSON files.
 - Open Selected File and Open Containing Folder help when you want to inspect recovery files directly in Windows.
+- Selection reminders and restore-complete messages use toast notifications instead of blocking dialogs.
 - The internal persistence helper powers these saves, but it is intentionally hidden from the sidebar because it is not a user-facing tool.
 
 ### Update Manager
@@ -105,6 +107,7 @@ The draft status area at the top of Production Log helps prevent lost work witho
 - Backup / Recovery provides the full restore workspace for recovery snapshots and JSON backups.
 - Delete Current Draft removes the active saved draft file.
 - The status line shows the latest draft name, current draft name, dirty/saved state, pending count, and recovery count.
+- Draft saves, imports, and exports now use toast notifications for routine success messages.
 
 If you load a draft or import Excel while unsaved changes exist, the suite asks for confirmation before replacing the current session.
 

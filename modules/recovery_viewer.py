@@ -233,7 +233,7 @@ class RecoveryViewer:
     def get_selected_record(self):
         selection = self.tree.selection()
         if not selection:
-            Messagebox.show_info("Select an item first.", "Recovery Viewer")
+            self.dispatcher.show_toast("Recovery Viewer", "Select an item first.", INFO)
             return None
         return self.records[int(selection[0])]
 
@@ -260,7 +260,7 @@ class RecoveryViewer:
         if not record:
             return
         if record["record_type"] not in {"draft", "snapshot"}:
-            Messagebox.show_info("Resume is only available for drafts and recovery snapshots.", "Recovery Viewer")
+            self.dispatcher.show_toast("Recovery Viewer", "Resume is only available for drafts and recovery snapshots.", INFO)
             return
 
         if record["record_type"] == "snapshot":
@@ -304,7 +304,7 @@ class RecoveryViewer:
                 keep_count=12,
             )
             self.refresh_records()
-            Messagebox.show_info(f"Restored {record['restore_target']} from backup.", "Restore Complete")
+            self.dispatcher.show_toast("Restore Complete", f"Restored {record['restore_target']} from backup.", SUCCESS)
         except Exception as exc:
             Messagebox.show_error(f"Could not restore backup: {exc}", "Restore Error")
 
@@ -329,7 +329,7 @@ class RecoveryViewer:
                 if hasattr(self.dispatcher.active_module_instance, "load_draft_path"):
                     self.dispatcher.active_module_instance.load_draft_path(record["target_path"])
             else:
-                Messagebox.show_info(f"Restored draft snapshot to {record['restore_target']}.", "Restore Complete")
+                self.dispatcher.show_toast("Restore Complete", f"Restored draft snapshot to {record['restore_target']}.", SUCCESS)
             return record["target_path"]
         except Exception as exc:
             Messagebox.show_error(f"Could not restore draft snapshot: {exc}", "Restore Error")

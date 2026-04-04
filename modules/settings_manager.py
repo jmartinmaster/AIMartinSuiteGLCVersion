@@ -52,11 +52,16 @@ class SettingsManager:
                 "organize_exports_by_date": True,
                 "default_export_prefix": "Disamatic Production Sheet",
                 "theme": DEFAULT_THEME,
+                "toast_duration_sec": 5,
                 "auto_save_interval_min": 5,
                 "default_shift_hours": 8.0,
                 "default_goal_mph": 240
             }
         self.settings["theme"] = normalize_theme(self.settings.get("theme", DEFAULT_THEME))
+        try:
+            self.settings["toast_duration_sec"] = max(1, int(self.settings.get("toast_duration_sec", 5)))
+        except Exception:
+            self.settings["toast_duration_sec"] = 5
         self.saved_theme = self.settings["theme"]
         self.preview_theme = self.saved_theme
 
@@ -66,7 +71,7 @@ class SettingsManager:
                 self.settings[key] = entry.instate(['selected'])
             else:
                 val = entry.get()
-                if key in ['auto_save_interval_min', 'default_shift_hours', 'default_goal_mph']:
+                if key in ['auto_save_interval_min', 'default_shift_hours', 'default_goal_mph', 'toast_duration_sec']:
                     try:
                         val = float(val) if '.' in val else int(val)
                     except:
@@ -74,6 +79,11 @@ class SettingsManager:
                 if key == 'theme':
                     val = normalize_theme(val)
                 self.settings[key] = val
+
+        try:
+            self.settings['toast_duration_sec'] = max(1, int(self.settings.get('toast_duration_sec', 5)))
+        except Exception:
+            self.settings['toast_duration_sec'] = 5
 
         backup_info = write_json_with_backup(
             self.settings_path,
@@ -85,14 +95,16 @@ class SettingsManager:
         self.saved_theme = self.settings["theme"]
         self.preview_theme = self.saved_theme
         self.preview_theme = self.dispatcher.apply_theme(self.saved_theme, redraw=True)
+        self.dispatcher.refresh_runtime_settings()
         
         backup_note = ""
         if backup_info.get("versioned_backup_path"):
             backup_note = " A recovery copy was stored in data/backups/settings."
 
-        Messagebox.show_info(
-            f"Settings saved! Theme changes were applied immediately.{backup_note}",
-            "Success"
+        self.dispatcher.show_toast(
+            "Settings Saved",
+            f"Theme changes were applied immediately.{backup_note}",
+            SUCCESS,
         )
 
     def preview_selected_theme(self, _event=None):
@@ -135,6 +147,7 @@ class SettingsManager:
             ("organize_exports_by_date", "Organize Exports by YYYY/MM", "check"),
             ("default_export_prefix", "Default Export Prefix", "entry"),
             ("theme", "Application Theme", "combo", get_theme_names()),
+            ("toast_duration_sec", "Toast Duration (Seconds)", "entry"),
             ("auto_save_interval_min", "Auto-Save Interval (Minutes)", "entry"),
             ("default_shift_hours", "Default Shift Hours", "entry"),
             ("default_goal_mph", "Default Goal MPH", "entry")

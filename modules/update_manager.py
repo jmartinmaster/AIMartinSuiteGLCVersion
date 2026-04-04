@@ -20,6 +20,7 @@ import sys
 import tempfile
 import urllib.error
 import urllib.request
+from tkinter import messagebox
 
 import ttkbootstrap as tb
 from ttkbootstrap.constants import *
@@ -280,10 +281,11 @@ class UpdateManager:
             Messagebox.show_error(f"Could not write the downloaded executable:\n\n{exc}", "Update Error")
             return
 
-        Messagebox.show_info(
-            "Executable update found. The application will close, replace its executable, and restart.",
-            "Applying Update"
-        )
+        if not messagebox.askyesno(
+            "Apply Update",
+            "Executable update found. The application will close, replace its executable, and restart. Continue?",
+        ):
+            return
         self._start_detached_exe_swap(temp_exe_path)
         self.dispatcher.root.after(200, self.dispatcher.root.destroy)
 
@@ -293,16 +295,17 @@ class UpdateManager:
 
         update_rows = [row for row in self.comparison_rows if row.get("update_available")]
         if not update_rows:
-            Messagebox.show_info("No executable updates are available from Dispatcher Core.", "Update Manager")
+            self.dispatcher.show_toast("Update Manager", "No executable updates are available from Dispatcher Core.", INFO)
             return
 
         if getattr(sys, "frozen", False):
             self._apply_frozen_executable_update()
             return
 
-        Messagebox.show_info(
+        self.dispatcher.show_toast(
+            "Source Mode",
             "Executable updates are only applied from the packaged application. Build a new EXE manually when working from source.",
-            "Source Mode"
+            WARNING,
         )
 
     def setup_ui(self):
