@@ -24,6 +24,7 @@ Example:
 - Production Log looks up the entered part number in this file.
 - If a part number is found, its target rate is used to estimate row time.
 - If a part number is not found, the Production Log falls back to the current goal MPH.
+- The active row rate is shown in Production Log, and each line can temporarily override that value without changing `rates.json`.
 
 ## Good Practices
 

@@ -22,6 +22,7 @@ from ttkbootstrap.dialogs import Messagebox
 from datetime import datetime
 import json
 import os
+import re
 import sys
 import webbrowser
 
@@ -31,7 +32,7 @@ from modules.persistence import write_json_with_backup
 from modules.utils import external_path, local_or_resource_path, resource_path
 
 __module_name__ = "Production Log"
-__version__ = "1.2"
+__version__ = "1.2.2"
 BALANCE_DOWNTIME_CAUSE = "Time Balance Adjustment"
 DEFAULT_GHOST_LABEL = "Ghost Time: 0 min"
 
@@ -88,7 +89,16 @@ class ProductionLog:
 
     def collect_ui_data(self):
         header_data = {fid: ent.get() for fid, ent in self.entries.items()}
-        prod_data = [{k: (v.get() if hasattr(v, 'get') else v.cget("text")) for k, v in row.items()} for row in self.production_rows]
+        prod_data = []
+        for row in self.production_rows:
+            prod_data.append({
+                "shop_order": row["shop_order"].get(),
+                "part_number": row["part_number"].get(),
+                "rate_lookup": row["rate_lookup"].get(),
+                "rate_override_enabled": bool(row["rate_override_enabled_var"].get()),
+                "molds": row["molds"].get(),
+                "time_calc": row["time_calc"].cget("text"),
+            })
         dt_data = [{k: (v.get() if hasattr(v, 'get') else v.cget("text")) for k, v in row.items()} for row in self.downtime_rows]
         return {"header": header_data, "production": prod_data, "downtime": dt_data}
 
@@ -246,6 +256,8 @@ class ProductionLog:
                 self.entries["date"].bind("<FocusOut>", self.sync_julian_cast_date)
             if "hours" in self.entries:
                 self.entries["hours"].bind("<KeyRelease>", self.on_hours_changed, add="+")
+            if "goal_mph" in self.entries:
+                self.entries["goal_mph"].bind("<KeyRelease>", self.on_goal_changed, add="+")
         except Exception as e:
             tb.Label(header_wrapper, text=f"Layout Error: {e}", bootstyle=DANGER).pack()
 
@@ -256,6 +268,8 @@ class ProductionLog:
         for text, width, side in (
             ("Shop Order", 15, LEFT),
             ("Part Number", 15, LEFT),
+            ("Rate", 12, LEFT),
+            ("Override", 8, LEFT),
             ("Molds", 10, LEFT),
             ("Time", 10, RIGHT),
         ):
@@ -299,18 +313,28 @@ class ProductionLog:
         row = {
             "shop_order": tb.Entry(row_frame, width=15),
             "part_number": tb.Entry(row_frame, width=15),
+            "rate_lookup": tb.Entry(row_frame, width=12),
             "molds": tb.Entry(row_frame, width=10),
             "time_calc": tb.Label(row_frame, text="0 min", width=10, font=('', 10, 'bold'))
         }
-        for k, w in row.items():
-            if k != "time_calc": w.pack(side=LEFT, padx=5)
+        row["rate_override_enabled_var"] = tk.BooleanVar(value=False)
+        row["rate_override_enabled"] = tb.Checkbutton(
+            row_frame,
+            variable=row["rate_override_enabled_var"],
+            command=lambda current_row=row: self.on_rate_override_toggled(current_row),
+        )
+        row["rate_lookup"].config(state="readonly")
+        for key in ("shop_order", "part_number", "rate_lookup", "rate_override_enabled", "molds"):
+            row[key].pack(side=LEFT, padx=5)
         row["time_calc"].pack(side=RIGHT, padx=10)
         
         row["part_number"].bind("<KeyRelease>", lambda e: self.update_row_math(), add="+")
+        row["rate_lookup"].bind("<KeyRelease>", lambda e: self.update_row_math(), add="+")
         row["molds"].bind("<KeyRelease>", lambda e: self.update_row_math(), add="+")
         row["shop_order"].bind("<KeyRelease>", self.on_production_row_edited, add="+")
         self.bind_dirty_tracking(row["shop_order"], ("<KeyRelease>",))
         self.bind_dirty_tracking(row["part_number"], ("<KeyRelease>",))
+        self.bind_dirty_tracking(row["rate_lookup"], ("<KeyRelease>",))
         self.bind_dirty_tracking(row["molds"], ("<KeyRelease>",))
         self.production_rows.append(row)
         self.update_ghost_total_display()
@@ -364,6 +388,121 @@ class ProductionLog:
     def on_hours_changed(self, _event=None):
         self.update_target_time_display()
         self.calculate_metrics()
+
+    def on_goal_changed(self, _event=None):
+        self.update_row_math()
+        self.calculate_metrics()
+
+    def load_rates_data(self):
+        rates_data = {}
+        rates_path = local_or_resource_path("rates.json")
+        if os.path.exists(rates_path):
+            try:
+                with open(rates_path, 'r', encoding='utf-8') as rate_file:
+                    loaded_rates = json.load(rate_file)
+                if isinstance(loaded_rates, dict):
+                    for part_number, rate in loaded_rates.items():
+                        for lookup_key in self.build_part_lookup_keys(part_number):
+                            if lookup_key not in rates_data:
+                                rates_data[lookup_key] = rate
+            except Exception:
+                pass
+        return rates_data
+
+    def get_global_goal_rate(self):
+        try:
+            return float(self.entries["goal_mph"].get() or 240)
+        except Exception:
+            return 240
+
+    def format_rate_value(self, value):
+        try:
+            numeric_value = float(value)
+        except Exception:
+            return ""
+        if numeric_value.is_integer():
+            return str(int(numeric_value))
+        return f"{numeric_value:.2f}".rstrip("0").rstrip(".")
+
+    def normalize_part_number(self, value):
+        part_text = str(value or "").strip().upper()
+        return " ".join(part_text.split())
+
+    def strip_leading_zeros_from_segments(self, value):
+        def replace_match(match):
+            digits = match.group(0)
+            stripped = digits.lstrip("0")
+            return stripped or "0"
+
+        return re.sub(r"\d+", replace_match, value)
+
+    def build_part_lookup_keys(self, value):
+        normalized = self.normalize_part_number(value)
+        if not normalized:
+            return []
+
+        candidates = []
+        compact = normalized.replace(" ", "")
+        zero_normalized = self.strip_leading_zeros_from_segments(normalized)
+        zero_compact = self.strip_leading_zeros_from_segments(compact)
+
+        for candidate in (normalized, compact, zero_normalized, zero_compact):
+            if candidate and candidate not in candidates:
+                candidates.append(candidate)
+        return candidates
+
+    def resolve_lookup_rate(self, part_number, rates_data, global_goal):
+        part_keys = self.build_part_lookup_keys(part_number)
+        if not part_keys:
+            return None
+
+        raw_rate = None
+        for part_key in part_keys:
+            if part_key in rates_data:
+                raw_rate = rates_data[part_key]
+                break
+        if raw_rate is None:
+            raw_rate = global_goal
+        try:
+            return float(raw_rate)
+        except Exception:
+            return None
+
+    def set_rate_lookup_value(self, row, value, editable=False):
+        rate_entry = row["rate_lookup"]
+        rate_entry.config(state="normal")
+        rate_entry.delete(0, END)
+        rate_entry.insert(0, value)
+        rate_entry.config(state=("normal" if editable else "readonly"))
+
+    def get_row_rate(self, row, rates_data, global_goal):
+        if bool(row["rate_override_enabled_var"].get()):
+            try:
+                return float(row["rate_lookup"].get().strip())
+            except Exception:
+                return None
+        return self.resolve_lookup_rate(row["part_number"].get(), rates_data, global_goal)
+
+    def on_rate_override_toggled(self, row):
+        override_enabled = bool(row["rate_override_enabled_var"].get())
+        if override_enabled:
+            lookup_rate = self.resolve_lookup_rate(
+                row["part_number"].get(),
+                self.load_rates_data(),
+                self.get_global_goal_rate(),
+            )
+            current_value = row["rate_lookup"].get().strip() or self.format_rate_value(lookup_rate)
+            self.set_rate_lookup_value(row, current_value, editable=True)
+            row["rate_lookup"].focus_set()
+            row["rate_lookup"].selection_range(0, END)
+        else:
+            self.set_rate_lookup_value(row, self.format_rate_value(self.resolve_lookup_rate(
+                row["part_number"].get(),
+                self.load_rates_data(),
+                self.get_global_goal_rate(),
+            )), editable=False)
+        self.mark_dirty()
+        self.update_row_math()
 
     def update_target_time_display(self):
         if not hasattr(self, "target_time_entry"):
@@ -664,9 +803,17 @@ class ProductionLog:
         for p_data in data.get("production", []):
             current_row = self.add_production_row()
             for key, val in p_data.items():
+                if key == "rate_override_enabled":
+                    current_row["rate_override_enabled_var"].set(str(val).strip().lower() in {"1", "true", "yes", "on"})
+                    continue
+                if key == "rate_lookup":
+                    self.set_rate_lookup_value(current_row, str(val) if val is not None else "", editable=True)
+                    continue
                 if key in current_row and hasattr(current_row[key], 'insert'):
                     current_row[key].delete(0, END)
                     current_row[key].insert(0, str(val) if val is not None else "")
+            if current_row["rate_override_enabled_var"].get():
+                current_row["rate_lookup"].config(state="normal")
 
         for d_data in data.get("downtime", []):
             current_row = self.add_downtime_row()
@@ -829,25 +976,17 @@ class ProductionLog:
             window.destroy()
 
     def update_row_math(self):
-        rates_data = {}
-        r_path = external_path("rates.json")
-        if os.path.exists(r_path):
-            try:
-                with open(r_path, 'r') as f: rates_data = json.load(f)
-            except Exception:
-                pass
-
-        try:
-            global_goal = float(self.entries["goal_mph"].get() or 240)
-        except Exception:
-            global_goal = 240
+        rates_data = self.load_rates_data()
+        global_goal = self.get_global_goal_rate()
 
         for row in self.production_rows:
+            if not bool(row["rate_override_enabled_var"].get()):
+                lookup_rate = self.resolve_lookup_rate(row["part_number"].get(), rates_data, global_goal)
+                self.set_rate_lookup_value(row, self.format_rate_value(lookup_rate), editable=False)
             try:
-                part = row["part_number"].get().strip()
                 molds = float(row["molds"].get() or 0)
-                rate = float(rates_data.get(part, global_goal))
-                minutes = (molds / rate) * 60 if rate > 0 else 0
+                rate = self.get_row_rate(row, rates_data, global_goal)
+                minutes = (molds / rate) * 60 if rate and rate > 0 else 0
                 row["time_calc"].config(text=f"{int(minutes)} min")
             except Exception:
                 row["time_calc"].config(text="0 min")
@@ -889,11 +1028,7 @@ class ProductionLog:
         try:
             from modules.data_handler import DataHandler
             handler = DataHandler()
-            ui_data = {
-                "header": {fid: ent.get() for fid, ent in self.entries.items()},
-                "production": [{k: (v.get() if hasattr(v, 'get') else v.cget("text")) for k, v in row.items()} for row in self.production_rows],
-                "downtime": [{k: (v.get() if hasattr(v, 'get') else v.cget("text")) for k, v in row.items()} for row in self.downtime_rows]
-            }
+            ui_data = self.collect_ui_data()
             shift = ui_data["header"].get("shift", "0")
             date = ui_data["header"].get("date", "00-00-00").replace("/", "")
             target_path = handler.export_to_template(ui_data, shift, date)
