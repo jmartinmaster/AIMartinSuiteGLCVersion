@@ -10,6 +10,11 @@ data/
 exports/
 settings.json
 
+# Generated backup artifacts
+*.bak
+data/backups/
+data/pending/history/
+
 # Build Artifacts
 build/
 dist/
