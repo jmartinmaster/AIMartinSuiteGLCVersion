@@ -19,17 +19,19 @@ import sys
 import importlib
 import json
 import ctypes
+import time
 import tkinter as tk
 from tkinter import messagebox
 from ctypes import wintypes
 import ttkbootstrap as tb
 from ttkbootstrap.constants import *
 from ttkbootstrap.widgets import ToastNotification
+from modules.app_logging import log_exception
 from modules.theme_manager import apply_readability_overrides, normalize_theme, DEFAULT_THEME
 from modules.utils import external_path, local_or_resource_path, resource_path
 
 __module_name__ = "Dispatcher Core"
-__version__ = "1.1.1"
+__version__ = "1.1.2"
 WINDOWS_APP_ID = "JamieMartin.TheMartinSuite.GLC"
 APP_ICON_RELATIVE_PATH = "icon.ico"
 APP_ICON_IMAGE_RELATIVE_PATHS = [
@@ -102,8 +104,8 @@ def apply_windows_window_icons(root):
 
         root._windows_small_icon_handle = small_icon
         root._windows_big_icon_handle = big_icon
-    except Exception:
-        pass
+    except Exception as exc:
+        log_exception("apply_windows_window_icons", exc)
 
 
 def apply_app_icon(root):
@@ -111,8 +113,8 @@ def apply_app_icon(root):
     try:
         if os.path.exists(icon_path):
             root.iconbitmap(default=icon_path)
-    except Exception:
-        pass
+    except Exception as exc:
+        log_exception("apply_app_icon.iconbitmap", exc)
     try:
         icon_images = []
         for relative_path in APP_ICON_IMAGE_RELATIVE_PATHS:
@@ -122,12 +124,12 @@ def apply_app_icon(root):
         if icon_images:
             root._app_icon_images = icon_images
             root.iconphoto(True, *icon_images)
-    except Exception:
-        pass
+    except Exception as exc:
+        log_exception("apply_app_icon.iconphoto", exc)
     try:
         root.after_idle(lambda widget=root: apply_windows_window_icons(widget) if widget.winfo_exists() else None)
-    except Exception:
-        pass
+    except Exception as exc:
+        log_exception("apply_app_icon.after_idle", exc)
 
 class Dispatcher:
     def __init__(self, root):
@@ -152,13 +154,17 @@ class Dispatcher:
         self.active_module_name = None
         self.settings_path = external_path("settings.json")
         self.runtime_settings = self.load_runtime_settings()
+        self.window_alpha_supported = self._supports_window_alpha()
+        self.transition_duration_ms = 320
+        self.transition_min_alpha = 0.94
+        self._transition_in_progress = False
 
         self._setup_ui()
         self._setup_menu()
         self.pre_load_manifest()
         self._load_modules_list()
         self._bind_mousewheel()
-        self.load_module("production_log")
+        self.load_module("production_log", use_transition=False)
 
     def _setup_menu(self):
         menubar = tk.Menu(self.root)
@@ -213,7 +219,7 @@ class Dispatcher:
                 if mod_name not in self.loaded_modules:
                     self.loaded_modules[mod_name] = importlib.import_module(full_path)
             except Exception as e:
-                pass
+                log_exception(f"pre_load_manifest.{mod_name}", e)
 
     def _setup_ui(self):
         self.main_container = tb.Frame(self.root)
@@ -265,8 +271,57 @@ class Dispatcher:
                           bootstyle="link-light", 
                           command=lambda m=module_name: self.load_module(m)).pack(fill=X, padx=5, pady=2)
 
-    def load_module(self, module_name):
+    def _supports_window_alpha(self):
         try:
+            current_alpha = float(self.root.attributes("-alpha"))
+            self.root.attributes("-alpha", current_alpha)
+            return True
+        except Exception:
+            return False
+
+    def _set_window_alpha(self, alpha_value):
+        if not self.window_alpha_supported:
+            return
+        try:
+            self.root.attributes("-alpha", alpha_value)
+        except Exception as exc:
+            self.window_alpha_supported = False
+            log_exception("set_window_alpha", exc)
+
+    def _run_window_transition(self, action):
+        if not self.window_alpha_supported or self._transition_in_progress:
+            return action()
+
+        self._transition_in_progress = True
+        steps = 4
+        half_duration = max(0.12, self.transition_duration_ms / 2000)
+        step_delay = half_duration / steps
+        alpha_values = [1.0 - ((1.0 - self.transition_min_alpha) * (index + 1) / steps) for index in range(steps)]
+
+        try:
+            for alpha_value in alpha_values:
+                self._set_window_alpha(alpha_value)
+                self.root.update_idletasks()
+                self.root.update()
+                time.sleep(step_delay)
+
+            result = action()
+
+            for alpha_value in reversed(alpha_values[:-1]):
+                self._set_window_alpha(alpha_value)
+                self.root.update_idletasks()
+                self.root.update()
+                time.sleep(step_delay)
+
+            self._set_window_alpha(1.0)
+            self.root.update_idletasks()
+            return result
+        finally:
+            self._set_window_alpha(1.0)
+            self._transition_in_progress = False
+
+    def load_module(self, module_name, use_transition=True):
+        def perform_load():
             if hasattr(self.active_module_instance, 'on_unload'):
                 self.active_module_instance.on_unload()
 
@@ -285,9 +340,14 @@ class Dispatcher:
             if hasattr(module, 'get_ui'):
                 self.active_module_name = module_name
                 self.active_module_instance = module.get_ui(self.content_area, self)
-                
+
+        try:
+            if use_transition and self.active_module_name is not None:
+                self._run_window_transition(perform_load)
+            else:
+                perform_load()
         except Exception as e:
-            print(f"LOAD ERROR: {e}")
+            log_exception(f"load_module.{module_name}", e)
             tb.Label(self.content_area, text=f"Error loading {module_name}: {e}", bootstyle=DANGER).pack(pady=20)
 
     def open_help_document(self, relative_path):
@@ -379,11 +439,6 @@ class Dispatcher:
         apply_readability_overrides(self.root)
         self.root.update_idletasks()
 
-        if redraw and self.active_module_name:
-            active_module_name = self.active_module_name
-            self.active_module_instance = None
-            self.load_module(active_module_name)
-
         return normalized_theme
 
     def _bind_mousewheel(self):
@@ -403,7 +458,8 @@ if __name__ == "__main__":
         try:
             with open(settings_path, 'r') as f:
                 theme_name = normalize_theme(json.load(f).get("theme", DEFAULT_THEME))
-        except: pass
+        except Exception as exc:
+            log_exception("main.__main__.load_theme", exc)
     
     apply_windows_app_id()
     app_root = tb.Window(themename=theme_name)

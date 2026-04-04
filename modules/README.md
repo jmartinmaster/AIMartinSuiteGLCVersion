@@ -52,7 +52,7 @@ The compiled executable will be located in the `dist/` directory as `TheMartinSu
 
 - Source / Python mode can inspect repository versions, but new executable releases are still best produced by rebuilding manually.
 - Packaged EXE mode uses Dispatcher Core as the master version check.
-- The current stable Dispatcher Core release is `1.1`.
+- The current stable Dispatcher Core release is `1.1.2`.
 - Two-part versions such as `1.07` are valid update targets.
 - Three-part versions only update when the third number is even, such as `1.07.2`.
 - Automatic EXE self-replacement is still experimental and may require manual replacement during testing.

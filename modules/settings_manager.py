@@ -21,13 +21,14 @@ from tkinter import filedialog
 import json
 import os
 from copy import deepcopy
+from modules.app_logging import log_exception
 from modules.persistence import write_json_with_backup
 from modules.downtime_codes import DEFAULT_DT_CODE_MAP, clear_downtime_code_cache
 from modules.theme_manager import DEFAULT_THEME, get_theme_names, normalize_theme
 from modules.utils import external_path
 
 __module_name__ = "Settings Manager"
-__version__ = "1.1.0"
+__version__ = "1.1.2"
 
 class SettingsManager:
     def __init__(self, parent, dispatcher):
@@ -89,7 +90,7 @@ class SettingsManager:
 
         self.saved_theme = self.settings["theme"]
         self.preview_theme = self.saved_theme
-        self.preview_theme = self.dispatcher.apply_theme(self.saved_theme, redraw=True)
+        self.preview_theme = self.dispatcher.apply_theme(self.saved_theme)
         self.dispatcher.refresh_runtime_settings()
         if hasattr(self.dispatcher.active_module_instance, 'refresh_downtime_codes'):
             self.dispatcher.active_module_instance.refresh_downtime_codes()
@@ -113,8 +114,8 @@ class SettingsManager:
                 if key in ['auto_save_interval_min', 'default_shift_hours', 'default_goal_mph', 'toast_duration_sec']:
                     try:
                         val = float(val) if '.' in val else int(val)
-                    except:
-                        pass
+                    except ValueError:
+                        log_exception(f"settings_manager.invalid_numeric.{key}", ValueError(f"Could not parse '{val}'"))
                 if key == 'theme':
                     val = normalize_theme(val)
                 self.settings[key] = val
@@ -132,12 +133,12 @@ class SettingsManager:
             return
 
         selected_theme = normalize_theme(theme_entry.get())
-        self.preview_theme = self.dispatcher.apply_theme(selected_theme, redraw=False)
+        self.preview_theme = self.dispatcher.apply_theme(selected_theme)
         if hasattr(self, 'theme_status'):
             self.theme_status.config(text=f"Previewing theme: {self.preview_theme}")
 
     def revert_theme_preview(self):
-        reverted_theme = self.dispatcher.apply_theme(self.saved_theme, redraw=False)
+        reverted_theme = self.dispatcher.apply_theme(self.saved_theme)
         self.preview_theme = reverted_theme
         if 'theme' in self.entries:
             self.entries['theme'].set(reverted_theme)
@@ -146,7 +147,7 @@ class SettingsManager:
 
     def on_unload(self):
         if self.preview_theme != self.saved_theme:
-            self.dispatcher.apply_theme(self.saved_theme, redraw=False)
+            self.dispatcher.apply_theme(self.saved_theme)
 
     def browse_export_dir(self):
         dir_path = filedialog.askdirectory()
