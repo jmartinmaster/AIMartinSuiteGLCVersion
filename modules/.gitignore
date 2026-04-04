@@ -1,0 +1,19 @@
+# Python and cache
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+
+# PyInstaller build folders and files
+build/
+dist/
+*.spec
+
+# Application runtime data (Prevent local user data from uploading)
+exports/
+data/pending/
+settings.json
+rates.json
+layout_config.json
