@@ -9,6 +9,7 @@ import json
 import tkinter as tk
 import ttkbootstrap as tb
 from ttkbootstrap.constants import *
+from modules.theme_manager import apply_readability_overrides, normalize_theme, DEFAULT_THEME
 
 __module_name__ = "Dispatcher Core"
 __version__ = "1.0.6"
@@ -102,7 +103,7 @@ class Dispatcher:
             self.active_module_instance.import_from_excel_ui()
 
     def pre_load_manifest(self):
-        module_list = ["production_log", "layout_manager", "data_handler", "about", "settings_manager"]
+        module_list = ["production_log", "layout_manager", "data_handler", "about", "settings_manager", "theme_manager"]
         for mod_name in module_list:
             try:
                 full_path = f"modules.{mod_name}"
@@ -148,7 +149,7 @@ class Dispatcher:
         for filename in sorted(os.listdir(self.modules_path)):
             if filename.endswith(".py") and filename != "__init__.py":
                 module_name = filename[:-3]
-                if module_name in ["about", "data_handler", "splash", "example_modules"]: continue 
+                if module_name in ["about", "data_handler", "splash", "example_modules", "theme_manager"]: continue 
                 display_name = module_name.replace("_", " ").title()
                 
                 tb.Button(self.nav_container, text=display_name,
@@ -192,14 +193,15 @@ class Dispatcher:
 
 if __name__ == "__main__":
     settings_path = os.path.abspath("settings.json")
-    theme_name = "darkly"
+    theme_name = DEFAULT_THEME
     if os.path.exists(settings_path):
         try:
             with open(settings_path, 'r') as f:
-                theme_name = json.load(f).get("theme", "darkly")
+                theme_name = normalize_theme(json.load(f).get("theme", DEFAULT_THEME))
         except: pass
     
     app_root = tb.Window(themename=theme_name)
+    apply_readability_overrides(app_root)
     from modules.splash import show_splash_screen
     show_splash_screen(app_root, duration=5000)
         

@@ -33,12 +33,18 @@ def resource_path(relative_path):
 
     return os.path.join(base_path, relative_path)
 
+def external_path(relative_path):
+    """Get path to external file (Write-Enabled)."""
+    return os.path.join(os.path.abspath("."), relative_path)
+
 class DataHandler:
     def __init__(self, config_name="layout_config.json"):
-        # Use resource_path to find the config file inside the build
-        self.config_path = resource_path(config_name)
+        # Prefer the local config so Layout Manager changes are reflected in import/export.
+        self.config_path = external_path(config_name)
+        if not os.path.exists(self.config_path):
+            self.config_path = resource_path(config_name)
         
-        with open(self.config_path, 'r') as f:
+        with open(self.config_path, 'r', encoding='utf-8') as f:
             self.config = json.load(f)
         
         # User data folders stay in the local directory (not internal to the exe)

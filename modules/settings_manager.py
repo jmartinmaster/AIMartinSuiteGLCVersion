@@ -7,6 +7,7 @@ from tkinter import filedialog
 import json
 import os
 import sys
+from modules.theme_manager import DEFAULT_THEME, get_theme_names, normalize_theme
 
 __module_name__ = "Settings Manager"
 __version__ = "1.0.0"
@@ -33,11 +34,12 @@ class SettingsManager:
                 "export_directory": "exports",
                 "organize_exports_by_date": True,
                 "default_export_prefix": "Disamatic Production Sheet",
-                "theme": "darkly",
+                "theme": DEFAULT_THEME,
                 "auto_save_interval_min": 5,
                 "default_shift_hours": 8.0,
                 "default_goal_mph": 240
             }
+        self.settings["theme"] = normalize_theme(self.settings.get("theme", DEFAULT_THEME))
 
     def save_settings(self):
         for key, entry in self.entries.items():
@@ -74,7 +76,7 @@ class SettingsManager:
             ("export_directory", "Base Export Directory", "entry_browse"),
             ("organize_exports_by_date", "Organize Exports by YYYY/MM", "check"),
             ("default_export_prefix", "Default Export Prefix", "entry"),
-            ("theme", "Application Theme", "combo", ["darkly", "superhero", "lumen", "cosmo", "cyborg", "journal", "pulse", "solar", "flatly", "minty", "morph"]),
+            ("theme", "Application Theme", "combo", get_theme_names()),
             ("auto_save_interval_min", "Auto-Save Interval (Minutes)", "entry"),
             ("default_shift_hours", "Default Shift Hours", "entry"),
             ("default_goal_mph", "Default Goal MPH", "entry")
