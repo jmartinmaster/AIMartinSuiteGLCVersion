@@ -4,6 +4,20 @@ This changelog tracks the main branch release line for The Martin Suite (GLC Edi
 
 Version headings below are aligned to the current `1.x` release line used by Dispatcher Core. Earlier work has been grouped into practical release milestones so the shipped feature history is easier to follow without rewriting older module version markers.
 
+## [1.1.2] - 2026-04-04
+
+### Changed
+
+- Promoted Dispatcher Core to stable version `1.1.2` after the stricter post-Gemini cleanup pass.
+- Removed module reloads from theme preview and theme save so settings changes stop hard-refreshing the active page.
+- Added a short fade transition around module switches to reduce visible flashing during screen changes.
+- Added lightweight dispatcher-level exception logging for icon setup, preload failures, module load failures, and startup theme reads.
+- Updated Settings Manager to use the stable `1.1.2` module marker for the anti-flash theme behavior changes.
+
+### Notes
+
+- This even patch release is intended to remain eligible for the packaged EXE update gate.
+
 ## [1.1.1] - 2026-04-04
 
 ### Changed
