@@ -177,7 +177,7 @@ class ProductionLog:
                 message = f"Draft saved to {os.path.basename(draft_path)}."
                 if backup_info.get("versioned_backup_path"):
                     message += " A recovery snapshot of the previous draft was stored in data/pending/history."
-                Messagebox.show_info(message, "Draft Saved")
+                self.dispatcher.show_toast("Draft Saved", message, SUCCESS)
         except Exception as e:
             Messagebox.show_error(f"Could not save draft: {e}", "Draft Save Error")
 
@@ -444,7 +444,7 @@ class ProductionLog:
     def resume_latest_draft(self):
         latest = self.get_latest_pending_draft()
         if not latest:
-            Messagebox.show_info("No pending drafts are available.", "Resume Latest")
+            self.dispatcher.show_toast("Resume Latest", "No pending drafts are available.", INFO)
             return
         self.load_draft_path(latest["path"])
 
@@ -456,7 +456,7 @@ class ProductionLog:
 
     def delete_current_draft(self):
         if not self.current_draft_path or not os.path.exists(self.current_draft_path):
-            Messagebox.show_info("There is no saved draft attached to the current session.", "Delete Draft")
+            self.dispatcher.show_toast("Delete Draft", "There is no saved draft attached to the current session.", INFO)
             return
         if not messagebox.askyesno("Delete Current Draft", f"Delete {os.path.basename(self.current_draft_path)}?"):
             return
@@ -536,7 +536,7 @@ class ProductionLog:
             shift = ui_data["header"].get("shift", "0")
             date = ui_data["header"].get("date", "00-00-00").replace("/", "")
             handler.export_to_template(ui_data, shift, date)
-            Messagebox.show_info("Excel Export Successful!", "Success")
+            self.dispatcher.show_toast("Export Complete", "Excel export completed successfully.", SUCCESS)
         except Exception as e:
             Messagebox.show_error(f"Export failed: {e}", "Error")
 
@@ -616,7 +616,7 @@ class ProductionLog:
                 handler = DataHandler()
                 data = handler.import_from_excel(file_path)
                 self.populate_from_data(data, source_path=None, mark_dirty_after_load=True)
-                Messagebox.show_info("Excel Import Successful!", "Success")
+                self.dispatcher.show_toast("Import Complete", "Excel import completed successfully.", SUCCESS)
             except Exception as e:
                 Messagebox.show_error(f"Failed to import Excel: {e}", "Import Error")
 

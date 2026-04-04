@@ -21,6 +21,7 @@ Version headings below are aligned to the current `1.0.x` release line used by D
 - Kept the persistence helper internal and out of the sidebar module list.
 - Trimmed Production Log so it keeps draft actions in place while the full restore workflow lives in Backup / Recovery.
 - Simplified Update Manager into a compact Dispatcher Core release check.
+- Replaced routine informational popups with toast notifications and added a configurable toast duration setting.
 - Promoted Dispatcher Core to stable version `1.0.8` for the recovery and UI cleanup release.
 
 ## [1.0.6] - 2026-04-04

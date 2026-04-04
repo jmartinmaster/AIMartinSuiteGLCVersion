@@ -19,6 +19,7 @@ These two forms do not have identical behavior. The Python version has access to
 - Layout Manager and Rate Manager tools.
 - Backup / Recovery viewer for browsing and restoring draft snapshots and configuration backups.
 - Settings management for export paths, theme selection, and production defaults.
+- Configurable toast notifications for non-blocking status messages.
 - In-app help viewer and About screen.
 - Bundled GPL license access from Help Center and About.
 - Theme support with readability overrides.

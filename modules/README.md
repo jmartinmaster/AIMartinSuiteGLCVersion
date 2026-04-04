@@ -15,6 +15,7 @@ The Martin Suite is a desktop application for logging Disamatic production, mana
 * **Layout Manager:** A built-in JSON editor to dynamically adjust the UI grid layout of the production form.
 * **Theme & Settings Management:** Support for curated readable themes and configurable production defaults.
 * **Backup-Aware Saves:** Settings, rates, and layout writes keep `.bak` copies plus rotated backups under `data/backups`.
+* **Toast Notifications:** Routine status messages are non-blocking and use a configurable toast duration.
 * **Help & License Access:** Built-in Help Center tabs plus bundled GPL license access from Help and About.
 * **Backup / Recovery Viewer:** Browse pending drafts, recovery snapshots, and configuration backups from inside the suite.
 * **Update Manager:** Shows a compact Dispatcher Core release check and can target packaged EXE updates.

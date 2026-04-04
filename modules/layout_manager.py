@@ -697,7 +697,7 @@ class LayoutManager:
             json_data = json.loads(self.get_editor_text())
             self.validate_config(json_data)
             self.update_status("Layout JSON is valid", SUCCESS)
-            Messagebox.show_info("Layout JSON is valid.", "Validation Success")
+            self.dispatcher.show_toast("Validation Success", "Layout JSON is valid.", SUCCESS)
         except Exception as e:
             self.update_status(f"Validation error: {e}", DANGER)
             Messagebox.show_error(f"Layout JSON is invalid: {e}", "Validation Error")
@@ -729,7 +729,7 @@ class LayoutManager:
                 backup_message += " A recovery copy was stored in data/backups/layouts."
             elif backup_info.get("adjacent_backup_path"):
                 backup_message += f" A backup was kept as {os.path.basename(backup_info['adjacent_backup_path'])}."
-            Messagebox.show_info(backup_message, "Success")
+            self.dispatcher.show_toast("Layout Saved", backup_message, SUCCESS)
             self.update_preview()
         except Exception as e:
             Messagebox.show_error(f"Error saving: {e}", "Error")

@@ -18,10 +18,13 @@ import os
 import sys
 import importlib
 import json
+import ctypes
 import tkinter as tk
 from tkinter import messagebox
+from ctypes import wintypes
 import ttkbootstrap as tb
 from ttkbootstrap.constants import *
+from ttkbootstrap.widgets import ToastNotification
 from modules.theme_manager import apply_readability_overrides, normalize_theme, DEFAULT_THEME
 
 __module_name__ = "Dispatcher Core"
@@ -33,6 +36,20 @@ def resource_path(relative_path):
     except Exception:
         base_path = os.path.abspath(".")
     return os.path.join(base_path, relative_path)
+
+
+def get_work_area_insets(root):
+    right_inset = 0
+    bottom_inset = 0
+    if sys.platform.startswith("win"):
+        try:
+            rect = wintypes.RECT()
+            if ctypes.windll.user32.SystemParametersInfoW(48, 0, ctypes.byref(rect), 0):
+                right_inset = max(0, root.winfo_screenwidth() - rect.right)
+                bottom_inset = max(0, root.winfo_screenheight() - rect.bottom)
+        except Exception:
+            pass
+    return right_inset, bottom_inset
 
 class Dispatcher:
     def __init__(self, root):
@@ -63,6 +80,8 @@ class Dispatcher:
         self.loaded_modules = {"main": sys.modules[__name__]}
         self.active_module_instance = None
         self.active_module_name = None
+        self.settings_path = os.path.join(self.external_base, "settings.json")
+        self.runtime_settings = self.load_runtime_settings()
 
         self._setup_ui()
         self._setup_menu()
@@ -102,15 +121,13 @@ class Dispatcher:
         if hasattr(self.active_module_instance, 'save_draft'):
             self.active_module_instance.save_draft()
         else:
-            from ttkbootstrap.dialogs import Messagebox
-            Messagebox.show_warning("Save action is not supported on this page.", "Action Unavailable")
+            self.show_toast("Action Unavailable", "Save action is not supported on this page.", WARNING)
 
     def menu_export(self, event=None):
         if hasattr(self.active_module_instance, 'export_to_excel'):
             self.active_module_instance.export_to_excel()
         else:
-            from ttkbootstrap.dialogs import Messagebox
-            Messagebox.show_warning("Export action is not supported on this page.", "Action Unavailable")
+            self.show_toast("Action Unavailable", "Export action is not supported on this page.", WARNING)
             
     def menu_import(self, event=None):
         self.load_module("production_log")
@@ -217,6 +234,48 @@ class Dispatcher:
             raise FileNotFoundError(relative_path)
         except Exception as e:
             messagebox.showerror("Help Document Error", f"Could not open help document: {e}")
+
+    def load_runtime_settings(self):
+        settings = {
+            "theme": DEFAULT_THEME,
+            "toast_duration_sec": 5,
+        }
+        if os.path.exists(self.settings_path):
+            try:
+                with open(self.settings_path, 'r', encoding='utf-8') as handle:
+                    loaded = json.load(handle)
+                if isinstance(loaded, dict):
+                    settings.update(loaded)
+            except Exception:
+                pass
+
+        try:
+            settings["toast_duration_sec"] = max(1, int(settings.get("toast_duration_sec", 5)))
+        except Exception:
+            settings["toast_duration_sec"] = 5
+        settings["theme"] = normalize_theme(settings.get("theme", DEFAULT_THEME))
+        return settings
+
+    def refresh_runtime_settings(self):
+        self.runtime_settings = self.load_runtime_settings()
+        return self.runtime_settings
+
+    def get_setting(self, key, default=None):
+        return self.runtime_settings.get(key, default)
+
+    def show_toast(self, title, message, bootstyle=INFO, duration_ms=None):
+        duration = duration_ms
+        if duration is None:
+            duration = int(self.get_setting("toast_duration_sec", 5)) * 1000
+        right_inset, bottom_inset = get_work_area_insets(self.root)
+        toast = ToastNotification(
+            title=title,
+            message=message,
+            duration=duration,
+            bootstyle=bootstyle,
+            position=(24 + right_inset, 24 + bottom_inset, "se"),
+        )
+        toast.show_toast()
 
     def apply_theme(self, theme_name, redraw=False):
         normalized_theme = normalize_theme(theme_name)
