@@ -205,6 +205,7 @@ class LayoutManager:
         tb.Separator(self.block_inner, bootstyle=PRIMARY).pack(fill=X, pady=(0, 8))
 
         for field in config.get("header_fields", []):
+            is_locked_readonly = field.get("id") == "cast_date"
             card = tb.Labelframe(self.block_inner, text=f" {field.get('label', 'Unnamed Field')} ", padding=10, style="Martin.Card.TLabelframe")
             card.pack(fill=X, pady=4)
 
@@ -234,24 +235,45 @@ class LayoutManager:
 
             tb.Label(form_row, text="Cell", bootstyle=PRIMARY).grid(row=0, column=4, padx=(0, 6), pady=2, sticky=W)
             cell_var = tk.StringVar(value=str(field.get("cell", "")))
-            tb.Entry(form_row, textvariable=cell_var, width=10).grid(row=0, column=5, padx=(0, 12), pady=2, sticky=W)
+            cell_entry = tb.Entry(form_row, textvariable=cell_var, width=10)
+            cell_entry.grid(row=0, column=5, padx=(0, 12), pady=2, sticky=W)
+
+            width_var = tk.StringVar(value=str(field.get("width", 10)))
+            readonly_var = tk.BooleanVar(value=bool(field.get("readonly", False)))
+            default_var = tk.StringVar(value=str(field.get("default", "")))
+
+            if not is_locked_readonly:
+                tb.Label(form_row, text="Width", bootstyle=PRIMARY).grid(row=0, column=6, padx=(0, 6), pady=2, sticky=W)
+                tb.Entry(form_row, textvariable=width_var, width=6).grid(row=0, column=7, padx=(0, 12), pady=2, sticky=W)
+
+                readonly_toggle = tb.Checkbutton(form_row, text="Readonly", variable=readonly_var, bootstyle="round-toggle")
+                readonly_toggle.grid(row=0, column=8, padx=(0, 12), pady=2, sticky=W)
 
             tb.Button(
                 form_row,
                 text="Apply",
                 bootstyle=SUCCESS,
-                command=lambda field_id=field.get("id"), row_var=row_var, col_var=col_var, cell_var=cell_var: self.update_header_field_from_block(
+                command=lambda field_id=field.get("id"), row_var=row_var, col_var=col_var, cell_var=cell_var, width_var=width_var, readonly_var=readonly_var, default_var=default_var: self.update_header_field_from_block(
                     field_id,
                     row_var.get(),
                     col_var.get(),
-                    cell_var.get()
+                    cell_var.get(),
+                    width_var.get(),
+                    readonly_var.get(),
+                    default_var.get()
                 )
-            ).grid(row=0, column=6, padx=(0, 8), pady=2, sticky=W)
+            ).grid(row=0, column=9 if not is_locked_readonly else 6, padx=(0, 8), pady=2, sticky=W)
 
-            meta_row = tb.Frame(card)
-            meta_row.pack(fill=X, pady=(8, 0))
-            tb.Label(meta_row, text=f"Width: {field.get('width', 10)}", style="Martin.Muted.TLabel").pack(side=LEFT)
-            tb.Label(meta_row, text=f"Default: {field.get('default', '(none)')}", style="Martin.Muted.TLabel").pack(side=LEFT, padx=12)
+            if is_locked_readonly:
+                note_row = tb.Frame(card)
+                note_row.pack(fill=X, pady=(8, 0))
+                tb.Label(note_row, text="Cast Date can only be repositioned here. It stays readonly and is driven from Date.", bootstyle=WARNING).pack(side=LEFT)
+            else:
+                meta_row = tb.Frame(card)
+                meta_row.pack(fill=X, pady=(8, 0))
+                tb.Label(meta_row, text="Default", bootstyle=PRIMARY).pack(side=LEFT)
+                tb.Entry(meta_row, textvariable=default_var, width=18).pack(side=LEFT, padx=(6, 12))
+                tb.Label(meta_row, text=f"Current: {field.get('default', '(none)')}", style="Martin.Muted.TLabel").pack(side=LEFT)
 
         mappings_title = tb.Label(self.block_inner, text="Mappings", font=("-size 12 -weight bold"), bootstyle=PRIMARY)
         mappings_title.pack(anchor=W, pady=(10, 6))
@@ -272,23 +294,47 @@ class LayoutManager:
     def add_mapping_block(self, title, mapping, parent):
         card = tb.Labelframe(parent, text=f" {title} ", padding=10, style="Martin.Card.TLabelframe")
         card.pack(fill=X, pady=4)
-        tb.Label(card, text=f"Start Row: {mapping.get('start_row', '(missing)')}", style="Martin.Section.TLabel").pack(anchor=W)
+        mapping_name = title.lower().replace(" ", "_")
+
+        top_row = tb.Frame(card)
+        top_row.pack(fill=X, pady=(0, 8))
+        tb.Label(top_row, text="Start Row", bootstyle=PRIMARY).pack(side=LEFT)
+        start_row_var = tk.StringVar(value=str(mapping.get('start_row', '')))
+        tb.Entry(top_row, textvariable=start_row_var, width=8).pack(side=LEFT, padx=(6, 12))
 
         columns = mapping.get("columns", {})
+        column_vars = {}
         if columns:
             for key, value in columns.items():
-                tb.Label(card, text=f"{key}: {value}", style="Martin.Muted.TLabel").pack(anchor=W)
+                row = tb.Frame(card)
+                row.pack(fill=X, pady=2)
+                tb.Label(row, text=key.replace("_", " ").title(), bootstyle=PRIMARY, width=18).pack(side=LEFT)
+                column_vars[key] = tk.StringVar(value=str(value))
+                tb.Entry(row, textvariable=column_vars[key], width=10).pack(side=LEFT, padx=(6, 0))
         else:
             tb.Label(card, text="No columns configured", bootstyle=WARNING).pack(anchor=W)
 
-    def update_header_field_from_block(self, field_id, row_value, col_value, cell_value):
+        tb.Button(
+            card,
+            text="Apply Mapping",
+            bootstyle=SUCCESS,
+            command=lambda mapping_name=mapping_name, start_row_var=start_row_var, column_vars=column_vars: self.update_mapping_from_block(
+                mapping_name,
+                start_row_var.get(),
+                {key: variable.get() for key, variable in column_vars.items()}
+            )
+        ).pack(anchor=W, pady=(8, 0))
+
+    def update_header_field_from_block(self, field_id, row_value, col_value, cell_value, width_value, readonly_value, default_value):
         try:
             if not field_id:
                 raise ValueError("Field ID is missing.")
 
             row = int(str(row_value).strip())
             col = int(str(col_value).strip())
+            width = int(str(width_value).strip())
             cell = str(cell_value).strip()
+            default_text = str(default_value)
 
             config = self.get_current_config()
             target_field = None
@@ -302,10 +348,24 @@ class LayoutManager:
 
             target_field["row"] = row
             target_field["col"] = col
-            if cell:
-                target_field["cell"] = cell
+            if target_field.get("id") == "cast_date":
+                target_field["readonly"] = True
+                target_field.pop("default", None)
+            elif readonly_value:
+                target_field["width"] = width
+                target_field["readonly"] = True
             else:
-                target_field.pop("cell", None)
+                target_field["width"] = width
+                target_field.pop("readonly", None)
+            if target_field.get("id") != "cast_date":
+                if cell:
+                    target_field["cell"] = cell
+                else:
+                    target_field.pop("cell", None)
+                if default_text.strip():
+                    target_field["default"] = default_text
+                else:
+                    target_field.pop("default", None)
 
             self.set_editor_text(config, mark_clean=False)
             self.refresh_block_view(config)
@@ -313,6 +373,28 @@ class LayoutManager:
             self.update_status(f"Updated field '{field_id}'", INFO)
         except Exception as e:
             Messagebox.show_error(f"Could not update field from block view: {e}", "Block Edit Error")
+
+    def update_mapping_from_block(self, mapping_name, start_row_value, column_values):
+        try:
+            start_row = int(str(start_row_value).strip())
+            config = self.get_current_config()
+            mapping = config.get(mapping_name)
+            if not isinstance(mapping, dict):
+                raise ValueError(f"Mapping '{mapping_name}' was not found.")
+
+            mapping["start_row"] = start_row
+            for key, value in column_values.items():
+                cleaned_value = str(value).strip()
+                if not cleaned_value:
+                    raise ValueError(f"Column '{key}' cannot be empty.")
+                mapping.setdefault("columns", {})[key] = cleaned_value
+
+            self.set_editor_text(config, mark_clean=False)
+            self.refresh_block_view(config)
+            self.update_preview()
+            self.update_status(f"Updated mapping '{mapping_name}'", INFO)
+        except Exception as e:
+            Messagebox.show_error(f"Could not update mapping from block view: {e}", "Mapping Edit Error")
 
     def on_text_modified(self, _event=None):
         if self.suppress_modified_event:
