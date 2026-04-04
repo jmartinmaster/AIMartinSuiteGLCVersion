@@ -65,6 +65,8 @@ Changes made here affect both the form layout and the Excel import/export mappin
 Use Settings Manager to configure application defaults.
 
 - Theme controls the UI theme.
+- Enable Screen Transitions turns the page-switch fade on or off.
+- Transition Duration controls how long the page-switch fade runs, from `0` to `500` milliseconds.
 - Auto Save Interval controls how often draft autosave runs.
 - Toast Duration controls how long non-blocking status notifications stay visible.
 - Default Shift Hours sets the default value loaded into the production form.
@@ -145,6 +147,11 @@ Manual JSON editing is still possible, but the built-in editors are safer becaus
 ## JSON Reference
 
 Use the other Help tabs for the detailed structure of each JSON file used by the application.
+
+## App Icons
+
+- The app icon files are hard-coded and documented in the App Icons help page.
+- Use that page when you need to replace the EXE icon, runtime PNG icon sizes, or the source icon artwork files.
 
 ## License Access
 

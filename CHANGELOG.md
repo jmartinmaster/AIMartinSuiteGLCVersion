@@ -4,6 +4,21 @@ This changelog tracks the main branch release line for The Martin Suite (GLC Edi
 
 Version headings below are aligned to the current `1.x` release line used by Dispatcher Core. Earlier work has been grouped into practical release milestones so the shipped feature history is easier to follow without rewriting older module version markers.
 
+## [1.1.4] - 2026-04-04
+
+### Added
+
+- Added configurable screen-transition controls so the app fade can be tuned or disabled without editing code.
+- Added a dedicated App Icons help page describing the hard-coded runtime and packaging icon pipeline.
+- Added the source icon artwork files to the tracked asset set alongside the generated icon sizes.
+
+### Changed
+
+- Promoted Dispatcher Core to stable version `1.1.4` after strengthening the default screen fade so module transitions are visibly noticeable out of the box.
+- Kept internal helpers such as `utils` and `app_logging` hidden inside the app navigation while allowing the VS Code explorer to show working files normally.
+- Added missing version markers to the remaining internal helper modules so version reporting stays complete.
+- Expanded the packaged asset bundle so the icon source artwork ships with the rest of the documented icon files.
+
 ## [1.1.2] - 2026-04-04
 
 ### Changed

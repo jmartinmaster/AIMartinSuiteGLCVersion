@@ -21,7 +21,7 @@ hiddenimports = ['openpyxl', 'openpyxl.cell.cell', 'PyInstaller', 'tkinter.messa
 hiddenimports += collect_submodules('openpyxl')
 hiddenimports += collect_submodules('PyInstaller')
 
-datas = [('modules', 'modules'), ('docs', 'docs'), ('templates', 'templates'), ('layout_config.json', '.'), ('rates.json', '.'), ('LICENSE.txt', '.'), ('icon.ico', '.'), ('icon-16.png', '.'), ('icon-24.png', '.'), ('icon-32.png', '.'), ('icon-48.png', '.'), ('icon-64.png', '.'), ('splash-logo.png', '.')]
+datas = [('modules', 'modules'), ('docs', 'docs'), ('templates', 'templates'), ('layout_config.json', '.'), ('rates.json', '.'), ('LICENSE.txt', '.'), ('icon.ico', '.'), ('icon-16.png', '.'), ('icon-24.png', '.'), ('icon-32.png', '.'), ('icon-48.png', '.'), ('icon-64.png', '.'), ('icon.png', '.'), ('icon.jpg', '.'), ('splash-logo.png', '.')]
 
 
 a = Analysis(

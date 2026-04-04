@@ -28,7 +28,7 @@ from modules.theme_manager import DEFAULT_THEME, get_theme_names, normalize_them
 from modules.utils import external_path
 
 __module_name__ = "Settings Manager"
-__version__ = "1.1.2"
+__version__ = "1.1.4"
 
 class SettingsManager:
     def __init__(self, parent, dispatcher):
@@ -52,6 +52,8 @@ class SettingsManager:
                 "organize_exports_by_date": True,
                 "default_export_prefix": "Disamatic Production Sheet",
                 "theme": DEFAULT_THEME,
+                "enable_screen_transitions": True,
+                "screen_transition_duration_ms": 360,
                 "toast_duration_sec": 5,
                 "auto_save_interval_min": 5,
                 "default_shift_hours": 8.0,
@@ -72,6 +74,11 @@ class SettingsManager:
                 normalized_codes[code] = label
             self.settings["downtime_codes"] = normalized_codes
         self.settings["theme"] = normalize_theme(self.settings.get("theme", DEFAULT_THEME))
+        self.settings["enable_screen_transitions"] = bool(self.settings.get("enable_screen_transitions", True))
+        try:
+            self.settings["screen_transition_duration_ms"] = max(0, min(500, int(self.settings.get("screen_transition_duration_ms", 360))))
+        except Exception:
+            self.settings["screen_transition_duration_ms"] = 360
         try:
             self.settings["toast_duration_sec"] = max(1, int(self.settings.get("toast_duration_sec", 5)))
         except Exception:
@@ -111,7 +118,7 @@ class SettingsManager:
                 self.settings[key] = entry.instate(['selected'])
             else:
                 val = entry.get()
-                if key in ['auto_save_interval_min', 'default_shift_hours', 'default_goal_mph', 'toast_duration_sec']:
+                if key in ['auto_save_interval_min', 'default_shift_hours', 'default_goal_mph', 'toast_duration_sec', 'screen_transition_duration_ms']:
                     try:
                         val = float(val) if '.' in val else int(val)
                     except ValueError:
@@ -124,6 +131,10 @@ class SettingsManager:
             self.settings['toast_duration_sec'] = max(1, int(self.settings.get('toast_duration_sec', 5)))
         except Exception:
             self.settings['toast_duration_sec'] = 5
+        try:
+            self.settings['screen_transition_duration_ms'] = max(0, min(500, int(self.settings.get('screen_transition_duration_ms', 360))))
+        except Exception:
+            self.settings['screen_transition_duration_ms'] = 360
 
         self.persist_settings()
 
@@ -308,6 +319,8 @@ class SettingsManager:
             ("organize_exports_by_date", "Organize Exports by Year/Month", "check"),
             ("default_export_prefix", "Default Export Prefix", "entry"),
             ("theme", "Application Theme", "combo", get_theme_names()),
+            ("enable_screen_transitions", "Enable Screen Transitions", "check"),
+            ("screen_transition_duration_ms", "Transition Duration (ms)", "entry"),
             ("toast_duration_sec", "Toast Duration (Seconds)", "entry"),
             ("auto_save_interval_min", "Auto-Save Interval (Minutes)", "entry"),
             ("default_shift_hours", "Default Shift Hours", "entry"),
@@ -355,6 +368,14 @@ class SettingsManager:
         tb.Button(theme_controls, text="Revert Theme Preview", bootstyle=SECONDARY, command=self.revert_theme_preview).pack(side=LEFT)
         self.theme_status = tb.Label(theme_controls, text=f"Current theme: {self.saved_theme}", bootstyle=SECONDARY)
         self.theme_status.pack(side=LEFT, padx=10)
+
+        tb.Label(
+            container,
+            text="Screen transitions can be disabled or tuned from 0 to 500 ms. Around 250 to 400 ms is usually enough to soften redraw flashes without feeling slow.",
+            bootstyle=SECONDARY,
+            justify=LEFT,
+            wraplength=760,
+        ).pack(anchor=W, pady=(0, 10))
 
         extras = tb.Frame(container)
         extras.pack(fill=X, pady=(5, 10))

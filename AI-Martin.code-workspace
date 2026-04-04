@@ -11,10 +11,6 @@
 		"cSpell.words": [
 			"yday"
 		],
-		"files.exclude": {
-			"modules/utils.py": true,
-			"utils.py": true
-		},
 		"chat.tools.terminal.autoApprove": {
 			"/^& \\.\\\\\\.venv\\\\Scripts\\\\python\\.exe \\.\\\\build\\.py$/": {
 				"approve": true,
