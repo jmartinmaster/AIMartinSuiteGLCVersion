@@ -85,6 +85,7 @@ class RecoveryViewer:
         self.tree.configure(yscrollcommand=y_scroll.set)
         self.tree.pack(side=LEFT, fill=BOTH, expand=True)
         y_scroll.pack(side=RIGHT, fill=Y)
+        self.dispatcher.bind_mousewheel_to_widget_tree(self.tree, self.tree)
 
         tb.Label(container, textvariable=self.status_var, bootstyle=SECONDARY).pack(anchor=W, pady=(12, 0))
 

@@ -28,7 +28,26 @@ from ttkbootstrap.widgets import ToastNotification
 from modules.theme_manager import apply_readability_overrides, normalize_theme, DEFAULT_THEME
 
 __module_name__ = "Dispatcher Core"
-__version__ = "1.0.8"
+__version__ = "1.1"
+WINDOWS_APP_ID = "JamieMartin.TheMartinSuite.GLC"
+APP_ICON_RELATIVE_PATH = "icon.ico"
+APP_ICON_IMAGE_RELATIVE_PATHS = [
+    "icon-16.png",
+    "icon-24.png",
+    "icon-32.png",
+    "icon-48.png",
+    "icon-64.png",
+]
+SPLASH_LOGO_RELATIVE_PATH = "splash-logo.png"
+WM_SETICON = 0x0080
+WM_GETICON = 0x007F
+ICON_SMALL = 0
+ICON_BIG = 1
+IMAGE_ICON = 1
+LR_LOADFROMFILE = 0x0010
+LR_DEFAULTSIZE = 0x0040
+GCLP_HICON = -14
+GCLP_HICONSM = -34
 
 def resource_path(relative_path):
     try:
@@ -51,11 +70,77 @@ def get_work_area_insets(root):
             pass
     return right_inset, bottom_inset
 
+
+def apply_windows_app_id():
+    if not sys.platform.startswith("win"):
+        return
+    try:
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(WINDOWS_APP_ID)
+    except Exception:
+        pass
+
+
+def apply_windows_window_icons(root):
+    if not sys.platform.startswith("win"):
+        return
+
+    icon_path = resource_path(APP_ICON_RELATIVE_PATH)
+    if not os.path.exists(icon_path):
+        return
+
+    try:
+        root.update_idletasks()
+        hwnd = root.winfo_id()
+        if not hwnd:
+            return
+
+        user32 = ctypes.windll.user32
+        small_icon = user32.LoadImageW(None, icon_path, IMAGE_ICON, 16, 16, LR_LOADFROMFILE)
+        big_icon = user32.LoadImageW(None, icon_path, IMAGE_ICON, 32, 32, LR_LOADFROMFILE | LR_DEFAULTSIZE)
+
+        if small_icon:
+            user32.SendMessageW(hwnd, WM_SETICON, ICON_SMALL, small_icon)
+            user32.SetClassLongPtrW(hwnd, GCLP_HICONSM, small_icon)
+        if big_icon:
+            user32.SendMessageW(hwnd, WM_SETICON, ICON_BIG, big_icon)
+            user32.SetClassLongPtrW(hwnd, GCLP_HICON, big_icon)
+
+        root._windows_small_icon_handle = small_icon
+        root._windows_big_icon_handle = big_icon
+    except Exception:
+        pass
+
+
+def apply_app_icon(root):
+    icon_path = resource_path(APP_ICON_RELATIVE_PATH)
+    try:
+        if os.path.exists(icon_path):
+            root.iconbitmap(default=icon_path)
+    except Exception:
+        pass
+    try:
+        icon_images = []
+        for relative_path in APP_ICON_IMAGE_RELATIVE_PATHS:
+            icon_image_path = resource_path(relative_path)
+            if os.path.exists(icon_image_path):
+                icon_images.append(tk.PhotoImage(file=icon_image_path))
+        if icon_images:
+            root._app_icon_images = icon_images
+            root.iconphoto(True, *icon_images)
+    except Exception:
+        pass
+    try:
+        root.after_idle(lambda widget=root: apply_windows_window_icons(widget) if widget.winfo_exists() else None)
+    except Exception:
+        pass
+
 class Dispatcher:
     def __init__(self, root):
+        apply_windows_app_id()
         self.root = root
         self.root.title(f"The Martin Suite - {__version__}")
         self.root.geometry("1000x600")
+        apply_app_icon(self.root)
         
         if getattr(sys, 'frozen', False):
             self.internal_base = sys._MEIPASS
@@ -88,6 +173,7 @@ class Dispatcher:
         self.pre_load_manifest()
         self._load_modules_list()
         self._bind_mousewheel()
+        self.load_module("production_log")
 
     def _setup_menu(self):
         menubar = tk.Menu(self.root)
@@ -178,12 +264,18 @@ class Dispatcher:
         if not os.path.exists(self.modules_path):
             return
 
-        for filename in sorted(os.listdir(self.modules_path)):
+        nav_modules = []
+
+        for filename in os.listdir(self.modules_path):
             if filename.endswith(".py") and filename != "__init__.py":
                 module_name = filename[:-3]
-                if module_name in ["about", "data_handler", "splash", "example_modules", "theme_manager", "help_viewer", "persistence"]: continue 
+                if module_name in ["about", "data_handler", "splash", "example_modules", "theme_manager", "help_viewer", "persistence", "downtime_codes"]:
+                    continue
                 display_name = module_name.replace("_", " ").title()
-                
+
+                nav_modules.append((display_name, module_name))
+
+        for display_name, module_name in sorted(nav_modules, key=lambda item: item[0].lower()):
                 tb.Button(self.nav_container, text=display_name,
                           bootstyle="link-light", 
                           command=lambda m=module_name: self.load_module(m)).pack(fill=X, padx=5, pady=2)
@@ -263,6 +355,35 @@ class Dispatcher:
     def get_setting(self, key, default=None):
         return self.runtime_settings.get(key, default)
 
+    def get_mousewheel_units(self, event):
+        if getattr(event, "num", None) == 4:
+            return -1
+        if getattr(event, "num", None) == 5:
+            return 1
+        if getattr(event, "delta", 0):
+            return int(-1 * (event.delta / 120))
+        return 0
+
+    def bind_mousewheel_to_widget_tree(self, root_widget, scroll_target, axis="y"):
+        def on_mousewheel(event):
+            step = self.get_mousewheel_units(event)
+            if not step:
+                return None
+            if axis == "x":
+                scroll_target.xview_scroll(step, "units")
+            else:
+                scroll_target.yview_scroll(step, "units")
+            return "break"
+
+        def bind_widget(widget):
+            widget.bind("<MouseWheel>", on_mousewheel)
+            widget.bind("<Button-4>", on_mousewheel)
+            widget.bind("<Button-5>", on_mousewheel)
+            for child in widget.winfo_children():
+                bind_widget(child)
+
+        bind_widget(root_widget)
+
     def show_toast(self, title, message, bootstyle=INFO, duration_ms=None):
         duration = duration_ms
         if duration is None:
@@ -297,13 +418,9 @@ class Dispatcher:
         self.canvas.bind_all("<Button-5>", self._on_mousewheel)
 
     def _on_mousewheel(self, event):
-        if event.num == 4:
-            self.canvas.yview_scroll(-1, "units")
-        elif event.num == 5:
-            self.canvas.yview_scroll(1, "units")
-        else:
-            # Handle Windows delta
-            self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        step = self.get_mousewheel_units(event)
+        if step:
+            self.canvas.yview_scroll(step, "units")
 
 if __name__ == "__main__":
     settings_path = os.path.abspath("settings.json")
@@ -314,10 +431,12 @@ if __name__ == "__main__":
                 theme_name = normalize_theme(json.load(f).get("theme", DEFAULT_THEME))
         except: pass
     
+    apply_windows_app_id()
     app_root = tb.Window(themename=theme_name)
     apply_readability_overrides(app_root)
+    apply_app_icon(app_root)
     from modules.splash import show_splash_screen
-    show_splash_screen(app_root, duration=5000)
+    show_splash_screen(app_root, duration=5000, logo_path=resource_path(SPLASH_LOGO_RELATIVE_PATH))
         
     app = Dispatcher(app_root)
     app_root.mainloop()

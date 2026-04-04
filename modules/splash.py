@@ -18,6 +18,7 @@ import os
 import tkinter as tk
 import ttkbootstrap as tb
 from ttkbootstrap.constants import *
+from main import apply_app_icon
 
 def show_splash_screen(root, duration=5000, logo_path=None):
     """
@@ -32,9 +33,10 @@ def show_splash_screen(root, duration=5000, logo_path=None):
     splash = tb.Toplevel(root)
     splash.overrideredirect(True) # Removes window borders and title bar
     splash.attributes('-topmost', True) # Keep it on top of other windows
+    apply_app_icon(splash)
     
     width = 500
-    height = 350 if logo_path else 250
+    height = 420 if logo_path else 250
     
     # Center the splash screen on the monitor
     screen_width = splash.winfo_screenwidth()
@@ -51,11 +53,11 @@ def show_splash_screen(root, duration=5000, logo_path=None):
         try:
             img = tk.PhotoImage(file=logo_path)
             splash.logo_img = img # Keep a reference to prevent Python's garbage collector from deleting it
-            tb.Label(frame, image=img).pack(pady=(0, 10))
+            tb.Label(frame, image=img).pack(pady=(0, 12))
         except Exception as e:
             print(f"Error loading splash logo: {e}")
 
-    tb.Label(frame, text="THE MARTIN SUITE", font=("-size 24 -weight bold")).pack(pady=(20, 0))
+    tb.Label(frame, text="THE MARTIN SUITE", font=("-size 24 -weight bold")).pack(pady=(8, 0))
     tb.Label(frame, text="GLC Edition", font=("-size 14 -slant italic"), bootstyle=INFO).pack(pady=5)
     
     tb.Label(frame, text="Copyright © 2026 Jamie Martin", font=("-size 10")).pack(pady=(20, 0))

@@ -11,9 +11,11 @@ The Martin Suite is a desktop application for logging Disamatic production, mana
 * **Excel Integration:** 
   * Export production logs to formatted Excel sheets.
   * Import existing Excel sheets to resume or edit logged data.
+  * Pull workbook summary header fields into Production Log without overwriting formula-driven cells on export.
+  * Balance downtime against the shift total before export by redistributing time proportionally across existing downtime rows, with a dedicated adjustment row as fallback.
 * **Draft Recovery & Restore:** Save drafts, retain recovery snapshots when drafts are overwritten, and restore them from the Backup / Recovery view.
 * **Layout Manager:** A built-in JSON editor to dynamically adjust the UI grid layout of the production form.
-* **Theme & Settings Management:** Support for curated readable themes and configurable production defaults.
+* **Theme & Settings Management:** Support for curated readable themes, configurable production defaults, and editable downtime code labels.
 * **Backup-Aware Saves:** Settings, rates, and layout writes keep `.bak` copies plus rotated backups under `data/backups`.
 * **Toast Notifications:** Routine status messages are non-blocking and use a configurable toast duration.
 * **Help & License Access:** Built-in Help Center tabs plus bundled GPL license access from Help and About.
@@ -50,6 +52,7 @@ The compiled executable will be located in the `dist/` directory as `TheMartinSu
 
 - Source / Python mode can inspect repository versions, but new executable releases are still best produced by rebuilding manually.
 - Packaged EXE mode uses Dispatcher Core as the master version check.
+- The current stable Dispatcher Core release is `1.1`.
 - Two-part versions such as `1.07` are valid update targets.
 - Three-part versions only update when the third number is even, such as `1.07.2`.
 - Automatic EXE self-replacement is still experimental and may require manual replacement during testing.

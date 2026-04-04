@@ -106,8 +106,6 @@ class LayoutManager:
         self.block_canvas_window = self.block_canvas.create_window((0, 0), window=self.block_inner, anchor="nw")
         self.block_inner.bind("<Configure>", self.on_block_frame_configure)
         self.block_canvas.bind("<Configure>", self.on_block_canvas_configure)
-        block_tab.bind("<Enter>", self.enable_block_mousewheel)
-        block_tab.bind("<Leave>", self.disable_block_mousewheel)
 
         editor_text_frame = tb.Frame(json_tab)
         editor_text_frame.pack(fill=BOTH, expand=True)
@@ -149,6 +147,9 @@ class LayoutManager:
         self.load_config()
         self.update_preview()
         self.parent.bind_all("<Control-s>", self.on_save_shortcut)
+        self.dispatcher.bind_mousewheel_to_widget_tree(self.block_canvas, self.block_canvas)
+        self.dispatcher.bind_mousewheel_to_widget_tree(self.block_inner, self.block_canvas)
+        self.dispatcher.bind_mousewheel_to_widget_tree(self.text_area, self.text_area)
 
     def set_editor_text(self, config_data, mark_clean=True):
         self.suppress_modified_event = True
@@ -173,27 +174,6 @@ class LayoutManager:
 
     def on_block_canvas_configure(self, event):
         self.block_canvas.itemconfigure(self.block_canvas_window, width=event.width)
-
-    def enable_block_mousewheel(self, _event=None):
-        self.block_canvas.bind_all("<MouseWheel>", self.on_block_mousewheel)
-        self.block_canvas.bind_all("<Button-4>", self.on_block_mousewheel)
-        self.block_canvas.bind_all("<Button-5>", self.on_block_mousewheel)
-
-    def disable_block_mousewheel(self, _event=None):
-        self.block_canvas.unbind_all("<MouseWheel>")
-        self.block_canvas.unbind_all("<Button-4>")
-        self.block_canvas.unbind_all("<Button-5>")
-
-    def on_block_mousewheel(self, event):
-        if event.num == 4:
-            step = -1
-        elif event.num == 5:
-            step = 1
-        else:
-            step = -1 * int(event.delta / 120) if event.delta else 0
-
-        if step:
-            self.block_canvas.yview_scroll(step, "units")
 
     def refresh_block_view(self, config):
         for child in self.block_inner.winfo_children():
@@ -304,6 +284,7 @@ class LayoutManager:
             config.get("downtime_mapping", {}),
             self.block_inner
         )
+        self.dispatcher.bind_mousewheel_to_widget_tree(self.block_inner, self.block_canvas)
 
     def add_mapping_block(self, title, mapping, parent):
         card = tb.Labelframe(parent, text=f" {title} ", padding=10, style="Martin.Card.TLabelframe")

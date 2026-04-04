@@ -20,8 +20,14 @@ It also includes a packaged-release Update Manager and direct access to the GPL 
 Use Production Log to enter the current shift data.
 
 - Header fields capture shift-level information such as date, cast date, shift, hours, goal MPH, and return counts.
+- The header also shows a read-only Target Time field derived from shift hours so the team can see the total minutes they are balancing toward.
+- Optional workbook-linked header fields can also display imported summary cells such as bond, percentages, and selected top-part values when they are configured in the layout.
 - Production rows capture shop order, part number, and mold count.
+- The footer shows a derived Ghost Time value based on the difference between shift time and the combined production-plus-downtime total.
+- Ghost Time is an internal balancing aid in the app and is not expected to exist in imported or exported production logs.
 - Downtime rows capture start time, stop time, code, and cause.
+- Excel export converts downtime stop times into the template's total-minute downtime column, and import converts those minutes back into stop times in the form.
+- Balance Downtime is shown directly in the Downtime Issues action row and redistributes the required downtime across existing downtime rows using their current durations as weights. If there is no recorded downtime yet, it falls back to a dedicated adjustment row.
 - Calculate All updates efficiency for the current shift.
 - Save Draft stores the current work in `data/pending`.
 - Overwriting an existing draft keeps a recovery snapshot in `data/pending/history`.
@@ -62,6 +68,7 @@ Use Settings Manager to configure application defaults.
 - Default Shift Hours sets the default value loaded into the production form.
 - Default Goal MPH sets the default shift target.
 - Export settings control where generated Excel files are written.
+- Edit Downtime Codes opens a scrollable dialog for renaming existing downtime code numbers and adding extra numeric codes used by the form and Excel import/export.
 - Saving settings also keeps recovery copies under `data/backups/settings`.
 
 ### Backup / Recovery
@@ -114,7 +121,9 @@ If you load a draft or import Excel while unsaved changes exist, the suite asks 
 ## Excel Import And Export Notes
 
 - Export uses the template path stored in `layout_config.json`.
-- Import reads Excel using the same mapping definitions.
+- Import reads Excel using the same mapping definitions and reconstructs downtime stop times from the template's total-minute column.
+- Production-row import also detects workbook header labels so older logs that store Molds in column F and newer logs that store Molds in column G both load correctly.
+- Header fields can be configured as import-only so formula-driven workbook cells can be shown in the app without being overwritten on export.
 - If exported values land in the wrong place, check the mapping docs and Layout Manager.
 
 ## Where To Edit JSON Files
