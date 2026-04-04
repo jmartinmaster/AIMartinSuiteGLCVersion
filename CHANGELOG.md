@@ -10,7 +10,9 @@ Version headings below are aligned to the current `1.x` release line used by Dis
 
 - Promoted Dispatcher Core to stable version `1.2.4` for the versioned packaged updater release.
 - Switched packaged builds to versioned EXE names such as `TheMartinSuite_GLC_v1.2.4.exe`.
+- Updated the build flow so preserved versioned EXEs can coexist in `dist` during side-by-side update testing.
 - Reworked packaged updates so the newer EXE downloads beside the current one, launches separately, and leaves the older copy available for testing until cleanup is confirmed.
+- Extended the updater so source-mode checks now require a published EXE artifact and can download and launch that packaged EXE for handoff testing.
 - Added startup detection so newer packaged builds can offer removal of older local EXE versions after side-by-side update testing.
 
 ## [1.2.2] - 2026-04-04

@@ -46,6 +46,10 @@ def _parse_module_metadata(file_text, fallback_name):
     }
 
 
+def _build_raw_github_url(owner, repo, branch_name, relative_path):
+    return f"https://raw.githubusercontent.com/{owner}/{repo}/{branch_name}/{relative_path}"
+
+
 def _is_supported_update_version(version_parts):
     if version_parts is None:
         return False
@@ -134,7 +138,7 @@ class UpdateManager:
         if not owner or not repo or not self.branch_name:
             raise RuntimeError("Repository origin or branch could not be determined.")
 
-        url = f"https://raw.githubusercontent.com/{owner}/{repo}/{self.branch_name}/{relative_path}"
+        url = _build_raw_github_url(owner, repo, self.branch_name, relative_path)
         request = urllib.request.Request(url, headers={"User-Agent": "MartinSuiteUpdater/1.0"})
         with urllib.request.urlopen(request, timeout=15) as response:
             return response.read().decode("utf-8")
@@ -145,10 +149,41 @@ class UpdateManager:
         if not owner or not repo or not self.branch_name:
             raise RuntimeError("Repository origin or branch could not be determined.")
 
-        url = f"https://raw.githubusercontent.com/{owner}/{repo}/{self.branch_name}/{relative_path}"
+        url = _build_raw_github_url(owner, repo, self.branch_name, relative_path)
         request = urllib.request.Request(url, headers={"User-Agent": "MartinSuiteUpdater/1.0"})
         with urllib.request.urlopen(request, timeout=30) as response:
             return response.read()
+
+    def _remote_executable_candidates(self, row):
+        versioned_name = row.get("remote_exe_name") or format_versioned_exe_name(row.get("remote_version"))
+        candidates = []
+        if versioned_name:
+            candidates.append((f"dist/{versioned_name}", versioned_name))
+        candidates.append((LEGACY_REMOTE_EXE_PATH, versioned_name or LEGACY_EXE_NAME))
+        return candidates
+
+    def _probe_remote_executable(self, row):
+        owner = self.remote_info.get("owner")
+        repo = self.remote_info.get("repo")
+        if not owner or not repo or not self.branch_name:
+            raise RuntimeError("Repository origin or branch could not be determined.")
+
+        last_not_found = None
+        for remote_path, target_name in self._remote_executable_candidates(row):
+            url = _build_raw_github_url(owner, repo, self.branch_name, remote_path)
+            request = urllib.request.Request(url, method="HEAD", headers={"User-Agent": "MartinSuiteUpdater/1.0"})
+            try:
+                with urllib.request.urlopen(request, timeout=15):
+                    return remote_path, target_name
+            except urllib.error.HTTPError as exc:
+                if exc.code == 404:
+                    last_not_found = exc
+                    continue
+                raise
+
+        if last_not_found is not None:
+            return None, None
+        return None, None
 
     def check_for_updates(self):
         self.refresh_local_manifest()
@@ -201,20 +236,24 @@ class UpdateManager:
                 "update_available": update_available,
             })
 
+            current_row = comparison_rows[-1]
+            if current_row["update_available"]:
+                remote_path, resolved_name = self._probe_remote_executable(current_row)
+                if remote_path:
+                    current_row["remote_exe_path"] = remote_path
+                    current_row["remote_exe_name"] = resolved_name
+                else:
+                    current_row["status"] = "EXE artifact missing"
+                    current_row["update_available"] = False
+
         self.comparison_rows = comparison_rows
         self.refresh_summary()
         available_count = sum(1 for row in comparison_rows if row["update_available"])
         self.status_var.set(f"Checked Dispatcher Core on branch '{self.branch_name}'. {available_count} executable update(s) available.")
 
     def _download_remote_executable(self, row):
-        versioned_name = row.get("remote_exe_name") or format_versioned_exe_name(row.get("remote_version"))
-        candidates = []
-        if versioned_name:
-            candidates.append((f"dist/{versioned_name}", versioned_name))
-        candidates.append((LEGACY_REMOTE_EXE_PATH, versioned_name or LEGACY_EXE_NAME))
-
         last_not_found = None
-        for remote_path, target_name in candidates:
+        for remote_path, target_name in self._remote_executable_candidates(row):
             try:
                 return self._fetch_remote_bytes(remote_path), target_name
             except urllib.error.HTTPError as exc:
@@ -244,18 +283,30 @@ class UpdateManager:
         self.status_var.set("Executable update download failed.")
         Messagebox.show_error(f"Could not download the updated executable:\n\n{exc}", "Update Error")
 
-    def _begin_frozen_executable_download(self, row):
+    def _resolve_download_directory(self):
+        if getattr(sys, "frozen", False):
+            return os.path.dirname(os.path.abspath(sys.executable))
+        return os.path.abspath("dist")
+
+    def _begin_executable_download(self, row):
         if self.download_in_progress:
             self.dispatcher.show_toast("Update Manager", "An executable download is already in progress.", WARNING)
             return
 
         target_name = row.get("remote_exe_name") or format_versioned_exe_name(row.get("remote_version"))
-        if not messagebox.askyesno(
-            "Download And Launch Update",
-            (
+        if getattr(sys, "frozen", False):
+            prompt_text = (
                 f"Download {target_name} in the background?\n\n"
                 "The current EXE will stay in place for testing. When the download finishes, the new EXE will be launched and this version will close."
-            ),
+            )
+        else:
+            prompt_text = (
+                f"Download {target_name} into dist and launch it?\n\n"
+                "This source session will hand off to the packaged EXE when the download finishes."
+            )
+        if not messagebox.askyesno(
+            "Download And Launch Update",
+            prompt_text,
         ):
             return
 
@@ -265,8 +316,9 @@ class UpdateManager:
         def worker():
             try:
                 remote_exe_bytes, resolved_name = self._download_remote_executable(row)
-                current_exe_directory = os.path.dirname(os.path.abspath(sys.executable))
-                final_exe_path = os.path.join(current_exe_directory, resolved_name)
+                download_directory = self._resolve_download_directory()
+                os.makedirs(download_directory, exist_ok=True)
+                final_exe_path = os.path.join(download_directory, resolved_name)
                 temp_exe_path = f"{final_exe_path}.download"
                 with open(temp_exe_path, "wb") as handle:
                     handle.write(remote_exe_bytes)
@@ -288,15 +340,7 @@ class UpdateManager:
             self.dispatcher.show_toast("Update Manager", "No executable updates are available from Dispatcher Core.", INFO)
             return
 
-        if getattr(sys, "frozen", False):
-            self._begin_frozen_executable_download(update_rows[0])
-            return
-
-        self.dispatcher.show_toast(
-            "Source Mode",
-            "Executable updates are only applied from the packaged application. Build a new EXE manually when working from source.",
-            WARNING,
-        )
+        self._begin_executable_download(update_rows[0])
 
     def setup_ui(self):
         container = tb.Frame(self.parent, padding=20)
@@ -308,7 +352,7 @@ class UpdateManager:
             text=(
                 "Compare the local Dispatcher Core version with the repository branch release target. "
                 "Odd third patch numbers stay in-progress and are ignored by the updater. "
-                "Stable EXE updates download beside the current build and then launch the newer version."
+                "Stable EXE updates require a published EXE artifact and can be launched from either source mode or the packaged build."
             ),
             wraplength=760,
             justify=LEFT,
