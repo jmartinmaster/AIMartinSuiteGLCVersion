@@ -14,10 +14,6 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-# The Martin Suite (GLC Edition)
-# Copyright (C) 2026 Jamie Martin
-# ... [License text omitted for brevity] ...
-
 import openpyxl
 import json
 import os
@@ -48,14 +44,6 @@ class DataHandler:
         # User data folders stay in the local directory (not internal to the exe)
         self.pending_dir = "data/pending"
         os.makedirs(self.pending_dir, exist_ok=True)
-        
-        self.settings_path = os.path.join(os.path.abspath("."), "settings.json")
-        self.settings = {}
-        if os.path.exists(self.settings_path):
-            try:
-                with open(self.settings_path, 'r') as f:
-                    self.settings = json.load(f)
-            except: pass
     def calculate_formula(self, formula_str, data_context):
     # """
         #Takes a string like '{molds} * 0.95' and replaces {molds} 
@@ -78,22 +66,9 @@ class DataHandler:
             return 0
     def export_to_template(self, ui_data, shift, date_str):
         clean_date = date_str.replace("/", "")
-        prefix = self.settings.get("default_export_prefix", "Disamatic Production Sheet")
-        filename = f"{prefix} {shift}{clean_date}.xlsx"
-        
-        base_export_dir = self.settings.get("export_directory", "exports")
-        
-        if self.settings.get("organize_exports_by_date", True) and "/" in date_str:
-            try:
-                parts = date_str.split("/")
-                if len(parts) == 3:
-                    year, month = parts[2], parts[0]
-                    base_export_dir = os.path.join(base_export_dir, year, month)
-            except Exception as e:
-                print(f"Date parse error: {e}")
-
-        target_path = os.path.join(base_export_dir, filename)
-        os.makedirs(base_export_dir, exist_ok=True)
+        filename = f"Disamatic Production Sheet {shift}{clean_date}.xlsx"
+        target_path = os.path.join("exports", filename)
+        os.makedirs("exports", exist_ok=True)
 
         # CRITICAL: Use resource_path for the template path defined in your JSON
         # If your JSON says "templates/production.xlsx", this finds it in the build
@@ -108,26 +83,24 @@ class DataHandler:
             cell_coord = field.get('cell')
             val = ui_data['header'].get(field['id'])
             if cell_coord:
-                try:
-                    is_merged = False
+                cell = ws[cell_coord]
+                from openpyxl.cell.cell import MergedCell
+                if isinstance(cell, MergedCell):
                     for range_ in ws.merged_cells.ranges:
                         if cell_coord in range_:
                             ws.cell(range_.min_row, range_.min_col).value = val
-                            is_merged = True
                             break
-                    if not is_merged:
-                        ws[cell_coord].value = val
-                except Exception as e:
-                    print(f"Error mapping header {field['id']}: {e}")
+                else:
+                    cell.value = val
 
         # 2. Map Production Rows
         p_map = self.config['production_mapping']
         p_start = p_map['start_row']
         for i, row_data in enumerate(ui_data['production']):
             curr_row = p_start + i
-            for col_key, col_letter in p_map['columns'].items():
-                if col_key in row_data:
-                    ws[f"{col_letter}{curr_row}"] = row_data.get(col_key)
+            ws[f"{p_map['columns']['shop_order']}{curr_row}"] = row_data.get('shop_order')
+            ws[f"{p_map['columns']['part_number']}{curr_row}"] = row_data.get('part_number')
+            ws[f"{p_map['columns']['molds']}{curr_row}"] = row_data.get('molds')
 
         # 3. Map Downtime Rows
         d_map = self.config['downtime_mapping']
@@ -136,13 +109,13 @@ class DataHandler:
 
         for i, row_data in enumerate(ui_data['downtime']):
             curr_row = d_start + i
-            for col_key, col_letter in d_cols.items():
-                if col_key == 'code':
-                    full_code = row_data.get('code', "")
-                    short_code = full_code.split(" ")[0] if full_code else ""
-                    ws[f"{col_letter}{curr_row}"] = short_code
-                elif col_key in row_data:
-                    ws[f"{col_letter}{curr_row}"] = row_data.get(col_key)
+            full_code = row_data.get('code', "")
+            short_code = full_code.split(" ")[0] if full_code else ""
+            
+            ws[f"{d_cols['start']}{curr_row}"] = row_data.get('start')
+            ws[f"{d_cols['stop']}{curr_row}"] = row_data.get('stop')
+            ws[f"{d_cols['code']}{curr_row}"] = short_code 
+            ws[f"{d_cols['cause']}{curr_row}"] = row_data.get('cause')
 
         wb.save(target_path)
         return target_path
@@ -172,49 +145,43 @@ class DataHandler:
                 if cell_coord:
                     data["header"][field['id']] = ws[cell_coord].value
 
-            # 3. Import Production Lines dynamically
+            # 3. Import Production Lines (Shop Order, Part #, Molds)
             p_map = self.config['production_mapping']
             p_cols = p_map['columns']
-            
-            # We need a primary key to know when to stop looking. We'll use the first column defined.
-            primary_col_key = list(p_cols.keys())[0] if p_cols else None
-            
-            if primary_col_key:
-                for i in range(50): # Check up to 50 rows
-                    row_idx = p_map['start_row'] + i
-                    primary_val = ws[f"{p_cols[primary_col_key]}{row_idx}"].value
-                    
-                    if not primary_val:
-                        break
-                    
-                    row_data = {}
-                    for col_key, col_letter in p_cols.items():
-                        row_data[col_key] = ws[f"{col_letter}{row_idx}"].value
-                    data["production"].append(row_data)
+            for i in range(50): # Check up to 50 rows
+                row_idx = p_map['start_row'] + i
+                shop_order = ws[f"{p_cols['shop_order']}{row_idx}"].value
+                
+                # If the shop order cell is empty, we've reached the end of the list
+                if not shop_order:
+                    break
 
-            # 4. Import Downtime dynamically
+                data["production"].append({
+                    "shop_order": shop_order,
+                    "part_number": ws[f"{p_cols['part_number']}{row_idx}"].value,
+                    "molds": ws[f"{p_cols['molds']}{row_idx}"].value
+                })
+
+            # 4. Import Downtime (Start, Stop, Code, Cause)
             d_map = self.config['downtime_mapping']
             d_cols = d_map['columns']
-            primary_col_key = list(d_cols.keys())[0] if d_cols else None
-            
-            if primary_col_key:
-                for i in range(25): # Check up to 25 downtime rows
-                    row_idx = d_map['start_row'] + i
-                    primary_val = ws[f"{d_cols[primary_col_key]}{row_idx}"].value
-                    
-                    if not primary_val:
-                        break
+            for i in range(25): # Check up to 25 downtime rows
+                row_idx = d_map['start_row'] + i
+                start_time = ws[f"{d_cols['start']}{row_idx}"].value
+                
+                if not start_time:
+                    break
 
-                    row_data = {}
-                    for col_key, col_letter in d_cols.items():
-                        raw_val = ws[f"{col_letter}{row_idx}"].value
-                        if col_key == 'code':
-                            raw_str = str(raw_val).strip() if raw_val else ""
-                            # Code conversion: UI needs "1 Misc..." but Excel only has "1"
-                            row_data[col_key] = dt_lookup.get(raw_str, raw_str)
-                        else:
-                            row_data[col_key] = raw_val
+                # Code conversion: UI needs "1 Misc..." but Excel only has "1"
+                raw_val = ws[f"{d_cols['code']}{row_idx}"].value
+                raw_str = str(raw_val).strip() if raw_val else ""
+                full_code = dt_lookup.get(raw_str, raw_str)
 
-                    data["downtime"].append(row_data)
+                data["downtime"].append({
+                    "start": start_time,
+                    "stop": ws[f"{d_cols['stop']}{row_idx}"].value,
+                    "code": full_code,
+                    "cause": ws[f"{d_cols['cause']}{row_idx}"].value
+                })
 
             return data

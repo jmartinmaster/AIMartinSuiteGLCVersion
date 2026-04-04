@@ -45,4 +45,4 @@ The compiled executable will be located in the `dist/` directory.
 
 Copyright (C) 2026 Jamie Martin
 
-This program is free software: you can redistribute it and/or modify it under the terms of the **GNU General Public License v3.0**.
+This program is free software: you can redistribute it and/or modify it under the terms of the **GNU General Public License v3.0**. See the `LICENSE` file for details.
