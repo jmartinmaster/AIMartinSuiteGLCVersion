@@ -54,6 +54,7 @@ class LayoutManager:
         # Save operations always target the local config so packaged builds remain editable.
         self.config_path = self.local_config if os.path.exists(self.local_config) else self.internal_config
         self.save_path = self.local_config
+        self.protected_field_ids = {"date", "cast_date", "shift", "hours", "goal_mph"}
         
         self.setup_ui()
 
@@ -137,7 +138,7 @@ class LayoutManager:
         btn_frame.pack(fill=X, pady=5)
 
         tb.Button(btn_frame, text="Reload Current", bootstyle=SECONDARY, command=self.load_config).pack(side=LEFT, padx=5)
-        tb.Button(btn_frame, text="Load Default", bootstyle=WARNING, command=self.load_default_config).pack(side=LEFT, padx=5)
+        tb.Button(btn_frame, text="Load Default", bootstyle=SECONDARY, command=self.load_default_config).pack(side=LEFT, padx=5)
         tb.Button(btn_frame, text="Format JSON", bootstyle=PRIMARY, command=self.format_json).pack(side=LEFT, padx=5)
         tb.Button(btn_frame, text="Validate JSON", bootstyle=INFO, command=self.validate_editor_json).pack(side=LEFT, padx=5)
         tb.Button(btn_frame, text="Update Preview", bootstyle=INFO, command=self.update_preview).pack(side=LEFT, padx=5)
@@ -202,6 +203,10 @@ class LayoutManager:
         header_title = tb.Label(self.block_inner, text="Header Fields", font=("-size 12 -weight bold"), bootstyle=PRIMARY)
         header_title.pack(anchor=W, pady=(0, 6))
 
+        header_actions = tb.Frame(self.block_inner)
+        header_actions.pack(fill=X, pady=(0, 6))
+        tb.Button(header_actions, text="+ Add Header Field", bootstyle=SUCCESS, command=self.add_header_field).pack(side=LEFT)
+
         tb.Separator(self.block_inner, bootstyle=PRIMARY).pack(fill=X, pady=(0, 8))
 
         for field in config.get("header_fields", []):
@@ -220,7 +225,17 @@ class LayoutManager:
                 state_bits.append(f"default={field.get('default')}")
             if not state_bits:
                 state_bits.append("editable")
-            tb.Label(header_row, text=f"State: {', '.join(state_bits)}", style="Martin.Muted.TLabel").pack(side=RIGHT)
+
+            action_row = tb.Frame(card)
+            action_row.pack(fill=X, pady=(0, 8))
+            tb.Label(action_row, text=f"State: {', '.join(state_bits)}", style="Martin.Muted.TLabel").pack(side=LEFT)
+            tb.Button(action_row, text="Up", bootstyle=SECONDARY, command=lambda field_id=field.get("id"): self.move_header_field(field_id, -1)).pack(side=RIGHT, padx=(4, 0))
+            tb.Button(action_row, text="Down", bootstyle=SECONDARY, command=lambda field_id=field.get("id"): self.move_header_field(field_id, 1)).pack(side=RIGHT, padx=(4, 0))
+
+            remove_button = tb.Button(action_row, text="Remove", bootstyle=DANGER, command=lambda field_id=field.get("id"): self.remove_header_field(field_id))
+            remove_button.pack(side=RIGHT, padx=(4, 0))
+            if field.get("id") in self.protected_field_ids:
+                remove_button.state(["disabled"])
 
             form_row = tb.Frame(card)
             form_row.pack(fill=X)
@@ -267,7 +282,7 @@ class LayoutManager:
             if is_locked_readonly:
                 note_row = tb.Frame(card)
                 note_row.pack(fill=X, pady=(8, 0))
-                tb.Label(note_row, text="Cast Date can only be repositioned here. It stays readonly and is driven from Date.", bootstyle=WARNING).pack(side=LEFT)
+                tb.Label(note_row, text="Cast Date can only be repositioned here. It stays readonly and is driven from Date.", style="Martin.Muted.TLabel").pack(side=LEFT)
             else:
                 meta_row = tb.Frame(card)
                 meta_row.pack(fill=X, pady=(8, 0))
@@ -312,7 +327,7 @@ class LayoutManager:
                 column_vars[key] = tk.StringVar(value=str(value))
                 tb.Entry(row, textvariable=column_vars[key], width=10).pack(side=LEFT, padx=(6, 0))
         else:
-            tb.Label(card, text="No columns configured", bootstyle=WARNING).pack(anchor=W)
+            tb.Label(card, text="No columns configured", style="Martin.Muted.TLabel").pack(anchor=W)
 
         tb.Button(
             card,
@@ -324,6 +339,71 @@ class LayoutManager:
                 {key: variable.get() for key, variable in column_vars.items()}
             )
         ).pack(anchor=W, pady=(8, 0))
+
+    def build_layout_update(self, config, status_message):
+        self.set_editor_text(config, mark_clean=False)
+        self.refresh_block_view(config)
+        self.update_preview()
+        self.update_status(status_message, INFO)
+
+    def create_unique_field_id(self, config):
+        existing_ids = {field.get("id") for field in config.get("header_fields", [])}
+        index = 1
+        while True:
+            field_id = f"new_field_{index}"
+            if field_id not in existing_ids:
+                return field_id
+            index += 1
+
+    def add_header_field(self):
+        try:
+            config = self.get_current_config()
+            field_id = self.create_unique_field_id(config)
+            next_row = max((int(field.get("row", 0)) for field in config.get("header_fields", [])), default=-1) + 1
+            config.setdefault("header_fields", []).append({
+                "id": field_id,
+                "label": field_id.replace("_", " ").title(),
+                "row": next_row,
+                "col": 0,
+                "width": 10,
+                "cell": ""
+            })
+            self.build_layout_update(config, f"Added header field '{field_id}'")
+        except Exception as e:
+            Messagebox.show_error(f"Could not add header field: {e}", "Layout Edit Error")
+
+    def move_header_field(self, field_id, direction):
+        try:
+            config = self.get_current_config()
+            fields = config.get("header_fields", [])
+            current_index = next((index for index, field in enumerate(fields) if field.get("id") == field_id), None)
+            if current_index is None:
+                raise ValueError(f"Field '{field_id}' was not found.")
+
+            target_index = current_index + direction
+            if target_index < 0 or target_index >= len(fields):
+                return
+
+            fields[current_index], fields[target_index] = fields[target_index], fields[current_index]
+            self.build_layout_update(config, f"Reordered field '{field_id}'")
+        except Exception as e:
+            Messagebox.show_error(f"Could not reorder header field: {e}", "Layout Edit Error")
+
+    def remove_header_field(self, field_id):
+        try:
+            if field_id in self.protected_field_ids:
+                raise ValueError(f"Field '{field_id}' is protected and cannot be removed.")
+
+            config = self.get_current_config()
+            fields = config.get("header_fields", [])
+            updated_fields = [field for field in fields if field.get("id") != field_id]
+            if len(updated_fields) == len(fields):
+                raise ValueError(f"Field '{field_id}' was not found.")
+
+            config["header_fields"] = updated_fields
+            self.build_layout_update(config, f"Removed field '{field_id}'")
+        except Exception as e:
+            Messagebox.show_error(f"Could not remove header field: {e}", "Layout Edit Error")
 
     def update_header_field_from_block(self, field_id, row_value, col_value, cell_value, width_value, readonly_value, default_value):
         try:
@@ -367,10 +447,7 @@ class LayoutManager:
                 else:
                     target_field.pop("default", None)
 
-            self.set_editor_text(config, mark_clean=False)
-            self.refresh_block_view(config)
-            self.update_preview()
-            self.update_status(f"Updated field '{field_id}'", INFO)
+            self.build_layout_update(config, f"Updated field '{field_id}'")
         except Exception as e:
             Messagebox.show_error(f"Could not update field from block view: {e}", "Block Edit Error")
 
@@ -389,10 +466,7 @@ class LayoutManager:
                     raise ValueError(f"Column '{key}' cannot be empty.")
                 mapping.setdefault("columns", {})[key] = cleaned_value
 
-            self.set_editor_text(config, mark_clean=False)
-            self.refresh_block_view(config)
-            self.update_preview()
-            self.update_status(f"Updated mapping '{mapping_name}'", INFO)
+            self.build_layout_update(config, f"Updated mapping '{mapping_name}'")
         except Exception as e:
             Messagebox.show_error(f"Could not update mapping from block view: {e}", "Mapping Edit Error")
 
