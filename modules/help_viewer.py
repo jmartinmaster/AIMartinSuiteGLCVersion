@@ -1,6 +1,18 @@
 # The Martin Suite (GLC Edition)
 # Copyright (C) 2026 Jamie Martin
-# Licensed under GNU GPLv3.
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import os
 import sys
@@ -37,6 +49,7 @@ class HelpViewer:
             ("Settings JSON", "docs/help/settings_json.md"),
             ("Rates JSON", "docs/help/rates_json.md"),
             ("Draft JSON", "docs/help/draft_json.md"),
+            ("License", "LICENSE.txt"),
         ]
         self.setup_ui()
 
@@ -62,6 +75,12 @@ class HelpViewer:
             bootstyle=PRIMARY,
             command=lambda: self.dispatcher.open_help_document("docs/help/user_guide.md")
         ).pack(side=LEFT)
+        tb.Button(
+            action_row,
+            text="Open License File",
+            bootstyle=SECONDARY,
+            command=lambda: self.dispatcher.open_help_document("LICENSE.txt")
+        ).pack(side=LEFT, padx=8)
 
         self.notebook = ttk.Notebook(self.container)
         self.notebook.grid(row=3, column=0, sticky=NSEW)

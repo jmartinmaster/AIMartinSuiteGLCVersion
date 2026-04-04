@@ -1,6 +1,18 @@
 # The Martin Suite (GLC Edition)
 # Copyright (C) 2026 Jamie Martin
-# Licensed under GNU GPLv3.
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import tkinter as tk
 import ttkbootstrap as tb
@@ -38,6 +50,13 @@ class AboutSection:
             "Environment: Windows / Portable Python 3.12"
         )
         tb.Label(container, text=info_text, justify=CENTER).pack(pady=10)
+
+        tb.Button(
+            container,
+            text="Open License",
+            bootstyle=SECONDARY,
+            command=lambda: self.dispatcher.open_help_document("LICENSE.txt")
+        ).pack(pady=(0, 10))
 
         # Module Manifest
         version_frame = tb.Labelframe(container, text=" Module Manifest ", padding=15)
