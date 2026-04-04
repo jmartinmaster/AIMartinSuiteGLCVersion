@@ -148,7 +148,7 @@ class Dispatcher:
         for filename in sorted(os.listdir(self.modules_path)):
             if filename.endswith(".py") and filename != "__init__.py":
                 module_name = filename[:-3]
-                if module_name == "about" or module_name == "data_handler": continue 
+                if module_name in ["about", "data_handler", "splash", "example_modules"]: continue 
                 display_name = module_name.replace("_", " ").title()
                 
                 tb.Button(self.nav_container, text=display_name,
@@ -200,5 +200,8 @@ if __name__ == "__main__":
         except: pass
     
     app_root = tb.Window(themename=theme_name)
+    from modules.splash import show_splash_screen
+    show_splash_screen(app_root, duration=5000)
+        
     app = Dispatcher(app_root)
     app_root.mainloop()
