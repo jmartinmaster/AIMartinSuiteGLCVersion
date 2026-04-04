@@ -22,6 +22,8 @@ class SettingsManager:
         self.settings_path = external_path("settings.json")
         self.settings = {}
         self.entries = {}
+        self.saved_theme = DEFAULT_THEME
+        self.preview_theme = DEFAULT_THEME
         self.load_settings()
         self.setup_ui()
 
@@ -40,6 +42,8 @@ class SettingsManager:
                 "default_goal_mph": 240
             }
         self.settings["theme"] = normalize_theme(self.settings.get("theme", DEFAULT_THEME))
+        self.saved_theme = self.settings["theme"]
+        self.preview_theme = self.saved_theme
 
     def save_settings(self):
         for key, entry in self.entries.items():
@@ -52,12 +56,40 @@ class SettingsManager:
                         val = float(val) if '.' in val else int(val)
                     except:
                         pass
+                if key == 'theme':
+                    val = normalize_theme(val)
                 self.settings[key] = val
 
         with open(self.settings_path, 'w') as f:
             json.dump(self.settings, f, indent=4)
+
+        self.saved_theme = self.settings["theme"]
+        self.preview_theme = self.saved_theme
+        self.preview_theme = self.dispatcher.apply_theme(self.saved_theme, redraw=True)
         
-        Messagebox.show_info("Settings saved! Some changes (like Theme) will apply on next restart.", "Success")
+        Messagebox.show_info("Settings saved! Theme changes were applied immediately.", "Success")
+
+    def preview_selected_theme(self, _event=None):
+        theme_entry = self.entries.get('theme')
+        if not theme_entry:
+            return
+
+        selected_theme = normalize_theme(theme_entry.get())
+        self.preview_theme = self.dispatcher.apply_theme(selected_theme, redraw=False)
+        if hasattr(self, 'theme_status'):
+            self.theme_status.config(text=f"Previewing theme: {self.preview_theme}")
+
+    def revert_theme_preview(self):
+        reverted_theme = self.dispatcher.apply_theme(self.saved_theme, redraw=False)
+        self.preview_theme = reverted_theme
+        if 'theme' in self.entries:
+            self.entries['theme'].set(reverted_theme)
+        if hasattr(self, 'theme_status'):
+            self.theme_status.config(text=f"Theme reverted to: {reverted_theme}")
+
+    def on_unload(self):
+        if self.preview_theme != self.saved_theme:
+            self.dispatcher.apply_theme(self.saved_theme, redraw=False)
 
     def browse_export_dir(self):
         dir_path = filedialog.askdirectory()
@@ -114,7 +146,15 @@ class SettingsManager:
                 cb = tb.Combobox(row_frame, values=opts, state="readonly")
                 cb.set(self.settings.get(key, opts[0]))
                 cb.pack(side=LEFT, fill=X, expand=True)
+                if key == 'theme':
+                    cb.bind("<<ComboboxSelected>>", self.preview_selected_theme)
                 self.entries[key] = cb
+
+        theme_controls = tb.Frame(container)
+        theme_controls.pack(fill=X, pady=(5, 10))
+        tb.Button(theme_controls, text="Revert Theme Preview", bootstyle=SECONDARY, command=self.revert_theme_preview).pack(side=LEFT)
+        self.theme_status = tb.Label(theme_controls, text=f"Current theme: {self.saved_theme}", bootstyle=SECONDARY)
+        self.theme_status.pack(side=LEFT, padx=10)
 
         tb.Button(container, text="Save Settings", bootstyle=SUCCESS, command=self.save_settings).pack(pady=20)
 

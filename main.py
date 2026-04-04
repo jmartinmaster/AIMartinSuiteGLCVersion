@@ -49,6 +49,7 @@ class Dispatcher:
         self.shared_data = {}
         self.loaded_modules = {"main": sys.modules[__name__]}
         self.active_module_instance = None
+        self.active_module_name = None
 
         self._setup_ui()
         self._setup_menu()
@@ -158,6 +159,9 @@ class Dispatcher:
 
     def load_module(self, module_name):
         try:
+            if hasattr(self.active_module_instance, 'on_unload'):
+                self.active_module_instance.on_unload()
+
             for child in self.content_area.winfo_children():
                 child.destroy()
             
@@ -171,11 +175,26 @@ class Dispatcher:
                 self.loaded_modules[module_name] = module
 
             if hasattr(module, 'get_ui'):
+                self.active_module_name = module_name
                 self.active_module_instance = module.get_ui(self.content_area, self)
                 
         except Exception as e:
             print(f"LOAD ERROR: {e}")
             tb.Label(self.content_area, text=f"Error loading {module_name}: {e}", bootstyle=DANGER).pack(pady=20)
+
+    def apply_theme(self, theme_name, redraw=False):
+        normalized_theme = normalize_theme(theme_name)
+        style = tb.Style.get_instance() or tb.Style()
+        style.theme_use(normalized_theme)
+        apply_readability_overrides(self.root)
+        self.root.update_idletasks()
+
+        if redraw and self.active_module_name:
+            active_module_name = self.active_module_name
+            self.active_module_instance = None
+            self.load_module(active_module_name)
+
+        return normalized_theme
 
     def _bind_mousewheel(self):
         self.canvas.bind_all("<MouseWheel>", self._on_mousewheel)
