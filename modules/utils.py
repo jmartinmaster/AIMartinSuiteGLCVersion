@@ -1,6 +1,9 @@
 import os
 import sys
 
+__module_name__ = "Path Helpers"
+__version__ = "1.1.4"
+
 
 def bundled_base_path():
     try:

@@ -22,7 +22,7 @@ from ttkbootstrap.constants import *
 from modules.utils import local_or_resource_path
 
 __module_name__ = "Help Viewer"
-__version__ = "1.0.0"
+__version__ = "1.1.4"
 
 
 class HelpViewer:
@@ -33,6 +33,7 @@ class HelpViewer:
         self.notebook = None
         self.doc_index = [
             ("User Guide", "docs/help/user_guide.md"),
+            ("App Icons", "docs/help/app_icons.md"),
             ("Layout JSON", "docs/help/layout_config.md"),
             ("Settings JSON", "docs/help/settings_json.md"),
             ("Rates JSON", "docs/help/rates_json.md"),

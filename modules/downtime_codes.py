@@ -3,6 +3,9 @@ import os
 from functools import lru_cache
 from modules.utils import external_path
 
+__module_name__ = "Downtime Codes"
+__version__ = "1.1.4"
+
 
 DEFAULT_DT_CODE_MAP = {
     "1": "Misc Reason",

@@ -10,6 +10,8 @@
   "organize_exports_by_date": true,
   "default_export_prefix": "Disamatic Production Sheet",
   "theme": "journal",
+  "enable_screen_transitions": true,
+  "screen_transition_duration_ms": 360,
   "toast_duration_sec": 5,
   "auto_save_interval_min": 5,
   "default_shift_hours": 8.0,
@@ -46,6 +48,16 @@
 - `theme`
   - Type: string
   - Purpose: One of the curated readable theme names supported by the suite.
+
+- `enable_screen_transitions`
+  - Type: boolean
+  - Purpose: Enables or disables the short fade used when switching between major pages in the application.
+
+- `screen_transition_duration_ms`
+  - Type: integer
+  - Purpose: Duration of the screen-change fade in milliseconds.
+  - Supported range: `0` to `500`.
+  - Notes: `0` makes page switches immediate.
 
 - `toast_duration_sec`
   - Type: integer

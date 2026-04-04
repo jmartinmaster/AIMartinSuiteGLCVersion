@@ -20,6 +20,9 @@ import ttkbootstrap as tb
 from ttkbootstrap.constants import *
 from main import apply_app_icon
 
+__module_name__ = "Splash Screen"
+__version__ = "1.1.4"
+
 def show_splash_screen(root, duration=5000, logo_path=None):
     """
     Displays a borderless splash screen for the specified duration (in milliseconds),

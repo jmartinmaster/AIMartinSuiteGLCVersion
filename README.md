@@ -24,11 +24,13 @@ These two forms do not have identical behavior. The Python version has access to
 - Layout Manager and Rate Manager tools.
 - Backup / Recovery viewer for browsing and restoring draft snapshots and configuration backups.
 - Settings management for export paths, theme selection, production defaults, and editable downtime code labels.
+- Configurable page-transition fades, including the ability to tune the duration or disable them.
 - Configurable toast notifications for non-blocking status messages.
 - In-app help viewer and About screen.
 - Bundled GPL license access from Help Center and About.
 - Theme support with readability overrides.
 - Rotated backup copies for settings, layout, and rate file saves.
+- Hard-coded application icon assets with documented replacement steps.
 
 ## Data Safety And Recovery
 
@@ -57,7 +59,7 @@ These two forms do not have identical behavior. The Python version has access to
 ## Update Manager Status
 
 - The updater checks only the Dispatcher Core version in `main.py` as the master version.
-- The current stable Dispatcher Core release is `1.1.2`.
+- The current stable Dispatcher Core release is `1.1.4`.
 - Two-part versions such as `1.07` trigger an executable update when greater than the local version.
 - Three-part versions only trigger an executable update when the third number is even, such as `1.07.2`.
 - Odd patch versions such as `1.07.1` are ignored.

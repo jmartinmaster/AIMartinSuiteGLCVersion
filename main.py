@@ -31,7 +31,7 @@ from modules.theme_manager import apply_readability_overrides, normalize_theme, 
 from modules.utils import external_path, local_or_resource_path, resource_path
 
 __module_name__ = "Dispatcher Core"
-__version__ = "1.1.2"
+__version__ = "1.1.4"
 WINDOWS_APP_ID = "JamieMartin.TheMartinSuite.GLC"
 APP_ICON_RELATIVE_PATH = "icon.ico"
 APP_ICON_IMAGE_RELATIVE_PATHS = [
@@ -40,6 +40,10 @@ APP_ICON_IMAGE_RELATIVE_PATHS = [
     "icon-32.png",
     "icon-48.png",
     "icon-64.png",
+]
+APP_ICON_SOURCE_RELATIVE_PATHS = [
+    "icon.png",
+    "icon.jpg",
 ]
 SPLASH_LOGO_RELATIVE_PATH = "splash-logo.png"
 WM_SETICON = 0x0080
@@ -155,9 +159,11 @@ class Dispatcher:
         self.settings_path = external_path("settings.json")
         self.runtime_settings = self.load_runtime_settings()
         self.window_alpha_supported = self._supports_window_alpha()
-        self.transition_duration_ms = 320
-        self.transition_min_alpha = 0.94
+        self.transition_duration_ms = 360
+        self.transitions_enabled = True
+        self.transition_min_alpha = 0.82
         self._transition_in_progress = False
+        self.refresh_animation_settings()
 
         self._setup_ui()
         self._setup_menu()
@@ -260,7 +266,7 @@ class Dispatcher:
         for filename in os.listdir(self.modules_path):
             if filename.endswith(".py") and filename != "__init__.py":
                 module_name = filename[:-3]
-                if module_name in ["about", "data_handler", "splash", "example_modules", "theme_manager", "help_viewer", "persistence", "downtime_codes"]:
+                if module_name in ["about", "app_logging", "data_handler", "downtime_codes", "example_modules", "help_viewer", "persistence", "splash", "theme_manager", "utils"]:
                     continue
                 display_name = module_name.replace("_", " ").title()
 
@@ -289,11 +295,16 @@ class Dispatcher:
             log_exception("set_window_alpha", exc)
 
     def _run_window_transition(self, action):
-        if not self.window_alpha_supported or self._transition_in_progress:
+        if (
+            not self.window_alpha_supported
+            or not self.transitions_enabled
+            or self.transition_duration_ms <= 0
+            or self._transition_in_progress
+        ):
             return action()
 
         self._transition_in_progress = True
-        steps = 4
+        steps = 6
         half_duration = max(0.12, self.transition_duration_ms / 2000)
         step_delay = half_duration / steps
         alpha_values = [1.0 - ((1.0 - self.transition_min_alpha) * (index + 1) / steps) for index in range(steps)]
@@ -364,6 +375,8 @@ class Dispatcher:
     def load_runtime_settings(self):
         settings = {
             "theme": DEFAULT_THEME,
+            "enable_screen_transitions": True,
+            "screen_transition_duration_ms": 360,
             "toast_duration_sec": 5,
         }
         if os.path.exists(self.settings_path):
@@ -379,12 +392,26 @@ class Dispatcher:
             settings["toast_duration_sec"] = max(1, int(settings.get("toast_duration_sec", 5)))
         except Exception:
             settings["toast_duration_sec"] = 5
+        settings["enable_screen_transitions"] = bool(settings.get("enable_screen_transitions", True))
+        try:
+            settings["screen_transition_duration_ms"] = max(0, min(500, int(settings.get("screen_transition_duration_ms", 360))))
+        except Exception:
+            settings["screen_transition_duration_ms"] = 360
         settings["theme"] = normalize_theme(settings.get("theme", DEFAULT_THEME))
         return settings
 
     def refresh_runtime_settings(self):
         self.runtime_settings = self.load_runtime_settings()
+        self.refresh_animation_settings()
         return self.runtime_settings
+
+    def refresh_animation_settings(self):
+        self.transitions_enabled = bool(self.runtime_settings.get("enable_screen_transitions", True))
+        try:
+            duration = int(self.runtime_settings.get("screen_transition_duration_ms", 360))
+        except Exception:
+            duration = 360
+        self.transition_duration_ms = max(0, min(duration, 500))
 
     def get_setting(self, key, default=None):
         return self.runtime_settings.get(key, default)
