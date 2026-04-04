@@ -46,7 +46,7 @@ These two forms do not have identical behavior. The Python version has access to
 - Can use the local project structure, docs, templates, and module files directly.
 - Can be rebuilt locally with `build.py` and PyInstaller.
 - Can be used to develop, test, and package new EXE releases.
-- The Update Manager gives a compact Dispatcher Core release check, but source-mode executable updates are still expected to be handled by rebuilding manually.
+- The Update Manager can now hand off from source mode by downloading the published packaged EXE into local `dist` and launching it.
 
 ## Packaged EXE Mode
 
@@ -64,5 +64,6 @@ These two forms do not have identical behavior. The Python version has access to
 - Two-part versions such as `1.07` trigger an executable update when greater than the local version.
 - Three-part versions only trigger an executable update when the third number is even, such as `1.07.2`.
 - Odd patch versions such as `1.07.1` are ignored.
-- In Python/source mode, new releases are still best handled by rebuilding manually.
+- Update availability now also requires a matching published EXE artifact in `dist/`.
+- In Python/source mode, stable updates download the published EXE into local `dist` and launch it for handoff testing.
 - In packaged EXE mode, stable updates download a versioned EXE beside the current copy, launch the newer build, and let the newer build offer cleanup of older local EXEs.

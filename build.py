@@ -24,6 +24,7 @@ from app_identity import APP_NAME, LEGACY_EXE_NAME, format_versioned_exe_name, l
 
 SPEC_FILE = f"{APP_NAME}.spec"
 EXE_NAME = format_versioned_exe_name(load_version_from_main())
+PRESERVE_DIST = os.environ.get("MARTIN_KEEP_DIST", "1") != "0"
 
 
 def clean_previous_builds():
@@ -38,7 +39,11 @@ def clean_previous_builds():
         else:
             os.remove(path)
 
-    for folder_name in ("build", "dist"):
+    folders_to_clean = ["build"]
+    if not PRESERVE_DIST:
+        folders_to_clean.append("dist")
+
+    for folder_name in folders_to_clean:
         folder_path = os.path.abspath(folder_name)
         if os.path.exists(folder_path):
             shutil.rmtree(folder_path, onexc=remove_readonly)
