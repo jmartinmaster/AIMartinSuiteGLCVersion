@@ -20,7 +20,6 @@ import sys
 import tempfile
 import urllib.error
 import urllib.request
-from tkinter import ttk
 
 import ttkbootstrap as tb
 from ttkbootstrap.constants import *
@@ -76,13 +75,17 @@ class UpdateManager:
         self.remote_info = self._detect_remote_info()
         self.local_manifest = []
         self.comparison_rows = []
-        self.tree = None
         self.status_var = tb.StringVar(value="Ready to check for updates.")
         self.branch_var = tb.StringVar(value=self.branch_name or "Unknown")
         self.repo_var = tb.StringVar(value=self.remote_info.get("display", "Unknown repository"))
+        self.target_name_var = tb.StringVar(value="Dispatcher Core")
+        self.local_version_var = tb.StringVar(value="Unknown")
+        self.remote_version_var = tb.StringVar(value="Not checked")
+        self.result_var = tb.StringVar(value="Pending")
+        self.note_var = tb.StringVar(value="Run a repository check to compare the packaged release target.")
         self.setup_ui()
         self.refresh_local_manifest()
-        self.populate_tree()
+        self.refresh_summary()
 
     def _detect_branch_name(self):
         return "main"
@@ -119,6 +122,23 @@ class UpdateManager:
             "module_name": getattr(dispatcher_module, "__module_name__", "Dispatcher Core"),
             "local_version": getattr(dispatcher_module, "__version__", "Unknown"),
         }]
+
+    def refresh_summary(self):
+        entry = self.local_manifest[0] if self.local_manifest else {
+            "module_name": "Dispatcher Core",
+            "local_version": "Unknown",
+        }
+        row = self.comparison_rows[0] if self.comparison_rows else None
+        self.target_name_var.set(entry["module_name"])
+        self.local_version_var.set(entry.get("local_version", "Unknown"))
+        self.remote_version_var.set(row.get("remote_version", "Not checked") if row else "Not checked")
+        self.result_var.set(row.get("status", "Pending") if row else "Pending")
+        if row and row.get("update_available"):
+            self.note_var.set("A newer stable executable target is available from the repository branch.")
+        elif row:
+            self.note_var.set("No newer stable executable target is available right now.")
+        else:
+            self.note_var.set("Run a repository check to compare the packaged release target.")
 
     def _fetch_remote_file(self, relative_path):
         owner = self.remote_info.get("owner")
@@ -193,37 +213,9 @@ class UpdateManager:
             })
 
         self.comparison_rows = comparison_rows
-        self.populate_tree()
+        self.refresh_summary()
         available_count = sum(1 for row in comparison_rows if row["update_available"])
         self.status_var.set(f"Checked Dispatcher Core on branch '{self.branch_name}'. {available_count} executable update(s) available.")
-
-    def populate_tree(self):
-        if self.tree is None:
-            return
-        for item_id in self.tree.get_children():
-            self.tree.delete(item_id)
-
-        rows = self.comparison_rows or [
-            {
-                "module_name": entry["module_name"],
-                "local_version": entry["local_version"],
-                "remote_version": "Not checked",
-                "status": "Pending",
-            }
-            for entry in self.local_manifest
-        ]
-
-        for row in rows:
-            self.tree.insert(
-                "",
-                END,
-                values=(
-                    row["module_name"],
-                    row.get("local_version", "Unknown"),
-                    row.get("remote_version", "Unknown"),
-                    row.get("status", "Pending"),
-                ),
-            )
 
     def _start_detached_exe_swap(self, downloaded_exe_path):
         current_exe_path = os.path.abspath(sys.executable)
@@ -321,31 +313,27 @@ class UpdateManager:
         tb.Label(
             container,
             text=(
-                "Compare the local Dispatcher Core version with the repository branch master version. "
-                "Two-part versions like 1.07 trigger an executable update when greater. "
-                "Three-part versions only trigger an executable update when the third number is even, such as 1.07.2. "
-                "Odd patch versions like 1.07.1 are ignored."
+                "Compare the local Dispatcher Core version with the repository branch release target. "
+                "Odd third patch numbers stay in-progress and are ignored by the updater."
             ),
             wraplength=760,
             justify=LEFT,
         ).pack(anchor=W, pady=(0, 12))
 
-        summary = tb.Frame(container)
+        summary = tb.Labelframe(container, text=" Release Target ", padding=14)
         summary.pack(fill=X, pady=(0, 12))
-        tb.Label(summary, text=f"Repository: {self.repo_var.get()}", bootstyle=SECONDARY).pack(anchor=W)
-        tb.Label(summary, text=f"Branch: {self.branch_var.get()}", bootstyle=SECONDARY).pack(anchor=W)
-
-        columns = ("module", "local", "remote", "status")
-        self.tree = ttk.Treeview(container, columns=columns, show="headings", height=16)
-        self.tree.heading("module", text="Module")
-        self.tree.heading("local", text="Local")
-        self.tree.heading("remote", text="Repository")
-        self.tree.heading("status", text="Status")
-        self.tree.column("module", width=260, anchor=W)
-        self.tree.column("local", width=120, anchor=W)
-        self.tree.column("remote", width=120, anchor=W)
-        self.tree.column("status", width=220, anchor=W)
-        self.tree.pack(fill=BOTH, expand=True)
+        tb.Label(summary, textvariable=self.target_name_var, font=("Helvetica", 12, "bold")).grid(row=0, column=0, columnspan=2, sticky=W, pady=(0, 8))
+        tb.Label(summary, text="Repository", bootstyle=SECONDARY).grid(row=1, column=0, sticky=W, padx=(0, 12), pady=2)
+        tb.Label(summary, textvariable=self.repo_var).grid(row=1, column=1, sticky=W, pady=2)
+        tb.Label(summary, text="Branch", bootstyle=SECONDARY).grid(row=2, column=0, sticky=W, padx=(0, 12), pady=2)
+        tb.Label(summary, textvariable=self.branch_var).grid(row=2, column=1, sticky=W, pady=2)
+        tb.Label(summary, text="Local Version", bootstyle=SECONDARY).grid(row=3, column=0, sticky=W, padx=(0, 12), pady=2)
+        tb.Label(summary, textvariable=self.local_version_var).grid(row=3, column=1, sticky=W, pady=2)
+        tb.Label(summary, text="Repository Version", bootstyle=SECONDARY).grid(row=4, column=0, sticky=W, padx=(0, 12), pady=2)
+        tb.Label(summary, textvariable=self.remote_version_var).grid(row=4, column=1, sticky=W, pady=2)
+        tb.Label(summary, text="Status", bootstyle=SECONDARY).grid(row=5, column=0, sticky=W, padx=(0, 12), pady=2)
+        tb.Label(summary, textvariable=self.result_var).grid(row=5, column=1, sticky=W, pady=2)
+        tb.Label(summary, textvariable=self.note_var, bootstyle=INFO, wraplength=720, justify=LEFT).grid(row=6, column=0, columnspan=2, sticky=W, pady=(10, 0))
 
         controls = tb.Frame(container)
         controls.pack(fill=X, pady=(12, 0))

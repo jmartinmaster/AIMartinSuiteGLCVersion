@@ -4,6 +4,25 @@ This changelog tracks the main branch release line for The Martin Suite (GLC Edi
 
 Version headings below are aligned to the current `1.0.x` release line used by Dispatcher Core. Earlier work has been grouped into practical release milestones so the shipped feature history is easier to follow without rewriting older module version markers.
 
+## [1.0.8] - 2026-04-04
+
+### Added
+
+- Added rotated backup copies for `settings.json`, `layout_config.json`, and `rates.json` saves.
+- Added recovery snapshots for overwritten Production Log drafts.
+- Added recovery snapshot browsing alongside the active pending-draft list.
+- Added a Backup / Recovery viewer for restoring drafts and configuration backups.
+- Added a shared persistence helper to keep JSON saves atomic and backup-aware.
+
+### Changed
+
+- Switched settings and rate saves to atomic JSON writes.
+- Switched layout saves to the shared backup-aware persistence helper.
+- Kept the persistence helper internal and out of the sidebar module list.
+- Trimmed Production Log so it keeps draft actions in place while the full restore workflow lives in Backup / Recovery.
+- Simplified Update Manager into a compact Dispatcher Core release check.
+- Promoted Dispatcher Core to stable version `1.0.8` for the recovery and UI cleanup release.
+
 ## [1.0.6] - 2026-04-04
 
 ### Added

@@ -21,6 +21,7 @@ from tkinter import filedialog
 import json
 import os
 import sys
+from modules.persistence import write_json_with_backup
 from modules.theme_manager import DEFAULT_THEME, get_theme_names, normalize_theme
 
 __module_name__ = "Settings Manager"
@@ -74,14 +75,25 @@ class SettingsManager:
                     val = normalize_theme(val)
                 self.settings[key] = val
 
-        with open(self.settings_path, 'w') as f:
-            json.dump(self.settings, f, indent=4)
+        backup_info = write_json_with_backup(
+            self.settings_path,
+            self.settings,
+            backup_dir=external_path("data/backups/settings"),
+            keep_count=12,
+        )
 
         self.saved_theme = self.settings["theme"]
         self.preview_theme = self.saved_theme
         self.preview_theme = self.dispatcher.apply_theme(self.saved_theme, redraw=True)
         
-        Messagebox.show_info("Settings saved! Theme changes were applied immediately.", "Success")
+        backup_note = ""
+        if backup_info.get("versioned_backup_path"):
+            backup_note = " A recovery copy was stored in data/backups/settings."
+
+        Messagebox.show_info(
+            f"Settings saved! Theme changes were applied immediately.{backup_note}",
+            "Success"
+        )
 
     def preview_selected_theme(self, _event=None):
         theme_entry = self.entries.get('theme')

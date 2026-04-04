@@ -20,6 +20,7 @@ from ttkbootstrap.dialogs import Messagebox
 import json
 import os
 import sys
+from modules.persistence import write_json_with_backup
 
 __module_name__ = "Rate Manager"
 __version__ = "1.0.1"
@@ -61,9 +62,12 @@ class RateManager:
 
     def save_data(self):
         try:
-            # Always save to the local file so changes persist after EXE close
-            with open(self.local_data, 'w') as f:
-                json.dump(self.rates, f, indent=4)
+            write_json_with_backup(
+                self.local_data,
+                self.rates,
+                backup_dir=os.path.join(os.path.abspath("."), "data", "backups", "rates"),
+                keep_count=12,
+            )
             # Switch current tracking to the local file now that it exists
             self.data_file = self.local_data
         except Exception as e:

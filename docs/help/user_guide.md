@@ -24,6 +24,8 @@ Use Production Log to enter the current shift data.
 - Downtime rows capture start time, stop time, code, and cause.
 - Calculate All updates efficiency for the current shift.
 - Save Draft stores the current work in `data/pending`.
+- Overwriting an existing draft keeps a recovery snapshot in `data/pending/history`.
+- The draft status strip keeps quick actions for resuming the latest draft, opening the pending-draft list, and launching the full Backup / Recovery viewer.
 - Export Excel writes the current session into the configured production template.
 - Import Excel loads an existing workbook back into the form.
 
@@ -59,12 +61,24 @@ Use Settings Manager to configure application defaults.
 - Default Shift Hours sets the default value loaded into the production form.
 - Default Goal MPH sets the default shift target.
 - Export settings control where generated Excel files are written.
+- Saving settings also keeps recovery copies under `data/backups/settings`.
+
+### Backup / Recovery
+
+Use Backup / Recovery to inspect saved drafts, recovery snapshots, and JSON backup files.
+
+- Pending Drafts can be resumed directly into Production Log.
+- Recovery Snapshots can be restored back into `data/pending` and opened immediately.
+- Settings, layout, and rate backups can be restored back into their live JSON files.
+- Open Selected File and Open Containing Folder help when you want to inspect recovery files directly in Windows.
+- The internal persistence helper powers these saves, but it is intentionally hidden from the sidebar because it is not a user-facing tool.
 
 ### Update Manager
 
 Use Update Manager to compare the local Dispatcher Core version with the repository release version.
 
 - Check Repository compares the local Dispatcher version against the current branch version.
+- The page is intentionally compact because the updater only evaluates Dispatcher Core, not every sidebar module.
 - Two-part versions such as `1.07` can trigger an executable update when greater than the local version.
 - Three-part versions only trigger updates when the third number is even, such as `1.07.2`.
 - Odd patch versions such as `1.07.1` are ignored.
@@ -84,12 +98,13 @@ Use Update Manager to compare the local Dispatcher Core version with the reposit
 
 ## Draft Recovery
 
-The draft recovery area at the top of Production Log helps prevent lost work.
+The draft status area at the top of Production Log helps prevent lost work without duplicating the full recovery page.
 
 - Resume Latest loads the newest draft in `data/pending`.
-- Browse Drafts opens the full pending-draft list.
+- Pending Drafts opens a focused list of active draft files.
+- Backup / Recovery provides the full restore workspace for recovery snapshots and JSON backups.
 - Delete Current Draft removes the active saved draft file.
-- The status line shows the latest draft name, current draft name, dirty/saved state, and pending count.
+- The status line shows the latest draft name, current draft name, dirty/saved state, pending count, and recovery count.
 
 If you load a draft or import Excel while unsaved changes exist, the suite asks for confirmation before replacing the current session.
 
@@ -105,6 +120,9 @@ If you load a draft or import Excel while unsaved changes exist, the suite asks 
 - `settings.json`: use Settings Manager when possible.
 - `rates.json`: use Rate Manager when possible.
 - Draft files in `data/pending`: normally created and managed by Production Log.
+- Recovery copies are stored under `data/backups` and `data/pending/history`.
+
+When you save settings, layout, or rates through the built-in tools, the suite now keeps extra restore copies automatically.
 
 Manual JSON editing is still possible, but the built-in editors are safer because they enforce more of the expected structure.
 

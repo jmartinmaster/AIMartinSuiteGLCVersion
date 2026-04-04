@@ -24,6 +24,9 @@ import json
 import os
 import sys
 
+from modules import recovery_viewer
+from modules.persistence import write_json_with_backup
+
 __module_name__ = "Production Log"
 __version__ = "1.0.3"
 
@@ -89,6 +92,11 @@ class ProductionLog:
         os.makedirs(pending_dir, exist_ok=True)
         return pending_dir
 
+    def get_pending_history_dir(self):
+        history_dir = os.path.join(self.get_pending_dir(), "history")
+        os.makedirs(history_dir, exist_ok=True)
+        return history_dir
+
     def collect_ui_data(self):
         header_data = {fid: ent.get() for fid, ent in self.entries.items()}
         prod_data = [{k: (v.get() if hasattr(v, 'get') else v.cget("text")) for k, v in row.items()} for row in self.production_rows]
@@ -150,29 +158,38 @@ class ProductionLog:
                     "saved_at": datetime.now().isoformat(timespec="seconds"),
                     "auto_save": is_auto,
                     "version": __version__,
+                    "draft_name": os.path.basename(draft_path),
                 },
                 **data,
             }
 
-            with open(draft_path, "w", encoding="utf-8") as f:
-                json.dump(payload, f, indent=4)
+            backup_info = write_json_with_backup(
+                draft_path,
+                payload,
+                backup_dir=self.get_pending_history_dir(),
+                keep_count=20,
+            )
 
             self.current_draft_path = draft_path
             self.mark_clean(data)
 
             if not is_auto:
-                Messagebox.show_info(f"Draft saved to {os.path.basename(draft_path)}", "Draft Saved")
+                message = f"Draft saved to {os.path.basename(draft_path)}."
+                if backup_info.get("versioned_backup_path"):
+                    message += " A recovery snapshot of the previous draft was stored in data/pending/history."
+                Messagebox.show_info(message, "Draft Saved")
         except Exception as e:
-            print(f"Save Error: {e}")
+            Messagebox.show_error(f"Could not save draft: {e}", "Draft Save Error")
 
     def setup_ui(self):
-        recovery_wrapper = tb.Labelframe(self.parent, text=" Draft Recovery ", padding=10, style="Martin.Recovery.TLabelframe")
+        recovery_wrapper = tb.Labelframe(self.parent, text=" Draft Status ", padding=10, style="Martin.Recovery.TLabelframe")
         recovery_wrapper.pack(fill=X, padx=10, pady=(10, 0))
         self.recovery_status_lbl = tb.Label(recovery_wrapper, text="Checking draft state...", style="Martin.Muted.TLabel")
         self.recovery_status_lbl.pack(side=LEFT, padx=(0, 10))
         self.resume_latest_btn = tb.Button(recovery_wrapper, text="Resume Latest", bootstyle=PRIMARY, command=self.resume_latest_draft)
         self.resume_latest_btn.pack(side=LEFT, padx=5)
-        tb.Button(recovery_wrapper, text="Browse Drafts", bootstyle=PRIMARY, command=self.show_pending).pack(side=LEFT, padx=5)
+        tb.Button(recovery_wrapper, text="Pending Drafts", bootstyle=SECONDARY, command=self.show_pending).pack(side=LEFT, padx=5)
+        tb.Button(recovery_wrapper, text="Backup / Recovery", bootstyle=INFO, command=self.open_recovery_viewer).pack(side=LEFT, padx=5)
         self.delete_current_draft_btn = tb.Button(recovery_wrapper, text="Delete Current Draft", bootstyle=DANGER, command=self.delete_current_draft)
         self.delete_current_draft_btn.pack(side=LEFT, padx=5)
 
@@ -225,7 +242,6 @@ class ProductionLog:
         tb.Button(footer, text="Save Draft", command=self.save_draft, bootstyle=SECONDARY).pack(side=LEFT, padx=5)
         tb.Button(footer, text="Export Excel", command=self.export_to_excel, bootstyle=SUCCESS).pack(side=LEFT, padx=5)
         tb.Button(footer, text="Import Excel", command=self.import_from_excel_ui, bootstyle=INFO).pack(side=LEFT, padx=5)
-        tb.Button(footer, text="📁 Pending", command=self.show_pending, bootstyle=SECONDARY).pack(side=LEFT, padx=5)
 
         self.add_production_row()
         self.mark_clean()
@@ -364,16 +380,51 @@ class ProductionLog:
         drafts.sort(key=lambda item: item["saved_at"], reverse=True)
         return drafts
 
+    def list_recovery_snapshots(self):
+        snapshots = []
+        history_dir = self.get_pending_history_dir()
+        for filename in os.listdir(history_dir):
+            if not filename.endswith(".json"):
+                continue
+            path = os.path.join(history_dir, filename)
+            try:
+                with open(path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                meta = data.get("meta", {})
+                saved_at = meta.get("saved_at") or datetime.fromtimestamp(os.path.getmtime(path)).isoformat(timespec="seconds")
+                header = data.get("header", {})
+                snapshots.append({
+                    "path": path,
+                    "filename": filename,
+                    "saved_at": saved_at,
+                    "date": header.get("date", ""),
+                    "shift": header.get("shift", ""),
+                    "source": "Recovery Snapshot",
+                })
+            except Exception:
+                snapshots.append({
+                    "path": path,
+                    "filename": filename,
+                    "saved_at": datetime.fromtimestamp(os.path.getmtime(path)).isoformat(timespec="seconds"),
+                    "date": "",
+                    "shift": "",
+                    "source": "Recovery Snapshot",
+                })
+        snapshots.sort(key=lambda item: item["saved_at"], reverse=True)
+        return snapshots
+
     def get_latest_pending_draft(self):
         drafts = self.list_pending_drafts()
         return drafts[0] if drafts else None
 
     def update_recovery_ui(self):
         drafts = self.list_pending_drafts()
+        recovery_snapshots = self.list_recovery_snapshots()
         latest = drafts[0] if drafts else None
         self.latest_draft_path = latest["path"] if latest else None
         current_name = os.path.basename(self.current_draft_path) if self.current_draft_path else "No active draft"
         pending_count = len(drafts)
+        snapshot_count = len(recovery_snapshots)
         dirty_text = "Unsaved changes" if self.has_unsaved_changes else "Saved"
 
         if latest:
@@ -381,7 +432,7 @@ class ProductionLog:
         else:
             latest_text = "No pending drafts"
 
-        self.recovery_status_lbl.config(text=f"{latest_text} | Current: {current_name} | State: {dirty_text} | Pending: {pending_count}")
+        self.recovery_status_lbl.config(text=f"{latest_text} | Current: {current_name} | State: {dirty_text} | Pending: {pending_count} | Recovery: {snapshot_count}")
         self.resume_latest_btn.config(state=(NORMAL if latest else DISABLED))
         self.delete_current_draft_btn.config(state=(NORMAL if self.current_draft_path and os.path.exists(self.current_draft_path) else DISABLED))
 
@@ -396,6 +447,12 @@ class ProductionLog:
             Messagebox.show_info("No pending drafts are available.", "Resume Latest")
             return
         self.load_draft_path(latest["path"])
+
+    def open_recovery_viewer(self):
+        top = tb.Toplevel(title="Backup / Recovery")
+        top.geometry("980x620")
+        top.minsize(820, 520)
+        recovery_viewer.get_ui(top, self.dispatcher)
 
     def delete_current_draft(self):
         if not self.current_draft_path or not os.path.exists(self.current_draft_path):
@@ -484,11 +541,11 @@ class ProductionLog:
             Messagebox.show_error(f"Export failed: {e}", "Error")
 
     def show_pending(self):
-        top = tb.Toplevel(title="Pending Shifts")
+        top = tb.Toplevel(title="Pending Drafts")
         top.geometry("560x420")
         drafts = self.list_pending_drafts()
         if not drafts:
-            tb.Label(top, text="No pending shifts found.").pack(pady=20)
+            tb.Label(top, text="No pending drafts found.").pack(pady=20)
             return
 
         outer = tb.Frame(top, padding=10)
@@ -520,15 +577,19 @@ class ProductionLog:
         canvas.bind_all("<MouseWheel>", on_mousewheel)
         top.bind("<Destroy>", lambda _event: canvas.unbind_all("<MouseWheel>"), add="+")
 
+        tb.Label(container, text="Pending Drafts", font=("TkDefaultFont", 10, "bold"), bootstyle=PRIMARY).pack(anchor=W, pady=(0, 6))
         for draft in drafts:
-            card = tb.Labelframe(container, text=f" {draft['filename']} ", padding=10, style="Martin.Card.TLabelframe")
-            card.pack(fill=X, pady=5)
-            tb.Label(card, text=f"Saved: {draft['saved_at']}", style="Martin.Muted.TLabel").pack(anchor=W)
-            tb.Label(card, text=f"Date: {draft['date'] or '(unknown)'} | Shift: {draft['shift'] or '(unknown)'}", style="Martin.Muted.TLabel").pack(anchor=W)
-            actions = tb.Frame(card)
-            actions.pack(fill=X, pady=(8, 0))
-            tb.Button(actions, text="Resume", bootstyle=SUCCESS, command=lambda path=draft['path'], win=top: self.load_draft_path(path, win)).pack(side=LEFT, padx=(0, 6))
-            tb.Button(actions, text="Delete", bootstyle=DANGER, command=lambda path=draft['path'], win=top: self.delete_pending_from_window(path, win)).pack(side=LEFT)
+            self.add_pending_draft_card(container, draft, top)
+
+    def add_pending_draft_card(self, container, draft_record, window):
+        card = tb.Labelframe(container, text=f" {draft_record['filename']} ", padding=10, style="Martin.Card.TLabelframe")
+        card.pack(fill=X, pady=5)
+        tb.Label(card, text=f"Saved: {draft_record['saved_at']}", style="Martin.Muted.TLabel").pack(anchor=W)
+        tb.Label(card, text=f"Date: {draft_record['date'] or '(unknown)'} | Shift: {draft_record['shift'] or '(unknown)'}", style="Martin.Muted.TLabel").pack(anchor=W)
+        actions = tb.Frame(card)
+        actions.pack(fill=X, pady=(8, 0))
+        tb.Button(actions, text="Resume", bootstyle=SUCCESS, command=lambda path=draft_record['path'], win=window: self.load_draft_path(path, win)).pack(side=LEFT, padx=(0, 6))
+        tb.Button(actions, text="Delete", bootstyle=DANGER, command=lambda path=draft_record['path'], win=window: self.delete_pending_from_window(path, win)).pack(side=LEFT)
 
     def delete_pending_from_window(self, draft_path, window):
         if not messagebox.askyesno("Delete Draft", f"Delete {os.path.basename(draft_path)}?"):
