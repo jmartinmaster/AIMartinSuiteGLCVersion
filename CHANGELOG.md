@@ -4,6 +4,15 @@ This changelog tracks the main branch release line for The Martin Suite (GLC Edi
 
 Version headings below are aligned to the current `1.x` release line used by Dispatcher Core. Earlier work has been grouped into practical release milestones so the shipped feature history is easier to follow without rewriting older module version markers.
 
+## [1.2.2] - 2026-04-04
+
+### Changed
+
+- Promoted Dispatcher Core to stable version `1.2.2` for the Production Log rate visibility and override release.
+- Added a visible per-line rate field in Production Log so operators can confirm the active rate used for each production row.
+- Added a per-line temporary override toggle so an incorrect looked-up rate can be corrected for the current row without changing `rates.json`.
+- Hardened Production Log rate matching so part numbers still resolve when they differ by case, spacing, or leading-zero formatting.
+
 ## [1.2] - 2026-04-04
 
 ### Changed

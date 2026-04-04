@@ -22,7 +22,7 @@ Use Production Log to enter the current shift data.
 - Header fields capture shift-level information such as date, cast date, shift, hours, goal MPH, and return counts.
 - The header also shows a read-only Target Time field derived from shift hours so the team can see the total minutes they are balancing toward.
 - Optional workbook-linked header fields can also display imported summary cells such as bond, percentages, and selected top-part values when they are configured in the layout.
-- Production rows capture shop order, part number, and mold count.
+- Production rows capture shop order, part number, the active rate, a per-line override toggle for temporary corrections, and mold count.
 - Production Log automatically keeps one blank production row and one blank downtime row open while you type so you do not need separate add-row buttons during normal entry.
 - The footer shows a derived Ghost Time value based on the difference between shift time and the combined production-plus-downtime total.
 - Ghost Time shows missing time in red and extra time in green.
