@@ -23,27 +23,17 @@ from datetime import datetime
 import json
 import os
 import sys
+import webbrowser
 
 from modules import recovery_viewer
 from modules.downtime_codes import get_code_options, normalize_code_value
 from modules.persistence import write_json_with_backup
+from modules.utils import external_path, local_or_resource_path, resource_path
 
 __module_name__ = "Production Log"
 __version__ = "1.1.0"
 BALANCE_DOWNTIME_CAUSE = "Time Balance Adjustment"
 DEFAULT_GHOST_LABEL = "Ghost Time: 0 min"
-
-def resource_path(relative_path):
-    """ Get absolute path to internal resource (Read-Only) """
-    try:
-        base_path = sys._MEIPASS
-    except Exception:
-        base_path = os.path.abspath(".")
-    return os.path.join(base_path, relative_path)
-
-def external_path(relative_path):
-    """ Get path to external file (Write-Enabled) """
-    return os.path.join(os.path.abspath("."), relative_path)
 
 class ProductionLog:
     def __init__(self, parent, dispatcher):
@@ -51,9 +41,7 @@ class ProductionLog:
         self.dispatcher = dispatcher
         
         # Prefer the local config so Layout Manager saves are used immediately in dev and packaged builds.
-        self.config_path = external_path("layout_config.json")
-        if not os.path.exists(self.config_path):
-            self.config_path = resource_path("layout_config.json")
+        self.config_path = local_or_resource_path("layout_config.json")
 
         self.dt_codes = get_code_options()
 
@@ -68,13 +56,15 @@ class ProductionLog:
             try:
                 with open(settings_path, 'r') as f:
                     self.settings = json.load(f)
-            except: pass
+            except Exception:
+                pass
         
         self.default_hours = str(self.settings.get("default_shift_hours", 8.0))
         self.default_goal = str(self.settings.get("default_goal_mph", 240))
         self.auto_save_interval = int(self.settings.get("auto_save_interval_min", 5)) * 60000
         self.current_draft_path = None
         self.latest_draft_path = None
+        self.last_export_path = None
         self.has_unsaved_changes = False
         self.last_saved_signature = None
 
@@ -262,11 +252,16 @@ class ProductionLog:
         tb.Button(footer, text="Calculate All", command=self.calculate_metrics, bootstyle=INFO).pack(side=RIGHT)
         tb.Button(footer, text="Save Draft", command=self.save_draft, bootstyle=SECONDARY).pack(side=LEFT, padx=5)
         tb.Button(footer, text="Export Excel", command=self.export_to_excel, bootstyle=SUCCESS).pack(side=LEFT, padx=5)
+        self.open_export_btn = tb.Button(footer, text="Open Last Export", command=self.open_last_exported_file, bootstyle=INFO)
+        self.open_export_btn.pack(side=LEFT, padx=5)
+        self.print_export_btn = tb.Button(footer, text="Print Last Export", command=self.print_last_exported_file, bootstyle=WARNING)
+        self.print_export_btn.pack(side=LEFT, padx=5)
         tb.Button(footer, text="Import Excel", command=self.import_from_excel_ui, bootstyle=INFO).pack(side=LEFT, padx=5)
 
         self.add_production_row()
         self.update_target_time_display()
         self.update_ghost_total_display()
+        self.update_export_action_state()
         self.mark_clean()
         self.update_recovery_ui()
 
@@ -805,11 +800,12 @@ class ProductionLog:
         if os.path.exists(r_path):
             try:
                 with open(r_path, 'r') as f: rates_data = json.load(f)
-            except: pass
+            except Exception:
+                pass
 
         try:
             global_goal = float(self.entries["goal_mph"].get() or 240)
-        except:
+        except Exception:
             global_goal = 240
 
         for row in self.production_rows:
@@ -819,7 +815,8 @@ class ProductionLog:
                 rate = float(rates_data.get(part, global_goal))
                 minutes = (molds / rate) * 60 if rate > 0 else 0
                 row["time_calc"].config(text=f"{int(minutes)} min")
-            except: row["time_calc"].config(text="0 min")
+            except Exception:
+                row["time_calc"].config(text="0 min")
 
         for row in self.downtime_rows:
             try:
@@ -829,7 +826,8 @@ class ProductionLog:
                     e_m = int(e_raw[:2])*60 + int(e_raw[2:])
                     diff = (e_m - s_m) if e_m >= s_m else (1440 - s_m + e_m)
                     row["time_calc"].config(text=f"{diff} min")
-            except: row["time_calc"].config(text="--")
+            except Exception:
+                row["time_calc"].config(text="--")
 
         self.update_target_time_display()
         self.update_ghost_total_display()
@@ -841,11 +839,17 @@ class ProductionLog:
             goal = float(self.entries["goal_mph"].get() or 240)
             eff = (total_molds / (hours * goal)) * 100 if hours and goal else 0
             self.eff_display_lbl.config(text=f"EFF%: {eff:.2f}")
-        except: pass
+        except Exception:
+            pass
         self.update_target_time_display()
         self.update_ghost_total_display()
 
     def export_to_excel(self):
+        ghost_minutes = self.get_ghost_time_minutes()
+        if ghost_minutes != 0:
+            if messagebox.askyesno("Unbalanced Time", f"Your accounted time is off by {abs(ghost_minutes)} minutes. Do you want to Auto-Balance your downtime before exporting?"):
+                self.balance_downtime_to_shift()
+
         try:
             from modules.data_handler import DataHandler
             handler = DataHandler()
@@ -856,10 +860,71 @@ class ProductionLog:
             }
             shift = ui_data["header"].get("shift", "0")
             date = ui_data["header"].get("date", "00-00-00").replace("/", "")
-            handler.export_to_template(ui_data, shift, date)
-            self.dispatcher.show_toast("Export Complete", "Excel export completed successfully.", SUCCESS)
+            target_path = handler.export_to_template(ui_data, shift, date)
+            self.last_export_path = target_path
+            self.update_export_action_state()
+            self.dispatcher.show_toast(
+                "Export Complete",
+                f"Excel export completed successfully: {os.path.basename(target_path)}",
+                SUCCESS,
+            )
+
+            if messagebox.askyesno(
+                "Export Complete",
+                f"Workbook created successfully.\n\n{target_path}\n\nOpen it in the default application now so you can review it before printing?",
+            ):
+                self.open_last_exported_file(show_prompt=False)
         except Exception as e:
             Messagebox.show_error(f"Export failed: {e}", "Error")
+
+    def get_last_export_path(self):
+        if self.last_export_path and os.path.exists(self.last_export_path):
+            return self.last_export_path
+        return None
+
+    def update_export_action_state(self):
+        state = NORMAL if self.get_last_export_path() else DISABLED
+        if hasattr(self, "open_export_btn"):
+            self.open_export_btn.config(state=state)
+        if hasattr(self, "print_export_btn"):
+            self.print_export_btn.config(state=state)
+
+    def open_last_exported_file(self, show_prompt=True):
+        export_path = self.get_last_export_path()
+        if not export_path:
+            if show_prompt:
+                Messagebox.show_error("No exported workbook is available yet.", "Open Export")
+            return
+
+        try:
+            if sys.platform.startswith("win"):
+                os.startfile(export_path)
+            else:
+                webbrowser.open(export_path)
+        except Exception as e:
+            Messagebox.show_error(f"Could not open exported workbook: {e}", "Open Export")
+
+    def print_last_exported_file(self):
+        export_path = self.get_last_export_path()
+        if not export_path:
+            Messagebox.show_error("Export a workbook first so there is something to print.", "Print Export")
+            return
+
+        if not messagebox.askyesno(
+            "Print Export",
+            f"Print this workbook using the default application print action?\n\n{export_path}\n\nReview it first with 'Open Last Export' if needed.",
+        ):
+            return
+
+        try:
+            if sys.platform.startswith("win"):
+                os.startfile(export_path, "print")
+                self.dispatcher.show_toast("Printing", "Sent Excel file to the default printer.", INFO)
+            else:
+                self.open_last_exported_file(show_prompt=False)
+                self.dispatcher.show_toast("Print Review", "Opened the exported workbook for manual printing in the default application.", INFO)
+        except Exception as e:
+            Messagebox.show_error(f"Could not print exported workbook: {e}", "Print Export")
 
     def show_pending(self):
         top = tb.Toplevel(title="Pending Drafts")
@@ -955,7 +1020,7 @@ class ProductionLog:
             cast_box.delete(0, END); cast_box.insert(0, julian)
             cast_box.config(state="readonly")
             self.mark_dirty()
-        except:
+        except Exception:
             pass
 
 def get_ui(parent, dispatcher):

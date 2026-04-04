@@ -4,6 +4,19 @@ This changelog tracks the main branch release line for The Martin Suite (GLC Edi
 
 Version headings below are aligned to the current `1.x` release line used by Dispatcher Core. Earlier work has been grouped into practical release milestones so the shipped feature history is easier to follow without rewriting older module version markers.
 
+## [1.1.1] - 2026-04-04
+
+### Changed
+
+- Advanced Dispatcher Core to development version `1.1.1` for the shared path helper cleanup checkpoint.
+- Centralized bundled-versus-local path resolution through a shared helper module and compatibility shim.
+- Added review-first export follow-up actions so the latest workbook can be opened and printed separately after validation.
+- Completed the remaining path-helper cleanup in layout backup handling and tightened broad exception fallbacks in Production Log.
+
+### Notes
+
+- This odd patch release is intended as a development checkpoint and is ignored by the packaged EXE update gate.
+
 ## [1.1] - 2026-04-04
 
 ### Changed

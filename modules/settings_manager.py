@@ -20,17 +20,14 @@ from ttkbootstrap.dialogs import Messagebox
 from tkinter import filedialog
 import json
 import os
-import sys
 from copy import deepcopy
 from modules.persistence import write_json_with_backup
 from modules.downtime_codes import DEFAULT_DT_CODE_MAP, clear_downtime_code_cache
 from modules.theme_manager import DEFAULT_THEME, get_theme_names, normalize_theme
+from modules.utils import external_path
 
 __module_name__ = "Settings Manager"
 __version__ = "1.1.0"
-
-def external_path(relative_path):
-    return os.path.join(os.path.abspath("."), relative_path)
 
 class SettingsManager:
     def __init__(self, parent, dispatcher):

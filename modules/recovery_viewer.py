@@ -24,13 +24,10 @@ from ttkbootstrap.constants import *
 from ttkbootstrap.dialogs import Messagebox
 
 from modules.persistence import write_json_with_backup
+from modules.utils import external_path
 
 __module_name__ = "Backup / Recovery"
 __version__ = "1.0.0"
-
-
-def external_path(relative_path):
-    return os.path.join(os.path.abspath("."), relative_path)
 
 
 class RecoveryViewer:

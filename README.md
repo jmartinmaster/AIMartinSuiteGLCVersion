@@ -18,6 +18,7 @@ These two forms do not have identical behavior. The Python version has access to
 - Automatic recovery snapshots for overwritten drafts.
 - Excel export and import support for production sheet work.
 - A manual balance action that redistributes downtime proportionally across existing downtime rows before export, with a fallback adjustment row when needed.
+- Exported workbooks can be opened in the default application for review, and the latest export can then be printed from the app once it has been checked.
 - A derived target-time field in the header plus a live Ghost Time indicator in the footer so operators can see the shift goal and the missing or extra time while entering the sheet.
 - Workbook-linked summary header import without overwriting formula cells on export.
 - Layout Manager and Rate Manager tools.

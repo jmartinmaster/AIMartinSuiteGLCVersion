@@ -123,7 +123,7 @@ class AboutSection:
             "--add-data", f"modules{os.pathsep}modules",
             "--add-data", f"templates{os.pathsep}templates",
             "--add-data", f"layout_config.json{os.pathsep}.",
-            "--add-data", f"rate.json{os.pathsep}.",
+            "--add-data", f"rates.json{os.pathsep}.",
             "--collect-submodules", "openpyxl",
             os.path.join(sys._MEIPASS, "main.py") 
         ]

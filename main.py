@@ -26,9 +26,10 @@ import ttkbootstrap as tb
 from ttkbootstrap.constants import *
 from ttkbootstrap.widgets import ToastNotification
 from modules.theme_manager import apply_readability_overrides, normalize_theme, DEFAULT_THEME
+from modules.utils import external_path, local_or_resource_path, resource_path
 
 __module_name__ = "Dispatcher Core"
-__version__ = "1.1"
+__version__ = "1.1.1"
 WINDOWS_APP_ID = "JamieMartin.TheMartinSuite.GLC"
 APP_ICON_RELATIVE_PATH = "icon.ico"
 APP_ICON_IMAGE_RELATIVE_PATHS = [
@@ -49,12 +50,6 @@ LR_DEFAULTSIZE = 0x0040
 GCLP_HICON = -14
 GCLP_HICONSM = -34
 
-def resource_path(relative_path):
-    try:
-        base_path = sys._MEIPASS
-    except Exception:
-        base_path = os.path.abspath(".")
-    return os.path.join(base_path, relative_path)
 
 
 def get_work_area_insets(root):
@@ -141,21 +136,11 @@ class Dispatcher:
         self.root.title(f"The Martin Suite - {__version__}")
         self.root.geometry("1000x600")
         apply_app_icon(self.root)
-        
-        if getattr(sys, 'frozen', False):
-            self.internal_base = sys._MEIPASS
-            self.external_base = os.path.dirname(sys.executable)
-        else:
-            self.internal_base = os.path.abspath(".")
-            self.external_base = os.path.abspath(".")
 
         self.modules_path = resource_path("modules")
 
-        ext_layout = os.path.join(self.external_base, "layout_config.json")
-        self.layout_config = ext_layout if os.path.exists(ext_layout) else resource_path("layout_config.json")
-        
-        ext_rate = os.path.join(self.external_base, "rate.json")
-        self.rate_config = ext_rate if os.path.exists(ext_rate) else resource_path("rate.json")
+        self.layout_config = local_or_resource_path("layout_config.json")
+        self.rate_config = local_or_resource_path("rates.json")
 
         base_dir = os.path.dirname(self.modules_path)
         if base_dir not in sys.path:
@@ -165,7 +150,7 @@ class Dispatcher:
         self.loaded_modules = {"main": sys.modules[__name__]}
         self.active_module_instance = None
         self.active_module_name = None
-        self.settings_path = os.path.join(self.external_base, "settings.json")
+        self.settings_path = external_path("settings.json")
         self.runtime_settings = self.load_runtime_settings()
 
         self._setup_ui()
@@ -307,21 +292,10 @@ class Dispatcher:
 
     def open_help_document(self, relative_path):
         try:
-            if getattr(sys, 'frozen', False):
-                internal_root = sys._MEIPASS
-                external_root = os.path.dirname(sys.executable)
-            else:
-                internal_root = os.path.abspath(".")
-                external_root = os.path.abspath(".")
-
-            candidate_paths = [
-                os.path.join(external_root, relative_path),
-                os.path.join(internal_root, relative_path),
-            ]
-            for candidate in candidate_paths:
-                if os.path.exists(candidate):
-                    os.startfile(candidate)
-                    return
+            candidate = local_or_resource_path(relative_path)
+            if os.path.exists(candidate):
+                os.startfile(candidate)
+                return
 
             raise FileNotFoundError(relative_path)
         except Exception as e:
@@ -423,7 +397,7 @@ class Dispatcher:
             self.canvas.yview_scroll(step, "units")
 
 if __name__ == "__main__":
-    settings_path = os.path.abspath("settings.json")
+    settings_path = external_path("settings.json")
     theme_name = DEFAULT_THEME
     if os.path.exists(settings_path):
         try:

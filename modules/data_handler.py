@@ -23,30 +23,15 @@ import sys
 from datetime import date, datetime
 
 from modules.downtime_codes import get_code_number, normalize_code_value
+from modules.utils import ensure_external_directory, external_path, local_or_resource_path, resource_path
 
 __module_name__ = "Data Handler"
 __version__ = "1.1.0"
 
-def resource_path(relative_path):
-    """ Get absolute path to resource, works for dev and for PyInstaller """
-    try:
-        # PyInstaller creates a temp folder and stores path in _MEIPASS
-        base_path = sys._MEIPASS
-    except Exception:
-        base_path = os.path.abspath(".")
-
-    return os.path.join(base_path, relative_path)
-
-def external_path(relative_path):
-    """Get path to external file (Write-Enabled)."""
-    return os.path.join(os.path.abspath("."), relative_path)
-
 class DataHandler:
     def __init__(self, config_name="layout_config.json"):
         # Prefer the local config so Layout Manager changes are reflected in import/export.
-        self.config_path = external_path(config_name)
-        if not os.path.exists(self.config_path):
-            self.config_path = resource_path(config_name)
+        self.config_path = local_or_resource_path(config_name)
         
         with open(self.config_path, 'r', encoding='utf-8') as f:
             self.config = json.load(f)
@@ -54,8 +39,7 @@ class DataHandler:
         self.settings = self.load_settings()
         
         # User data folders stay in the local directory (not internal to the exe)
-        self.pending_dir = "data/pending"
-        os.makedirs(self.pending_dir, exist_ok=True)
+        self.pending_dir = ensure_external_directory("data/pending")
 
     def load_settings(self):
         settings_path = external_path("settings.json")
