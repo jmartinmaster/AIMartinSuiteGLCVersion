@@ -17,7 +17,7 @@
 import os
 import re
 import sys
-import tempfile
+import threading
 import urllib.error
 import urllib.request
 from tkinter import messagebox
@@ -25,6 +25,7 @@ from tkinter import messagebox
 import ttkbootstrap as tb
 from ttkbootstrap.constants import *
 from ttkbootstrap.dialogs import Messagebox
+from app_identity import LEGACY_EXE_NAME, format_versioned_exe_name, normalize_version, parse_version
 
 __module_name__ = "Update Manager"
 __version__ = "1.0.0"
@@ -33,7 +34,7 @@ GITHUB_REMOTE_PATTERN = re.compile(r"github\.com[:/](?P<owner>[^/]+)/(?P<repo>[^
 MODULE_NAME_PATTERN = re.compile(r"__module_name__\s*=\s*[\"']([^\"']+)[\"']")
 VERSION_PATTERN = re.compile(r"__version__\s*=\s*[\"']([^\"']+)[\"']")
 MASTER_VERSION_PATH = "main.py"
-REMOTE_EXE_PATH = "dist/TheMartinSuite_GLC.exe"
+LEGACY_REMOTE_EXE_PATH = "dist/TheMartinSuite_GLC.exe"
 
 
 def _parse_module_metadata(file_text, fallback_name):
@@ -43,21 +44,6 @@ def _parse_module_metadata(file_text, fallback_name):
         "module_name": module_name_match.group(1) if module_name_match else fallback_name,
         "version": version_match.group(1) if version_match else "Unknown",
     }
-
-
-def _parse_version(version_text):
-    if not version_text:
-        return None
-    parts = [part.strip() for part in str(version_text).split(".") if part.strip()]
-    if len(parts) in (2, 3) and all(part.isdigit() for part in parts):
-        return tuple(int(part) for part in parts)
-    return None
-
-
-def _normalize_version(version_parts):
-    if version_parts is None:
-        return None
-    return version_parts + (0,) * (3 - len(version_parts))
 
 
 def _is_supported_update_version(version_parts):
@@ -84,6 +70,7 @@ class UpdateManager:
         self.remote_version_var = tb.StringVar(value="Not checked")
         self.result_var = tb.StringVar(value="Pending")
         self.note_var = tb.StringVar(value="Run a repository check to compare the packaged release target.")
+        self.download_in_progress = False
         self.setup_ui()
         self.refresh_local_manifest()
         self.refresh_summary()
@@ -183,8 +170,8 @@ class UpdateManager:
 
             remote_metadata = _parse_module_metadata(remote_text, entry["module_name"])
             remote_version = remote_metadata["version"]
-            remote_compare = _parse_version(remote_version)
-            local_compare = _parse_version(entry["local_version"])
+            remote_compare = parse_version(remote_version)
+            local_compare = parse_version(entry["local_version"])
 
             if remote_compare is None:
                 status = "Remote version unreadable"
@@ -198,7 +185,7 @@ class UpdateManager:
             elif local_compare is None:
                 status = "Local version unreadable"
                 update_available = False
-            elif _normalize_version(remote_compare) > _normalize_version(local_compare):
+            elif normalize_version(remote_compare) > normalize_version(local_compare):
                 status = "EXE update available"
                 update_available = True
             else:
@@ -209,6 +196,7 @@ class UpdateManager:
                 **entry,
                 "module_name": remote_metadata["module_name"],
                 "remote_version": remote_version,
+                "remote_exe_name": format_versioned_exe_name(remote_version) if remote_compare else LEGACY_EXE_NAME,
                 "status": status,
                 "update_available": update_available,
             })
@@ -218,76 +206,78 @@ class UpdateManager:
         available_count = sum(1 for row in comparison_rows if row["update_available"])
         self.status_var.set(f"Checked Dispatcher Core on branch '{self.branch_name}'. {available_count} executable update(s) available.")
 
-    def _start_detached_exe_swap(self, downloaded_exe_path):
-        current_exe_path = os.path.abspath(sys.executable)
-        replacement_exe_path = f"{current_exe_path}.new"
-        backup_exe_path = f"{current_exe_path}.bak"
-        current_pid = os.getpid()
-        batch_path = os.path.join(tempfile.gettempdir(), "martin_suite_update_swap.bat")
-        with open(batch_path, "w", encoding="utf-8") as handle:
-            handle.write(
-                "@echo off\n"
-                "setlocal EnableExtensions\n"
-                f'set "TARGET={current_exe_path}"\n'
-                f'set "DOWNLOAD={downloaded_exe_path}"\n'
-                f'set "REPLACEMENT={replacement_exe_path}"\n'
-                f'set "BACKUP={backup_exe_path}"\n'
-                f'set "TARGET_PID={current_pid}"\n'
-                "set /a ATTEMPTS=0\n"
-                ":wait_for_exit\n"
-                'tasklist /FI "PID eq %TARGET_PID%" | find "%TARGET_PID%" > nul\n'
-                "if errorlevel 1 goto replace_exe\n"
-                "timeout /t 1 /nobreak > nul\n"
-                "goto wait_for_exit\n"
-                ":replace_exe\n"
-                "set /a ATTEMPTS+=1\n"
-                "if %ATTEMPTS% GTR 20 goto failed\n"
-                'if exist "%REPLACEMENT%" del /Q "%REPLACEMENT%"\n'
-                'if exist "%BACKUP%" del /Q "%BACKUP%"\n'
-                'copy /Y "%DOWNLOAD%" "%REPLACEMENT%" > nul\n'
-                "if errorlevel 1 goto retry\n"
-                'move /Y "%TARGET%" "%BACKUP%" > nul\n'
-                "if errorlevel 1 goto retry\n"
-                'move /Y "%REPLACEMENT%" "%TARGET%" > nul\n'
-                "if errorlevel 1 goto restore_backup\n"
-                'start "" "%TARGET%"\n'
-                'del /Q "%DOWNLOAD%" "%BACKUP%"\n'
-                'del "%~f0"\n'
-                "exit /b 0\n"
-                ":restore_backup\n"
-                'if exist "%BACKUP%" move /Y "%BACKUP%" "%TARGET%" > nul\n'
-                ":retry\n"
-                "timeout /t 1 /nobreak > nul\n"
-                "goto replace_exe\n"
-                ":failed\n"
-                'if exist "%BACKUP%" move /Y "%BACKUP%" "%TARGET%" > nul\n'
-                'if exist "%REPLACEMENT%" del /Q "%REPLACEMENT%"\n'
-                'del "%~f0"\n'
-            )
-        os.startfile(batch_path)
+    def _download_remote_executable(self, row):
+        versioned_name = row.get("remote_exe_name") or format_versioned_exe_name(row.get("remote_version"))
+        candidates = []
+        if versioned_name:
+            candidates.append((f"dist/{versioned_name}", versioned_name))
+        candidates.append((LEGACY_REMOTE_EXE_PATH, versioned_name or LEGACY_EXE_NAME))
 
-    def _apply_frozen_executable_update(self):
+        last_not_found = None
+        for remote_path, target_name in candidates:
+            try:
+                return self._fetch_remote_bytes(remote_path), target_name
+            except urllib.error.HTTPError as exc:
+                if exc.code == 404:
+                    last_not_found = exc
+                    continue
+                raise
+
+        if last_not_found is not None:
+            raise last_not_found
+        raise RuntimeError("No packaged executable artifact was found for the remote version.")
+
+    def _finish_downloaded_update(self, downloaded_path):
+        self.download_in_progress = False
         try:
-            remote_exe_bytes = self._fetch_remote_bytes(REMOTE_EXE_PATH)
+            os.startfile(downloaded_path)
         except Exception as exc:
-            Messagebox.show_error(f"Could not download the updated executable:\n\n{exc}", "Update Error")
+            Messagebox.show_error(f"The updated executable was downloaded but could not be launched:\n\n{exc}", "Launch Error")
+            self.status_var.set("Update downloaded, but launch failed.")
             return
 
-        temp_exe_path = os.path.join(tempfile.gettempdir(), "TheMartinSuite_GLC.update.exe")
-        try:
-            with open(temp_exe_path, "wb") as handle:
-                handle.write(remote_exe_bytes)
-        except Exception as exc:
-            Messagebox.show_error(f"Could not write the downloaded executable:\n\n{exc}", "Update Error")
+        self.status_var.set("Updated executable launched. Closing the current version.")
+        self.dispatcher.root.after(300, self.dispatcher.root.destroy)
+
+    def _handle_download_failure(self, exc):
+        self.download_in_progress = False
+        self.status_var.set("Executable update download failed.")
+        Messagebox.show_error(f"Could not download the updated executable:\n\n{exc}", "Update Error")
+
+    def _begin_frozen_executable_download(self, row):
+        if self.download_in_progress:
+            self.dispatcher.show_toast("Update Manager", "An executable download is already in progress.", WARNING)
             return
 
+        target_name = row.get("remote_exe_name") or format_versioned_exe_name(row.get("remote_version"))
         if not messagebox.askyesno(
-            "Apply Update",
-            "Executable update found. The application will close, replace its executable, and restart. Continue?",
+            "Download And Launch Update",
+            (
+                f"Download {target_name} in the background?\n\n"
+                "The current EXE will stay in place for testing. When the download finishes, the new EXE will be launched and this version will close."
+            ),
         ):
             return
-        self._start_detached_exe_swap(temp_exe_path)
-        self.dispatcher.root.after(200, self.dispatcher.root.destroy)
+
+        self.download_in_progress = True
+        self.status_var.set(f"Downloading {target_name} in the background...")
+
+        def worker():
+            try:
+                remote_exe_bytes, resolved_name = self._download_remote_executable(row)
+                current_exe_directory = os.path.dirname(os.path.abspath(sys.executable))
+                final_exe_path = os.path.join(current_exe_directory, resolved_name)
+                temp_exe_path = f"{final_exe_path}.download"
+                with open(temp_exe_path, "wb") as handle:
+                    handle.write(remote_exe_bytes)
+                os.replace(temp_exe_path, final_exe_path)
+            except Exception as exc:
+                self.dispatcher.root.after(0, lambda error=exc: self._handle_download_failure(error))
+                return
+
+            self.dispatcher.root.after(0, lambda path=final_exe_path: self._finish_downloaded_update(path))
+
+        threading.Thread(target=worker, daemon=True).start()
 
     def apply_updates(self):
         if not self.comparison_rows:
@@ -299,7 +289,7 @@ class UpdateManager:
             return
 
         if getattr(sys, "frozen", False):
-            self._apply_frozen_executable_update()
+            self._begin_frozen_executable_download(update_rows[0])
             return
 
         self.dispatcher.show_toast(
@@ -317,7 +307,8 @@ class UpdateManager:
             container,
             text=(
                 "Compare the local Dispatcher Core version with the repository branch release target. "
-                "Odd third patch numbers stay in-progress and are ignored by the updater."
+                "Odd third patch numbers stay in-progress and are ignored by the updater. "
+                "Stable EXE updates download beside the current build and then launch the newer version."
             ),
             wraplength=760,
             justify=LEFT,

@@ -48,16 +48,16 @@ The Martin Suite is designed to be bundled into a standalone `.exe` for deployme
 python build.py
 ```
 
-The compiled executable will be located in the `dist/` directory as `TheMartinSuite_GLC.exe`.
+The compiled executable will be located in the `dist/` directory as a versioned file such as `TheMartinSuite_GLC_v1.2.4.exe`.
 
 ## Update Behavior
 
 - Source / Python mode can inspect repository versions, but new executable releases are still best produced by rebuilding manually.
 - Packaged EXE mode uses Dispatcher Core as the master version check.
-- The current stable Dispatcher Core release is `1.2`.
+- The current stable Dispatcher Core release is `1.2.4`.
 - Two-part versions such as `1.07` are valid update targets.
 - Three-part versions only update when the third number is even, such as `1.07.2`.
-- Automatic EXE self-replacement is still experimental and may require manual replacement during testing.
+- Stable packaged updates download a versioned EXE beside the current copy, launch it, and let the newer build offer cleanup of older local EXEs.
 
 ## License
 

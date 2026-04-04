@@ -22,7 +22,7 @@ The runtime icon paths are defined in `main.py`.
 
 ## Where Packaging Uses Them
 
-The packaged EXE includes the runtime icon assets through `TheMartinSuite_GLC.spec`.
+The packaged EXE includes the runtime icon assets through `TheMartinSuite_GLC.spec`, and packaged builds now use a versioned EXE name such as `TheMartinSuite_GLC_v1.2.4.exe`.
 
 - `datas` bundles `icon.ico` and the size-specific PNG files.
 - `icon=['icon.ico']` sets the Windows executable icon.
