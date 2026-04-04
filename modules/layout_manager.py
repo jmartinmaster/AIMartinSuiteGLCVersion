@@ -15,15 +15,20 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import tkinter as tk
+from tkinter import messagebox
+from tkinter import ttk
 import ttkbootstrap as tb
 from ttkbootstrap.constants import *
 from ttkbootstrap.dialogs import Messagebox
 import json
 import os
+import shutil
 import sys
+import tempfile
+from modules.theme_manager import normalize_theme
 
 __module_name__ = "Layout Manager"
-__version__ = "1.0.1"
+__version__ = "1.0.4"
 
 def resource_path(relative_path):
     """ Get absolute path to resource, works for dev and for PyInstaller """
@@ -37,6 +42,10 @@ class LayoutManager:
     def __init__(self, parent, dispatcher):
         self.parent = parent
         self.dispatcher = dispatcher
+        self.is_dirty = False
+        self.preview_after_id = None
+        self.preview_tooltip = None
+        self.suppress_modified_event = False
         
         # 1. Logic: Read from local config when present, otherwise fall back to the packaged default.
         self.local_config = "layout_config.json"
@@ -49,6 +58,17 @@ class LayoutManager:
         self.setup_ui()
 
     def setup_ui(self):
+        theme_name = normalize_theme(tb.Style.get_instance().theme.name)
+        self.is_dark_theme = theme_name in {"darkly", "superhero"}
+        self.block_canvas_bg = "#1f242b" if self.is_dark_theme else "#f4f6f8"
+        self.preview_grid_bg = "#1f242b" if self.is_dark_theme else "#eef2f5"
+        self.preview_cell_bg = "#2a313a" if self.is_dark_theme else "#ffffff"
+        self.preview_muted_fg = "#d6dde5" if self.is_dark_theme else "#6c757d"
+        self.preview_empty_fg = "#9fb0c0" if self.is_dark_theme else "#6c757d"
+        self.preview_text_fg = "#f8f9fa" if self.is_dark_theme else "#212529"
+        self.preview_readonly_fg = "#7cc4ff" if self.is_dark_theme else "#0b5ed7"
+        self.preview_border = "#5f6b78" if self.is_dark_theme else "#8b98a5"
+
         self.main_container = tb.Frame(self.parent, padding=10)
         self.main_container.pack(fill=BOTH, expand=True)
 
@@ -59,8 +79,51 @@ class LayoutManager:
         tb.Label(editor_frame, text="JSON Editor", font=("-size 12 -weight bold")).pack(anchor=W)
         self.source_label = tb.Label(editor_frame, bootstyle=SECONDARY)
         self.source_label.pack(anchor=W)
-        self.text_area = tk.Text(editor_frame, wrap=NONE, font=("Monospace", 10), undo=True)
-        self.text_area.pack(fill=BOTH, expand=True, pady=5)
+
+        self.editor_notebook = ttk.Notebook(editor_frame)
+        self.editor_notebook.pack(fill=BOTH, expand=True, pady=5)
+
+        block_tab = tb.Frame(self.editor_notebook)
+        json_tab = tb.Frame(self.editor_notebook)
+        self.editor_notebook.add(block_tab, text="Block View")
+        self.editor_notebook.add(json_tab, text="JSON Editor")
+
+        block_help = tb.Label(
+            block_tab,
+            text="Block View lets you adjust field placement without working directly in raw JSON. Use JSON Editor for advanced edits.",
+            bootstyle=INFO
+        )
+        block_help.pack(anchor=W, pady=(0, 5))
+
+        block_scroll_frame = tb.Frame(block_tab)
+        block_scroll_frame.pack(fill=BOTH, expand=True)
+        self.block_canvas = tk.Canvas(block_scroll_frame, highlightthickness=0, background=self.block_canvas_bg)
+        self.block_canvas.pack(side=LEFT, fill=BOTH, expand=True)
+        self.block_scrollbar = tb.Scrollbar(block_scroll_frame, orient=VERTICAL, command=self.block_canvas.yview)
+        self.block_scrollbar.pack(side=RIGHT, fill=Y)
+        self.block_canvas.configure(yscrollcommand=self.block_scrollbar.set)
+        self.block_inner = tb.Frame(self.block_canvas)
+        self.block_canvas_window = self.block_canvas.create_window((0, 0), window=self.block_inner, anchor="nw")
+        self.block_inner.bind("<Configure>", self.on_block_frame_configure)
+        self.block_canvas.bind("<Configure>", self.on_block_canvas_configure)
+        block_tab.bind("<Enter>", self.enable_block_mousewheel)
+        block_tab.bind("<Leave>", self.disable_block_mousewheel)
+
+        editor_text_frame = tb.Frame(json_tab)
+        editor_text_frame.pack(fill=BOTH, expand=True)
+
+        self.text_area = tk.Text(editor_text_frame, wrap=NONE, font=("Monospace", 10), undo=True)
+        self.text_area.grid(row=0, column=0, sticky=NSEW)
+
+        y_scroll = tb.Scrollbar(editor_text_frame, orient=VERTICAL, command=self.text_area.yview)
+        y_scroll.grid(row=0, column=1, sticky=NS)
+        x_scroll = tb.Scrollbar(editor_text_frame, orient=HORIZONTAL, command=self.text_area.xview)
+        x_scroll.grid(row=1, column=0, sticky=EW)
+
+        editor_text_frame.rowconfigure(0, weight=1)
+        editor_text_frame.columnconfigure(0, weight=1)
+        self.text_area.configure(yscrollcommand=y_scroll.set, xscrollcommand=x_scroll.set)
+        self.text_area.bind("<<Modified>>", self.on_text_modified)
 
         # RIGHT SIDE: Preview
         self.preview_wrapper = tb.Labelframe(self.main_container, text=" Live Grid Preview ", padding=10)
@@ -75,15 +138,241 @@ class LayoutManager:
 
         tb.Button(btn_frame, text="Reload Current", bootstyle=SECONDARY, command=self.load_config).pack(side=LEFT, padx=5)
         tb.Button(btn_frame, text="Load Default", bootstyle=WARNING, command=self.load_default_config).pack(side=LEFT, padx=5)
+        tb.Button(btn_frame, text="Format JSON", bootstyle=PRIMARY, command=self.format_json).pack(side=LEFT, padx=5)
+        tb.Button(btn_frame, text="Validate JSON", bootstyle=INFO, command=self.validate_editor_json).pack(side=LEFT, padx=5)
         tb.Button(btn_frame, text="Update Preview", bootstyle=INFO, command=self.update_preview).pack(side=LEFT, padx=5)
         tb.Button(btn_frame, text="Save to File", bootstyle=SUCCESS, command=self.save_config).pack(side=RIGHT, padx=5)
 
+        self.status_label = tb.Label(editor_frame, text="", bootstyle=SECONDARY)
+        self.status_label.pack(anchor=W, pady=(0, 2))
+
         self.load_config()
         self.update_preview()
+        self.parent.bind_all("<Control-s>", self.on_save_shortcut)
 
-    def set_editor_text(self, config_data):
+    def set_editor_text(self, config_data, mark_clean=True):
+        self.suppress_modified_event = True
         self.text_area.delete("1.0", END)
         self.text_area.insert("1.0", json.dumps(config_data, indent=4))
+        self.text_area.edit_modified(False)
+        self.suppress_modified_event = False
+        self.is_dirty = not mark_clean
+        if mark_clean:
+            self.update_status("Ready")
+
+    def get_current_config(self):
+        config = json.loads(self.get_editor_text())
+        self.validate_config(config)
+        return config
+
+    def get_editor_text(self):
+        return self.text_area.get("1.0", END).strip()
+
+    def on_block_frame_configure(self, _event=None):
+        self.block_canvas.configure(scrollregion=self.block_canvas.bbox("all"))
+
+    def on_block_canvas_configure(self, event):
+        self.block_canvas.itemconfigure(self.block_canvas_window, width=event.width)
+
+    def enable_block_mousewheel(self, _event=None):
+        self.block_canvas.bind_all("<MouseWheel>", self.on_block_mousewheel)
+        self.block_canvas.bind_all("<Button-4>", self.on_block_mousewheel)
+        self.block_canvas.bind_all("<Button-5>", self.on_block_mousewheel)
+
+    def disable_block_mousewheel(self, _event=None):
+        self.block_canvas.unbind_all("<MouseWheel>")
+        self.block_canvas.unbind_all("<Button-4>")
+        self.block_canvas.unbind_all("<Button-5>")
+
+    def on_block_mousewheel(self, event):
+        if event.num == 4:
+            step = -1
+        elif event.num == 5:
+            step = 1
+        else:
+            step = -1 * int(event.delta / 120) if event.delta else 0
+
+        if step:
+            self.block_canvas.yview_scroll(step, "units")
+
+    def refresh_block_view(self, config):
+        for child in self.block_inner.winfo_children():
+            child.destroy()
+
+        header_title = tb.Label(self.block_inner, text="Header Fields", font=("-size 12 -weight bold"), bootstyle=PRIMARY)
+        header_title.pack(anchor=W, pady=(0, 6))
+
+        tb.Separator(self.block_inner, bootstyle=PRIMARY).pack(fill=X, pady=(0, 8))
+
+        for field in config.get("header_fields", []):
+            card = tb.Labelframe(self.block_inner, text=f" {field.get('label', 'Unnamed Field')} ", padding=10, style="Martin.Card.TLabelframe")
+            card.pack(fill=X, pady=4)
+
+            header_row = tb.Frame(card)
+            header_row.pack(fill=X, pady=(0, 8))
+            tb.Label(header_row, text=f"ID: {field.get('id', '(missing)')}", style="Martin.Section.TLabel").pack(side=LEFT)
+
+            state_bits = []
+            if field.get("readonly"):
+                state_bits.append("readonly")
+            if "default" in field:
+                state_bits.append(f"default={field.get('default')}")
+            if not state_bits:
+                state_bits.append("editable")
+            tb.Label(header_row, text=f"State: {', '.join(state_bits)}", style="Martin.Muted.TLabel").pack(side=RIGHT)
+
+            form_row = tb.Frame(card)
+            form_row.pack(fill=X)
+
+            tb.Label(form_row, text="Row", bootstyle=PRIMARY).grid(row=0, column=0, padx=(0, 6), pady=2, sticky=W)
+            row_var = tk.StringVar(value=str(field.get("row", 0)))
+            tb.Entry(form_row, textvariable=row_var, width=6).grid(row=0, column=1, padx=(0, 12), pady=2, sticky=W)
+
+            tb.Label(form_row, text="Column", bootstyle=PRIMARY).grid(row=0, column=2, padx=(0, 6), pady=2, sticky=W)
+            col_var = tk.StringVar(value=str(field.get("col", 0)))
+            tb.Entry(form_row, textvariable=col_var, width=6).grid(row=0, column=3, padx=(0, 12), pady=2, sticky=W)
+
+            tb.Label(form_row, text="Cell", bootstyle=PRIMARY).grid(row=0, column=4, padx=(0, 6), pady=2, sticky=W)
+            cell_var = tk.StringVar(value=str(field.get("cell", "")))
+            tb.Entry(form_row, textvariable=cell_var, width=10).grid(row=0, column=5, padx=(0, 12), pady=2, sticky=W)
+
+            tb.Button(
+                form_row,
+                text="Apply",
+                bootstyle=SUCCESS,
+                command=lambda field_id=field.get("id"), row_var=row_var, col_var=col_var, cell_var=cell_var: self.update_header_field_from_block(
+                    field_id,
+                    row_var.get(),
+                    col_var.get(),
+                    cell_var.get()
+                )
+            ).grid(row=0, column=6, padx=(0, 8), pady=2, sticky=W)
+
+            meta_row = tb.Frame(card)
+            meta_row.pack(fill=X, pady=(8, 0))
+            tb.Label(meta_row, text=f"Width: {field.get('width', 10)}", style="Martin.Muted.TLabel").pack(side=LEFT)
+            tb.Label(meta_row, text=f"Default: {field.get('default', '(none)')}", style="Martin.Muted.TLabel").pack(side=LEFT, padx=12)
+
+        mappings_title = tb.Label(self.block_inner, text="Mappings", font=("-size 12 -weight bold"), bootstyle=PRIMARY)
+        mappings_title.pack(anchor=W, pady=(10, 6))
+
+        tb.Separator(self.block_inner, bootstyle=PRIMARY).pack(fill=X, pady=(0, 8))
+
+        self.add_mapping_block(
+            "Production Mapping",
+            config.get("production_mapping", {}),
+            self.block_inner
+        )
+        self.add_mapping_block(
+            "Downtime Mapping",
+            config.get("downtime_mapping", {}),
+            self.block_inner
+        )
+
+    def add_mapping_block(self, title, mapping, parent):
+        card = tb.Labelframe(parent, text=f" {title} ", padding=10, style="Martin.Card.TLabelframe")
+        card.pack(fill=X, pady=4)
+        tb.Label(card, text=f"Start Row: {mapping.get('start_row', '(missing)')}", style="Martin.Section.TLabel").pack(anchor=W)
+
+        columns = mapping.get("columns", {})
+        if columns:
+            for key, value in columns.items():
+                tb.Label(card, text=f"{key}: {value}", style="Martin.Muted.TLabel").pack(anchor=W)
+        else:
+            tb.Label(card, text="No columns configured", bootstyle=WARNING).pack(anchor=W)
+
+    def update_header_field_from_block(self, field_id, row_value, col_value, cell_value):
+        try:
+            if not field_id:
+                raise ValueError("Field ID is missing.")
+
+            row = int(str(row_value).strip())
+            col = int(str(col_value).strip())
+            cell = str(cell_value).strip()
+
+            config = self.get_current_config()
+            target_field = None
+            for field in config.get("header_fields", []):
+                if field.get("id") == field_id:
+                    target_field = field
+                    break
+
+            if target_field is None:
+                raise ValueError(f"Field '{field_id}' was not found.")
+
+            target_field["row"] = row
+            target_field["col"] = col
+            if cell:
+                target_field["cell"] = cell
+            else:
+                target_field.pop("cell", None)
+
+            self.set_editor_text(config, mark_clean=False)
+            self.refresh_block_view(config)
+            self.update_preview()
+            self.update_status(f"Updated field '{field_id}'", INFO)
+        except Exception as e:
+            Messagebox.show_error(f"Could not update field from block view: {e}", "Block Edit Error")
+
+    def on_text_modified(self, _event=None):
+        if self.suppress_modified_event:
+            self.text_area.edit_modified(False)
+            return
+
+        if self.text_area.edit_modified():
+            self.is_dirty = True
+            self.update_status("Unsaved changes")
+            self.schedule_preview_update()
+            self.text_area.edit_modified(False)
+
+    def schedule_preview_update(self):
+        if self.preview_after_id:
+            self.parent.after_cancel(self.preview_after_id)
+        self.preview_after_id = self.parent.after(400, self.update_preview)
+
+    def update_status(self, message, bootstyle=SECONDARY):
+        source_name = self.local_config if self.config_path == self.local_config else os.path.basename(self.internal_config)
+        dirty_text = "Unsaved changes" if self.is_dirty else "Saved"
+        self.status_label.config(text=f"{message} | Source: {source_name} | State: {dirty_text}", bootstyle=bootstyle)
+
+    def confirm_discard_changes(self):
+        if not self.is_dirty:
+            return True
+        return messagebox.askyesno("Discard Unsaved Changes", "You have unsaved layout changes. Discard them and continue?")
+
+    def validate_config(self, config):
+        if not isinstance(config, dict):
+            raise ValueError("Config must be a JSON object.")
+
+        required_top_level = ["template_path", "header_fields", "production_mapping", "downtime_mapping"]
+        missing_keys = [key for key in required_top_level if key not in config]
+        if missing_keys:
+            raise ValueError(f"Missing required keys: {', '.join(missing_keys)}")
+
+        if not isinstance(config["header_fields"], list):
+            raise ValueError("header_fields must be a list.")
+
+        for index, field in enumerate(config["header_fields"], start=1):
+            if not isinstance(field, dict):
+                raise ValueError(f"header_fields item {index} must be an object.")
+            field_missing = [key for key in ("id", "label", "row", "col") if key not in field]
+            if field_missing:
+                raise ValueError(f"header_fields item {index} is missing: {', '.join(field_missing)}")
+
+        self.validate_mapping(config["production_mapping"], "production_mapping", ("shop_order", "part_number", "molds"))
+        self.validate_mapping(config["downtime_mapping"], "downtime_mapping", ("start", "stop", "code", "cause"))
+
+    def validate_mapping(self, mapping, mapping_name, required_columns):
+        if not isinstance(mapping, dict):
+            raise ValueError(f"{mapping_name} must be an object.")
+        if "start_row" not in mapping or "columns" not in mapping:
+            raise ValueError(f"{mapping_name} must contain start_row and columns.")
+        if not isinstance(mapping["columns"], dict):
+            raise ValueError(f"{mapping_name}.columns must be an object.")
+
+        missing_columns = [column for column in required_columns if column not in mapping["columns"]]
+        if missing_columns:
+            raise ValueError(f"{mapping_name}.columns is missing: {', '.join(missing_columns)}")
 
     def update_source_label(self):
         if self.config_path == self.local_config:
@@ -92,58 +381,206 @@ class LayoutManager:
             source_text = f"Editing packaged default: {self.internal_config}"
         self.source_label.config(text=source_text)
 
+    def bind_preview_tooltip(self, widget, field):
+        widget.bind("<Enter>", lambda event, data=field: self.show_preview_tooltip(event, data))
+        widget.bind("<Leave>", self.hide_preview_tooltip)
+
+    def show_preview_tooltip(self, event, field):
+        self.hide_preview_tooltip()
+
+        marker_parts = []
+        if field.get("readonly"):
+            marker_parts.append("readonly")
+        if "default" in field:
+            marker_parts.append(f"default={field.get('default')}")
+        marker_text = ", ".join(marker_parts) if marker_parts else "editable"
+
+        tooltip_lines = [
+            f"ID: {field.get('id', '(missing)')}",
+            f"Label: {field.get('label', '(missing)')}",
+            f"Grid: row {field.get('row', 0)}, col {field.get('col', 0)}",
+            f"Width: {field.get('width', 10)}",
+            f"State: {marker_text}",
+            f"Default: {field.get('default', '(none)')}",
+            f"Cell: {field.get('cell', '(none)')}"
+        ]
+
+        self.preview_tooltip = tk.Toplevel(self.preview_canvas)
+        self.preview_tooltip.wm_overrideredirect(True)
+        self.preview_tooltip.attributes("-topmost", True)
+        self.preview_tooltip.geometry(f"+{event.x_root + 12}+{event.y_root + 12}")
+
+        tooltip_label = tb.Label(
+            self.preview_tooltip,
+            text="\n".join(tooltip_lines),
+            justify=LEFT,
+            padding=8,
+            bootstyle="light"
+        )
+        tooltip_label.pack()
+
+    def hide_preview_tooltip(self, _event=None):
+        if self.preview_tooltip is not None:
+            self.preview_tooltip.destroy()
+            self.preview_tooltip = None
+
     def update_preview(self):
         """Renders the current text area JSON into a visual grid."""
+        self.preview_after_id = None
+        self.hide_preview_tooltip()
         # Clear existing preview
         for child in self.preview_canvas.winfo_children():
             child.destroy()
 
         try:
-            raw_data = self.text_area.get("1.0", END).strip()
+            raw_data = self.get_editor_text()
             config = json.loads(raw_data)
-            
-            # Draw dummy widgets to show the layout
-            for field in config.get("header_fields", []):
-                r = field.get("row", 0)
-                c = field.get("col", 0)
-                
-                # We draw a "ghost" label and box to show positioning
-                lbl = tb.Label(self.preview_canvas, text=field["label"], bootstyle=SECONDARY)
-                lbl.grid(row=r, column=c, padx=2, pady=2, sticky=W)
-                
-                box = tb.Frame(self.preview_canvas, bootstyle=LIGHT, width=60, height=25)
-                box.grid(row=r, column=c+1, padx=2, pady=2, sticky=W)
-                box.pack_propagate(False) # Keep fixed size for preview
+            self.validate_config(config)
+
+            fields = config.get("header_fields", [])
+            max_row = max((int(field.get("row", 0)) for field in fields), default=0)
+            max_col = max((int(field.get("col", 0)) for field in fields), default=0)
+
+            preview_grid = tk.Frame(self.preview_canvas, bg=self.preview_grid_bg)
+            preview_grid.pack(anchor=NW, fill=BOTH, expand=True)
+
+            tb.Label(preview_grid, text=" ", width=6, bootstyle=PRIMARY).grid(row=0, column=0, padx=3, pady=3)
+            for col in range(max_col + 1):
+                tb.Label(preview_grid, text=f"Col {col}", width=14, bootstyle=PRIMARY).grid(row=0, column=col + 1, padx=3, pady=3, sticky=EW)
+
+            field_positions = {}
+            for field in fields:
+                position = (int(field.get("row", 0)), int(field.get("col", 0)))
+                field_positions.setdefault(position, []).append(field)
+
+            for row in range(max_row + 1):
+                tb.Label(preview_grid, text=f"Row {row}", width=8, bootstyle=PRIMARY).grid(row=row + 1, column=0, padx=3, pady=3, sticky=NS)
+
+                for col in range(max_col + 1):
+                    cell_frame = tk.Frame(preview_grid, bg=self.preview_cell_bg, highlightthickness=1, highlightbackground=self.preview_border)
+                    cell_frame.grid(row=row + 1, column=col + 1, padx=3, pady=3, sticky=NSEW)
+                    cell_frame.grid_propagate(False)
+                    cell_frame.configure(width=130, height=70)
+
+                    tk.Label(cell_frame, text=f"({row}, {col})", bg=self.preview_cell_bg, fg=self.preview_muted_fg, anchor="w").pack(anchor=NW)
+
+                    fields_here = field_positions.get((row, col), [])
+                    if fields_here:
+                        for field in fields_here:
+                            field_label = tk.Label(
+                                cell_frame,
+                                text=field.get("label", field.get("id", "Unnamed")),
+                                bg=self.preview_cell_bg,
+                                fg=self.preview_readonly_fg if field.get("readonly") else self.preview_text_fg,
+                                wraplength=110,
+                                justify=LEFT,
+                                anchor="w"
+                            )
+                            field_label.pack(anchor=W, pady=(4, 0))
+                            self.bind_preview_tooltip(field_label, field)
+                            self.bind_preview_tooltip(cell_frame, field)
+                    else:
+                        tk.Label(cell_frame, text="empty", bg=self.preview_cell_bg, fg=self.preview_empty_fg, anchor="w").pack(anchor=W, pady=(8, 0))
+
+            for col in range(max_col + 2):
+                preview_grid.columnconfigure(col, weight=1)
+
+            self.update_status(
+                f"Preview updated: {len(fields)} header fields on a {max_row + 1}x{max_col + 1} grid",
+                SUCCESS
+            )
 
         except Exception as e:
             tb.Label(self.preview_canvas, text=f"Preview Error: {e}", bootstyle=DANGER).pack()
+            self.update_status(f"Preview error: {e}", DANGER)
 
     def load_config(self):
+        if not self.confirm_discard_changes():
+            return
         if os.path.exists(self.config_path):
-            with open(self.config_path, 'r') as f:
-                data = json.load(f)
+            try:
+                with open(self.config_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                self.validate_config(data)
                 self.set_editor_text(data)
+                self.refresh_block_view(data)
                 self.update_source_label()
                 self.update_preview()
+            except Exception as e:
+                Messagebox.show_error(f"Failed to load layout config: {e}", "Load Error")
 
     def load_default_config(self):
+        if not self.confirm_discard_changes():
+            return
         if os.path.exists(self.internal_config):
-            with open(self.internal_config, 'r') as f:
-                data = json.load(f)
-            self.config_path = self.internal_config
-            self.set_editor_text(data)
-            self.update_source_label()
+            try:
+                with open(self.internal_config, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                self.validate_config(data)
+                self.config_path = self.internal_config
+                self.set_editor_text(data)
+                self.refresh_block_view(data)
+                self.update_source_label()
+                self.update_preview()
+            except Exception as e:
+                Messagebox.show_error(f"Failed to load default layout config: {e}", "Load Error")
+
+    def format_json(self):
+        try:
+            json_data = json.loads(self.get_editor_text())
+            self.validate_config(json_data)
+            self.set_editor_text(json_data)
+            self.refresh_block_view(json_data)
             self.update_preview()
+            self.is_dirty = True
+            self.update_status("JSON formatted", INFO)
+        except Exception as e:
+            Messagebox.show_error(f"Unable to format JSON: {e}", "Format Error")
+
+    def validate_editor_json(self):
+        try:
+            json_data = json.loads(self.get_editor_text())
+            self.validate_config(json_data)
+            self.update_status("Layout JSON is valid", SUCCESS)
+            Messagebox.show_info("Layout JSON is valid.", "Validation Success")
+        except Exception as e:
+            self.update_status(f"Validation error: {e}", DANGER)
+            Messagebox.show_error(f"Layout JSON is invalid: {e}", "Validation Error")
+
+    def on_save_shortcut(self, _event=None):
+        self.save_config()
+        return "break"
 
     def save_config(self):
         try:
-            raw_data = self.text_area.get("1.0", END).strip()
+            raw_data = self.get_editor_text()
             json_data = json.loads(raw_data)
-            with open(self.save_path, 'w') as f:
-                json.dump(json_data, f, indent=4)
+            self.validate_config(json_data)
+
+            save_dir = os.path.dirname(os.path.abspath(self.save_path)) or os.path.abspath(".")
+            os.makedirs(save_dir, exist_ok=True)
+
+            fd, temp_path = tempfile.mkstemp(prefix="layout_config_", suffix=".json.tmp", dir=save_dir)
+            try:
+                with os.fdopen(fd, 'w', encoding='utf-8') as f:
+                    json.dump(json_data, f, indent=4)
+                    f.write("\n")
+
+                if os.path.exists(self.save_path):
+                    shutil.copy2(self.save_path, f"{self.save_path}.bak")
+
+                os.replace(temp_path, self.save_path)
+            except Exception:
+                if os.path.exists(temp_path):
+                    os.remove(temp_path)
+                raise
+
             self.config_path = self.save_path
+            self.is_dirty = False
             self.update_source_label()
-            Messagebox.show_info("Layout saved! Production Log will update next time it's opened.", "Success")
+            self.text_area.edit_modified(False)
+            self.refresh_block_view(json_data)
+            Messagebox.show_info(f"Layout saved to {self.save_path}. A backup was kept as {self.save_path}.bak when applicable.", "Success")
             self.update_preview()
         except Exception as e:
             Messagebox.show_error(f"Error saving: {e}", "Error")

@@ -31,10 +31,10 @@ class ProductionLog:
         self.parent = parent 
         self.dispatcher = dispatcher
         
-        # Path Logic: Config is internal (template), Data is external (user)
-        self.config_path = resource_path("layout_config.json")
+        # Prefer the local config so Layout Manager saves are used immediately in dev and packaged builds.
+        self.config_path = external_path("layout_config.json")
         if not os.path.exists(self.config_path):
-            self.config_path = external_path("layout_config.json")
+            self.config_path = resource_path("layout_config.json")
 
         self.dt_codes = [
             "1 Misc Reason", "2 Machine Repairs", "3 AMC, SBC, Shakeout", 
