@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+env/
+
+# Application Data & Config
+data/
+exports/
+settings.json
+
+# Build Artifacts
+build/
+dist/
+
+# IDEs
+.vscode/
+.idea/

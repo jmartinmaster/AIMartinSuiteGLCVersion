@@ -1,0 +1,175 @@
+# The Martin Suite (GLC Edition)
+# Copyright (C) 2026 Jamie Martin
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+import tkinter as tk
+from tkinter import ttk
+import ttkbootstrap as tb
+from ttkbootstrap.constants import *
+import json
+import os
+
+class RateManager:
+    def __init__(self, parent, dispatcher):
+        self.parent = parent
+        self.dispatcher = dispatcher
+        self.data_file = "rates.json"
+        self.rates = self.load_data()
+        self.editing_part = None  # Tracks the key during Edit Mode
+        
+        self.setup_ui()
+
+    def load_data(self):
+        if os.path.exists(self.data_file):
+            try:
+                with open(self.data_file, 'r') as f:
+                    return json.load(f)
+            except:
+                return {}
+        return {}
+
+    def save_data(self):
+        with open(self.data_file, 'w') as f:
+            json.dump(self.rates, f, indent=4)
+        # Update dispatcher's shared data
+        if hasattr(self.dispatcher, 'shared_data'):
+            self.dispatcher.shared_data['rates_count'] = len(self.rates)
+
+    def setup_ui(self):
+        # Main Container
+        self.main_container = tb.Frame(self.parent, padding=10)
+        self.main_container.pack(fill=BOTH, expand=True)
+
+        # --- Header Section ---
+        header = tb.Frame(self.main_container)
+        header.pack(fill=X, pady=(0, 10))
+        tb.Label(header, text="Rate Manager", font=("Helvetica", 16, "bold")).pack(side=LEFT)
+        
+        # Search
+        self.search_var = tk.StringVar()
+        self.search_var.trace("w", lambda *args: self.refresh_table())
+        tb.Entry(header, textvariable=self.search_var, width=20).pack(side=RIGHT, padx=5)
+        tb.Label(header, text="Search:", bootstyle=SECONDARY).pack(side=RIGHT)
+
+        # --- Table Section ---
+        self.tree = tb.Treeview(self.main_container, columns=("Part", "Rate"), show="headings", bootstyle=INFO)
+        self.tree.heading("Part", text="Part Number")
+        self.tree.heading("Rate", text="Target Rate")
+        self.tree.pack(fill=BOTH, expand=True)
+
+        # --- Form Section (The "Lockable" UI) ---
+        self.form = tb.Labelframe(self.main_container, text=" Part Details ", padding=15)
+        self.form.pack(fill=X, pady=15)
+
+        # Inputs
+        tb.Label(self.form, text="Part #:").grid(row=0, column=0, padx=5, sticky=W)
+        self.part_ent = tb.Entry(self.form)
+        self.part_ent.grid(row=0, column=1, padx=5, sticky=EW)
+
+        tb.Label(self.form, text="Rate:").grid(row=0, column=2, padx=5, sticky=W)
+        self.rate_ent = tb.Entry(self.form)
+        self.rate_ent.grid(row=0, column=3, padx=5, sticky=EW)
+
+        # Buttons
+        self.btn_frame = tb.Frame(self.form)
+        self.btn_frame.grid(row=0, column=4, padx=10)
+
+        self.primary_btn = tb.Button(self.btn_frame, text="Add", bootstyle=SUCCESS, command=self.add_rate, width=10)
+        self.primary_btn.pack(side=LEFT, padx=2)
+
+        self.secondary_btn = tb.Button(self.btn_frame, text="Edit", bootstyle=WARNING, command=self.enter_edit_mode, width=10)
+        self.secondary_btn.pack(side=LEFT, padx=2)
+
+        self.del_btn = tb.Button(self.btn_frame, text="Delete", bootstyle=DANGER, command=self.delete_rate, width=10)
+        self.del_btn.pack(side=LEFT, padx=2)
+
+        self.form.columnconfigure((1, 3), weight=1)
+        self.refresh_table()
+
+    def refresh_table(self):
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+        search = self.search_var.get().lower()
+        for part, rate in self.rates.items():
+            part_str = str(part) # Keep it as a literal string
+            if search in part_str.lower():
+                # We set the 'iid' to the part number itself. 
+                # This ensures the "ID" of the row is the exact string "0204"
+                self.tree.insert("", END, iid=part_str, values=(part_str, rate))
+
+    def enter_edit_mode(self):
+        selected = self.tree.selection()
+        if not selected: return
+        
+        # We grab the 'iid' instead of the display value. 
+        # The iid is guaranteed to be the exact string we saved.
+        part_key = self.tree.focus() 
+        rate = self.tree.item(part_key)['values'][1]
+
+        self.editing_part = part_key 
+
+        self.part_ent.delete(0, END)
+        self.part_ent.insert(0, part_key)
+        self.part_ent.config(state='disabled')
+        
+        self.rate_ent.delete(0, END)
+        self.rate_ent.insert(0, rate)
+
+        self.primary_btn.config(text="Save", bootstyle=INFO, command=self.save_edit)
+        self.secondary_btn.config(text="Cancel", bootstyle=SECONDARY, command=self.cancel_edit)
+        self.del_btn.config(state='disabled')
+
+    def save_edit(self):
+        new_rate = self.rate_ent.get().strip()
+        # Use the stored editing_part key to ensure we overwrite the EXACT entry
+        if self.editing_part and new_rate:
+            self.rates[str(self.editing_part)] = new_rate
+            self.save_data()
+            self.cancel_edit()
+            self.refresh_table()
+
+    def cancel_edit(self):
+        self.editing_part = None
+        self.part_ent.config(state='normal')
+        self.part_ent.delete(0, END)
+        self.rate_ent.delete(0, END)
+        
+        # Reset UI
+        self.primary_btn.config(text="Add", bootstyle=SUCCESS, command=self.add_rate)
+        self.secondary_btn.config(text="Edit", bootstyle=WARNING, command=self.enter_edit_mode)
+        self.del_btn.config(state='normal')
+
+    def add_rate(self):
+        # 1. Get raw text from entry (DO NOT convert to int)
+        part = self.part_ent.get().strip()
+        rate = self.rate_ent.get().strip()
+        
+        if part and rate:
+            # 2. Store it as a string key. 
+            # This preserves leading zeros without adding extra ones.
+            self.rates[str(part)] = str(rate)
+            self.save_data()
+            self.refresh_table()
+            self.part_ent.delete(0, END)
+            self.rate_ent.delete(0, END)
+    def delete_rate(self):
+        # Focus gives us the iid (the literal string key)
+        part_key = self.tree.focus()
+        if part_key in self.rates:
+            del self.rates[part_key]
+            self.save_data()
+            self.refresh_table()
+def get_ui(parent, dispatcher):
+    RateManager(parent, dispatcher)
