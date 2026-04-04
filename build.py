@@ -20,15 +20,16 @@ import shutil
 import stat
 import subprocess
 
-# Define your project name
-APP_NAME = "TheMartinSuite_GLC"
+from app_identity import APP_NAME, LEGACY_EXE_NAME, format_versioned_exe_name, load_version_from_main
+
 SPEC_FILE = f"{APP_NAME}.spec"
+EXE_NAME = format_versioned_exe_name(load_version_from_main())
 
 
 def clean_previous_builds():
-    exe_name = f"{APP_NAME}.exe"
     if os.name == "nt":
-        subprocess.run(["taskkill", "/F", "/IM", exe_name], check=False, capture_output=True)
+        for exe_name in {EXE_NAME, LEGACY_EXE_NAME}:
+            subprocess.run(["taskkill", "/F", "/IM", exe_name], check=False, capture_output=True)
 
     def remove_readonly(_func, path, _exc_info):
         os.chmod(path, stat.S_IWRITE)
@@ -50,4 +51,4 @@ PyInstaller.__main__.run([
     '--noconfirm',
 ])
 
-print(f"\n--- Build Complete! Check dist/{APP_NAME} ---")
+print(f"\n--- Build Complete! Check dist/{EXE_NAME} ---")

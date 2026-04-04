@@ -4,6 +4,15 @@ This changelog tracks the main branch release line for The Martin Suite (GLC Edi
 
 Version headings below are aligned to the current `1.x` release line used by Dispatcher Core. Earlier work has been grouped into practical release milestones so the shipped feature history is easier to follow without rewriting older module version markers.
 
+## [1.2.4] - 2026-04-04
+
+### Changed
+
+- Promoted Dispatcher Core to stable version `1.2.4` for the versioned packaged updater release.
+- Switched packaged builds to versioned EXE names such as `TheMartinSuite_GLC_v1.2.4.exe`.
+- Reworked packaged updates so the newer EXE downloads beside the current one, launches separately, and leaves the older copy available for testing until cleanup is confirmed.
+- Added startup detection so newer packaged builds can offer removal of older local EXE versions after side-by-side update testing.
+
 ## [1.2.2] - 2026-04-04
 
 ### Changed

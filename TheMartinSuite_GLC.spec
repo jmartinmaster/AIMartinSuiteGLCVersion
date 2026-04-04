@@ -17,11 +17,14 @@
 
 from PyInstaller.utils.hooks import collect_submodules
 
+from app_identity import format_versioned_exe_stem, load_version_from_main
+
 hiddenimports = ['openpyxl', 'openpyxl.cell.cell', 'PyInstaller', 'tkinter.messagebox', 'tkinter.filedialog']
 hiddenimports += collect_submodules('openpyxl')
 hiddenimports += collect_submodules('PyInstaller')
 
 datas = [('modules', 'modules'), ('docs', 'docs'), ('templates', 'templates'), ('layout_config.json', '.'), ('rates.json', '.'), ('LICENSE.txt', '.'), ('icon.ico', '.'), ('icon-16.png', '.'), ('icon-24.png', '.'), ('icon-32.png', '.'), ('icon-48.png', '.'), ('icon-64.png', '.'), ('icon.png', '.'), ('icon.jpg', '.'), ('splash-logo.png', '.')]
+app_build_name = format_versioned_exe_stem(load_version_from_main())
 
 
 a = Analysis(
@@ -45,7 +48,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='TheMartinSuite_GLC',
+    name=app_build_name,
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

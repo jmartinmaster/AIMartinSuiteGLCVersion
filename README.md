@@ -55,14 +55,14 @@ These two forms do not have identical behavior. The Python version has access to
 - Does not have the same direct access to repository source files or local build tooling that the Python version has.
 - Bundles the help documentation and `LICENSE.txt` for in-app access.
 - Uses the Update Manager only for executable-release checks, not for source-file maintenance.
-- Automatic self-replacement of the running EXE is still not dependable and may require manual EXE replacement during testing.
+- Packaged builds now use versioned EXE filenames so a newer build can download beside the current one, launch separately, and leave the older copy available until cleanup is confirmed.
 
 ## Update Manager Status
 
 - The updater checks only the Dispatcher Core version in `main.py` as the master version.
-- The current stable Dispatcher Core release is `1.2`.
+- The current stable Dispatcher Core release is `1.2.4`.
 - Two-part versions such as `1.07` trigger an executable update when greater than the local version.
 - Three-part versions only trigger an executable update when the third number is even, such as `1.07.2`.
 - Odd patch versions such as `1.07.1` are ignored.
 - In Python/source mode, new releases are still best handled by rebuilding manually.
-- In packaged EXE mode, automatic self-replacement is still experimental and may require manual EXE replacement during testing.
+- In packaged EXE mode, stable updates download a versioned EXE beside the current copy, launch the newer build, and let the newer build offer cleanup of older local EXEs.

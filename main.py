@@ -26,12 +26,13 @@ from ctypes import wintypes
 import ttkbootstrap as tb
 from ttkbootstrap.constants import *
 from ttkbootstrap.widgets import ToastNotification
+from app_identity import LEGACY_EXE_NAME, normalize_version, parse_version, parse_versioned_exe_name
 from modules.app_logging import log_exception
 from modules.theme_manager import apply_readability_overrides, normalize_theme, DEFAULT_THEME
 from modules.utils import external_path, local_or_resource_path, resource_path
 
 __module_name__ = "Dispatcher Core"
-__version__ = "1.2.2"
+__version__ = "1.2.4"
 WINDOWS_APP_ID = "JamieMartin.TheMartinSuite.GLC"
 APP_ICON_RELATIVE_PATH = "icon.ico"
 APP_ICON_IMAGE_RELATIVE_PATHS = [
@@ -56,6 +57,58 @@ LR_DEFAULTSIZE = 0x0040
 GCLP_HICON = -14
 GCLP_HICONSM = -34
 
+
+def get_obsolete_local_executables(current_exe_path, current_version):
+    if not getattr(sys, "frozen", False):
+        return []
+
+    current_version_parts = normalize_version(parse_version(current_version))
+    if current_version_parts is None:
+        return []
+
+    current_name = os.path.basename(current_exe_path)
+    current_directory = os.path.dirname(current_exe_path)
+    obsolete_entries = []
+
+    try:
+        directory_entries = os.listdir(current_directory)
+    except OSError:
+        return []
+
+    for file_name in directory_entries:
+        if file_name.lower() == current_name.lower() or not file_name.lower().endswith(".exe"):
+            continue
+
+        file_path = os.path.join(current_directory, file_name)
+        if not os.path.isfile(file_path):
+            continue
+
+        if file_name.lower() == LEGACY_EXE_NAME.lower():
+            obsolete_entries.append({
+                "name": file_name,
+                "path": file_path,
+                "version": "Legacy",
+            })
+            continue
+
+        version_text = parse_versioned_exe_name(file_name)
+        candidate_version = normalize_version(parse_version(version_text)) if version_text else None
+        if candidate_version is None or candidate_version >= current_version_parts:
+            continue
+
+        obsolete_entries.append({
+            "name": file_name,
+            "path": file_path,
+            "version": version_text,
+        })
+
+    return sorted(
+        obsolete_entries,
+        key=lambda entry: (
+            0 if entry["version"] == "Legacy" else 1,
+            normalize_version(parse_version(entry["version"])) or (0, 0, 0),
+        ),
+    )
 
 
 def get_work_area_insets(root):
@@ -171,6 +224,7 @@ class Dispatcher:
         self._load_modules_list()
         self._bind_mousewheel()
         self.load_module("production_log", use_transition=False)
+        self.root.after(900, self.prompt_old_executable_cleanup)
 
     def _setup_menu(self):
         menubar = tk.Menu(self.root)
@@ -458,6 +512,40 @@ class Dispatcher:
             position=(24 + right_inset, 24 + bottom_inset, "se"),
         )
         toast.show_toast()
+
+    def prompt_old_executable_cleanup(self):
+        obsolete_executables = get_obsolete_local_executables(os.path.abspath(sys.executable), __version__)
+        if not obsolete_executables:
+            return
+
+        file_list = "\n".join(f"- {entry['name']}" for entry in obsolete_executables)
+        if not messagebox.askyesno(
+            "Remove Older Versions",
+            (
+                "Older local EXE versions were found next to the current build:\n\n"
+                f"{file_list}\n\n"
+                "Remove them now?"
+            ),
+        ):
+            return
+
+        removed = []
+        failed = []
+        for entry in obsolete_executables:
+            try:
+                os.remove(entry["path"])
+                removed.append(entry["name"])
+            except OSError:
+                failed.append(entry["name"])
+
+        if removed:
+            self.show_toast("Cleanup Complete", f"Removed {len(removed)} older EXE file(s).", SUCCESS)
+        if failed:
+            failure_list = "\n".join(f"- {name}" for name in failed)
+            messagebox.showwarning(
+                "Cleanup Incomplete",
+                f"These EXE files could not be removed:\n\n{failure_list}",
+            )
 
     def apply_theme(self, theme_name, redraw=False):
         normalized_theme = normalize_theme(theme_name)
