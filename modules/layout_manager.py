@@ -22,9 +22,8 @@ from ttkbootstrap.constants import *
 from ttkbootstrap.dialogs import Messagebox
 import json
 import os
-import shutil
 import sys
-import tempfile
+from modules.persistence import write_json_with_backup
 from modules.theme_manager import normalize_theme
 
 __module_name__ = "Layout Manager"
@@ -713,30 +712,24 @@ class LayoutManager:
             json_data = json.loads(raw_data)
             self.validate_config(json_data)
 
-            save_dir = os.path.dirname(os.path.abspath(self.save_path)) or os.path.abspath(".")
-            os.makedirs(save_dir, exist_ok=True)
-
-            fd, temp_path = tempfile.mkstemp(prefix="layout_config_", suffix=".json.tmp", dir=save_dir)
-            try:
-                with os.fdopen(fd, 'w', encoding='utf-8') as f:
-                    json.dump(json_data, f, indent=4)
-                    f.write("\n")
-
-                if os.path.exists(self.save_path):
-                    shutil.copy2(self.save_path, f"{self.save_path}.bak")
-
-                os.replace(temp_path, self.save_path)
-            except Exception:
-                if os.path.exists(temp_path):
-                    os.remove(temp_path)
-                raise
+            backup_info = write_json_with_backup(
+                self.save_path,
+                json_data,
+                backup_dir=os.path.join(os.path.abspath("."), "data", "backups", "layouts"),
+                keep_count=12,
+            )
 
             self.config_path = self.save_path
             self.is_dirty = False
             self.update_source_label()
             self.text_area.edit_modified(False)
             self.refresh_block_view(json_data)
-            Messagebox.show_info(f"Layout saved to {self.save_path}. A backup was kept as {self.save_path}.bak when applicable.", "Success")
+            backup_message = f"Layout saved to {self.save_path}."
+            if backup_info.get("versioned_backup_path"):
+                backup_message += " A recovery copy was stored in data/backups/layouts."
+            elif backup_info.get("adjacent_backup_path"):
+                backup_message += f" A backup was kept as {os.path.basename(backup_info['adjacent_backup_path'])}."
+            Messagebox.show_info(backup_message, "Success")
             self.update_preview()
         except Exception as e:
             Messagebox.show_error(f"Error saving: {e}", "Error")

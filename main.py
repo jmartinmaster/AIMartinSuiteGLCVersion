@@ -25,7 +25,7 @@ from ttkbootstrap.constants import *
 from modules.theme_manager import apply_readability_overrides, normalize_theme, DEFAULT_THEME
 
 __module_name__ = "Dispatcher Core"
-__version__ = "1.0.6"
+__version__ = "1.0.8"
 
 def resource_path(relative_path):
     try:
@@ -118,7 +118,7 @@ class Dispatcher:
             self.active_module_instance.import_from_excel_ui()
 
     def pre_load_manifest(self):
-        module_list = ["production_log", "layout_manager", "data_handler", "about", "settings_manager", "theme_manager", "help_viewer", "update_manager"]
+        module_list = ["production_log", "layout_manager", "data_handler", "about", "settings_manager", "theme_manager", "help_viewer", "update_manager", "recovery_viewer"]
         for mod_name in module_list:
             try:
                 full_path = f"modules.{mod_name}"
@@ -164,7 +164,7 @@ class Dispatcher:
         for filename in sorted(os.listdir(self.modules_path)):
             if filename.endswith(".py") and filename != "__init__.py":
                 module_name = filename[:-3]
-                if module_name in ["about", "data_handler", "splash", "example_modules", "theme_manager", "help_viewer"]: continue 
+                if module_name in ["about", "data_handler", "splash", "example_modules", "theme_manager", "help_viewer", "persistence"]: continue 
                 display_name = module_name.replace("_", " ").title()
                 
                 tb.Button(self.nav_container, text=display_name,

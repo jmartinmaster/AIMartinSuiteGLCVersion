@@ -14,12 +14,22 @@ These two forms do not have identical behavior. The Python version has access to
 ## Shared Capabilities
 
 - Production Log workflow with draft save and reopen support.
+- Automatic recovery snapshots for overwritten drafts.
 - Excel export and import support for production sheet work.
 - Layout Manager and Rate Manager tools.
+- Backup / Recovery viewer for browsing and restoring draft snapshots and configuration backups.
 - Settings management for export paths, theme selection, and production defaults.
 - In-app help viewer and About screen.
 - Bundled GPL license access from Help Center and About.
 - Theme support with readability overrides.
+- Rotated backup copies for settings, layout, and rate file saves.
+
+## Data Safety And Recovery
+
+- `settings.json`, `layout_config.json`, and `rates.json` now save through an atomic write path instead of direct overwrite-only writes.
+- Each of those files keeps a local `.bak` recovery copy plus rotated recovery history under `data/backups`.
+- Production Log drafts continue to save in `data/pending`, and overwritten drafts now keep recovery snapshots under `data/pending/history`.
+- Backup / Recovery gives operators a single place to restore saved drafts, recovery snapshots, and JSON backup copies without using Windows Explorer.
 
 ## Source / Python Mode
 
@@ -27,7 +37,7 @@ These two forms do not have identical behavior. The Python version has access to
 - Can use the local project structure, docs, templates, and module files directly.
 - Can be rebuilt locally with `build.py` and PyInstaller.
 - Can be used to develop, test, and package new EXE releases.
-- The Update Manager can check repository versions, but source-mode executable updates are still expected to be handled by rebuilding manually.
+- The Update Manager gives a compact Dispatcher Core release check, but source-mode executable updates are still expected to be handled by rebuilding manually.
 
 ## Packaged EXE Mode
 
@@ -40,7 +50,7 @@ These two forms do not have identical behavior. The Python version has access to
 
 ## Update Manager Status
 
-- The updater checks the Dispatcher Core version in `main.py` as the master version.
+- The updater checks only the Dispatcher Core version in `main.py` as the master version.
 - Two-part versions such as `1.07` trigger an executable update when greater than the local version.
 - Three-part versions only trigger an executable update when the third number is even, such as `1.07.2`.
 - Odd patch versions such as `1.07.1` are ignored.

@@ -1,6 +1,6 @@
 # The Martin Suite (GLC Edition)
 
-The Martin Suite is a desktop application for logging Disamatic production, managing rates, editing layout mappings, and packaging a Windows executable release. Built with Python, Tkinter, and `ttkbootstrap`, it supports both source-based development and a packaged EXE workflow.
+The Martin Suite is a desktop application for logging Disamatic production, managing rates, editing layout mappings, recovering saved work, and packaging a Windows executable release. Built with Python, Tkinter, and `ttkbootstrap`, it supports both source-based development and a packaged EXE workflow.
 
 ## Features
 
@@ -11,10 +11,13 @@ The Martin Suite is a desktop application for logging Disamatic production, mana
 * **Excel Integration:** 
   * Export production logs to formatted Excel sheets.
   * Import existing Excel sheets to resume or edit logged data.
+* **Draft Recovery & Restore:** Save drafts, retain recovery snapshots when drafts are overwritten, and restore them from the Backup / Recovery view.
 * **Layout Manager:** A built-in JSON editor to dynamically adjust the UI grid layout of the production form.
 * **Theme & Settings Management:** Support for curated readable themes and configurable production defaults.
+* **Backup-Aware Saves:** Settings, rates, and layout writes keep `.bak` copies plus rotated backups under `data/backups`.
 * **Help & License Access:** Built-in Help Center tabs plus bundled GPL license access from Help and About.
-* **Update Manager:** Checks Dispatcher Core version against the repository and can target packaged EXE updates.
+* **Backup / Recovery Viewer:** Browse pending drafts, recovery snapshots, and configuration backups from inside the suite.
+* **Update Manager:** Shows a compact Dispatcher Core release check and can target packaged EXE updates.
 
 ## Prerequisites
 
