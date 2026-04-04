@@ -39,6 +39,8 @@ Optional keys per field:
 - `cell`: Excel cell used for export/import
 - `readonly`: if `true`, the field cannot be edited directly in the form
 - `default`: default text loaded into the field
+- `import_enabled`: set to `false` to leave the field out of Excel import while still keeping it in the form
+- `export_enabled`: set to `false` to prevent exporting the field back into the workbook
 
 Example:
 
@@ -53,6 +55,8 @@ Example:
   "default": "240"
 }
 ```
+
+Import-only workbook summary fields are supported by combining `readonly: true` with `export_enabled: false`. This is useful for cells such as calculated percentages or formula-driven summary rows that you want to display in Production Log without overwriting the workbook formula on export.
 
 Protected core fields currently expected by the suite:
 

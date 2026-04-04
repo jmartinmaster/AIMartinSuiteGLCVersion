@@ -9,7 +9,7 @@ a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
-    datas=[('modules', 'modules'), ('templates', 'templates'), ('layout_config.json', '.')],
+    datas=[('modules', 'modules'), ('templates', 'templates'), ('layout_config.json', '.'), ('icon.ico', '.'), ('icon-16.png', '.'), ('icon-24.png', '.'), ('icon-32.png', '.'), ('icon-48.png', '.'), ('icon-64.png', '.'), ('splash-logo.png', '.')],
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
@@ -36,6 +36,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon=['icon.ico'],
 )
 coll = COLLECT(
     exe,

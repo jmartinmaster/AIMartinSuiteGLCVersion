@@ -25,10 +25,13 @@ import os
 import sys
 
 from modules import recovery_viewer
+from modules.downtime_codes import get_code_options, normalize_code_value
 from modules.persistence import write_json_with_backup
 
 __module_name__ = "Production Log"
-__version__ = "1.0.3"
+__version__ = "1.1.0"
+BALANCE_DOWNTIME_CAUSE = "Time Balance Adjustment"
+DEFAULT_GHOST_LABEL = "Ghost Time: 0 min"
 
 def resource_path(relative_path):
     """ Get absolute path to internal resource (Read-Only) """
@@ -52,11 +55,7 @@ class ProductionLog:
         if not os.path.exists(self.config_path):
             self.config_path = resource_path("layout_config.json")
 
-        self.dt_codes = [
-            "1 Misc Reason", "2 Machine Repairs", "3 AMC, SBC, Shakeout", 
-            "4 Pattern Change", "5 Pattern Repair", "6 No Iron (Cupola)",
-            "7 No Iron (Transfer)", "8 Auto Pour", "9 Inoculator", "10 No Sand"
-        ]
+        self.dt_codes = get_code_options()
 
         self.production_rows = []
         self.downtime_rows = []
@@ -216,13 +215,30 @@ class ProductionLog:
                 if not field.get("readonly"):
                     self.bind_dirty_tracking(ent, ("<KeyRelease>",))
 
+            summary_row = (max((field.get("row", 0) for field in config["header_fields"]), default=0) + 1)
+            tb.Label(header_wrapper, text="Target Time").grid(row=summary_row, column=0, padx=5, pady=(10, 5), sticky=W)
+            self.target_time_entry = tb.Entry(header_wrapper, width=12)
+            self.target_time_entry.config(state="readonly", bootstyle=INFO)
+            self.target_time_entry.grid(row=summary_row, column=1, padx=5, pady=(10, 5), sticky=W)
+
             if "date" in self.entries:
                 self.entries["date"].bind("<FocusOut>", self.sync_julian_cast_date)
+            if "hours" in self.entries:
+                self.entries["hours"].bind("<KeyRelease>", self.on_hours_changed, add="+")
         except Exception as e:
             tb.Label(header_wrapper, text=f"Layout Error: {e}", bootstyle=DANGER).pack()
 
         prod_wrapper = tb.Labelframe(self.parent, text=" Production Jobs ", padding=10)
         prod_wrapper.pack(fill=X, padx=10, pady=5)
+        prod_columns = tb.Frame(prod_wrapper)
+        prod_columns.pack(fill=X, pady=(0, 4))
+        for text, width, side in (
+            ("Shop Order", 15, LEFT),
+            ("Part Number", 15, LEFT),
+            ("Molds", 10, LEFT),
+            ("Time", 10, RIGHT),
+        ):
+            tb.Label(prod_columns, text=text, width=width, anchor=W if side == LEFT else E, style="Martin.Muted.TLabel").pack(side=side, padx=5)
         self.production_container = tb.Frame(prod_wrapper)
         self.production_container.pack(fill=X)
         tb.Button(prod_wrapper, text="+ Add Production", command=self.add_production_row, bootstyle=SUCCESS).pack(pady=5)
@@ -231,12 +247,17 @@ class ProductionLog:
         dt_wrapper.pack(fill=X, padx=10, pady=5)
         self.downtime_container = tb.Frame(dt_wrapper)
         self.downtime_container.pack(fill=X)
-        tb.Button(dt_wrapper, text="+ Add Downtime", command=self.add_downtime_row, bootstyle=SUCCESS).pack(pady=5)
+        dt_actions = tb.Frame(dt_wrapper)
+        dt_actions.pack(fill=X, pady=5)
+        tb.Button(dt_actions, text="+ Add Downtime", command=self.add_downtime_row, bootstyle=SUCCESS).pack(side=LEFT)
+        tb.Button(dt_actions, text="Balance Downtime", command=self.balance_downtime_to_shift, bootstyle=WARNING).pack(side=LEFT, padx=5)
 
         footer = tb.Frame(self.parent, padding=20)
         footer.pack(fill=X)
         self.eff_display_lbl = tb.Label(footer, text="EFF%: 0.00", font=('-size 14 -weight bold'))
         self.eff_display_lbl.pack(side=LEFT, padx=10)
+        self.ghost_total_lbl = tb.Label(footer, text=DEFAULT_GHOST_LABEL, font=('-size 12 -weight bold'))
+        self.ghost_total_lbl.pack(side=LEFT, padx=10)
         
         tb.Button(footer, text="Calculate All", command=self.calculate_metrics, bootstyle=INFO).pack(side=RIGHT)
         tb.Button(footer, text="Save Draft", command=self.save_draft, bootstyle=SECONDARY).pack(side=LEFT, padx=5)
@@ -244,6 +265,8 @@ class ProductionLog:
         tb.Button(footer, text="Import Excel", command=self.import_from_excel_ui, bootstyle=INFO).pack(side=LEFT, padx=5)
 
         self.add_production_row()
+        self.update_target_time_display()
+        self.update_ghost_total_display()
         self.mark_clean()
         self.update_recovery_ui()
 
@@ -266,6 +289,7 @@ class ProductionLog:
         self.bind_dirty_tracking(row["part_number"], ("<KeyRelease>",))
         self.bind_dirty_tracking(row["molds"], ("<KeyRelease>",))
         self.production_rows.append(row)
+        self.update_ghost_total_display()
         return row
 
     def add_downtime_row(self):
@@ -293,6 +317,293 @@ class ProductionLog:
         self.downtime_rows.append(row)
         return row
 
+    def refresh_downtime_codes(self):
+        self.dt_codes = get_code_options()
+        for row in self.downtime_rows:
+            code_widget = row.get("code")
+            if code_widget is None:
+                continue
+            current_value = normalize_code_value(code_widget.get())
+            code_widget.configure(values=self.dt_codes)
+            if current_value:
+                code_widget.set(current_value)
+
+    def parse_minutes_label(self, value):
+        text = str(value or "").strip().lower().replace(" min", "")
+        try:
+            return int(float(text))
+        except Exception:
+            return 0
+
+    def on_hours_changed(self, _event=None):
+        self.update_target_time_display()
+        self.calculate_metrics()
+
+    def update_target_time_display(self):
+        if not hasattr(self, "target_time_entry"):
+            return
+        target_minutes = self.get_shift_total_minutes()
+        self.target_time_entry.config(state="normal")
+        self.target_time_entry.delete(0, END)
+        self.target_time_entry.insert(0, f"{target_minutes} min" if target_minutes > 0 else "")
+        self.target_time_entry.config(state="readonly")
+
+    def update_ghost_total_display(self):
+        if not hasattr(self, "ghost_total_lbl"):
+            return
+        ghost_minutes = self.get_ghost_time_minutes()
+        if ghost_minutes > 0:
+            message = f"Ghost Time: {ghost_minutes} min missing"
+        elif ghost_minutes < 0:
+            message = f"Ghost Time: {abs(ghost_minutes)} min extra"
+        else:
+            message = "Ghost Time: 0 min"
+        self.ghost_total_lbl.config(text=message)
+
+    def parse_clock_value(self, value):
+        text = str(value or "").strip()
+        if not text:
+            return None
+        digits = "".join(ch for ch in text if ch.isdigit())
+        if not digits:
+            return None
+        digits = digits.zfill(4)[-4:]
+        hours = int(digits[:2])
+        minutes = int(digits[2:])
+        if hours > 23 or minutes > 59:
+            return None
+        return hours * 60 + minutes
+
+    def format_clock_value(self, total_minutes):
+        normalized = int(total_minutes) % (24 * 60)
+        return f"{normalized // 60:02}{normalized % 60:02}"
+
+    def get_row_duration_minutes(self, row):
+        start_minutes = self.parse_clock_value(row["start"].get())
+        stop_minutes = self.parse_clock_value(row["stop"].get())
+        if start_minutes is not None and stop_minutes is not None:
+            if stop_minutes < start_minutes:
+                stop_minutes += 24 * 60
+            return stop_minutes - start_minutes
+        return self.parse_minutes_label(row["time_calc"].cget("text"))
+
+    def is_balance_downtime_row(self, row):
+        return row["cause"].get().strip() == BALANCE_DOWNTIME_CAUSE
+
+    def find_balance_downtime_row(self):
+        for row in self.downtime_rows:
+            if self.is_balance_downtime_row(row):
+                return row
+        return None
+
+    def remove_downtime_row(self, row):
+        row["start"].master.destroy()
+        if row in self.downtime_rows:
+            self.downtime_rows.remove(row)
+
+    def set_downtime_row_duration(self, row, duration_minutes, set_balance_metadata=False):
+        duration_minutes = max(0, int(duration_minutes))
+        start_minutes = self.parse_clock_value(row["start"].get())
+        if start_minutes is None:
+            start_minutes = 0
+            row["start"].delete(0, END)
+            row["start"].insert(0, self.format_clock_value(start_minutes))
+
+        row["stop"].delete(0, END)
+        row["stop"].insert(0, self.format_clock_value(start_minutes + duration_minutes))
+        if set_balance_metadata:
+            if not row["code"].get().strip() and self.dt_codes:
+                row["code"].set(normalize_code_value(self.dt_codes[0]))
+            row["cause"].delete(0, END)
+            row["cause"].insert(0, BALANCE_DOWNTIME_CAUSE)
+
+    def get_shift_total_minutes(self):
+        try:
+            return int(round(float(self.entries["hours"].get() or 0) * 60))
+        except Exception:
+            return 0
+
+    def get_production_total_minutes(self):
+        return sum(self.parse_minutes_label(row["time_calc"].cget("text")) for row in self.production_rows)
+
+    def get_total_downtime_minutes(self):
+        return sum(self.get_row_duration_minutes(row) for row in self.downtime_rows)
+
+    def get_ghost_time_minutes(self):
+        shift_total = self.get_shift_total_minutes()
+        if shift_total <= 0:
+            return 0
+        return shift_total - self.get_production_total_minutes() - self.get_total_downtime_minutes()
+
+    def get_manual_downtime_total_minutes(self):
+        return sum(self.get_row_duration_minutes(row) for row in self.downtime_rows if not self.is_balance_downtime_row(row))
+
+    def get_weighted_downtime_rows(self):
+        weighted_rows = []
+        for row in self.downtime_rows:
+            if self.is_balance_downtime_row(row):
+                continue
+            duration = self.get_row_duration_minutes(row)
+            if duration > 0:
+                weighted_rows.append((row, duration))
+        return weighted_rows
+
+    def allocate_weighted_minutes(self, weighted_rows, target_total_minutes):
+        target_total_minutes = max(0, int(target_total_minutes))
+        total_weight = sum(duration for _, duration in weighted_rows)
+        if total_weight <= 0:
+            return []
+
+        allocations = []
+        used_minutes = 0
+        for row, duration in weighted_rows:
+            exact = target_total_minutes * (duration / total_weight)
+            allocated = int(exact)
+            allocations.append({
+                "row": row,
+                "allocated": allocated,
+                "remainder": exact - allocated,
+            })
+            used_minutes += allocated
+
+        leftover = target_total_minutes - used_minutes
+        for item in sorted(allocations, key=lambda entry: entry["remainder"], reverse=True):
+            if leftover <= 0:
+                break
+            item["allocated"] += 1
+            leftover -= 1
+
+        return allocations
+
+    def build_downtime_timeline(self, weighted_rows):
+        timeline = []
+        day_offset = 0
+        previous_start = None
+        for row, _duration in weighted_rows:
+            start_minutes = self.parse_clock_value(row["start"].get())
+            absolute_start = None
+            if start_minutes is not None:
+                if previous_start is not None and start_minutes < previous_start:
+                    day_offset += 24 * 60
+                absolute_start = day_offset + start_minutes
+                previous_start = start_minutes
+            timeline.append({
+                "row": row,
+                "start_absolute": absolute_start,
+            })
+        return timeline
+
+    def apply_spillover_allocations(self, weighted_rows, target_total_minutes):
+        allocations = self.allocate_weighted_minutes(weighted_rows, target_total_minutes)
+        timeline = self.build_downtime_timeline(weighted_rows)
+        spill_minutes = 0
+
+        for index, (timeline_item, allocation_item) in enumerate(zip(timeline, allocations)):
+            row = timeline_item["row"]
+            desired_minutes = allocation_item["allocated"] + spill_minutes
+            spill_minutes = 0
+
+            actual_minutes = desired_minutes
+            current_start = timeline_item["start_absolute"]
+            next_start = timeline[index + 1]["start_absolute"] if index + 1 < len(timeline) else None
+            if current_start is not None and next_start is not None:
+                max_minutes = max(0, next_start - current_start)
+                if actual_minutes > max_minutes:
+                    spill_minutes = actual_minutes - max_minutes
+                    actual_minutes = max_minutes
+
+            self.set_downtime_row_duration(row, actual_minutes, set_balance_metadata=False)
+
+        if spill_minutes > 0 and timeline:
+            last_row = timeline[-1]["row"]
+            last_duration = self.get_row_duration_minutes(last_row)
+            self.set_downtime_row_duration(last_row, last_duration + spill_minutes, set_balance_metadata=False)
+
+    def apply_weighted_downtime_balance(self, target_total_minutes):
+        weighted_rows = self.get_weighted_downtime_rows()
+        if not weighted_rows:
+            return False
+
+        balance_row = self.find_balance_downtime_row()
+        if balance_row is not None:
+            self.remove_downtime_row(balance_row)
+
+        self.apply_spillover_allocations(weighted_rows, target_total_minutes)
+        return True
+
+    def balance_downtime_to_shift(self):
+        self.update_row_math()
+
+        shift_total = self.get_shift_total_minutes()
+        production_total = self.get_production_total_minutes()
+        current_downtime_total = self.get_total_downtime_minutes()
+        target_downtime_total = shift_total - production_total
+        delta_minutes = target_downtime_total - current_downtime_total
+        balance_row = self.find_balance_downtime_row()
+
+        if shift_total <= 0:
+            self.dispatcher.show_toast("Balance Downtime", "Enter a valid shift hour value before balancing.", WARNING)
+            return
+
+        if target_downtime_total < 0:
+            if balance_row is not None:
+                self.remove_downtime_row(balance_row)
+                self.update_row_math()
+                self.mark_dirty()
+            self.dispatcher.show_toast(
+                "Balance Downtime",
+                f"Recorded production time exceeds the shift total by {abs(target_downtime_total)} minutes. Review molds, rates, or shift hours before export.",
+                WARNING,
+            )
+            return
+
+        if target_downtime_total == 0:
+            if balance_row is not None:
+                self.remove_downtime_row(balance_row)
+            if self.apply_weighted_downtime_balance(0):
+                self.update_row_math()
+                self.mark_dirty()
+            self.dispatcher.show_toast(
+                "Balance Downtime",
+                "Downtime was adjusted to zero so production time now matches the shift total.",
+                SUCCESS,
+            )
+            return
+
+        if self.apply_weighted_downtime_balance(target_downtime_total):
+            self.update_row_math()
+            self.mark_dirty()
+            if delta_minutes > 0:
+                message = f"Added {delta_minutes} downtime minutes across the existing downtime rows to match the shift total."
+            elif delta_minutes < 0:
+                message = f"Removed {abs(delta_minutes)} downtime minutes across the existing downtime rows to match the shift total."
+            else:
+                message = "Existing downtime rows already matched the shift total."
+            self.dispatcher.show_toast(
+                "Balance Downtime",
+                message,
+                SUCCESS,
+            )
+            return
+
+        if balance_row is None:
+            balance_row = self.add_downtime_row()
+
+        self.set_downtime_row_duration(balance_row, target_downtime_total, set_balance_metadata=True)
+        self.update_row_math()
+        self.mark_dirty()
+        if delta_minutes > 0:
+            message = f"Added {delta_minutes} downtime minutes to the balance row because there were no existing downtime durations to distribute."
+        elif delta_minutes < 0:
+            message = f"Removed {abs(delta_minutes)} downtime minutes from the balance row to match the shift total."
+        else:
+            message = "The downtime balance row already matched the shift total."
+        self.dispatcher.show_toast(
+            "Balance Downtime",
+            message,
+            SUCCESS,
+        )
+
     def set_entry_value(self, field_id, value):
         if field_id not in self.entries:
             return
@@ -317,6 +628,9 @@ class ProductionLog:
     def populate_from_data(self, data, source_path=None, mark_dirty_after_load=False):
         for fid, val in data.get("header", {}).items():
             self.set_entry_value(fid, val)
+
+        if not str(data.get("header", {}).get("cast_date", "")).strip():
+            self.sync_julian_cast_date()
 
         self.clear_dynamic_rows()
 
@@ -343,6 +657,8 @@ class ProductionLog:
 
         self.update_row_math()
         self.calculate_metrics()
+        self.update_target_time_display()
+        self.update_ghost_total_display()
         self.current_draft_path = source_path
         if mark_dirty_after_load:
             self.mark_dirty()
@@ -515,6 +831,9 @@ class ProductionLog:
                     row["time_calc"].config(text=f"{diff} min")
             except: row["time_calc"].config(text="--")
 
+        self.update_target_time_display()
+        self.update_ghost_total_display()
+
     def calculate_metrics(self):
         try:
             total_molds = sum(int(row["molds"].get() or 0) for row in self.production_rows)
@@ -523,6 +842,8 @@ class ProductionLog:
             eff = (total_molds / (hours * goal)) * 100 if hours and goal else 0
             self.eff_display_lbl.config(text=f"EFF%: {eff:.2f}")
         except: pass
+        self.update_target_time_display()
+        self.update_ghost_total_display()
 
     def export_to_excel(self):
         try:
@@ -567,19 +888,14 @@ class ProductionLog:
         def sync_window_width(event):
             canvas.itemconfigure(window_id, width=event.width)
 
-        def on_mousewheel(event):
-            delta = -1 * int(event.delta / 120) if event.delta else 0
-            if delta:
-                canvas.yview_scroll(delta, "units")
-
         container.bind("<Configure>", sync_scroll_region)
         canvas.bind("<Configure>", sync_window_width)
-        canvas.bind_all("<MouseWheel>", on_mousewheel)
-        top.bind("<Destroy>", lambda _event: canvas.unbind_all("<MouseWheel>"), add="+")
 
         tb.Label(container, text="Pending Drafts", font=("TkDefaultFont", 10, "bold"), bootstyle=PRIMARY).pack(anchor=W, pady=(0, 6))
         for draft in drafts:
             self.add_pending_draft_card(container, draft, top)
+        self.dispatcher.bind_mousewheel_to_widget_tree(canvas, canvas)
+        self.dispatcher.bind_mousewheel_to_widget_tree(container, canvas)
 
     def add_pending_draft_card(self, container, draft_record, window):
         card = tb.Labelframe(container, text=f" {draft_record['filename']} ", padding=10, style="Martin.Card.TLabelframe")
@@ -624,7 +940,16 @@ class ProductionLog:
         try:
             date_box = self.entries.get("date")
             cast_box = self.entries.get("cast_date")
-            date_obj = datetime.strptime(date_box.get().strip(), "%m/%d/%Y")
+            raw_date = date_box.get().strip()
+            date_obj = None
+            for fmt in ("%m/%d/%Y", "%m-%d-%Y", "%Y-%m-%d", "%m%d%Y"):
+                try:
+                    date_obj = datetime.strptime(raw_date, fmt)
+                    break
+                except ValueError:
+                    continue
+            if date_obj is None:
+                return
             julian = f"{date_obj.timetuple().tm_yday:03}"
             cast_box.config(state="normal")
             cast_box.delete(0, END); cast_box.insert(0, julian)

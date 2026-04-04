@@ -9,6 +9,7 @@ env/
 data/
 exports/
 settings.json
+Sample_Data/
 
 # Generated backup artifacts
 *.bak

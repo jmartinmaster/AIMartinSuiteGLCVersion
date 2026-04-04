@@ -21,11 +21,13 @@ from tkinter import filedialog
 import json
 import os
 import sys
+from copy import deepcopy
 from modules.persistence import write_json_with_backup
+from modules.downtime_codes import DEFAULT_DT_CODE_MAP, clear_downtime_code_cache
 from modules.theme_manager import DEFAULT_THEME, get_theme_names, normalize_theme
 
 __module_name__ = "Settings Manager"
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 def external_path(relative_path):
     return os.path.join(os.path.abspath("."), relative_path)
@@ -55,8 +57,22 @@ class SettingsManager:
                 "toast_duration_sec": 5,
                 "auto_save_interval_min": 5,
                 "default_shift_hours": 8.0,
-                "default_goal_mph": 240
+                "default_goal_mph": 240,
+                "downtime_codes": deepcopy(DEFAULT_DT_CODE_MAP)
             }
+        if not isinstance(self.settings.get("downtime_codes"), dict):
+            self.settings["downtime_codes"] = deepcopy(DEFAULT_DT_CODE_MAP)
+        else:
+            normalized_codes = deepcopy(DEFAULT_DT_CODE_MAP)
+            for raw_code, raw_label in self.settings["downtime_codes"].items():
+                code = str(raw_code).strip()
+                if not code:
+                    continue
+                label = str(raw_label or "").strip()
+                if not label:
+                    continue
+                normalized_codes[code] = label
+            self.settings["downtime_codes"] = normalized_codes
         self.settings["theme"] = normalize_theme(self.settings.get("theme", DEFAULT_THEME))
         try:
             self.settings["toast_duration_sec"] = max(1, int(self.settings.get("toast_duration_sec", 5)))
@@ -64,6 +80,32 @@ class SettingsManager:
             self.settings["toast_duration_sec"] = 5
         self.saved_theme = self.settings["theme"]
         self.preview_theme = self.saved_theme
+
+    def persist_settings(self, toast_title="Settings Saved", toast_message_prefix="Theme changes were applied immediately."):
+        clear_downtime_code_cache()
+        backup_info = write_json_with_backup(
+            self.settings_path,
+            self.settings,
+            backup_dir=external_path("data/backups/settings"),
+            keep_count=12,
+        )
+
+        self.saved_theme = self.settings["theme"]
+        self.preview_theme = self.saved_theme
+        self.preview_theme = self.dispatcher.apply_theme(self.saved_theme, redraw=True)
+        self.dispatcher.refresh_runtime_settings()
+        if hasattr(self.dispatcher.active_module_instance, 'refresh_downtime_codes'):
+            self.dispatcher.active_module_instance.refresh_downtime_codes()
+        
+        backup_note = ""
+        if backup_info.get("versioned_backup_path"):
+            backup_note = " A recovery copy was stored in data/backups/settings."
+
+        self.dispatcher.show_toast(
+            toast_title,
+            f"{toast_message_prefix}{backup_note}",
+            SUCCESS,
+        )
 
     def save_settings(self):
         for key, entry in self.entries.items():
@@ -85,27 +127,7 @@ class SettingsManager:
         except Exception:
             self.settings['toast_duration_sec'] = 5
 
-        backup_info = write_json_with_backup(
-            self.settings_path,
-            self.settings,
-            backup_dir=external_path("data/backups/settings"),
-            keep_count=12,
-        )
-
-        self.saved_theme = self.settings["theme"]
-        self.preview_theme = self.saved_theme
-        self.preview_theme = self.dispatcher.apply_theme(self.saved_theme, redraw=True)
-        self.dispatcher.refresh_runtime_settings()
-        
-        backup_note = ""
-        if backup_info.get("versioned_backup_path"):
-            backup_note = " A recovery copy was stored in data/backups/settings."
-
-        self.dispatcher.show_toast(
-            "Settings Saved",
-            f"Theme changes were applied immediately.{backup_note}",
-            SUCCESS,
-        )
+        self.persist_settings()
 
     def preview_selected_theme(self, _event=None):
         theme_entry = self.entries.get('theme')
@@ -135,6 +157,147 @@ class SettingsManager:
             self.entries['export_directory'].delete(0, END)
             self.entries['export_directory'].insert(0, dir_path)
 
+    def open_downtime_codes_dialog(self):
+        top = tb.Toplevel(title="Downtime Codes")
+        top.geometry("520x520")
+        top.minsize(420, 420)
+
+        container = tb.Frame(top, padding=20)
+        container.pack(fill=BOTH, expand=True)
+
+        tb.Label(container, text="Downtime Codes", font=("-size 14 -weight bold")).pack(anchor=W)
+        tb.Label(
+            container,
+            text="Edit existing codes or add new ones. Numeric codes are what import and export use.",
+            bootstyle=SECONDARY,
+            justify=LEFT,
+        ).pack(anchor=W, pady=(4, 16))
+
+        list_outer = tb.Frame(container)
+        list_outer.pack(fill=BOTH, expand=True)
+
+        canvas = tk.Canvas(list_outer, highlightthickness=0)
+        canvas.pack(side=LEFT, fill=BOTH, expand=True)
+        scrollbar = tb.Scrollbar(list_outer, orient=VERTICAL, command=canvas.yview)
+        scrollbar.pack(side=RIGHT, fill=Y)
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        list_frame = tb.Frame(canvas)
+        window_id = canvas.create_window((0, 0), window=list_frame, anchor="nw")
+
+        def sync_scroll_region(_event=None):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+
+        def sync_window_width(event):
+            canvas.itemconfigure(window_id, width=event.width)
+
+        list_frame.bind("<Configure>", sync_scroll_region)
+        canvas.bind("<Configure>", sync_window_width)
+        self.dispatcher.bind_mousewheel_to_widget_tree(list_outer, canvas)
+        self.dispatcher.bind_mousewheel_to_widget_tree(list_frame, canvas)
+        self.dispatcher.bind_mousewheel_to_widget_tree(canvas, canvas)
+        self.dispatcher.bind_mousewheel_to_widget_tree(scrollbar, canvas)
+
+        header = tb.Frame(list_frame)
+        header.pack(fill=X, pady=(0, 6))
+        tb.Label(header, text="Code", width=8, bootstyle=PRIMARY).pack(side=LEFT)
+        tb.Label(header, text="Label", bootstyle=PRIMARY).pack(side=LEFT)
+
+        code_rows = []
+        current_codes = self.settings.get("downtime_codes", deepcopy(DEFAULT_DT_CODE_MAP))
+
+        def sort_key(code_text):
+            return (int(code_text) if str(code_text).isdigit() else 10**9, str(code_text))
+
+        def add_code_row(code_value="", label_value=""):
+            row = tb.Frame(list_frame)
+            row.pack(fill=X, pady=4)
+
+            code_entry = tb.Entry(row, width=8)
+            code_entry.insert(0, str(code_value))
+            code_entry.pack(side=LEFT)
+
+            label_entry = tb.Entry(row)
+            label_entry.insert(0, str(label_value))
+            label_entry.pack(side=LEFT, fill=X, expand=True, padx=(8, 0))
+
+            remove_button = tb.Button(row, text="Remove", bootstyle=DANGER, width=8)
+            remove_button.pack(side=RIGHT, padx=(8, 0))
+
+            row_record = {
+                "frame": row,
+                "code_entry": code_entry,
+                "label_entry": label_entry,
+                "remove_button": remove_button,
+            }
+
+            def remove_row():
+                if len(code_rows) <= 1:
+                    code_entry.delete(0, END)
+                    label_entry.delete(0, END)
+                    return
+                row.destroy()
+                code_rows.remove(row_record)
+                sync_scroll_region()
+
+            remove_button.configure(command=remove_row)
+            code_rows.append(row_record)
+            self.dispatcher.bind_mousewheel_to_widget_tree(row, canvas)
+            sync_scroll_region()
+
+        for code in sorted(current_codes, key=sort_key):
+            add_code_row(code, current_codes[code])
+
+        actions = tb.Frame(container)
+        actions.pack(fill=X, pady=(18, 0))
+
+        def reset_defaults():
+            for row_record in list(code_rows):
+                row_record["frame"].destroy()
+                code_rows.remove(row_record)
+            for code in sorted(DEFAULT_DT_CODE_MAP, key=sort_key):
+                add_code_row(code, DEFAULT_DT_CODE_MAP[code])
+
+        def add_next_code():
+            numeric_codes = [int(record["code_entry"].get().strip()) for record in code_rows if record["code_entry"].get().strip().isdigit()]
+            next_code = str(max(numeric_codes, default=0) + 1)
+            add_code_row(next_code, "")
+
+        def save_codes():
+            updated_codes = {}
+            for row_record in code_rows:
+                code = row_record["code_entry"].get().strip()
+                label = row_record["label_entry"].get().strip()
+                if not code and not label:
+                    continue
+                if not code:
+                    Messagebox.show_error("Each downtime code row needs a code number.", "Downtime Codes")
+                    return
+                if not code.isdigit():
+                    Messagebox.show_error(f"Code '{code}' must be numeric.", "Downtime Codes")
+                    return
+                if not label:
+                    Messagebox.show_error(f"Code {code} cannot be blank.", "Downtime Codes")
+                    return
+                if code in updated_codes:
+                    Messagebox.show_error(f"Code {code} is duplicated.", "Downtime Codes")
+                    return
+                updated_codes[code] = label
+            if not updated_codes:
+                Messagebox.show_error("At least one downtime code is required.", "Downtime Codes")
+                return
+            self.settings["downtime_codes"] = updated_codes
+            self.persist_settings(
+                toast_title="Downtime Codes Saved",
+                toast_message_prefix="Downtime code labels were updated immediately.",
+            )
+            top.destroy()
+
+        tb.Button(actions, text="Reset Defaults", bootstyle=SECONDARY, command=reset_defaults).pack(side=LEFT)
+        tb.Button(actions, text="Add Code", bootstyle=INFO, command=add_next_code).pack(side=LEFT, padx=(8, 0))
+        tb.Button(actions, text="Cancel", bootstyle=SECONDARY, command=top.destroy).pack(side=RIGHT)
+        tb.Button(actions, text="Save Codes", bootstyle=SUCCESS, command=save_codes).pack(side=RIGHT, padx=(0, 8))
+
     def setup_ui(self):
         container = tb.Frame(self.parent, padding=20)
         container.pack(fill=BOTH, expand=True)
@@ -144,7 +307,7 @@ class SettingsManager:
         # Build form fields
         fields = [
             ("export_directory", "Base Export Directory", "entry_browse"),
-            ("organize_exports_by_date", "Organize Exports by YYYY/MM", "check"),
+            ("organize_exports_by_date", "Organize Exports by Year/Month", "check"),
             ("default_export_prefix", "Default Export Prefix", "entry"),
             ("theme", "Application Theme", "combo", get_theme_names()),
             ("toast_duration_sec", "Toast Duration (Seconds)", "entry"),
@@ -194,6 +357,10 @@ class SettingsManager:
         tb.Button(theme_controls, text="Revert Theme Preview", bootstyle=SECONDARY, command=self.revert_theme_preview).pack(side=LEFT)
         self.theme_status = tb.Label(theme_controls, text=f"Current theme: {self.saved_theme}", bootstyle=SECONDARY)
         self.theme_status.pack(side=LEFT, padx=10)
+
+        extras = tb.Frame(container)
+        extras.pack(fill=X, pady=(5, 10))
+        tb.Button(extras, text="Edit Downtime Codes", bootstyle=INFO, command=self.open_downtime_codes_dialog).pack(side=LEFT)
 
         tb.Button(container, text="Save Settings", bootstyle=SUCCESS, command=self.save_settings).pack(pady=20)
 

@@ -14,11 +14,15 @@ These two forms do not have identical behavior. The Python version has access to
 ## Shared Capabilities
 
 - Production Log workflow with draft save and reopen support.
+- Production Log tracks shop orders, part numbers, and molds during shift entry.
 - Automatic recovery snapshots for overwritten drafts.
 - Excel export and import support for production sheet work.
+- A manual balance action that redistributes downtime proportionally across existing downtime rows before export, with a fallback adjustment row when needed.
+- A derived target-time field in the header plus a live Ghost Time indicator in the footer so operators can see the shift goal and the missing or extra time while entering the sheet.
+- Workbook-linked summary header import without overwriting formula cells on export.
 - Layout Manager and Rate Manager tools.
 - Backup / Recovery viewer for browsing and restoring draft snapshots and configuration backups.
-- Settings management for export paths, theme selection, and production defaults.
+- Settings management for export paths, theme selection, production defaults, and editable downtime code labels.
 - Configurable toast notifications for non-blocking status messages.
 - In-app help viewer and About screen.
 - Bundled GPL license access from Help Center and About.
@@ -52,6 +56,7 @@ These two forms do not have identical behavior. The Python version has access to
 ## Update Manager Status
 
 - The updater checks only the Dispatcher Core version in `main.py` as the master version.
+- The current stable Dispatcher Core release is `1.1`.
 - Two-part versions such as `1.07` trigger an executable update when greater than the local version.
 - Three-part versions only trigger an executable update when the third number is even, such as `1.07.2`.
 - Odd patch versions such as `1.07.1` are ignored.

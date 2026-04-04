@@ -2,7 +2,27 @@
 
 This changelog tracks the main branch release line for The Martin Suite (GLC Edition).
 
-Version headings below are aligned to the current `1.0.x` release line used by Dispatcher Core. Earlier work has been grouped into practical release milestones so the shipped feature history is easier to follow without rewriting older module version markers.
+Version headings below are aligned to the current `1.x` release line used by Dispatcher Core. Earlier work has been grouped into practical release milestones so the shipped feature history is easier to follow without rewriting older module version markers.
+
+## [1.1] - 2026-04-04
+
+### Changed
+
+- Promoted Dispatcher Core to stable version `1.1`.
+- Aligned export folder handling with the Settings toggle so organized exports are written into year folders with month subfolders under the configured base export directory.
+- Fixed downtime Excel import/export so the UI keeps using stop times while the template column stores total downtime minutes.
+- Added import-only and export-only header field support so workbook summary cells can be shown in Production Log without overwriting formulas on export.
+- Extended the default layout with additional workbook-linked header fields including bond, percentages, pattern-change count, and top-part summary values.
+- Corrected the downtime code map so code 8 is AMC/SBC/Shakeout and code 9 is Pattern Change across both the UI and Excel import.
+- Added a Settings dialog for editing downtime code labels, with overrides stored in `settings.json` and applied immediately to Production Log.
+- Made the downtime code editor scrollable, allowed adding extra numeric codes beyond the defaults, and explicitly kept the internal helper out of the sidebar.
+- Added a Balance Downtime action in Production Log that redistributes required downtime across existing downtime rows by weighted duration before export, with a dedicated adjustment row as fallback.
+- Added a visible Target Time field in the Production Log header, a derived Ghost Time indicator in the footer, and a dedicated Downtime action row so Balance Downtime stays visible during entry.
+- Hardened Production Log import so production columns are detected from real workbook headers, which keeps older `F = Molds` logs and newer `G = Molds` logs loading correctly while keeping Ghost internal to the app's balancing workflow.
+
+### Notes
+
+- Updated the touched module version markers for the stable `1.1` release, including Production Log, Data Handler, and Settings Manager.
 
 ## [1.0.8] - 2026-04-04
 
