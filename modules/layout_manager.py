@@ -25,17 +25,10 @@ import os
 import sys
 from modules.persistence import write_json_with_backup
 from modules.theme_manager import normalize_theme
+from modules.utils import external_path, local_or_resource_path, resource_path
 
 __module_name__ = "Layout Manager"
 __version__ = "1.0.4"
-
-def resource_path(relative_path):
-    """ Get absolute path to resource, works for dev and for PyInstaller """
-    try:
-        base_path = sys._MEIPASS
-    except Exception:
-        base_path = os.path.abspath(".")
-    return os.path.join(base_path, relative_path)
 
 class LayoutManager:
     def __init__(self, parent, dispatcher):
@@ -47,11 +40,11 @@ class LayoutManager:
         self.suppress_modified_event = False
         
         # 1. Logic: Read from local config when present, otherwise fall back to the packaged default.
-        self.local_config = "layout_config.json"
+        self.local_config = external_path("layout_config.json")
         self.internal_config = resource_path("layout_config.json")
         
         # Save operations always target the local config so packaged builds remain editable.
-        self.config_path = self.local_config if os.path.exists(self.local_config) else self.internal_config
+        self.config_path = local_or_resource_path("layout_config.json")
         self.save_path = self.local_config
         self.protected_field_ids = {"date", "cast_date", "shift", "hours", "goal_mph"}
         
@@ -696,7 +689,7 @@ class LayoutManager:
             backup_info = write_json_with_backup(
                 self.save_path,
                 json_data,
-                backup_dir=os.path.join(os.path.abspath("."), "data", "backups", "layouts"),
+                backup_dir=external_path("data/backups/layouts"),
                 keep_count=12,
             )
 

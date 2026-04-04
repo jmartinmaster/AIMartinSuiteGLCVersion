@@ -32,7 +32,9 @@ Use Production Log to enter the current shift data.
 - Save Draft stores the current work in `data/pending`.
 - Overwriting an existing draft keeps a recovery snapshot in `data/pending/history`.
 - The draft status strip keeps quick actions for resuming the latest draft, opening the pending-draft list, and launching the full Backup / Recovery viewer.
-- Export Excel writes the current session into the configured production template.
+- Export Excel writes the current session into the configured production template and can immediately open the workbook in the default application for review.
+- Open Last Export reopens the most recent exported workbook so it can be checked again before printing.
+- Print Last Export sends the reviewed workbook to the default application print action when you are ready to print it.
 - Import Excel loads an existing workbook back into the form.
 
 ### Rate Manager
@@ -121,6 +123,8 @@ If you load a draft or import Excel while unsaved changes exist, the suite asks 
 ## Excel Import And Export Notes
 
 - Export uses the template path stored in `layout_config.json`.
+- If the sheet is not balanced, Export can prompt to auto-balance downtime before writing the workbook.
+- After export, the workbook can be opened in the default application for review before using Print Last Export.
 - Import reads Excel using the same mapping definitions and reconstructs downtime stop times from the template's total-minute column.
 - Production-row import also detects workbook header labels so older logs that store Molds in column F and newer logs that store Molds in column G both load correctly.
 - Header fields can be configured as import-only so formula-driven workbook cells can be shown in the app without being overwritten on export.

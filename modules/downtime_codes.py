@@ -1,6 +1,7 @@
 import json
 import os
 from functools import lru_cache
+from modules.utils import external_path
 
 
 DEFAULT_DT_CODE_MAP = {
@@ -15,10 +16,6 @@ DEFAULT_DT_CODE_MAP = {
     "9": "Pattern Change",
     "10": "No Sand",
 }
-
-
-def external_path(relative_path):
-    return os.path.join(os.path.abspath("."), relative_path)
 
 
 @lru_cache(maxsize=1)

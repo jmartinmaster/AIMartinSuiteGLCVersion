@@ -21,17 +21,10 @@ import json
 import os
 import sys
 from modules.persistence import write_json_with_backup
+from modules.utils import ensure_external_directory, external_path, local_or_resource_path, resource_path
 
 __module_name__ = "Rate Manager"
 __version__ = "1.0.1"
-
-def resource_path(relative_path):
-    """ Get absolute path to resource, works for dev and for PyInstaller """
-    try:
-        base_path = sys._MEIPASS
-    except Exception:
-        base_path = os.path.abspath(".")
-    return os.path.join(base_path, relative_path)
 
 class RateManager:
     def __init__(self, parent, dispatcher):
@@ -39,11 +32,11 @@ class RateManager:
         self.dispatcher = dispatcher
         
         # Persistence Logic: Local first, then internal default
-        self.local_data = "rates.json"
+        self.local_data = external_path("rates.json")
         self.internal_data = resource_path("rates.json")
         
         # Decide which file to load from
-        self.data_file = self.local_data if os.path.exists(self.local_data) else self.internal_data
+        self.data_file = local_or_resource_path("rates.json")
         
         self.rates = self.load_data()
         self.editing_part = None  
@@ -65,7 +58,7 @@ class RateManager:
             write_json_with_backup(
                 self.local_data,
                 self.rates,
-                backup_dir=os.path.join(os.path.abspath("."), "data", "backups", "rates"),
+                backup_dir=ensure_external_directory("data/backups/rates"),
                 keep_count=12,
             )
             # Switch current tracking to the local file now that it exists

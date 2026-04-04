@@ -15,26 +15,14 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import os
-import sys
 import tkinter as tk
 from tkinter import ttk
 import ttkbootstrap as tb
 from ttkbootstrap.constants import *
+from modules.utils import local_or_resource_path
 
 __module_name__ = "Help Viewer"
 __version__ = "1.0.0"
-
-
-def resource_path(relative_path):
-    try:
-        base_path = sys._MEIPASS
-    except Exception:
-        base_path = os.path.abspath(".")
-    return os.path.join(base_path, relative_path)
-
-
-def external_path(relative_path):
-    return os.path.join(os.path.abspath("."), relative_path)
 
 
 class HelpViewer:
@@ -131,14 +119,10 @@ class HelpViewer:
         text_widget.config(state=DISABLED)
 
     def read_doc(self, relative_path):
-        candidate_paths = [
-            external_path(relative_path),
-            resource_path(relative_path),
-        ]
-        for candidate in candidate_paths:
-            if os.path.exists(candidate):
-                with open(candidate, "r", encoding="utf-8") as handle:
-                    return handle.read()
+        candidate = local_or_resource_path(relative_path)
+        if os.path.exists(candidate):
+            with open(candidate, "r", encoding="utf-8") as handle:
+                return handle.read()
         return f"Missing help document: {relative_path}"
 
 
