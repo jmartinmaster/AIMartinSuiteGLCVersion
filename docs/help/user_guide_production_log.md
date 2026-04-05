@@ -37,6 +37,8 @@ If you load a draft or import Excel while unsaved changes exist, the suite asks 
 ## Excel Import And Export Notes
 
 - Export uses the template path stored in `layout_config.json`.
+- Export writes into the configured base export folder and, when date organization is enabled, uses `YYYY/MM MonthName` subfolders.
+- If Export finds an older month folder such as `04`, it renames it to the newer format such as `04 April` before saving the workbook.
 - If the sheet is missing time, Export can prompt to auto-balance downtime before writing the workbook.
 - If the sheet is already over shift, review or remove downtime manually before export.
 - After export, the workbook can be opened in the default application for review before using Print Last Export.

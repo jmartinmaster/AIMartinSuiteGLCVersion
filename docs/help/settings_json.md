@@ -35,11 +35,13 @@
 
 - `export_directory`
   - Type: string
-  - Purpose: Folder used for Excel exports.
+  - Purpose: Base folder used for Excel exports.
+  - Notes: When `organize_exports_by_date` is enabled, exports are written under `YYYY/MM MonthName` inside this base folder.
 
 - `organize_exports_by_date`
   - Type: boolean
-  - Purpose: If true, exports can be grouped by date.
+  - Purpose: If true, exports are grouped by date.
+  - Notes: The app uses year folders with month folders such as `04 April`. If it finds an older month folder such as `04`, it renames it to the newer format when that month is exported.
 
 - `default_export_prefix`
   - Type: string

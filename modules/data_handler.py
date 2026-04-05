@@ -26,7 +26,7 @@ from modules.downtime_codes import get_code_number, normalize_code_value
 from modules.utils import ensure_external_directory, external_path, local_or_resource_path, resource_path
 
 __module_name__ = "Data Handler"
-__version__ = "1.1.1"
+__version__ = "1.1.2"
 
 class DataHandler:
     def __init__(self, config_name="layout_config.json"):
@@ -315,11 +315,17 @@ class DataHandler:
 
     def get_export_directory(self, raw_date):
         base_dir = str(self.settings.get("export_directory", "exports") or "exports").strip() or "exports"
-        target_dir = external_path(base_dir)
+        target_dir = base_dir if os.path.isabs(base_dir) else external_path(base_dir)
         if self.settings.get("organize_exports_by_date", True):
             export_date = self.parse_export_date(raw_date)
             if export_date is not None:
-                target_dir = os.path.join(target_dir, export_date.strftime("%Y"), export_date.strftime("%m"))
+                year_dir = os.path.join(target_dir, export_date.strftime("%Y"))
+                legacy_month_dir = os.path.join(year_dir, export_date.strftime("%m"))
+                month_folder = export_date.strftime("%m %B")
+                target_dir = os.path.join(year_dir, month_folder)
+                if os.path.isdir(legacy_month_dir) and not os.path.exists(target_dir):
+                    os.makedirs(year_dir, exist_ok=True)
+                    os.rename(legacy_month_dir, target_dir)
         os.makedirs(target_dir, exist_ok=True)
         return target_dir
 
