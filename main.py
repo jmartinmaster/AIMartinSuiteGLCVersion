@@ -22,6 +22,7 @@ import ctypes
 import threading
 import time
 import tkinter as tk
+import webbrowser
 from tkinter import messagebox
 from ctypes import wintypes
 import ttkbootstrap as tb
@@ -34,7 +35,8 @@ from modules.theme_manager import apply_readability_overrides, normalize_theme, 
 from modules.utils import external_path, local_or_resource_path, resource_path
 
 __module_name__ = "Dispatcher Core"
-__version__ = "1.5.4"
+__version__ = "1.5.6"
+ISSUE_REPORT_URL = "https://github.com/jmartinmaster/AIMartinSuiteGLCVersion/issues/new/choose"
 WINDOWS_APP_ID = "JamieMartin.TheMartinSuite.GLC"
 APP_ICON_RELATIVE_PATH = "icon.ico"
 APP_ICON_IMAGE_RELATIVE_PATHS = [
@@ -684,8 +686,16 @@ class Dispatcher:
 
         help_menu = tk.Menu(menubar, tearoff=0)
         help_menu.add_command(label="User Guide", command=lambda: self.load_module("help_viewer"))
+        help_menu.add_command(label="Report A Problem", command=self.open_issue_report_page)
         help_menu.add_command(label="About", command=lambda: self.load_module("about"))
         menubar.add_cascade(label="Help", menu=help_menu)
+
+    def open_issue_report_page(self):
+        try:
+            webbrowser.open(ISSUE_REPORT_URL)
+        except Exception as exc:
+            log_exception("open_issue_report_page", exc)
+            messagebox.showerror("Report A Problem", f"Could not open the GitHub issue page:\n\n{exc}")
 
     def menu_open(self, event=None):
         self.load_module("production_log")
