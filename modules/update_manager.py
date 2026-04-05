@@ -32,11 +32,11 @@ import ttkbootstrap as tb
 from ttkbootstrap.constants import *
 from ttkbootstrap.dialogs import Messagebox
 from app_identity import LEGACY_EXE_NAME, format_versioned_exe_name, load_version_from_main, normalize_version, parse_version
-from modules.persistence import write_json_with_backup
-from modules.utils import ensure_external_directory, external_path, resolve_local_venv_python
+from modules.persistence import write_json_with_backup, write_text_with_backup
+from modules.utils import ensure_external_directory, external_path, local_or_resource_path, resolve_local_venv_python
 
 __module_name__ = "Update Manager"
-__version__ = "2.0.9"
+__version__ = "2.1.0"
 
 GITHUB_REMOTE_PATTERN = re.compile(r"github\.com[:/](?P<owner>[^/]+)/(?P<repo>[^/.]+?)(?:\.git)?$")
 MODULE_NAME_PATTERN = re.compile(r"__module_name__\s*=\s*[\"']([^\"']+)[\"']")
@@ -58,6 +58,9 @@ JSON_PAYLOAD_OPTIONS = [
         "backup_dir": os.path.join("data", "backups", "rates"),
     },
 ]
+DOCUMENTATION_PAYLOAD_RELATIVE_ROOT = os.path.join("docs", "help")
+DOCUMENTATION_PAYLOAD_BACKUP_ROOT = os.path.join("data", "backups", "docs")
+DOCUMENTATION_STANDALONE_FILES = ["LICENSE.txt"]
 
 
 def _default_module_payload_name(module_key):
@@ -88,6 +91,31 @@ def _parse_json_payload_metadata(file_text, fallback_name):
     }
 
 
+def _default_documentation_payload_name(relative_path):
+    if os.path.normpath(relative_path).lower() == "license.txt":
+        return "Bundled License"
+
+    stem = os.path.splitext(os.path.basename(relative_path))[0]
+    return stem.replace("_", " ").title()
+
+
+def _parse_text_payload_metadata(file_text, fallback_name):
+    if file_text is None:
+        return {
+            "module_name": fallback_name,
+            "version": "Missing",
+            "compare_token": None,
+        }
+
+    normalized_text = file_text.replace("\r\n", "\n")
+    return {
+        "module_name": fallback_name,
+        "version": "Present",
+        "compare_token": normalized_text,
+        "payload": file_text,
+    }
+
+
 def _parse_module_metadata(file_text, fallback_name):
     module_name_match = MODULE_NAME_PATTERN.search(file_text)
     version_match = VERSION_PATTERN.search(file_text)
@@ -105,6 +133,20 @@ def _read_module_metadata_from_path(file_path, fallback_name):
             return _parse_module_metadata(handle.read(), fallback_name)
     except OSError:
         return None
+
+
+def _read_text_payload_metadata_from_path(file_path, fallback_name):
+    if not file_path or not os.path.exists(file_path):
+        return _parse_text_payload_metadata(None, fallback_name)
+    try:
+        with open(file_path, "r", encoding="utf-8") as handle:
+            return _parse_text_payload_metadata(handle.read(), fallback_name)
+    except OSError:
+        return {
+            "module_name": fallback_name,
+            "version": "Unreadable",
+            "compare_token": None,
+        }
 
 
 def _build_raw_github_url(owner, repo, branch_name, relative_path, cache_bust=None):
@@ -198,6 +240,31 @@ def discover_module_payload_options(modules_path):
     return options
 
 
+def discover_documentation_payload_options():
+    options = []
+    discovered_paths = []
+
+    docs_root = local_or_resource_path(DOCUMENTATION_PAYLOAD_RELATIVE_ROOT)
+    if os.path.isdir(docs_root):
+        for file_name in sorted(os.listdir(docs_root)):
+            if file_name.lower().endswith(".md"):
+                discovered_paths.append(f"{DOCUMENTATION_PAYLOAD_RELATIVE_ROOT}/{file_name}".replace("\\", "/"))
+
+    for relative_path in sorted(set(discovered_paths + DOCUMENTATION_STANDALONE_FILES)):
+        fallback_name = _default_documentation_payload_name(relative_path)
+        backup_subdir = "help" if relative_path.startswith("docs/help/") else "root"
+        options.append({
+            "kind": "documentation",
+            "key": relative_path.replace("/", "_").replace(".", "_"),
+            "relative_path": relative_path,
+            "fallback_name": fallback_name,
+            "module_name": fallback_name,
+            "backup_dir": os.path.join(DOCUMENTATION_PAYLOAD_BACKUP_ROOT, backup_subdir),
+        })
+
+    return options
+
+
 def get_local_module_payload_metadata(dispatcher, option):
     if not option:
         return {"module_name": "No payload selected", "version": "Unknown"}
@@ -230,6 +297,19 @@ def get_local_module_payload_metadata(dispatcher, option):
         }
 
     return {"module_name": option["module_name"], "version": "Unknown"}
+
+
+def get_local_documentation_payload_metadata(option):
+    if not option:
+        return {"module_name": "Documentation", "version": "Unknown", "compare_token": None}
+
+    local_path = external_path(option["relative_path"])
+    if not os.path.exists(local_path):
+        local_path = local_or_resource_path(option["relative_path"])
+
+    metadata = _read_text_payload_metadata_from_path(local_path, option["fallback_name"])
+    metadata["source_path"] = local_path
+    return metadata
 
 
 def fetch_remote_payload_text(remote_info, branch_name, relative_path, timeout=15):
@@ -341,6 +421,80 @@ def evaluate_module_payload_option(dispatcher, option, branch_name, remote_info)
     }
 
 
+def evaluate_documentation_payload_option(option, branch_name, remote_info):
+    local_metadata = get_local_documentation_payload_metadata(option)
+    module_name = local_metadata.get("module_name", option.get("module_name", option.get("fallback_name", "Documentation")))
+
+    try:
+        remote_text = fetch_remote_payload_text(remote_info, branch_name, option["relative_path"])
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            return {
+                "option": option.copy(),
+                "module_name": module_name,
+                "local_metadata": local_metadata,
+                "remote_version": "Missing",
+                "status": "Not in repository branch",
+                "note": f"The repository copy for {module_name} does not exist on the current branch.",
+                "update_available": False,
+                "remote_text": None,
+            }
+        return {
+            "option": option.copy(),
+            "module_name": module_name,
+            "local_metadata": local_metadata,
+            "remote_version": "Unavailable",
+            "status": "Documentation check failed",
+            "note": f"Could not read the remote {module_name} file: {exc}",
+            "update_available": False,
+            "remote_text": None,
+        }
+    except Exception as exc:
+        return {
+            "option": option.copy(),
+            "module_name": module_name,
+            "local_metadata": local_metadata,
+            "remote_version": "Unavailable",
+            "status": "Documentation check failed",
+            "note": f"Could not read the remote {module_name} file: {exc}",
+            "update_available": False,
+            "remote_text": None,
+        }
+
+    remote_metadata = _parse_text_payload_metadata(remote_text, option["fallback_name"])
+    local_version = local_metadata.get("version", "Unknown")
+    local_token = local_metadata.get("compare_token")
+    remote_token = remote_metadata.get("compare_token")
+
+    if local_version == "Missing":
+        status = "Documentation restore available"
+        note = f"The local {module_name} file is missing and can be restored from the repository copy."
+        update_available = True
+    elif local_version == "Unreadable":
+        status = "Documentation restore available"
+        note = f"The local {module_name} file is unreadable and can be restored from the repository copy."
+        update_available = True
+    elif local_token == remote_token:
+        status = "Up to date"
+        note = f"The local {module_name} file already matches the repository copy."
+        update_available = False
+    else:
+        status = "Documentation restore available"
+        note = f"The local {module_name} file differs from the repository copy and can be restored."
+        update_available = True
+
+    return {
+        "option": option.copy(),
+        "module_name": module_name,
+        "local_metadata": local_metadata,
+        "remote_version": remote_metadata.get("version", "Unknown"),
+        "status": status,
+        "note": note,
+        "update_available": update_available,
+        "remote_text": remote_text,
+    }
+
+
 def scan_available_module_payload_updates(dispatcher, branch_name=None, remote_info=None):
     resolved_branch_name = branch_name or _detect_branch_name()
     resolved_remote_info = remote_info or _detect_remote_info()
@@ -349,6 +503,19 @@ def scan_available_module_payload_updates(dispatcher, branch_name=None, remote_i
         evaluate_module_payload_option(dispatcher, option, resolved_branch_name, resolved_remote_info)
         for option in options
     ]
+    return {
+        "branch_name": resolved_branch_name,
+        "remote_info": resolved_remote_info,
+        "results": results,
+        "available_results": [result for result in results if result.get("update_available")],
+    }
+
+
+def scan_available_documentation_payload_updates(branch_name=None, remote_info=None):
+    resolved_branch_name = branch_name or _detect_branch_name()
+    resolved_remote_info = remote_info or _detect_remote_info()
+    options = discover_documentation_payload_options()
+    results = [evaluate_documentation_payload_option(option, resolved_branch_name, resolved_remote_info) for option in options]
     return {
         "branch_name": resolved_branch_name,
         "remote_info": resolved_remote_info,
@@ -377,6 +544,7 @@ class UpdateManager:
         self.job_phase_var = self.coordinator.job_phase_var
         self.job_detail_var = self.coordinator.job_detail_var
         self.module_payload_options = self._discover_payload_options()
+        self.documentation_payload_options = discover_documentation_payload_options()
         default_option = next((option for option in self.module_payload_options if option["key"] == "about"), None)
         if default_option is None and self.module_payload_options:
             default_option = self.module_payload_options[0]
@@ -388,6 +556,11 @@ class UpdateManager:
         self.module_payload_status_var = tb.StringVar(value="Pending")
         self.module_payload_note_var = tb.StringVar(value="Select a payload to compare against the repository. Dispatcher Core (main.py) remains an EXE-only update boundary.")
         self.module_payload_in_progress = False
+        self.documentation_payload_tracked_var = tb.StringVar(value=f"{len(self.documentation_payload_options)} tracked file(s)")
+        self.documentation_payload_remote_state_var = tb.StringVar(value="Not checked")
+        self.documentation_payload_status_var = tb.StringVar(value="Pending")
+        self.documentation_payload_note_var = tb.StringVar(value="Documentation restores are grouped into one action so bundled help files can be refreshed without choosing individual documents.")
+        self.documentation_payload_in_progress = False
         self.container = None
         self.coordinator.branch_name = self.branch_name
         self.coordinator.remote_info = self.remote_info
@@ -410,6 +583,14 @@ class UpdateManager:
 
     def _discover_payload_options(self):
         return discover_module_payload_options(getattr(self.dispatcher, "modules_path", None))
+
+    def _payload_job_is_busy(self):
+        return any([
+            self.module_payload_in_progress,
+            self.documentation_payload_in_progress,
+            self.coordinator.download_in_progress,
+            self.coordinator.source_job_in_progress,
+        ])
 
     def _get_selected_module_payload_option(self):
         selected_display = self.module_payload_selection_var.get().strip()
@@ -542,6 +723,15 @@ class UpdateManager:
         if note is not None:
             self.module_payload_note_var.set(note)
 
+    def refresh_documentation_payload_summary(self, remote_state=None, status=None, note=None):
+        self.documentation_payload_tracked_var.set(f"{len(self.documentation_payload_options)} tracked file(s)")
+        if remote_state is not None:
+            self.documentation_payload_remote_state_var.set(remote_state)
+        if status is not None:
+            self.documentation_payload_status_var.set(status)
+        if note is not None:
+            self.documentation_payload_note_var.set(note)
+
     def check_module_payload_update(self):
         option = self._get_selected_module_payload_option()
         if option is None:
@@ -559,6 +749,37 @@ class UpdateManager:
             status=result.get("status", "Module check failed"),
             note=result.get("note", "Could not evaluate the selected payload."),
             option=option,
+        )
+
+    def check_documentation_payload_updates(self):
+        if not self.documentation_payload_options:
+            self.refresh_documentation_payload_summary(
+                remote_state="Unavailable",
+                status="Unavailable",
+                note="No tracked documentation files are available for grouped restore checks.",
+            )
+            return
+
+        scan_result = scan_available_documentation_payload_updates(branch_name=self.branch_name, remote_info=self.remote_info)
+        available_results = scan_result.get("available_results", [])
+        available_count = len(available_results)
+
+        if available_count:
+            preview_names = [item.get("module_name") or item["option"].get("module_name") for item in available_results[:3]]
+            preview = ", ".join(name for name in preview_names if name)
+            if available_count > 3:
+                preview = f"{preview}, and {available_count - 3} more"
+            self.refresh_documentation_payload_summary(
+                remote_state=f"{available_count} update(s) available",
+                status="Documentation restore available",
+                note=f"{available_count} tracked documentation file(s) differ from the repository and can be restored together: {preview}.",
+            )
+            return
+
+        self.refresh_documentation_payload_summary(
+            remote_state="Matched",
+            status="Up to date",
+            note=f"All {len(self.documentation_payload_options)} tracked documentation files already match the repository copy.",
         )
 
     def _finish_module_payload_install(self, option, installed_path, remote_version):
@@ -594,6 +815,44 @@ class UpdateManager:
         self.dispatcher.set_update_status(f"Installed the {option['module_name']} module payload.", SUCCESS, active=True, mode="module")
         self.dispatcher.show_toast("Update Manager", toast_message, SUCCESS)
 
+    def _finish_documentation_payload_install(self, installed_items, failed_items):
+        self.documentation_payload_in_progress = False
+        installed_count = len(installed_items)
+        failed_count = len(failed_items)
+
+        if failed_count:
+            self.status_var.set(f"Installed {installed_count} documentation file(s). {failed_count} failed.")
+            self.refresh_documentation_payload_summary(
+                remote_state="Errors",
+                status="Documentation install failed",
+                note=f"Installed {installed_count} documentation file(s), but {failed_count} failed.",
+            )
+            self.dispatcher.set_update_status("Documentation restore completed with errors.", WARNING, active=True, mode="module")
+            failure_lines = [f"{item['option']['module_name']}: {item['error']}" for item in failed_items]
+            Messagebox.show_error("Could not restore all documentation files:\n\n" + "\n".join(failure_lines), "Documentation Restore Error")
+            if installed_count:
+                self.dispatcher.show_toast("Update Manager", f"Installed {installed_count} documentation file(s), but {failed_count} failed.", WARNING)
+            return
+
+        if installed_count:
+            self.status_var.set(f"Installed {installed_count} documentation file(s).")
+            self.refresh_documentation_payload_summary(
+                remote_state="Installed",
+                status="Installed",
+                note=f"Installed {installed_count} tracked documentation file(s) into the external documentation path.",
+            )
+            self.dispatcher.set_update_status("Installed documentation restores.", SUCCESS, active=True, mode="module")
+            self.dispatcher.show_toast("Update Manager", f"Installed {installed_count} documentation file(s).", SUCCESS)
+            return
+
+        self.status_var.set("No documentation updates were available.")
+        self.refresh_documentation_payload_summary(
+            remote_state="Matched",
+            status="Up to date",
+            note="All tracked documentation files already match the repository copy.",
+        )
+        self.dispatcher.show_toast("Update Manager", "No documentation updates were available to install.", INFO)
+
     def _handle_module_payload_failure(self, option, exc):
         self.module_payload_in_progress = False
         self.refresh_module_payload_summary(
@@ -603,6 +862,17 @@ class UpdateManager:
         )
         self.dispatcher.set_update_status(f"{option['module_name']} payload install failed.", DANGER, active=True, mode="module")
         Messagebox.show_error(f"Could not install the {option['module_name']} payload:\n\n{exc}", "Module Payload Error")
+
+    def _install_documentation_payload_option(self, option, remote_text=None):
+        payload_text = remote_text if remote_text is not None else self._fetch_remote_file(option["relative_path"])
+        target_path = external_path(option["relative_path"])
+        write_text_with_backup(
+            target_path,
+            payload_text,
+            backup_dir=external_path(option["backup_dir"]),
+            keep_count=12,
+        )
+        return target_path, "Present"
 
     def _install_module_payload_option(self, option, remote_text=None):
         payload_text = remote_text if remote_text is not None else self._fetch_remote_file(option["relative_path"])
@@ -625,7 +895,7 @@ class UpdateManager:
         return installed_path, remote_metadata.get("version", "Unknown")
 
     def apply_module_payload_update(self):
-        if self.module_payload_in_progress or self.coordinator.download_in_progress or self.coordinator.source_job_in_progress:
+        if self._payload_job_is_busy():
             self.dispatcher.show_toast("Update Manager", "Another update job is already running in the background.", WARNING)
             return
 
@@ -647,6 +917,58 @@ class UpdateManager:
                 return
 
             self.dispatcher.root.after(0, lambda current_option=option.copy(), path=installed_path, version=remote_version: self._finish_module_payload_install(current_option, path, version))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def apply_documentation_payload_updates(self):
+        if self._payload_job_is_busy():
+            self.dispatcher.show_toast("Update Manager", "Another update job is already running in the background.", WARNING)
+            return
+
+        if not self.documentation_payload_options:
+            self.dispatcher.show_toast("Update Manager", "No tracked documentation files are available to restore.", INFO)
+            return
+
+        self.documentation_payload_in_progress = True
+        self.refresh_documentation_payload_summary(
+            remote_state="Checking",
+            status="Checking",
+            note="Checking the repository for all tracked documentation files before restoring them together.",
+        )
+        self.status_var.set("Checking documentation updates...")
+        self.dispatcher.set_update_status("Checking documentation updates...", INFO, active=True, mode="module")
+
+        def worker():
+            installed_items = []
+            failed_items = []
+            try:
+                scan_result = scan_available_documentation_payload_updates(branch_name=self.branch_name, remote_info=self.remote_info)
+                available_results = scan_result.get("available_results", [])
+                if not available_results:
+                    self.dispatcher.root.after(0, lambda: self._finish_documentation_payload_install([], []))
+                    return
+
+                for result in available_results:
+                    option = result["option"].copy()
+                    try:
+                        installed_path, remote_version = self._install_documentation_payload_option(option, remote_text=result.get("remote_text"))
+                        installed_items.append({
+                            "option": option,
+                            "installed_path": installed_path,
+                            "remote_version": remote_version,
+                        })
+                    except Exception as exc:
+                        failed_items.append({
+                            "option": option,
+                            "error": exc,
+                        })
+            except Exception as exc:
+                failed_items.append({
+                    "option": {"module_name": "Documentation restore"},
+                    "error": exc,
+                })
+
+            self.dispatcher.root.after(0, lambda installed=installed_items, failed=failed_items: self._finish_documentation_payload_install(installed, failed))
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -718,7 +1040,7 @@ class UpdateManager:
         self.dispatcher.show_toast("Update Manager", "No payload updates were available to install.", INFO)
 
     def apply_all_module_payload_updates(self):
-        if self.module_payload_in_progress or self.coordinator.download_in_progress or self.coordinator.source_job_in_progress:
+        if self._payload_job_is_busy():
             self.dispatcher.show_toast("Update Manager", "Another update job is already running in the background.", WARNING)
             return
 
@@ -1420,7 +1742,7 @@ class UpdateManager:
         module_payload.pack(fill=X, pady=(12, 0))
         tb.Label(
             module_payload,
-            text="Choose a single module or JSON payload to compare and restore without rebuilding the EXE. Dispatcher Core (main.py) stays outside this list and continues to update through the stable EXE path above.",
+            text="Choose a single module or tracked config payload to compare and restore without rebuilding the EXE. Dispatcher Core (main.py) stays outside this list and continues to update through the stable EXE path above.",
             wraplength=720,
             justify=LEFT,
         ).pack(anchor=W)
@@ -1451,7 +1773,29 @@ class UpdateManager:
         payload_controls.pack(anchor=W, pady=(10, 0))
         tb.Button(payload_controls, text="Check Selected Payload", bootstyle=PRIMARY, command=self.check_module_payload_update).pack(side=LEFT)
         tb.Button(payload_controls, text="Install Selected Payload", bootstyle=SUCCESS, command=self.apply_module_payload_update).pack(side=LEFT, padx=(8, 0))
-        tb.Button(payload_controls, text="Install All Available Payloads", bootstyle=WARNING, command=self.apply_all_module_payload_updates).pack(side=LEFT, padx=(8, 0))
+        tb.Button(payload_controls, text="Install All Available Module/Config Payloads", bootstyle=WARNING, command=self.apply_all_module_payload_updates).pack(side=LEFT, padx=(8, 0))
+
+        documentation_payload = tb.Labelframe(container, text=" Documentation Restores ", padding=14)
+        documentation_payload.pack(fill=X, pady=(12, 0))
+        tb.Label(
+            documentation_payload,
+            text="Restore the bundled Help Center documents as one grouped update. Individual documentation files are not selectable here.",
+            wraplength=720,
+            justify=LEFT,
+        ).pack(anchor=W)
+        documentation_grid = tb.Frame(documentation_payload)
+        documentation_grid.pack(fill=X, pady=(10, 0))
+        tb.Label(documentation_grid, text="Tracked Files", bootstyle=SECONDARY).grid(row=0, column=0, sticky=W, padx=(0, 12), pady=2)
+        tb.Label(documentation_grid, textvariable=self.documentation_payload_tracked_var).grid(row=0, column=1, sticky=W, pady=2)
+        tb.Label(documentation_grid, text="Repository State", bootstyle=SECONDARY).grid(row=1, column=0, sticky=W, padx=(0, 12), pady=2)
+        tb.Label(documentation_grid, textvariable=self.documentation_payload_remote_state_var).grid(row=1, column=1, sticky=W, pady=2)
+        tb.Label(documentation_grid, text="Status", bootstyle=SECONDARY).grid(row=2, column=0, sticky=W, padx=(0, 12), pady=2)
+        tb.Label(documentation_grid, textvariable=self.documentation_payload_status_var).grid(row=2, column=1, sticky=W, pady=2)
+        tb.Label(documentation_payload, textvariable=self.documentation_payload_note_var, bootstyle=INFO, wraplength=720, justify=LEFT).pack(anchor=W, pady=(10, 0))
+        documentation_controls = tb.Frame(documentation_payload)
+        documentation_controls.pack(anchor=W, pady=(10, 0))
+        tb.Button(documentation_controls, text="Check Documentation Updates", bootstyle=PRIMARY, command=self.check_documentation_payload_updates).pack(side=LEFT)
+        tb.Button(documentation_controls, text="Install Documentation Updates", bootstyle=SUCCESS, command=self.apply_documentation_payload_updates).pack(side=LEFT, padx=(8, 0))
 
         tb.Label(container, textvariable=self.status_var, bootstyle=SECONDARY).pack(anchor=W, pady=(12, 0))
 

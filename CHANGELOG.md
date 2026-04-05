@@ -4,13 +4,16 @@ This changelog tracks the main branch release line for The Martin Suite (GLC Edi
 
 Version headings below are aligned to the current `1.x` release line used by Dispatcher Core. Earlier work has been grouped into practical release milestones so the shipped feature history is easier to follow without rewriting older module version markers.
 
-## [Unreleased]
+## [1.5.6] - 2026-04-05
 
 ### Changed
 
+- Promoted Dispatcher Core to stable version `1.5.6` for the grouped documentation restore and Help menu issue-report release.
 - Updated `Data Handler` to version `1.1.2` for export-folder naming cleanup under configured base export directories.
 - Changed organized exports to use `YYYY/MM MonthName` month folders under the selected base export directory.
 - Added automatic migration so a legacy `YYYY/MM` export folder is renamed in place to `YYYY/MM MonthName` when that export month is used.
+- Added grouped documentation restores in Update Manager so Help Center markdown files and `LICENSE.txt` can be refreshed without rebuilding the EXE or choosing individual doc files.
+- Added a `Report A Problem` Help menu action that opens the GitHub issue creation page.
 
 ## [1.5.4] - 2026-04-05
 

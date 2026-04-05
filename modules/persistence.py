@@ -21,7 +21,7 @@ import tempfile
 from datetime import datetime
 
 __module_name__ = "Persistence Helpers"
-__version__ = "1.0.8"
+__version__ = "1.0.9"
 
 
 def ensure_directory(path):
@@ -91,6 +91,43 @@ def write_json_with_backup(target_path, payload, backup_dir=None, keep_count=10,
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             json.dump(payload, handle, indent=indent)
             handle.write("\n")
+
+        os.replace(temp_path, target_path)
+    except Exception:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+        raise
+
+    return {
+        "target_path": target_path,
+        "adjacent_backup_path": adjacent_backup_path,
+        "versioned_backup_path": versioned_backup_path,
+    }
+
+
+def write_text_with_backup(target_path, text, backup_dir=None, keep_count=10, encoding="utf-8"):
+    target_path = os.path.abspath(target_path)
+    target_dir = os.path.dirname(target_path) or os.path.abspath(".")
+    ensure_directory(target_dir)
+
+    adjacent_backup_path = None
+    versioned_backup_path = None
+
+    if os.path.exists(target_path):
+        adjacent_backup_path = f"{target_path}.bak"
+        shutil.copy2(target_path, adjacent_backup_path)
+
+        if backup_dir:
+            backup_dir = ensure_directory(os.path.abspath(backup_dir))
+            versioned_backup_path = _build_versioned_backup_path(target_path, backup_dir)
+            shutil.copy2(target_path, versioned_backup_path)
+            _prune_versioned_backups(target_path, backup_dir, keep_count)
+
+    suffix = os.path.splitext(target_path)[1] or ".tmp"
+    fd, temp_path = tempfile.mkstemp(prefix="martin_", suffix=suffix, dir=target_dir)
+    try:
+        with os.fdopen(fd, "w", encoding=encoding) as handle:
+            handle.write(text)
 
         os.replace(temp_path, target_path)
     except Exception:

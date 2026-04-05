@@ -73,7 +73,7 @@ These two forms do not have identical behavior. The Python version has access to
 ## Update Manager Status
 
 - The updater checks only the Dispatcher Core version in `main.py` as the master version.
-- The current stable Dispatcher Core release is `1.5.4`.
+- The current stable Dispatcher Core release is `1.5.6`.
 - Two-part versions such as `1.07` trigger an executable update when greater than the local version.
 - Three-part versions only trigger an executable update when the third number is even, such as `1.07.2`.
 - Odd patch versions such as `1.07.1` are ignored.
@@ -85,6 +85,7 @@ These two forms do not have identical behavior. The Python version has access to
 - Update Manager can now check for available module payload restores at startup and show a toast notification when they are available.
 - Update Manager can now install all available module and JSON payload restores in one pass.
 - Packaged EXE mode can also restore tracked JSON files such as `layout_config.json` and `rates.json` from the repository copy with local backups preserved before overwrite.
+- Packaged EXE mode can also restore the bundled Help Center markdown files and `LICENSE.txt` as one grouped documentation update.
 - `main.py` remains the Dispatcher Core boundary and still updates only through the stable EXE release path.
-- `About System v1.0.7` remains the first module payload target for packaged update testing after the `1.5.4` EXE handoff.
+- `About System v1.0.7` remains the first module payload target for packaged update testing after the `1.5.6` EXE handoff.
 - The Help Center now uses a modern single-page layout with top link navigation, a Hidden Modules guide, and section chips for User Guide module pages instead of notebook tabs.
