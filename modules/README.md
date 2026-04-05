@@ -20,7 +20,7 @@ The Martin Suite is a desktop application for logging Disamatic production, mana
 * **Theme & Settings Management:** Support for curated readable themes, configurable production defaults, and editable downtime code labels.
 * **Backup-Aware Saves:** Settings, rates, and layout writes keep `.bak` copies plus rotated backups under `data/backups`.
 * **Toast Notifications:** Routine status messages are non-blocking and use a configurable toast duration.
-* **Help & License Access:** Built-in Help Center tabs plus bundled GPL license access from Help and About.
+* **Help & License Access:** Built-in Help Center navigation plus bundled GPL license access from Help and About.
 * **Backup / Recovery Viewer:** Browse pending drafts, recovery snapshots, and configuration backups from inside the suite.
 * **Update Manager:** Shows a compact Dispatcher Core release check and can target packaged EXE updates.
 
@@ -48,19 +48,21 @@ The Martin Suite is designed to be bundled into a standalone `.exe` for deployme
 python build.py
 ```
 
-The compiled executable will be located in the `dist/` directory as a versioned file such as `TheMartinSuite_GLC_v1.2.6.exe`. Existing versioned EXEs are preserved by default so side-by-side update testing can keep more than one build available.
+The compiled executable will be located in the `dist/` directory as a versioned file such as `TheMartinSuite_GLC_v1.2.8.exe`. Existing versioned EXEs are preserved by default so side-by-side update testing can keep more than one build available.
 
 ## Update Behavior
 
 - Source / Python mode can inspect repository versions and hand off into the published packaged EXE by downloading it into local `dist`.
 - Packaged EXE mode uses Dispatcher Core as the master version check.
-- The current stable Dispatcher Core release is `1.2.6`.
+- The current stable Dispatcher Core release is `1.2.8`.
 - Two-part versions such as `1.07` are valid update targets.
 - Three-part versions only update when the third number is even, such as `1.07.2`.
 - Stable executable updates also require a matching published EXE artifact in `dist/`.
 - Packaged EXE updates download a versioned EXE beside the current copy, launch it, and let the newer build offer cleanup of older local EXEs.
 - Packaged EXE mode can also install selected module payload overrides directly from `modules/` without rebuilding the EXE.
+- Packaged EXE mode can also restore tracked JSON files such as `layout_config.json` and `rates.json` from the repository while preserving local backups.
 - `main.py` remains outside that payload list and still moves only through the packaged EXE update path.
+- The Help Center now uses a single-page document layout with top link navigation and horizontal scrolling for smaller windows.
 
 ## License
 

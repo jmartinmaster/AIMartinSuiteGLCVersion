@@ -56,11 +56,12 @@ These two forms do not have identical behavior. The Python version has access to
 - Bundles the help documentation and `LICENSE.txt` for in-app access.
 - Uses the Update Manager for packaged EXE release checks plus selectable module payload installs.
 - Packaged builds now use versioned EXE filenames so a newer build can download beside the current one, launch separately, and leave the older copy available until cleanup is confirmed.
+- The footer update status bar now stays hidden unless an update job is actively running.
 
 ## Update Manager Status
 
 - The updater checks only the Dispatcher Core version in `main.py` as the master version.
-- The current stable Dispatcher Core release is `1.2.6`.
+- The current stable Dispatcher Core release is `1.2.8`.
 - Two-part versions such as `1.07` trigger an executable update when greater than the local version.
 - Three-part versions only trigger an executable update when the third number is even, such as `1.07.2`.
 - Odd patch versions such as `1.07.1` are ignored.
@@ -68,5 +69,7 @@ These two forms do not have identical behavior. The Python version has access to
 - In Python/source mode, stable updates download the published EXE into local `dist` and launch it for handoff testing.
 - In packaged EXE mode, stable updates download a versioned EXE beside the current copy, launch the newer build, and let the newer build offer cleanup of older local EXEs.
 - Packaged EXE mode also supports selected module payload installs from the `modules/` package without rebuilding the EXE.
+- Packaged EXE mode can also restore tracked JSON files such as `layout_config.json` and `rates.json` from the repository copy with local backups preserved before overwrite.
 - `main.py` remains the Dispatcher Core boundary and still updates only through the stable EXE release path.
-- `About System v1.0.4` is the first planned module payload target for packaged update testing after the `1.2.6` EXE handoff.
+- `About System v1.0.4` remains the first module payload target for packaged update testing after the `1.2.8` EXE handoff.
+- The Help Center now uses a modern single-page layout with top link navigation instead of notebook tabs.

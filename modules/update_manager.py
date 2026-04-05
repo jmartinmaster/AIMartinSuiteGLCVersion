@@ -25,16 +25,18 @@ import time
 import urllib.error
 import urllib.request
 import zipfile
+import json
 from tkinter import messagebox
 
 import ttkbootstrap as tb
 from ttkbootstrap.constants import *
 from ttkbootstrap.dialogs import Messagebox
 from app_identity import LEGACY_EXE_NAME, format_versioned_exe_name, load_version_from_main, normalize_version, parse_version
-from modules.utils import ensure_external_directory
+from modules.persistence import write_json_with_backup
+from modules.utils import ensure_external_directory, external_path
 
 __module_name__ = "Update Manager"
-__version__ = "2.0.2"
+__version__ = "2.0.3"
 
 GITHUB_REMOTE_PATTERN = re.compile(r"github\.com[:/](?P<owner>[^/]+)/(?P<repo>[^/.]+?)(?:\.git)?$")
 MODULE_NAME_PATTERN = re.compile(r"__module_name__\s*=\s*[\"']([^\"']+)[\"']")
@@ -42,10 +44,48 @@ VERSION_PATTERN = re.compile(r"__version__\s*=\s*[\"']([^\"']+)[\"']")
 MASTER_VERSION_PATH = "main.py"
 LEGACY_REMOTE_EXE_PATH = "dist/TheMartinSuite_GLC.exe"
 MODULE_PAYLOAD_EXCLUDED_KEYS = {"__init__", "update_manager"}
+JSON_PAYLOAD_OPTIONS = [
+    {
+        "key": "layout_config",
+        "relative_path": "layout_config.json",
+        "fallback_name": "Layout Config",
+        "backup_dir": os.path.join("data", "backups", "layouts"),
+    },
+    {
+        "key": "rates",
+        "relative_path": "rates.json",
+        "fallback_name": "Rates Config",
+        "backup_dir": os.path.join("data", "backups", "rates"),
+    },
+]
 
 
 def _default_module_payload_name(module_key):
     return module_key.replace("_", " ").title()
+
+
+def _parse_json_payload_metadata(file_text, fallback_name):
+    normalized_text = (file_text or "").strip()
+    if not normalized_text:
+        return {
+            "module_name": fallback_name,
+            "version": "Missing",
+            "compare_token": None,
+        }
+    try:
+        payload = json.loads(normalized_text)
+    except Exception:
+        return {
+            "module_name": fallback_name,
+            "version": "Unreadable JSON",
+            "compare_token": normalized_text,
+        }
+    return {
+        "module_name": fallback_name,
+        "version": "Valid JSON",
+        "compare_token": json.dumps(payload, sort_keys=True),
+        "payload": payload,
+    }
 
 
 def _parse_module_metadata(file_text, fallback_name):
@@ -106,17 +146,17 @@ class UpdateManager:
         self.note_var = self.coordinator.note_var
         self.job_phase_var = self.coordinator.job_phase_var
         self.job_detail_var = self.coordinator.job_detail_var
-        self.module_payload_options = self._discover_module_payload_options()
+        self.module_payload_options = self._discover_payload_options()
         default_option = next((option for option in self.module_payload_options if option["key"] == "about"), None)
         if default_option is None and self.module_payload_options:
             default_option = self.module_payload_options[0]
         self.module_payload_selection_var = tb.StringVar(value=default_option["display"] if default_option else "No module payloads available")
-        self.module_payload_name_var = tb.StringVar(value=default_option["module_name"] if default_option else "No module selected")
+        self.module_payload_name_var = tb.StringVar(value=default_option["module_name"] if default_option else "No payload selected")
         self.module_payload_path_var = tb.StringVar(value=default_option["relative_path"] if default_option else "Payload updates are not available.")
         self.module_payload_local_version_var = tb.StringVar(value="Unknown")
         self.module_payload_remote_version_var = tb.StringVar(value="Not checked")
         self.module_payload_status_var = tb.StringVar(value="Pending")
-        self.module_payload_note_var = tb.StringVar(value="Select a module payload to compare against the repository. Dispatcher Core (main.py) remains an EXE-only update boundary.")
+        self.module_payload_note_var = tb.StringVar(value="Select a payload to compare against the repository. Dispatcher Core (main.py) remains an EXE-only update boundary.")
         self.module_payload_in_progress = False
         self.container = None
         self.coordinator.branch_name = self.branch_name
@@ -138,33 +178,46 @@ class UpdateManager:
     def on_unload(self):
         return None
 
-    def _discover_module_payload_options(self):
+    def _discover_payload_options(self):
         options = []
         modules_path = getattr(self.dispatcher, "modules_path", None)
         if not modules_path or not os.path.isdir(modules_path):
-            return options
+            modules_path = None
 
-        for file_name in sorted(os.listdir(modules_path)):
-            if not file_name.endswith(".py"):
-                continue
-            module_key = os.path.splitext(file_name)[0]
-            if module_key in MODULE_PAYLOAD_EXCLUDED_KEYS:
-                continue
+        if modules_path:
+            for file_name in sorted(os.listdir(modules_path)):
+                if not file_name.endswith(".py"):
+                    continue
+                module_key = os.path.splitext(file_name)[0]
+                if module_key in MODULE_PAYLOAD_EXCLUDED_KEYS:
+                    continue
 
-            relative_path = f"modules/{file_name}"
-            fallback_name = _default_module_payload_name(module_key)
-            metadata = _read_module_metadata_from_path(os.path.join(modules_path, file_name), fallback_name) or {
-                "module_name": fallback_name,
-                "version": "Unknown",
-            }
-            module_name = metadata.get("module_name", fallback_name)
+                relative_path = f"modules/{file_name}"
+                fallback_name = _default_module_payload_name(module_key)
+                metadata = _read_module_metadata_from_path(os.path.join(modules_path, file_name), fallback_name) or {
+                    "module_name": fallback_name,
+                    "version": "Unknown",
+                }
+                module_name = metadata.get("module_name", fallback_name)
+                options.append({
+                    "kind": "module",
+                    "key": module_key,
+                    "file_name": file_name,
+                    "relative_path": relative_path,
+                    "fallback_name": fallback_name,
+                    "module_name": module_name,
+                    "display": f"{module_name} ({file_name})",
+                })
+
+        for spec in JSON_PAYLOAD_OPTIONS:
             options.append({
-                "key": module_key,
-                "file_name": file_name,
-                "relative_path": relative_path,
-                "fallback_name": fallback_name,
-                "module_name": module_name,
-                "display": f"{module_name} ({file_name})",
+                "kind": "json",
+                "key": spec["key"],
+                "relative_path": spec["relative_path"],
+                "fallback_name": spec["fallback_name"],
+                "module_name": spec["fallback_name"],
+                "backup_dir": spec["backup_dir"],
+                "display": f"{spec['fallback_name']} ({os.path.basename(spec['relative_path'])})",
             })
 
         return options
@@ -178,7 +231,17 @@ class UpdateManager:
 
     def _get_local_module_payload_metadata(self, option):
         if not option:
-            return {"module_name": "No module selected", "version": "Unknown"}
+            return {"module_name": "No payload selected", "version": "Unknown"}
+
+        if option.get("kind") == "json":
+            local_path = external_path(option["relative_path"])
+            if not os.path.exists(local_path):
+                return _parse_json_payload_metadata("", option["fallback_name"])
+            try:
+                with open(local_path, "r", encoding="utf-8") as handle:
+                    return _parse_json_payload_metadata(handle.read(), option["fallback_name"])
+            except OSError:
+                return {"module_name": option["module_name"], "version": "Unreadable JSON", "compare_token": None}
 
         override_path = self.dispatcher.get_external_module_override_path(option["key"])
         override_metadata = _read_module_metadata_from_path(override_path, option["fallback_name"])
@@ -202,12 +265,12 @@ class UpdateManager:
     def handle_module_payload_selection_change(self, _event=None):
         option = self._get_selected_module_payload_option()
         if option is None:
-            self.module_payload_name_var.set("No module selected")
+            self.module_payload_name_var.set("No payload selected")
             self.module_payload_path_var.set("Payload updates are not available.")
             self.module_payload_local_version_var.set("Unknown")
             self.module_payload_remote_version_var.set("Not available")
             self.module_payload_status_var.set("Unavailable")
-            self.module_payload_note_var.set("No payload-eligible modules are available. Dispatcher Core (main.py) remains an EXE-only update boundary.")
+            self.module_payload_note_var.set("No payload-eligible items are available. Dispatcher Core (main.py) remains an EXE-only update boundary.")
             return
 
         local_metadata = self._get_local_module_payload_metadata(option)
@@ -323,11 +386,12 @@ class UpdateManager:
             self.refresh_module_payload_summary(
                 remote_version="Not available",
                 status="Unavailable",
-                note="No payload-eligible modules are available. Dispatcher Core (main.py) remains an EXE-only update boundary.",
+                note="No payload-eligible items are available. Dispatcher Core (main.py) remains an EXE-only update boundary.",
             )
             return
 
-        local_version = self._get_local_module_payload_version()
+        local_metadata = self._get_local_module_payload_metadata(option)
+        local_version = local_metadata.get("version", "Unknown")
         try:
             remote_text = self._fetch_remote_file(option["relative_path"])
         except urllib.error.HTTPError as exc:
@@ -352,39 +416,71 @@ class UpdateManager:
             )
             return
 
-        remote_metadata = _parse_module_metadata(remote_text, option["fallback_name"])
-        remote_version = remote_metadata.get("version", "Unknown")
-        option["module_name"] = remote_metadata.get("module_name", option["module_name"])
-        local_compare = parse_version(local_version)
-        remote_compare = parse_version(remote_version)
-
-        if remote_compare and local_compare and normalize_version(remote_compare) > normalize_version(local_compare):
-            status = "Module update available"
-            note = f"A newer {option['module_name']} payload is available and can be installed without rebuilding the EXE."
-        elif remote_version == local_version:
-            status = "Up to date"
-            note = f"The selected {option['module_name']} payload already matches the repository version."
+        if option.get("kind") == "json":
+            remote_metadata = _parse_json_payload_metadata(remote_text, option["fallback_name"])
+            remote_version = remote_metadata.get("version", "Unknown")
+            local_token = local_metadata.get("compare_token")
+            remote_token = remote_metadata.get("compare_token")
+            if remote_version != "Valid JSON":
+                status = "Repository JSON unreadable"
+                note = f"The repository copy for {option['module_name']} is not valid JSON and cannot be restored safely."
+            elif local_version == "Missing":
+                status = "JSON restore available"
+                note = f"The local {option['module_name']} file is missing and can be restored from the repository copy."
+            elif local_version == "Unreadable JSON":
+                status = "JSON restore available"
+                note = f"The local {option['module_name']} file is unreadable and can be restored from the repository copy."
+            elif local_token == remote_token:
+                status = "Up to date"
+                note = f"The selected {option['module_name']} JSON file already matches the repository copy."
+            else:
+                status = "JSON restore available"
+                note = f"The local {option['module_name']} JSON file differs from the repository copy and can be restored."
         else:
-            status = "Module version unreadable"
-            note = f"The selected {option['module_name']} payload could not be compared cleanly."
+            remote_metadata = _parse_module_metadata(remote_text, option["fallback_name"])
+            remote_version = remote_metadata.get("version", "Unknown")
+            option["module_name"] = remote_metadata.get("module_name", option["module_name"])
+            local_compare = parse_version(local_version)
+            remote_compare = parse_version(remote_version)
+
+            if remote_compare and local_compare and normalize_version(remote_compare) > normalize_version(local_compare):
+                status = "Module update available"
+                note = f"A newer {option['module_name']} payload is available and can be installed without rebuilding the EXE."
+            elif remote_version == local_version:
+                status = "Up to date"
+                note = f"The selected {option['module_name']} payload already matches the repository version."
+            else:
+                status = "Module version unreadable"
+                note = f"The selected {option['module_name']} payload could not be compared cleanly."
 
         self.refresh_module_payload_summary(remote_version=remote_version, status=status, note=note)
 
     def _finish_module_payload_install(self, option, installed_path, remote_version):
         self.module_payload_in_progress = False
-        installed_metadata = _read_module_metadata_from_path(installed_path, option["fallback_name"])
+        if option.get("kind") == "json":
+            try:
+                with open(installed_path, "r", encoding="utf-8") as handle:
+                    installed_metadata = _parse_json_payload_metadata(handle.read(), option["fallback_name"])
+            except OSError:
+                installed_metadata = None
+        else:
+            installed_metadata = _read_module_metadata_from_path(installed_path, option["fallback_name"])
+
         if installed_metadata:
             self.module_payload_local_version_var.set(installed_metadata.get("version", "Unknown"))
             option["module_name"] = installed_metadata.get("module_name", option["module_name"])
         self.refresh_module_payload_summary(
             remote_version=remote_version,
             status="Installed",
-            note=f"Installed the {option['module_name']} payload override at {installed_path}. Reload that part of the app to verify the change.",
+            note=(
+                f"Installed the {option['module_name']} payload at {installed_path}. "
+                f"{'Reload that part of the app to verify the change.' if option.get('kind') == 'module' else 'The previous local file was backed up before restore.'}"
+            ),
             option=option,
         )
         self.status_var.set(f"{option['module_name']} payload installed.")
         self.dispatcher.set_update_status(f"Installed the {option['module_name']} module payload.", SUCCESS, active=True, mode="module")
-        self.dispatcher.show_toast("Update Manager", f"Installed the {option['module_name']} payload override.", SUCCESS)
+        self.dispatcher.show_toast("Update Manager", f"Installed the {option['module_name']} payload.", SUCCESS)
 
     def _handle_module_payload_failure(self, option, exc):
         self.module_payload_in_progress = False
@@ -414,9 +510,23 @@ class UpdateManager:
         def worker():
             try:
                 remote_text = self._fetch_remote_file(option["relative_path"])
-                remote_metadata = _parse_module_metadata(remote_text, option["fallback_name"])
-                installed_path, _module = self.dispatcher.install_module_override(option["key"], remote_text)
-                remote_version = remote_metadata.get("version", "Unknown")
+                if option.get("kind") == "json":
+                    remote_metadata = _parse_json_payload_metadata(remote_text, option["fallback_name"])
+                    if remote_metadata.get("version") != "Valid JSON":
+                        raise RuntimeError(f"The repository copy for {option['module_name']} is not valid JSON.")
+                    target_path = external_path(option["relative_path"])
+                    write_json_with_backup(
+                        target_path,
+                        remote_metadata["payload"],
+                        backup_dir=external_path(option["backup_dir"]),
+                        keep_count=12,
+                    )
+                    installed_path = target_path
+                    remote_version = remote_metadata.get("version", "Unknown")
+                else:
+                    remote_metadata = _parse_module_metadata(remote_text, option["fallback_name"])
+                    installed_path, _module = self.dispatcher.install_module_override(option["key"], remote_text)
+                    remote_version = remote_metadata.get("version", "Unknown")
             except Exception as exc:
                 self.dispatcher.root.after(0, lambda current_option=option.copy(), error=exc: self._handle_module_payload_failure(current_option, error))
                 return
@@ -1114,17 +1224,17 @@ class UpdateManager:
         tb.Button(controls, text="Check Repository", bootstyle=PRIMARY, command=self.check_for_updates).pack(side=LEFT)
         tb.Button(controls, text="Apply Stable Updates", bootstyle=SUCCESS, command=self.apply_updates).pack(side=LEFT, padx=8)
 
-        module_payload = tb.Labelframe(container, text=" Module Payloads ", padding=14)
+        module_payload = tb.Labelframe(container, text=" Payload Restores ", padding=14)
         module_payload.pack(fill=X, pady=(12, 0))
         tb.Label(
             module_payload,
-            text="Choose a single module payload to compare and install without rebuilding the EXE. Dispatcher Core (main.py) stays outside this list and continues to update through the stable EXE path above.",
+            text="Choose a single module or JSON payload to compare and restore without rebuilding the EXE. Dispatcher Core (main.py) stays outside this list and continues to update through the stable EXE path above.",
             wraplength=720,
             justify=LEFT,
         ).pack(anchor=W)
         payload_grid = tb.Frame(module_payload)
         payload_grid.pack(fill=X, pady=(10, 0))
-        tb.Label(payload_grid, text="Module", bootstyle=SECONDARY).grid(row=0, column=0, sticky=W, padx=(0, 12), pady=2)
+        tb.Label(payload_grid, text="Payload", bootstyle=SECONDARY).grid(row=0, column=0, sticky=W, padx=(0, 12), pady=2)
         module_payload_selector = tb.Combobox(
             payload_grid,
             textvariable=self.module_payload_selection_var,
@@ -1134,21 +1244,21 @@ class UpdateManager:
         )
         module_payload_selector.grid(row=0, column=1, sticky=W, pady=2)
         module_payload_selector.bind("<<ComboboxSelected>>", self.handle_module_payload_selection_change)
-        tb.Label(payload_grid, text="Module Name", bootstyle=SECONDARY).grid(row=1, column=0, sticky=W, padx=(0, 12), pady=2)
+        tb.Label(payload_grid, text="Name", bootstyle=SECONDARY).grid(row=1, column=0, sticky=W, padx=(0, 12), pady=2)
         tb.Label(payload_grid, textvariable=self.module_payload_name_var).grid(row=1, column=1, sticky=W, pady=2)
         tb.Label(payload_grid, text="Repository Path", bootstyle=SECONDARY).grid(row=2, column=0, sticky=W, padx=(0, 12), pady=2)
         tb.Label(payload_grid, textvariable=self.module_payload_path_var).grid(row=2, column=1, sticky=W, pady=2)
-        tb.Label(payload_grid, text="Local Version", bootstyle=SECONDARY).grid(row=3, column=0, sticky=W, padx=(0, 12), pady=2)
+        tb.Label(payload_grid, text="Local State", bootstyle=SECONDARY).grid(row=3, column=0, sticky=W, padx=(0, 12), pady=2)
         tb.Label(payload_grid, textvariable=self.module_payload_local_version_var).grid(row=3, column=1, sticky=W, pady=2)
-        tb.Label(payload_grid, text="Repository Version", bootstyle=SECONDARY).grid(row=4, column=0, sticky=W, padx=(0, 12), pady=2)
+        tb.Label(payload_grid, text="Repository State", bootstyle=SECONDARY).grid(row=4, column=0, sticky=W, padx=(0, 12), pady=2)
         tb.Label(payload_grid, textvariable=self.module_payload_remote_version_var).grid(row=4, column=1, sticky=W, pady=2)
         tb.Label(payload_grid, text="Status", bootstyle=SECONDARY).grid(row=5, column=0, sticky=W, padx=(0, 12), pady=2)
         tb.Label(payload_grid, textvariable=self.module_payload_status_var).grid(row=5, column=1, sticky=W, pady=2)
         tb.Label(module_payload, textvariable=self.module_payload_note_var, bootstyle=INFO, wraplength=720, justify=LEFT).pack(anchor=W, pady=(10, 0))
         payload_controls = tb.Frame(module_payload)
         payload_controls.pack(anchor=W, pady=(10, 0))
-        tb.Button(payload_controls, text="Check Selected Module", bootstyle=PRIMARY, command=self.check_module_payload_update).pack(side=LEFT)
-        tb.Button(payload_controls, text="Install Selected Module", bootstyle=SUCCESS, command=self.apply_module_payload_update).pack(side=LEFT, padx=(8, 0))
+        tb.Button(payload_controls, text="Check Selected Payload", bootstyle=PRIMARY, command=self.check_module_payload_update).pack(side=LEFT)
+        tb.Button(payload_controls, text="Install Selected Payload", bootstyle=SUCCESS, command=self.apply_module_payload_update).pack(side=LEFT, padx=(8, 0))
 
         tb.Label(container, textvariable=self.status_var, bootstyle=SECONDARY).pack(anchor=W, pady=(12, 0))
 

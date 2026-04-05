@@ -33,7 +33,7 @@ from modules.theme_manager import apply_readability_overrides, normalize_theme, 
 from modules.utils import external_path, local_or_resource_path, resource_path
 
 __module_name__ = "Dispatcher Core"
-__version__ = "1.2.6"
+__version__ = "1.2.8"
 WINDOWS_APP_ID = "JamieMartin.TheMartinSuite.GLC"
 APP_ICON_RELATIVE_PATH = "icon.ico"
 APP_ICON_IMAGE_RELATIVE_PATHS = [
@@ -493,6 +493,7 @@ class Dispatcher:
         self.pre_load_manifest()
         self._load_modules_list()
         self._bind_mousewheel()
+        self.refresh_update_status_visibility()
         self.load_module("production_log", use_transition=False)
         self.root.after(900, self.prompt_old_executable_cleanup)
 
@@ -653,7 +654,7 @@ class Dispatcher:
         for filename in os.listdir(self.modules_path):
             if filename.endswith(".py") and filename != "__init__.py":
                 module_name = filename[:-3]
-                if module_name in ["about", "app_logging", "data_handler", "downtime_codes", "example_modules", "help_viewer", "persistence", "splash", "theme_manager", "utils"]:
+                if module_name in ["about", "app_logging", "data_handler", "downtime_codes", "help_viewer", "persistence", "splash", "theme_manager", "utils"]:
                     continue
                 display_name = module_name.replace("_", " ").title()
 
@@ -867,15 +868,24 @@ class Dispatcher:
         )
         toast.show_toast()
 
+    def refresh_update_status_visibility(self):
+        if self.update_coordinator.active:
+            if not self.update_status_frame.winfo_manager():
+                self.update_status_frame.pack(side=BOTTOM, fill=X)
+            self.update_status_frame.configure(bootstyle=INFO)
+            self.update_status_label.configure(bootstyle=self.update_coordinator.banner_bootstyle)
+            return
+
+        if self.update_status_frame.winfo_manager():
+            self.update_status_frame.pack_forget()
+
     def set_update_status(self, message, bootstyle=INFO, active=True, mode=None):
         self.update_coordinator.set_banner(message, bootstyle=bootstyle, active=active, mode=mode)
-        self.update_status_frame.configure(bootstyle=LIGHT if not active else INFO)
-        self.update_status_label.configure(bootstyle=self.update_coordinator.banner_bootstyle)
+        self.refresh_update_status_visibility()
 
     def clear_update_status(self):
         self.update_coordinator.clear_banner()
-        self.update_status_frame.configure(bootstyle=LIGHT)
-        self.update_status_label.configure(bootstyle=SECONDARY)
+        self.refresh_update_status_visibility()
 
     def prompt_old_executable_cleanup(self):
         obsolete_executables = get_obsolete_local_executables(os.path.abspath(sys.executable), __version__)
