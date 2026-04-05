@@ -21,7 +21,7 @@ import tempfile
 from datetime import datetime
 
 __module_name__ = "Persistence Helpers"
-__version__ = "1.0.0"
+__version__ = "1.0.8"
 
 
 def ensure_directory(path):
