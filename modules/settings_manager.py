@@ -28,7 +28,7 @@ from modules.theme_manager import DEFAULT_THEME, get_theme_names, normalize_them
 from modules.utils import external_path
 
 __module_name__ = "Settings Manager"
-__version__ = "1.1.9"
+__version__ = "1.1.11"
 
 class SettingsManager:
     def __init__(self, parent, dispatcher):
@@ -56,6 +56,7 @@ class SettingsManager:
                 "default_export_prefix": "Disamatic Production Sheet",
                 "theme": DEFAULT_THEME,
                 "enable_screen_transitions": True,
+                "enable_module_update_notifications": True,
                 "screen_transition_duration_ms": 360,
                 "toast_duration_sec": 5,
                 "auto_save_interval_min": 5,
@@ -85,6 +86,7 @@ class SettingsManager:
             self.settings["downtime_codes"] = normalized_codes
         self.settings["theme"] = normalize_theme(self.settings.get("theme", DEFAULT_THEME))
         self.settings["enable_screen_transitions"] = bool(self.settings.get("enable_screen_transitions", True))
+        self.settings["enable_module_update_notifications"] = bool(self.settings.get("enable_module_update_notifications", True))
         try:
             self.settings["screen_transition_duration_ms"] = max(0, min(500, int(self.settings.get("screen_transition_duration_ms", 360))))
         except Exception:
@@ -566,6 +568,7 @@ class SettingsManager:
             ("default_export_prefix", "Default Export Prefix", "entry"),
             ("theme", "Application Theme", "combo", get_theme_names()),
             ("enable_screen_transitions", "Enable Screen Transitions", "check"),
+            ("enable_module_update_notifications", "Check Module Updates On Startup", "check"),
             ("screen_transition_duration_ms", "Transition Duration (ms)", "entry"),
             ("toast_duration_sec", "Toast Duration (Seconds)", "entry"),
             ("auto_save_interval_min", "Auto-Save Interval (Minutes)", "entry"),
@@ -633,6 +636,14 @@ class SettingsManager:
         tb.Label(
             container,
             text="Screen transitions can be disabled or tuned from 0 to 500 ms. Around 250 to 400 ms is usually enough to soften redraw flashes without feeling slow.",
+            bootstyle=SECONDARY,
+            justify=LEFT,
+            wraplength=760,
+        ).pack(anchor=W, pady=(0, 10))
+
+        tb.Label(
+            container,
+            text="Module update notifications run in the background at startup by default and show a toast when repository payload restores are available.",
             bootstyle=SECONDARY,
             justify=LEFT,
             wraplength=760,
