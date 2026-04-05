@@ -22,18 +22,20 @@ from ttkbootstrap.constants import *
 from modules.utils import local_or_resource_path
 
 __module_name__ = "Help Viewer"
-__version__ = "1.2.2"
+__version__ = "1.2.3"
 
 
 class RoundedNavChip(tk.Canvas):
-    def __init__(self, parent, text, command, width=None):
+    def __init__(self, parent, text, command, width=None, compact=False):
         self.command = command
         self.text = text
-        self.radius = 16
-        self.height = 36
-        self.font = tkfont.Font(family="Segoe UI", size=10, weight="bold")
+        self.compact = bool(compact)
+        self.radius = 14 if self.compact else 16
+        self.height = 30 if self.compact else 36
+        self.font = tkfont.Font(family="Segoe UI", size=9 if self.compact else 10, weight="bold")
         text_width = self.font.measure(text)
-        chip_width = width or max(120, text_width + 28)
+        min_width = 84 if self.compact else 120
+        chip_width = width or max(min_width, text_width + (22 if self.compact else 28))
         bg_color = self._resolve_canvas_background(parent)
         super().__init__(
             parent,
@@ -157,6 +159,11 @@ class HelpViewer:
         self.link_canvas = None
         self.link_window = None
         self.link_scrollbar = None
+        self.subnav_shell = None
+        self.sub_link_bar = None
+        self.sub_link_canvas = None
+        self.sub_link_window = None
+        self.sub_link_scrollbar = None
         self.doc_panel = None
         self.doc_surface = None
         self.doc_title_var = tb.StringVar(value="User Guide")
@@ -164,7 +171,21 @@ class HelpViewer:
         self.doc_meta_var = tb.StringVar(value="Bundled guide")
         self.doc_text_widget = None
         self.doc_link_buttons = {}
+        self.sub_doc_link_buttons = {}
         self.active_doc_path = None
+        self.doc_groups = {
+            "user_guide": {
+                "sections": [
+                    ("Overview", "docs/help/user_guide.md"),
+                    ("Production Log", "docs/help/user_guide_production_log.md"),
+                    ("Rate Manager", "docs/help/user_guide_rate_manager.md"),
+                    ("Layout Manager", "docs/help/user_guide_layout_manager.md"),
+                    ("Settings Manager", "docs/help/user_guide_settings_manager.md"),
+                    ("Backup / Recovery", "docs/help/user_guide_recovery_viewer.md"),
+                    ("Update Manager", "docs/help/user_guide_update_manager.md"),
+                ],
+            },
+        }
         self.doc_index = [
             ("User Guide", "docs/help/user_guide.md"),
             ("App Icons", "docs/help/app_icons.md"),
@@ -172,6 +193,7 @@ class HelpViewer:
             ("Settings JSON", "docs/help/settings_json.md"),
             ("Rates JSON", "docs/help/rates_json.md"),
             ("Draft JSON", "docs/help/draft_json.md"),
+            ("Hidden Modules", "docs/help/hidden_modules.md"),
             ("License", "LICENSE.txt"),
         ]
         self.setup_ui()
@@ -181,7 +203,7 @@ class HelpViewer:
         self.container.pack(fill=BOTH, expand=True)
         self.container.pack_propagate(False)
         self.container.columnconfigure(0, weight=1)
-        self.container.rowconfigure(2, weight=1)
+        self.container.rowconfigure(3, weight=1)
         self.container.configure(bootstyle=DARK)
 
         self.hero_panel = tk.Frame(self.container, bg=self.palette["hero_bg"], padx=22, pady=22)
@@ -280,8 +302,36 @@ class HelpViewer:
             button.pack(side=LEFT, padx=(0, 10), pady=(0, 8))
             self.doc_link_buttons[doc_path] = button
 
+        self.subnav_shell = tk.Frame(self.container, bg=self.palette["page_bg"], padx=4, pady=0)
+        self.subnav_shell.grid(row=2, column=0, sticky=EW, pady=(8, 0))
+        self.subnav_shell.columnconfigure(0, weight=1)
+        self.subnav_shell.rowconfigure(0, weight=1)
+
+        self.sub_link_canvas = tk.Canvas(
+            self.subnav_shell,
+            height=42,
+            highlightthickness=0,
+            bd=0,
+            bg=self.palette["page_bg"],
+            xscrollincrement=20,
+        )
+        self.sub_link_canvas.grid(row=0, column=0, sticky=EW)
+
+        self.sub_link_scrollbar = tb.Scrollbar(self.subnav_shell, orient=HORIZONTAL, command=self.sub_link_canvas.xview)
+        self.sub_link_scrollbar.grid(row=1, column=0, sticky=EW, pady=(4, 0))
+        self.sub_link_scrollbar.configure(bootstyle=SECONDARY)
+        self.sub_link_canvas.configure(xscrollcommand=self.sub_link_scrollbar.set)
+
+        self.sub_link_bar = tk.Frame(self.sub_link_canvas, bg=self.palette["page_bg"])
+        self.sub_link_window = self.sub_link_canvas.create_window((0, 0), window=self.sub_link_bar, anchor="nw")
+        self.sub_link_bar.bind("<Configure>", self.on_sub_link_bar_configure)
+        self.sub_link_canvas.bind("<Configure>", self.on_sub_link_canvas_resize)
+        self.sub_link_canvas.bind("<Shift-MouseWheel>", self.on_sub_link_bar_mousewheel)
+        self.sub_link_canvas.bind("<MouseWheel>", self.on_sub_link_bar_mousewheel)
+        self.subnav_shell.grid_remove()
+
         self.doc_panel = tk.Frame(self.container, bg=self.palette["panel_bg"], padx=20, pady=20)
-        self.doc_panel.grid(row=2, column=0, sticky=NSEW)
+        self.doc_panel.grid(row=3, column=0, sticky=NSEW)
         self.doc_panel.columnconfigure(0, weight=1)
         self.doc_panel.rowconfigure(1, weight=1)
 
@@ -384,6 +434,66 @@ class HelpViewer:
         if delta:
             self.link_canvas.xview_scroll(delta * 3, "units")
 
+    def on_sub_link_bar_configure(self, _event=None):
+        if self.sub_link_canvas is None:
+            return
+        self.sub_link_canvas.configure(scrollregion=self.sub_link_canvas.bbox("all"))
+
+    def on_sub_link_canvas_resize(self, event):
+        if self.sub_link_canvas is None or self.sub_link_window is None:
+            return
+        required_width = self.sub_link_bar.winfo_reqwidth() if self.sub_link_bar is not None else event.width
+        self.sub_link_canvas.itemconfigure(self.sub_link_window, height=event.height)
+        if required_width < event.width:
+            self.sub_link_canvas.itemconfigure(self.sub_link_window, width=event.width)
+        else:
+            self.sub_link_canvas.itemconfigure(self.sub_link_window, width=required_width)
+
+    def on_sub_link_bar_mousewheel(self, event):
+        if self.sub_link_canvas is None:
+            return
+        delta = 0
+        if getattr(event, "delta", 0):
+            delta = -1 if event.delta > 0 else 1
+        elif getattr(event, "num", None) in (4, 5):
+            delta = -1 if event.num == 4 else 1
+        if delta:
+            self.sub_link_canvas.xview_scroll(delta * 3, "units")
+
+    def get_doc_group(self, doc_path):
+        for group_name, group in self.doc_groups.items():
+            for _section_name, section_path in group.get("sections", []):
+                if section_path == doc_path:
+                    return group_name
+        return None
+
+    def render_subnav_for_path(self, doc_path):
+        if self.sub_link_bar is None or self.subnav_shell is None:
+            return
+
+        for child in self.sub_link_bar.winfo_children():
+            child.destroy()
+        self.sub_doc_link_buttons.clear()
+
+        group_name = self.get_doc_group(doc_path)
+        if group_name is None:
+            self.subnav_shell.grid_remove()
+            return
+
+        group = self.doc_groups[group_name]
+        for section_name, section_path in group.get("sections", []):
+            button = RoundedNavChip(
+                self.sub_link_bar,
+                text=section_name,
+                compact=True,
+                command=lambda name=section_name, path=section_path: self.show_document(name, path),
+            )
+            button.pack(side=LEFT, padx=(0, 8), pady=(0, 6))
+            self.sub_doc_link_buttons[section_path] = button
+
+        self.subnav_shell.grid()
+        self.on_sub_link_bar_configure()
+
     def apply_viewport_layout(self):
         if not self.container or not self.doc_panel:
             return
@@ -400,13 +510,23 @@ class HelpViewer:
         if self.link_canvas is not None:
             self.link_canvas.configure(width=viewport_width - 40)
             self.on_link_bar_configure()
+        if self.sub_link_canvas is not None:
+            self.sub_link_canvas.configure(width=viewport_width - 56)
+            self.on_sub_link_bar_configure()
 
     def show_document(self, doc_name, doc_path):
         self.active_doc_path = doc_path
         self.doc_title_var.set(doc_name)
         self.doc_path_var.set(doc_path)
-        self.doc_meta_var.set("Bundled license" if doc_path == "LICENSE.txt" else "Bundled guide")
+        group_name = self.get_doc_group(doc_path)
+        if doc_path == "LICENSE.txt":
+            self.doc_meta_var.set("Bundled license")
+        elif group_name == "user_guide":
+            self.doc_meta_var.set("User Guide section")
+        else:
+            self.doc_meta_var.set("Bundled guide")
         content = self.read_doc(doc_path)
+        self.render_subnav_for_path(doc_path)
 
         self.doc_text_widget.config(state=NORMAL)
         self.doc_text_widget.delete("1.0", END)
@@ -415,6 +535,8 @@ class HelpViewer:
         self.doc_text_widget.yview_moveto(0)
 
         for candidate_path, button in self.doc_link_buttons.items():
+            button.set_active(candidate_path == doc_path or (candidate_path == "docs/help/user_guide.md" and group_name == "user_guide"))
+        for candidate_path, button in self.sub_doc_link_buttons.items():
             button.set_active(candidate_path == doc_path)
 
     def open_active_document(self):
