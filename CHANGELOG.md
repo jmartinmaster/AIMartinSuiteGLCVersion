@@ -4,6 +4,16 @@ This changelog tracks the main branch release line for The Martin Suite (GLC Edi
 
 Version headings below are aligned to the current `1.x` release line used by Dispatcher Core. Earlier work has been grouped into practical release milestones so the shipped feature history is easier to follow without rewriting older module version markers.
 
+## [1.2.8] - 2026-04-04
+
+### Changed
+
+- Promoted Dispatcher Core to stable version `1.2.8` for the final packaged update-manager polish release.
+- Hid the footer update status bar whenever the updater is idle and only surface it while an update job is actually active.
+- Expanded payload restores so packaged builds can restore tracked JSON files such as `layout_config.json` and `rates.json` from the repository copy while preserving local backups.
+- Refreshed the Help Center into a single-page layout with top link navigation, improved readability, and horizontal scrolling for smaller windows.
+- Removed the unused `example_modules.py` placeholder so future modules can be added intentionally as needed.
+
 ## [1.2.6] - 2026-04-04
 
 ### Changed
