@@ -33,10 +33,10 @@ from ttkbootstrap.constants import *
 from ttkbootstrap.dialogs import Messagebox
 from app_identity import LEGACY_EXE_NAME, format_versioned_exe_name, load_version_from_main, normalize_version, parse_version
 from modules.persistence import write_json_with_backup
-from modules.utils import ensure_external_directory, external_path
+from modules.utils import ensure_external_directory, external_path, resolve_local_venv_python
 
 __module_name__ = "Update Manager"
-__version__ = "2.0.3"
+__version__ = "2.0.7"
 
 GITHUB_REMOTE_PATTERN = re.compile(r"github\.com[:/](?P<owner>[^/]+)/(?P<repo>[^/.]+?)(?:\.git)?$")
 MODULE_NAME_PATTERN = re.compile(r"__module_name__\s*=\s*[\"']([^\"']+)[\"']")
@@ -469,18 +469,24 @@ class UpdateManager:
         if installed_metadata:
             self.module_payload_local_version_var.set(installed_metadata.get("version", "Unknown"))
             option["module_name"] = installed_metadata.get("module_name", option["module_name"])
+        if option.get("kind") == "module":
+            install_note = "Reload that part of the app to verify the change. The app will now prefer this external module file automatically whenever it exists beside the executable."
+            toast_message = f"Installed the {option['module_name']} payload. It will be used automatically when that module is reloaded."
+        else:
+            install_note = "The previous local file was backed up before restore."
+            toast_message = f"Installed the {option['module_name']} payload."
         self.refresh_module_payload_summary(
             remote_version=remote_version,
             status="Installed",
             note=(
                 f"Installed the {option['module_name']} payload at {installed_path}. "
-                f"{'Reload that part of the app to verify the change.' if option.get('kind') == 'module' else 'The previous local file was backed up before restore.'}"
+                f"{install_note}"
             ),
             option=option,
         )
         self.status_var.set(f"{option['module_name']} payload installed.")
         self.dispatcher.set_update_status(f"Installed the {option['module_name']} module payload.", SUCCESS, active=True, mode="module")
-        self.dispatcher.show_toast("Update Manager", f"Installed the {option['module_name']} payload.", SUCCESS)
+        self.dispatcher.show_toast("Update Manager", toast_message, SUCCESS)
 
     def _handle_module_payload_failure(self, option, exc):
         self.module_payload_in_progress = False
@@ -799,26 +805,33 @@ class UpdateManager:
             raise RuntimeError(f"The downloaded source snapshot is incomplete: {missing_text}")
 
     def _resolve_build_python_command(self):
-        configured_python = os.environ.get("MARTIN_BUILD_PYTHON", "").strip()
         python_candidates = []
+
+        def add_candidate(command_prefix, display_name):
+            if not command_prefix:
+                return
+            if any(existing_display == display_name for _existing_prefix, existing_display in python_candidates):
+                return
+            python_candidates.append((command_prefix, display_name))
+
+        adjacent_venv_python = resolve_local_venv_python()
+        add_candidate([adjacent_venv_python] if adjacent_venv_python else None, adjacent_venv_python)
+
+        external_venv_python = resolve_local_venv_python(self._resolve_download_directory())
+        if external_venv_python != adjacent_venv_python:
+            add_candidate([external_venv_python] if external_venv_python else None, external_venv_python)
+
+        configured_python = os.environ.get("MARTIN_BUILD_PYTHON", "").strip()
         if configured_python:
-            python_candidates.append(([configured_python], configured_python))
-
-        adjacent_venv_python = os.path.join(os.path.abspath("."), ".venv", "Scripts", "python.exe")
-        if os.path.exists(adjacent_venv_python):
-            python_candidates.append(([adjacent_venv_python], adjacent_venv_python))
-
-        external_venv_python = os.path.join(self._resolve_download_directory(), ".venv", "Scripts", "python.exe")
-        if os.path.exists(external_venv_python) and external_venv_python != adjacent_venv_python:
-            python_candidates.append(([external_venv_python], external_venv_python))
+            add_candidate([configured_python], configured_python)
 
         python_on_path = shutil.which("python")
         if python_on_path:
-            python_candidates.append(([python_on_path], python_on_path))
+            add_candidate([python_on_path], python_on_path)
 
         py_launcher = shutil.which("py")
         if py_launcher:
-            python_candidates.append(([py_launcher, "-3"], f"{py_launcher} -3"))
+            add_candidate([py_launcher, "-3"], f"{py_launcher} -3")
 
         creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
         for command_prefix, display_name in python_candidates:
@@ -837,7 +850,7 @@ class UpdateManager:
                 return command_prefix, display_name
 
         raise RuntimeError(
-            "No usable Python build runtime with PyInstaller was found. Set MARTIN_BUILD_PYTHON or place a working .venv next to the app."
+            "No usable Python build runtime with PyInstaller was found. The app checks its local .venv first, then MARTIN_BUILD_PYTHON and system Python fallbacks."
         )
 
     def _write_source_build_log(self, log_name, content):

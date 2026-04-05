@@ -33,7 +33,7 @@ from modules.theme_manager import apply_readability_overrides, normalize_theme, 
 from modules.utils import external_path, local_or_resource_path, resource_path
 
 __module_name__ = "Dispatcher Core"
-__version__ = "1.2.8"
+__version__ = "1.5.2"
 WINDOWS_APP_ID = "JamieMartin.TheMartinSuite.GLC"
 APP_ICON_RELATIVE_PATH = "icon.ico"
 APP_ICON_IMAGE_RELATIVE_PATHS = [
@@ -477,6 +477,7 @@ class Dispatcher:
         self.persistent_module_instances = {}
         self.active_module_instance = None
         self.active_module_name = None
+        self.active_module_frame = None
         self.settings_path = external_path("settings.json")
         self.runtime_settings = self.load_runtime_settings()
         self.window_alpha_supported = self._supports_window_alpha()
@@ -509,7 +510,13 @@ class Dispatcher:
         modules_package = sys.modules.get("modules")
         if modules_package is not None and hasattr(modules_package, "__path__"):
             package_paths = []
-            for candidate in [self.external_modules_path, self.modules_path]:
+            candidate_paths = [self.modules_path, self.external_modules_path]
+            if self.has_external_module_overrides():
+                candidate_paths = [self.external_modules_path, self.modules_path]
+
+            for candidate in candidate_paths:
+                if candidate == self.external_modules_path and not self.has_external_modules_directory():
+                    continue
                 if candidate not in package_paths:
                     package_paths.append(candidate)
             for candidate in list(modules_package.__path__):
@@ -521,10 +528,6 @@ class Dispatcher:
 
     def ensure_external_modules_package(self):
         os.makedirs(self.external_modules_path, exist_ok=True)
-        init_path = os.path.join(self.external_modules_path, "__init__.py")
-        if not os.path.exists(init_path):
-            with open(init_path, "w", encoding="utf-8") as handle:
-                handle.write("# External module overrides for The Martin Suite.\n")
         self._configure_module_import_paths()
 
     def import_managed_module(self, module_name, force_fresh=True):
@@ -540,6 +543,66 @@ class Dispatcher:
     def get_external_module_override_path(self, module_name):
         candidate = os.path.join(self.external_modules_path, f"{module_name}.py")
         return candidate if os.path.exists(candidate) else None
+
+    def has_external_modules_directory(self):
+        return os.path.isdir(self.external_modules_path) and os.path.abspath(self.external_modules_path) != os.path.abspath(self.modules_path)
+
+    def get_external_module_override_names(self):
+        if not self.has_external_modules_directory():
+            return []
+
+        module_names = []
+        for file_name in os.listdir(self.external_modules_path):
+            if not file_name.endswith(".py") or file_name == "__init__.py":
+                continue
+            module_name = os.path.splitext(file_name)[0]
+            if module_name not in module_names:
+                module_names.append(module_name)
+        return sorted(module_names)
+
+    def has_external_module_overrides(self):
+        return bool(self.get_external_module_override_names())
+
+    def are_external_module_overrides_enabled(self):
+        return self.has_external_module_overrides()
+
+    def is_module_loaded_from_external(self, module_name, module_obj=None):
+        if module_name == "main":
+            return False
+        if not self.has_external_modules_directory():
+            return False
+        candidate_module = module_obj or self.loaded_modules.get(module_name)
+        module_file = getattr(candidate_module, "__file__", "") if candidate_module is not None else ""
+        if not module_file:
+            return False
+        normalized_file = os.path.abspath(module_file)
+        normalized_external_root = os.path.abspath(self.external_modules_path)
+        try:
+            return os.path.commonpath([normalized_file, normalized_external_root]) == normalized_external_root
+        except Exception:
+            return False
+
+    def reset_module_import_state(self, keep_active=True):
+        active_name = self.active_module_name if keep_active else None
+        for module_name, session in list(self.persistent_module_instances.items()):
+            if keep_active and module_name == active_name:
+                continue
+            instance = session.get("instance")
+            frame = session.get("frame")
+            if hasattr(instance, 'on_unload'):
+                try:
+                    instance.on_unload()
+                except Exception as exc:
+                    log_exception(f"reset_module_import_state.{module_name}", exc)
+            if frame is not None and frame.winfo_exists():
+                frame.destroy()
+            self.persistent_module_instances.pop(module_name, None)
+
+        for module_name in list(self.loaded_modules):
+            if module_name == "main" or (keep_active and module_name == active_name):
+                continue
+            self.loaded_modules.pop(module_name, None)
+            sys.modules.pop(f"modules.{module_name}", None)
 
     def install_module_override(self, module_name, module_text):
         self.ensure_external_modules_package()
@@ -634,36 +697,87 @@ class Dispatcher:
 
         self.canvas = tk.Canvas(self.right_container, highlightthickness=0)
         self.scrollbar = tb.Scrollbar(self.right_container, orient=VERTICAL, command=self.canvas.yview)
+        self.x_scrollbar = tb.Scrollbar(self.right_container, orient=HORIZONTAL, command=self.canvas.xview)
         
         self.content_area = tb.Frame(self.canvas)
         self.canvas_window = self.canvas.create_window((0, 0), window=self.content_area, anchor="nw")
         
-        self.canvas.configure(yscrollcommand=self.scrollbar.set)
+        self.canvas.configure(yscrollcommand=self.scrollbar.set, xscrollcommand=self.x_scrollbar.set)
         self.scrollbar.pack(side=RIGHT, fill=Y)
+        self.x_scrollbar.pack(side=BOTTOM, fill=X)
         self.canvas.pack(side=LEFT, fill=BOTH, expand=True)
 
-        self.content_area.bind("<Configure>", lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
-        self.canvas.bind("<Configure>", lambda e: self.canvas.itemconfig(self.canvas_window, width=e.width))
+        self.content_area.bind("<Configure>", self.sync_content_canvas_layout)
+        self.canvas.bind("<Configure>", self.sync_content_canvas_layout)
 
     def _load_modules_list(self):
-        if not os.path.exists(self.modules_path):
-            return
+        for display_name, module_name in self.get_navigation_modules():
+            tb.Button(
+                self.nav_container,
+                text=display_name,
+                bootstyle="link-light",
+                command=lambda m=module_name: self.load_module(m),
+            ).pack(fill=X, padx=5, pady=2)
 
+    def get_navigation_modules(self):
+        if not os.path.exists(self.modules_path):
+            return []
+
+        hidden_modules = {"about", "app_logging", "data_handler", "downtime_codes", "help_viewer", "persistence", "splash", "theme_manager", "utils"}
         nav_modules = []
 
         for filename in os.listdir(self.modules_path):
-            if filename.endswith(".py") and filename != "__init__.py":
-                module_name = filename[:-3]
-                if module_name in ["about", "app_logging", "data_handler", "downtime_codes", "help_viewer", "persistence", "splash", "theme_manager", "utils"]:
-                    continue
-                display_name = module_name.replace("_", " ").title()
+            if not filename.endswith(".py") or filename == "__init__.py":
+                continue
+            module_name = filename[:-3]
+            if module_name in hidden_modules:
+                continue
+            nav_modules.append((module_name.replace("_", " ").title(), module_name))
 
-                nav_modules.append((display_name, module_name))
+        return sorted(nav_modules, key=lambda item: item[0].lower())
 
-        for display_name, module_name in sorted(nav_modules, key=lambda item: item[0].lower()):
-                tb.Button(self.nav_container, text=display_name,
-                          bootstyle="link-light", 
-                          command=lambda m=module_name: self.load_module(m)).pack(fill=X, padx=5, pady=2)
+    def get_persistable_modules(self):
+        return [(display_name, module_name) for display_name, module_name in self.get_navigation_modules() if module_name != "update_manager"]
+
+    def normalize_persistent_modules(self, raw_value):
+        if isinstance(raw_value, str):
+            candidates = [part.strip() for part in raw_value.split(",")]
+        elif isinstance(raw_value, (list, tuple, set)):
+            candidates = [str(part).strip() for part in raw_value]
+        else:
+            candidates = []
+
+        valid_modules = {module_name for _display_name, module_name in self.get_persistable_modules()}
+        normalized = []
+        for module_name in candidates:
+            if module_name and module_name in valid_modules and module_name not in normalized:
+                normalized.append(module_name)
+        return normalized
+
+    def is_module_persistent(self, module_name):
+        if not module_name:
+            return False
+        if module_name == "update_manager":
+            return True
+        return module_name in self.runtime_settings.get("persistent_modules", [])
+
+    def prune_persistent_module_instances(self):
+        allowed_modules = set(self.runtime_settings.get("persistent_modules", [])) | {"update_manager"}
+        for module_name in list(self.persistent_module_instances):
+            if module_name in allowed_modules or module_name == self.active_module_name:
+                continue
+            session = self.persistent_module_instances.pop(module_name, None)
+            if not session:
+                continue
+            instance = session.get("instance")
+            frame = session.get("frame")
+            if hasattr(instance, "on_unload"):
+                try:
+                    instance.on_unload()
+                except Exception as exc:
+                    log_exception(f"persistent_module_unload.{module_name}", exc)
+            if frame is not None and frame.winfo_exists():
+                frame.destroy()
 
     def _supports_window_alpha(self):
         try:
@@ -721,32 +835,55 @@ class Dispatcher:
 
     def load_module(self, module_name, use_transition=True):
         def perform_load():
-            if self.active_module_name == "update_manager" and self.active_module_instance is not None:
-                if hasattr(self.active_module_instance, 'on_hide'):
-                    self.active_module_instance.on_hide()
-            elif hasattr(self.active_module_instance, 'on_unload'):
-                self.active_module_instance.on_unload()
+            previous_module_name = self.active_module_name
+            previous_module_instance = self.active_module_instance
+            previous_module_frame = self.active_module_frame
 
-            for child in self.content_area.winfo_children():
-                child.destroy()
+            if previous_module_instance is not None:
+                if self.is_module_persistent(previous_module_name):
+                    if hasattr(previous_module_instance, 'on_hide'):
+                        previous_module_instance.on_hide()
+                    if previous_module_frame is not None and previous_module_frame.winfo_exists():
+                        previous_module_frame.pack_forget()
+                else:
+                    if hasattr(previous_module_instance, 'on_unload'):
+                        previous_module_instance.on_unload()
+                    if previous_module_frame is not None and previous_module_frame.winfo_exists():
+                        previous_module_frame.destroy()
+                    self.persistent_module_instances.pop(previous_module_name, None)
+
+            self.active_module_name = None
+            self.active_module_instance = None
+            self.active_module_frame = None
             
             self.canvas.yview_moveto(0)
 
-            if module_name == "update_manager" and module_name in self.persistent_module_instances:
-                self.active_module_name = module_name
-                self.active_module_instance = self.persistent_module_instances[module_name]
-                if hasattr(self.active_module_instance, 'mount'):
-                    self.active_module_instance.mount(self.content_area)
-                return
-            
-            module_path = f"modules.{module_name}"
+            if self.is_module_persistent(module_name) and module_name in self.persistent_module_instances:
+                session = self.persistent_module_instances[module_name]
+                cached_frame = session.get("frame")
+                if cached_frame is not None and cached_frame.winfo_exists():
+                    self.active_module_name = module_name
+                    self.active_module_instance = session.get("instance")
+                    self.active_module_frame = cached_frame
+                    cached_frame.pack(fill=BOTH, expand=True)
+                    self.content_area.update_idletasks()
+                    return
+                self.persistent_module_instances.pop(module_name, None)
+
+            module_frame = tb.Frame(self.content_area)
+            module_frame.pack(fill=BOTH, expand=True)
+
             module = self.import_managed_module(module_name, force_fresh=True)
 
             if hasattr(module, 'get_ui'):
                 self.active_module_name = module_name
-                self.active_module_instance = module.get_ui(self.content_area, self)
-                if module_name == "update_manager":
-                    self.persistent_module_instances[module_name] = self.active_module_instance
+                self.active_module_instance = module.get_ui(module_frame, self)
+                self.active_module_frame = module_frame
+                if self.is_module_persistent(module_name):
+                    self.persistent_module_instances[module_name] = {
+                        "instance": self.active_module_instance,
+                        "frame": module_frame,
+                    }
 
         try:
             if use_transition and self.active_module_name is not None:
@@ -774,6 +911,7 @@ class Dispatcher:
             "enable_screen_transitions": True,
             "screen_transition_duration_ms": 360,
             "toast_duration_sec": 5,
+            "persistent_modules": [],
         }
         if os.path.exists(self.settings_path):
             try:
@@ -794,11 +932,14 @@ class Dispatcher:
         except Exception:
             settings["screen_transition_duration_ms"] = 360
         settings["theme"] = normalize_theme(settings.get("theme", DEFAULT_THEME))
+        settings["persistent_modules"] = self.normalize_persistent_modules(settings.get("persistent_modules", []))
         return settings
 
     def refresh_runtime_settings(self):
         self.runtime_settings = self.load_runtime_settings()
+        self._configure_module_import_paths()
         self.refresh_animation_settings()
+        self.prune_persistent_module_instances()
         for listener in list(self.runtime_settings_listeners):
             try:
                 listener(self.runtime_settings)
@@ -934,11 +1075,25 @@ class Dispatcher:
         self.canvas.bind_all("<MouseWheel>", self._on_mousewheel)
         self.canvas.bind_all("<Button-4>", self._on_mousewheel)
         self.canvas.bind_all("<Button-5>", self._on_mousewheel)
+        self.canvas.bind_all("<Shift-MouseWheel>", self._on_horizontal_mousewheel)
 
     def _on_mousewheel(self, event):
         step = self.get_mousewheel_units(event)
         if step:
             self.canvas.yview_scroll(step, "units")
+
+    def _on_horizontal_mousewheel(self, event):
+        step = self.get_mousewheel_units(event)
+        if step:
+            self.canvas.xview_scroll(step, "units")
+
+    def sync_content_canvas_layout(self, _event=None):
+        viewport_width = max(self.canvas.winfo_width(), 1)
+        requested_width = max(self.content_area.winfo_reqwidth(), 1)
+        self.canvas.itemconfigure(self.canvas_window, width=max(viewport_width, requested_width))
+        scroll_region = self.canvas.bbox("all")
+        if scroll_region is not None:
+            self.canvas.configure(scrollregion=scroll_region)
 
 if __name__ == "__main__":
     settings_path = external_path("settings.json")

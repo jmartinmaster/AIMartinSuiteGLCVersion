@@ -23,11 +23,15 @@ These two forms do not have identical behavior. The Python version has access to
 - A derived target-time field in the header plus a live color-coded Ghost Time indicator in the footer so operators can see missing time in red and extra time in green while entering the sheet.
 - Workbook-linked summary header import without overwriting formula cells on export.
 - Layout Manager and Rate Manager tools.
+- Shared viewport scrolling keeps wider modules usable in narrower windows instead of clipping the right side of the page.
 - Backup / Recovery viewer for browsing and restoring draft snapshots and configuration backups.
-- Settings management for export paths, theme selection, production defaults, and editable downtime code labels.
+- Settings management for export paths, theme selection, production defaults, editable downtime code labels, and per-module live-session persistence.
+- Settings Manager includes advanced tools for inspecting and editing external module override files beside the app.
 - Configurable page-transition fades, including the ability to tune the duration or disable them.
 - Configurable toast notifications for non-blocking status messages.
+- Automatic per-file external module overrides when a matching `.py` file exists in the external `modules` folder.
 - In-app help viewer and About screen.
+- Help Center navigation now includes top-level guide chips, a Hidden Modules reference, and smaller User Guide section chips for module-specific reading.
 - Bundled GPL license access from Help Center and About.
 - Theme support with readability overrides.
 - Rotated backup copies for settings, layout, and rate file saves.
@@ -40,11 +44,17 @@ These two forms do not have identical behavior. The Python version has access to
 - Production Log drafts continue to save in `data/pending`, and overwritten drafts now keep recovery snapshots under `data/pending/history`.
 - Backup / Recovery gives operators a single place to restore saved drafts, recovery snapshots, and JSON backup copies without using Windows Explorer.
 
+## Compatibility Notes
+
+- The current `layout_config.json` routes `target_time` through `header_fields`. Older local builds from before the config-driven Target Time change may not present that field correctly if they reuse the newer layout file.
+- The current `settings.json` includes `persistent_modules`. Older builds ignore that key safely, but they do not preserve module state across navigation.
+
 ## Source / Python Mode
 
 - Runs directly from the repository source files.
 - Can use the local project structure, docs, templates, and module files directly.
 - Can be rebuilt locally with `build.py` and PyInstaller.
+- Prefers the suite's own local `.venv` for source-build runtime discovery before falling back to environment or system Python.
 - Can be used to develop, test, and package new EXE releases.
 - The Update Manager can now hand off from source mode by downloading the published packaged EXE into local `dist` and launching it.
 
@@ -55,13 +65,15 @@ These two forms do not have identical behavior. The Python version has access to
 - Does not have the same direct access to repository source files or local build tooling that the Python version has.
 - Bundles the help documentation and `LICENSE.txt` for in-app access.
 - Uses the Update Manager for packaged EXE release checks plus selectable module payload installs.
+- Uses local editable JSON files and external module override files beside the EXE when they exist.
 - Packaged builds now use versioned EXE filenames so a newer build can download beside the current one, launch separately, and leave the older copy available until cleanup is confirmed.
+- Local builds now keep the current EXE in `dist/` and archive up to 10 older versioned EXEs in `dist/Old_exe`.
 - The footer update status bar now stays hidden unless an update job is actively running.
 
 ## Update Manager Status
 
 - The updater checks only the Dispatcher Core version in `main.py` as the master version.
-- The current stable Dispatcher Core release is `1.2.8`.
+- The current stable Dispatcher Core release is `1.5.2`.
 - Two-part versions such as `1.07` trigger an executable update when greater than the local version.
 - Three-part versions only trigger an executable update when the third number is even, such as `1.07.2`.
 - Odd patch versions such as `1.07.1` are ignored.
@@ -69,7 +81,8 @@ These two forms do not have identical behavior. The Python version has access to
 - In Python/source mode, stable updates download the published EXE into local `dist` and launch it for handoff testing.
 - In packaged EXE mode, stable updates download a versioned EXE beside the current copy, launch the newer build, and let the newer build offer cleanup of older local EXEs.
 - Packaged EXE mode also supports selected module payload installs from the `modules/` package without rebuilding the EXE.
+- Downloaded or user-supplied module payloads become active automatically for that module when the matching external override file exists.
 - Packaged EXE mode can also restore tracked JSON files such as `layout_config.json` and `rates.json` from the repository copy with local backups preserved before overwrite.
 - `main.py` remains the Dispatcher Core boundary and still updates only through the stable EXE release path.
-- `About System v1.0.4` remains the first module payload target for packaged update testing after the `1.2.8` EXE handoff.
-- The Help Center now uses a modern single-page layout with top link navigation instead of notebook tabs.
+- `About System v1.0.7` remains the first module payload target for packaged update testing after the `1.5.2` EXE handoff.
+- The Help Center now uses a modern single-page layout with top link navigation, a Hidden Modules guide, and section chips for User Guide module pages instead of notebook tabs.

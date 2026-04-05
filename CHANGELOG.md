@@ -4,11 +4,32 @@ This changelog tracks the main branch release line for The Martin Suite (GLC Edi
 
 Version headings below are aligned to the current `1.x` release line used by Dispatcher Core. Earlier work has been grouped into practical release milestones so the shipped feature history is easier to follow without rewriting older module version markers.
 
-## [1.2.8] - 2026-04-04
+## [1.5.2] - 2026-04-05
 
 ### Changed
 
-- Promoted Dispatcher Core to stable version `1.2.8` for the final packaged update-manager polish release.
+- Promoted Dispatcher Core to stable version `1.5.2` for the shared module viewport scrolling update.
+- Added horizontal overflow support to the main dispatcher content canvas so wide pages such as Production Log and Layout Manager scroll instead of clipping content in narrower windows.
+- Added shared horizontal mouse-wheel support with `Shift + Mouse Wheel` for the main module viewport.
+- Updated the local build flow to archive older versioned EXEs under `dist/Old_exe` and retain up to 10 older builds automatically.
+
+### Notes
+
+- The current `layout_config.json` now expects the config-driven `target_time` header field. Older local builds from before that change may not handle the newer layout file correctly.
+- The newer `settings.json` `persistent_modules` entry is safe for older builds to ignore, but those builds will not restore live module state across navigation.
+
+## [1.5.0] - 2026-04-05
+
+### Changed
+
+- Promoted Dispatcher Core to stable version `1.5.0` for the runtime-control and module-source selection release.
+- Added settings-controlled module persistence so selected tools can keep their live in-progress state across navigation within the current app session.
+- Changed source-build runtime resolution to prefer the suite's own `.venv` before environment-variable or system Python fallbacks.
+- Changed external module loading to automatic per-file fallback so a matching file in the external `modules` folder is used first and bundled modules remain active everywhere else.
+- Updated About so loaded module entries can show `(external)` when the live module came from the external `modules` folder, even when its version matches the bundled copy.
+- Routed Production Log header values through shared normalization so header edits, JSON drafts, and Excel import/export stay formatted consistently, including derived `Target Time`.
+- Refactored Production Log UI construction into smaller section builders for safer ongoing edits.
+- Added a hidden advanced module editor in Settings so external override files can be reviewed, created, updated, or removed intentionally from the app.
 - Hid the footer update status bar whenever the updater is idle and only surface it while an update job is actually active.
 - Expanded payload restores so packaged builds can restore tracked JSON files such as `layout_config.json` and `rates.json` from the repository copy while preserving local backups.
 - Refreshed the Help Center into a single-page layout with top link navigation, improved readability, and horizontal scrolling for smaller windows.
@@ -110,6 +131,11 @@ Version headings below are aligned to the current `1.x` release line used by Dis
 - Made the downtime code editor scrollable, allowed adding extra numeric codes beyond the defaults, and explicitly kept the internal helper out of the sidebar.
 - Added a Balance Downtime action in Production Log that redistributes required downtime across existing downtime rows by weighted duration before export, with a dedicated adjustment row as fallback.
 - Added a visible Target Time field in the Production Log header, a derived Ghost Time indicator in the footer, and a dedicated Downtime action row so Balance Downtime stays visible during entry.
+- Routed the Production Log Target Time field through `header_fields` so it now saves in draft JSON and participates in the normal workbook header mapping.
+- Added a Settings option for keeping selected modules live across navigation so returning to a chosen module restores the same in-progress UI state during the current app session.
+- Changed source-build runtime discovery to prefer the suite's own `.venv` before environment-variable or system Python fallbacks.
+- Added a Settings-controlled External Module Overrides switch so downloaded or user-supplied files in the external `modules` folder can be activated explicitly instead of always taking precedence.
+- Updated About so modules currently loaded from the external `modules` folder are marked with `(external)` even when the version number matches the bundled copy.
 - Hardened Production Log import so production columns are detected from real workbook headers, which keeps older `F = Molds` logs and newer `G = Molds` logs loading correctly while keeping Ghost internal to the app's balancing workflow.
 
 ### Notes
