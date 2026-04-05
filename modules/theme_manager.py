@@ -17,7 +17,7 @@
 import ttkbootstrap as tb
 
 __module_name__ = "Theme Manager"
-__version__ = "1.0.0"
+__version__ = "1.0.6"
 
 DEFAULT_THEME = "flatly"
 

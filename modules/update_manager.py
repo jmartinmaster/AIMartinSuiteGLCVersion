@@ -34,7 +34,7 @@ from app_identity import LEGACY_EXE_NAME, format_versioned_exe_name, load_versio
 from modules.utils import ensure_external_directory
 
 __module_name__ = "Update Manager"
-__version__ = "1.0.0"
+__version__ = "2.0.2"
 
 GITHUB_REMOTE_PATTERN = re.compile(r"github\.com[:/](?P<owner>[^/]+)/(?P<repo>[^/.]+?)(?:\.git)?$")
 MODULE_NAME_PATTERN = re.compile(r"__module_name__\s*=\s*[\"']([^\"']+)[\"']")

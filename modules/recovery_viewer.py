@@ -27,7 +27,7 @@ from modules.persistence import write_json_with_backup
 from modules.utils import external_path
 
 __module_name__ = "Backup / Recovery"
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 
 class RecoveryViewer:

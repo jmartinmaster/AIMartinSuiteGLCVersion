@@ -24,7 +24,7 @@ from modules.persistence import write_json_with_backup
 from modules.utils import ensure_external_directory, external_path, local_or_resource_path, resource_path
 
 __module_name__ = "Rate Manager"
-__version__ = "1.0.1"
+__version__ = "1.0.8"
 
 class RateManager:
     def __init__(self, parent, dispatcher):
