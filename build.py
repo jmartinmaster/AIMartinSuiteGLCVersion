@@ -20,12 +20,13 @@ import shutil
 import stat
 import subprocess
 
-from app_identity import APP_NAME, LEGACY_EXE_NAME, format_versioned_exe_name, load_version_from_main
+from app_identity import APP_NAME, LEGACY_EXE_NAME, format_versioned_exe_name, load_version_from_main, normalize_version, parse_version, parse_versioned_exe_name
 
 SPEC_FILE = f"{APP_NAME}.spec"
 EXE_NAME = format_versioned_exe_name(load_version_from_main())
 PRESERVE_DIST = os.environ.get("MARTIN_KEEP_DIST", "1") != "0"
 SKIP_TASKKILL = os.environ.get("MARTIN_SKIP_TASKKILL", "0") == "1"
+MAX_OLD_EXE_ARCHIVE = 10
 
 
 def clean_previous_builds():
@@ -50,11 +51,53 @@ def clean_previous_builds():
             shutil.rmtree(folder_path, onexc=remove_readonly)
 
 
+def archive_previous_builds():
+    if not PRESERVE_DIST:
+        return
+
+    dist_dir = os.path.abspath("dist")
+    archive_dir = os.path.join(dist_dir, "Old_exe")
+    os.makedirs(archive_dir, exist_ok=True)
+
+    for file_name in os.listdir(dist_dir):
+        source_path = os.path.join(dist_dir, file_name)
+        if not os.path.isfile(source_path):
+            continue
+        if file_name == EXE_NAME:
+            continue
+        if parse_versioned_exe_name(file_name) is None:
+            continue
+
+        target_path = os.path.join(archive_dir, file_name)
+        if os.path.abspath(source_path) == os.path.abspath(target_path):
+            continue
+        if os.path.exists(target_path):
+            os.remove(target_path)
+        shutil.move(source_path, target_path)
+
+    archived_entries = []
+    for file_name in os.listdir(archive_dir):
+        archive_path = os.path.join(archive_dir, file_name)
+        if not os.path.isfile(archive_path):
+            continue
+        version_text = parse_versioned_exe_name(file_name)
+        version_key = normalize_version(parse_version(version_text)) if version_text else None
+        if version_key is None:
+            continue
+        archived_entries.append((version_key, file_name, archive_path))
+
+    archived_entries.sort(key=lambda entry: entry[0], reverse=True)
+    for _version_key, _file_name, archive_path in archived_entries[MAX_OLD_EXE_ARCHIVE:]:
+        os.remove(archive_path)
+
+
 clean_previous_builds()
 
 PyInstaller.__main__.run([
     SPEC_FILE,
     '--noconfirm',
 ])
+
+archive_previous_builds()
 
 print(f"\n--- Build Complete! Check dist/{EXE_NAME} ---")

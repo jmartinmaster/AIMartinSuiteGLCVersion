@@ -24,7 +24,7 @@ import os
 import time
 
 __module_name__ = "About System"
-__version__ = "1.0.4"
+__version__ = "1.0.7"
 
 class AboutSection:
     def __init__(self, parent, dispatcher):
@@ -73,8 +73,9 @@ class AboutSection:
                 
                 display_name = getattr(mod_obj, '__module_name__', mod_key)
                 version = getattr(mod_obj, '__version__', "Unknown")
+                source_suffix = " (external)" if self.dispatcher.is_module_loaded_from_external(mod_key, mod_obj) else ""
                 
-                tb.Label(row, text=display_name, font=("-weight bold")).pack(side=LEFT)
+                tb.Label(row, text=f"{display_name}{source_suffix}", font=("-weight bold")).pack(side=LEFT)
                 tb.Label(row, text=f"v{version}", bootstyle=SECONDARY).pack(side=RIGHT)
 
         # --- REPACK UTILITY SECTION ---

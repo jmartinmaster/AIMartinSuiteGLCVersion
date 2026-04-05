@@ -24,7 +24,7 @@ from modules.persistence import write_json_with_backup
 from modules.utils import ensure_external_directory, external_path, local_or_resource_path, resource_path
 
 __module_name__ = "Rate Manager"
-__version__ = "1.0.8"
+__version__ = "1.0.9"
 
 class RateManager:
     def __init__(self, parent, dispatcher):
@@ -192,4 +192,4 @@ class RateManager:
             self.save_data(); self.refresh_table()
             self.clear_form()
 def get_ui(parent, dispatcher):
-    RateManager(parent, dispatcher)
+    return RateManager(parent, dispatcher)
