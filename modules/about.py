@@ -24,7 +24,7 @@ import os
 import time
 
 __module_name__ = "About System"
-__version__ = "1.0.2"
+__version__ = "1.0.4"
 
 class AboutSection:
     def __init__(self, parent, dispatcher):
@@ -57,16 +57,6 @@ class AboutSection:
             bootstyle=SECONDARY,
             command=lambda: self.dispatcher.open_help_document("LICENSE.txt")
         ).pack(pady=(0, 10))
-
-        integration_frame = tb.Labelframe(container, text=" Update Integration Test ", padding=15)
-        integration_frame.pack(fill=X, pady=(10, 10))
-        tb.Label(
-            integration_frame,
-            text="If you can see this panel in the next packaged update, the pushed source module payload integrated successfully.",
-            justify=LEFT,
-            wraplength=700,
-            bootstyle=INFO,
-        ).pack(anchor=W)
 
         # Module Manifest
         version_frame = tb.Labelframe(container, text=" Module Manifest ", padding=15)
