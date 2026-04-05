@@ -4,6 +4,16 @@ This changelog tracks the main branch release line for The Martin Suite (GLC Edi
 
 Version headings below are aligned to the current `1.x` release line used by Dispatcher Core. Earlier work has been grouped into practical release milestones so the shipped feature history is easier to follow without rewriting older module version markers.
 
+## [1.2.6] - 2026-04-04
+
+### Changed
+
+- Promoted Dispatcher Core to stable version `1.2.6` for the packaged EXE handoff and module-payload release.
+- Added a dispatcher-owned persistent update coordinator so the Update Manager can retain release-check state and reopen the same live session.
+- Updated packaged releases to preserve side-by-side EXE handoff while keeping Dispatcher Core updates tied to `main.py` and published EXE artifacts.
+- Expanded packaged updates so selectable module payloads from `modules/` can be downloaded and installed without rebuilding the EXE.
+- Prepared `About System v1.0.4` as the first post-EXE module payload target for packaged update verification.
+
 ## [1.2.4] - 2026-04-04
 
 ### Changed

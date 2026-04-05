@@ -25,10 +25,11 @@ from app_identity import APP_NAME, LEGACY_EXE_NAME, format_versioned_exe_name, l
 SPEC_FILE = f"{APP_NAME}.spec"
 EXE_NAME = format_versioned_exe_name(load_version_from_main())
 PRESERVE_DIST = os.environ.get("MARTIN_KEEP_DIST", "1") != "0"
+SKIP_TASKKILL = os.environ.get("MARTIN_SKIP_TASKKILL", "0") == "1"
 
 
 def clean_previous_builds():
-    if os.name == "nt":
+    if os.name == "nt" and not SKIP_TASKKILL:
         for exe_name in {EXE_NAME, LEGACY_EXE_NAME}:
             subprocess.run(["taskkill", "/F", "/IM", exe_name], check=False, capture_output=True)
 

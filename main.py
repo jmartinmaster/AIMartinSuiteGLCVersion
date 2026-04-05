@@ -28,11 +28,12 @@ from ttkbootstrap.constants import *
 from ttkbootstrap.widgets import ToastNotification
 from app_identity import LEGACY_EXE_NAME, normalize_version, parse_version, parse_versioned_exe_name
 from modules.app_logging import log_exception
+from modules.persistence import write_json_with_backup
 from modules.theme_manager import apply_readability_overrides, normalize_theme, DEFAULT_THEME
 from modules.utils import external_path, local_or_resource_path, resource_path
 
 __module_name__ = "Dispatcher Core"
-__version__ = "1.2.4"
+__version__ = "1.2.6"
 WINDOWS_APP_ID = "JamieMartin.TheMartinSuite.GLC"
 APP_ICON_RELATIVE_PATH = "icon.ico"
 APP_ICON_IMAGE_RELATIVE_PATHS = [
@@ -56,6 +57,45 @@ LR_LOADFROMFILE = 0x0010
 LR_DEFAULTSIZE = 0x0040
 GCLP_HICON = -14
 GCLP_HICONSM = -34
+
+UPDATE_PHASE_LABELS = {
+    "idle": "Idle",
+    "checking": "Checking",
+    "ready": "Ready",
+    "downloading": "Downloading",
+    "handoff": "Handoff",
+    "failed": "Failed",
+    "source_armed": "Source Armed",
+    "source_manifest": "Source Manifest",
+    "source_downloading": "Source Downloading",
+    "source_staging": "Source Staging",
+    "source_extracting": "Source Extracting",
+    "source_validating": "Source Validating",
+    "source_building": "Source Building",
+    "source_packaging": "Source Packaging",
+    "source_cleanup": "Source Cleanup",
+    "source_relaunch": "Source Relaunch",
+    "source_complete": "Source Complete",
+}
+
+SOURCE_UPDATE_PHASES = {
+    "source_armed",
+    "source_manifest",
+    "source_downloading",
+    "source_staging",
+    "source_extracting",
+    "source_validating",
+    "source_building",
+    "source_packaging",
+    "source_cleanup",
+    "source_relaunch",
+    "source_complete",
+}
+
+RECOVERABLE_SOURCE_PHASES = SOURCE_UPDATE_PHASES | {"failed"}
+INTERRUPTED_SOURCE_PHASES = SOURCE_UPDATE_PHASES - {"source_armed", "source_complete"}
+SOURCE_JOB_STATE_RELATIVE_PATH = os.path.join("data", "updater", "state", "source-job.json")
+SOURCE_JOB_BACKUP_RELATIVE_PATH = os.path.join("data", "backups", "updater")
 
 
 def get_obsolete_local_executables(current_exe_path, current_version):
@@ -188,6 +228,234 @@ def apply_app_icon(root):
     except Exception as exc:
         log_exception("apply_app_icon.after_idle", exc)
 
+
+class UpdateCoordinator:
+    def __init__(self, root):
+        self.root = root
+        self.source_state_path = external_path(SOURCE_JOB_STATE_RELATIVE_PATH)
+        self._loading_state = False
+        self.branch_name = "main"
+        self.remote_info = {"owner": None, "repo": None, "url": None, "display": "Unknown repository"}
+        self.local_manifest = []
+        self.comparison_rows = []
+        self.download_in_progress = False
+        self.source_job_in_progress = False
+        self.active = False
+        self.mode = None
+        self.job_phase = "idle"
+        self.job_detail = "No update job is running."
+        self.source_archive_path = None
+        self.source_stage_dir = None
+        self.source_extract_dir = None
+        self.source_root_dir = None
+        self.source_build_log_path = None
+        self.source_built_exe_path = None
+        self.source_build_runtime = None
+        self.source_build_runtime_issue = None
+        self.banner_bootstyle = SECONDARY
+        self.banner_var = tb.StringVar(master=root, value="Updates idle.")
+        self.status_var = tb.StringVar(master=root, value="Ready to check for updates.")
+        self.branch_var = tb.StringVar(master=root, value="main")
+        self.repo_var = tb.StringVar(master=root, value="Unknown repository")
+        self.target_name_var = tb.StringVar(master=root, value="Dispatcher Core")
+        self.local_version_var = tb.StringVar(master=root, value="Unknown")
+        self.remote_version_var = tb.StringVar(master=root, value="Not checked")
+        self.result_var = tb.StringVar(master=root, value="Pending")
+        self.note_var = tb.StringVar(master=root, value="Run a repository check to compare the packaged release target.")
+        self.advanced_status_var = tb.StringVar(master=root, value="Advanced dev updates are available for packaged builds only.")
+        self.job_phase_var = tb.StringVar(master=root, value="Idle")
+        self.job_detail_var = tb.StringVar(master=root, value="No update job is running.")
+        self.build_runtime_var = tb.StringVar(master=root, value="Build runtime not resolved yet.")
+        self._load_source_job_state()
+
+    def _normalize_existing_path(self, path_text):
+        if not path_text:
+            return None
+        absolute_path = os.path.abspath(path_text)
+        return absolute_path if os.path.exists(absolute_path) else None
+
+    def _has_recoverable_source_state(self):
+        return any([
+            self.mode == "advanced",
+            self.job_phase in RECOVERABLE_SOURCE_PHASES,
+            self.source_archive_path,
+            self.source_stage_dir,
+            self.source_extract_dir,
+            self.source_root_dir,
+            self.source_build_log_path,
+            self.source_built_exe_path,
+            self.source_build_runtime,
+            self.source_build_runtime_issue,
+        ])
+
+    def _serialize_source_job_state(self):
+        if not self._has_recoverable_source_state():
+            return None
+        return {
+            "metadata_version": 1,
+            "branch_name": self.branch_name,
+            "remote_info": self.remote_info,
+            "job_phase": self.job_phase,
+            "job_detail": self.job_detail,
+            "mode": self.mode,
+            "active": self.active,
+            "banner_text": self.banner_var.get(),
+            "banner_bootstyle": self.banner_bootstyle,
+            "status_text": self.status_var.get(),
+            "source_job_in_progress": self.source_job_in_progress,
+            "source_archive_path": self.source_archive_path,
+            "source_stage_dir": self.source_stage_dir,
+            "source_extract_dir": self.source_extract_dir,
+            "source_root_dir": self.source_root_dir,
+            "source_build_log_path": self.source_build_log_path,
+            "source_built_exe_path": self.source_built_exe_path,
+            "source_build_runtime": self.source_build_runtime,
+            "source_build_runtime_issue": self.source_build_runtime_issue,
+        }
+
+    def _persist_source_job_state(self):
+        if self._loading_state:
+            return
+
+        payload = self._serialize_source_job_state()
+        if payload is None:
+            try:
+                if os.path.exists(self.source_state_path):
+                    os.remove(self.source_state_path)
+            except OSError:
+                pass
+            return
+
+        write_json_with_backup(
+            self.source_state_path,
+            payload,
+            backup_dir=external_path(SOURCE_JOB_BACKUP_RELATIVE_PATH),
+            keep_count=10,
+        )
+
+    def _load_source_job_state(self):
+        if not os.path.exists(self.source_state_path):
+            return
+
+        try:
+            with open(self.source_state_path, "r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+        except Exception as exc:
+            log_exception("update_coordinator.load_source_job_state", exc)
+            return
+
+        if not isinstance(payload, dict):
+            return
+
+        phase = str(payload.get("job_phase") or "idle")
+        mode = payload.get("mode")
+        if mode == "advanced" or phase in SOURCE_UPDATE_PHASES:
+            try:
+                os.remove(self.source_state_path)
+            except OSError:
+                pass
+            return
+
+        self._loading_state = True
+        try:
+            remote_info = payload.get("remote_info")
+            if isinstance(remote_info, dict):
+                self.remote_info = remote_info
+            self.branch_name = str(payload.get("branch_name") or self.branch_name)
+            self.set_source_snapshot(
+                archive_path=self._normalize_existing_path(payload.get("source_archive_path")),
+                stage_dir=self._normalize_existing_path(payload.get("source_stage_dir")),
+                extract_dir=self._normalize_existing_path(payload.get("source_extract_dir")),
+                root_dir=self._normalize_existing_path(payload.get("source_root_dir")),
+                build_log_path=self._normalize_existing_path(payload.get("source_build_log_path")),
+                built_exe_path=self._normalize_existing_path(payload.get("source_built_exe_path")),
+            )
+            self.set_build_runtime(
+                payload.get("source_build_runtime"),
+                payload.get("source_build_runtime_issue"),
+            )
+
+            phase = str(payload.get("job_phase") or "idle")
+            detail = str(payload.get("job_detail") or "Recovered source job state.")
+            mode = payload.get("mode")
+            active = bool(payload.get("active", False))
+            banner_text = str(payload.get("banner_text") or "Recovered source job state.")
+            banner_bootstyle = payload.get("banner_bootstyle", SECONDARY)
+            status_text = str(payload.get("status_text") or "Recovered source job state.")
+            was_in_progress = bool(payload.get("source_job_in_progress", False))
+
+            if phase in INTERRUPTED_SOURCE_PHASES or was_in_progress:
+                phase = "failed"
+                mode = "advanced"
+                active = True
+                banner_bootstyle = WARNING
+                detail = "Recovered an interrupted source update session. Staged files and logs are available for retry or cleanup."
+                banner_text = "Recovered interrupted source update session."
+                status_text = "Recovered interrupted source update session."
+
+            self.set_job_phase(phase, detail, mode=mode)
+            self.status_var.set(status_text)
+            self.set_banner(banner_text, bootstyle=banner_bootstyle, active=active, mode=mode)
+            self.source_job_in_progress = False
+        finally:
+            self._loading_state = False
+
+    def set_banner(self, message, bootstyle=INFO, active=True, mode=None):
+        self.active = active
+        self.mode = mode
+        self.banner_bootstyle = bootstyle if active else SECONDARY
+        self.banner_var.set(message)
+        self._persist_source_job_state()
+
+    def set_job_phase(self, phase, detail=None, mode=None):
+        normalized_phase = str(phase or "idle").strip().lower() or "idle"
+        self.job_phase = normalized_phase
+        self.job_detail = detail or ""
+        self.mode = mode if mode is not None else self.mode
+        self.job_phase_var.set(UPDATE_PHASE_LABELS.get(normalized_phase, normalized_phase.replace("_", " ").title()))
+        self.job_detail_var.set(detail or "")
+        self._persist_source_job_state()
+
+    def set_source_phase(self, phase, detail=None):
+        normalized_phase = str(phase or "source_armed").strip().lower() or "source_armed"
+        if normalized_phase not in SOURCE_UPDATE_PHASES:
+            raise ValueError(f"Unsupported source update phase: {phase}")
+        self.set_job_phase(normalized_phase, detail=detail, mode="advanced")
+
+    def is_source_phase_active(self):
+        return self.job_phase in SOURCE_UPDATE_PHASES
+
+    def clear_job_phase(self):
+        self.set_job_phase("idle", "No update job is running.", mode=None)
+
+    def set_source_snapshot(self, archive_path=None, stage_dir=None, extract_dir=None, root_dir=None, build_log_path=None, built_exe_path=None):
+        self.source_archive_path = archive_path
+        self.source_stage_dir = stage_dir
+        self.source_extract_dir = extract_dir
+        self.source_root_dir = root_dir
+        self.source_build_log_path = build_log_path
+        self.source_built_exe_path = built_exe_path
+        self._persist_source_job_state()
+
+    def set_build_runtime(self, runtime_text=None, issue_text=None):
+        self.source_build_runtime = str(runtime_text).strip() if runtime_text else None
+        self.source_build_runtime_issue = str(issue_text).strip() if issue_text else None
+        if self.source_build_runtime:
+            display_text = f"Build runtime: {self.source_build_runtime}"
+        elif self.source_build_runtime_issue:
+            display_text = f"Build runtime unavailable: {self.source_build_runtime_issue}"
+        else:
+            display_text = "Build runtime not resolved yet."
+        self.build_runtime_var.set(display_text)
+        self._persist_source_job_state()
+
+    def clear_source_snapshot(self):
+        self.set_source_snapshot()
+
+    def clear_banner(self):
+        self.set_banner("Updates idle.", active=False, mode=None)
+        self.clear_job_phase()
+
 class Dispatcher:
     def __init__(self, root):
         apply_windows_app_id()
@@ -197,16 +465,16 @@ class Dispatcher:
         apply_app_icon(self.root)
 
         self.modules_path = resource_path("modules")
+        self.external_modules_path = external_path("modules")
 
         self.layout_config = local_or_resource_path("layout_config.json")
         self.rate_config = local_or_resource_path("rates.json")
 
-        base_dir = os.path.dirname(self.modules_path)
-        if base_dir not in sys.path:
-            sys.path.insert(0, base_dir)
+        self._configure_module_import_paths()
 
         self.shared_data = {}
         self.loaded_modules = {"main": sys.modules[__name__]}
+        self.persistent_module_instances = {}
         self.active_module_instance = None
         self.active_module_name = None
         self.settings_path = external_path("settings.json")
@@ -216,6 +484,8 @@ class Dispatcher:
         self.transitions_enabled = True
         self.transition_min_alpha = 0.82
         self._transition_in_progress = False
+        self.update_coordinator = UpdateCoordinator(self.root)
+        self.runtime_settings_listeners = []
         self.refresh_animation_settings()
 
         self._setup_ui()
@@ -225,6 +495,60 @@ class Dispatcher:
         self._bind_mousewheel()
         self.load_module("production_log", use_transition=False)
         self.root.after(900, self.prompt_old_executable_cleanup)
+
+    def _configure_module_import_paths(self):
+        bundled_base_dir = os.path.dirname(self.modules_path)
+        external_base_dir = os.path.dirname(self.external_modules_path)
+
+        if external_base_dir not in sys.path:
+            sys.path.insert(0, external_base_dir)
+        if bundled_base_dir not in sys.path:
+            sys.path.append(bundled_base_dir)
+
+        modules_package = sys.modules.get("modules")
+        if modules_package is not None and hasattr(modules_package, "__path__"):
+            package_paths = []
+            for candidate in [self.external_modules_path, self.modules_path]:
+                if candidate not in package_paths:
+                    package_paths.append(candidate)
+            for candidate in list(modules_package.__path__):
+                if candidate not in package_paths:
+                    package_paths.append(candidate)
+            modules_package.__path__ = package_paths
+
+        importlib.invalidate_caches()
+
+    def ensure_external_modules_package(self):
+        os.makedirs(self.external_modules_path, exist_ok=True)
+        init_path = os.path.join(self.external_modules_path, "__init__.py")
+        if not os.path.exists(init_path):
+            with open(init_path, "w", encoding="utf-8") as handle:
+                handle.write("# External module overrides for The Martin Suite.\n")
+        self._configure_module_import_paths()
+
+    def import_managed_module(self, module_name, force_fresh=True):
+        module_path = f"modules.{module_name}"
+        self._configure_module_import_paths()
+        if force_fresh and module_path in sys.modules:
+            del sys.modules[module_path]
+        importlib.invalidate_caches()
+        module = importlib.import_module(module_path)
+        self.loaded_modules[module_name] = module
+        return module
+
+    def get_external_module_override_path(self, module_name):
+        candidate = os.path.join(self.external_modules_path, f"{module_name}.py")
+        return candidate if os.path.exists(candidate) else None
+
+    def install_module_override(self, module_name, module_text):
+        self.ensure_external_modules_package()
+        target_path = os.path.join(self.external_modules_path, f"{module_name}.py")
+        temp_path = f"{target_path}.tmp"
+        with open(temp_path, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(module_text)
+        os.replace(temp_path, target_path)
+        module = self.import_managed_module(module_name, force_fresh=True)
+        return target_path, module
 
     def _setup_menu(self):
         menubar = tk.Menu(self.root)
@@ -275,9 +599,8 @@ class Dispatcher:
         module_list = ["production_log", "layout_manager", "data_handler", "about", "settings_manager", "theme_manager", "help_viewer", "update_manager", "recovery_viewer"]
         for mod_name in module_list:
             try:
-                full_path = f"modules.{mod_name}"
                 if mod_name not in self.loaded_modules:
-                    self.loaded_modules[mod_name] = importlib.import_module(full_path)
+                    self.import_managed_module(mod_name, force_fresh=False)
             except Exception as e:
                 log_exception(f"pre_load_manifest.{mod_name}", e)
 
@@ -297,6 +620,16 @@ class Dispatcher:
 
         self.right_container = tb.Frame(self.main_container)
         self.right_container.pack(side=RIGHT, fill=BOTH, expand=True)
+
+        self.update_status_frame = tb.Frame(self.right_container, padding=(12, 6), bootstyle=LIGHT)
+        self.update_status_frame.pack(side=BOTTOM, fill=X)
+        self.update_status_label = tb.Label(
+            self.update_status_frame,
+            textvariable=self.update_coordinator.banner_var,
+            bootstyle=SECONDARY,
+            anchor=W,
+        )
+        self.update_status_label.pack(fill=X)
 
         self.canvas = tk.Canvas(self.right_container, highlightthickness=0)
         self.scrollbar = tb.Scrollbar(self.right_container, orient=VERTICAL, command=self.canvas.yview)
@@ -387,24 +720,32 @@ class Dispatcher:
 
     def load_module(self, module_name, use_transition=True):
         def perform_load():
-            if hasattr(self.active_module_instance, 'on_unload'):
+            if self.active_module_name == "update_manager" and self.active_module_instance is not None:
+                if hasattr(self.active_module_instance, 'on_hide'):
+                    self.active_module_instance.on_hide()
+            elif hasattr(self.active_module_instance, 'on_unload'):
                 self.active_module_instance.on_unload()
 
             for child in self.content_area.winfo_children():
                 child.destroy()
             
             self.canvas.yview_moveto(0)
+
+            if module_name == "update_manager" and module_name in self.persistent_module_instances:
+                self.active_module_name = module_name
+                self.active_module_instance = self.persistent_module_instances[module_name]
+                if hasattr(self.active_module_instance, 'mount'):
+                    self.active_module_instance.mount(self.content_area)
+                return
             
             module_path = f"modules.{module_name}"
-            if module_name in self.loaded_modules:
-                module = importlib.reload(self.loaded_modules[module_name])
-            else:
-                module = importlib.import_module(module_path)
-                self.loaded_modules[module_name] = module
+            module = self.import_managed_module(module_name, force_fresh=True)
 
             if hasattr(module, 'get_ui'):
                 self.active_module_name = module_name
                 self.active_module_instance = module.get_ui(self.content_area, self)
+                if module_name == "update_manager":
+                    self.persistent_module_instances[module_name] = self.active_module_instance
 
         try:
             if use_transition and self.active_module_name is not None:
@@ -457,7 +798,20 @@ class Dispatcher:
     def refresh_runtime_settings(self):
         self.runtime_settings = self.load_runtime_settings()
         self.refresh_animation_settings()
+        for listener in list(self.runtime_settings_listeners):
+            try:
+                listener(self.runtime_settings)
+            except Exception as exc:
+                log_exception("dispatcher.refresh_runtime_settings.listener", exc)
         return self.runtime_settings
+
+    def register_runtime_settings_listener(self, listener):
+        if listener not in self.runtime_settings_listeners:
+            self.runtime_settings_listeners.append(listener)
+
+    def unregister_runtime_settings_listener(self, listener):
+        if listener in self.runtime_settings_listeners:
+            self.runtime_settings_listeners.remove(listener)
 
     def refresh_animation_settings(self):
         self.transitions_enabled = bool(self.runtime_settings.get("enable_screen_transitions", True))
@@ -512,6 +866,16 @@ class Dispatcher:
             position=(24 + right_inset, 24 + bottom_inset, "se"),
         )
         toast.show_toast()
+
+    def set_update_status(self, message, bootstyle=INFO, active=True, mode=None):
+        self.update_coordinator.set_banner(message, bootstyle=bootstyle, active=active, mode=mode)
+        self.update_status_frame.configure(bootstyle=LIGHT if not active else INFO)
+        self.update_status_label.configure(bootstyle=self.update_coordinator.banner_bootstyle)
+
+    def clear_update_status(self):
+        self.update_coordinator.clear_banner()
+        self.update_status_frame.configure(bootstyle=LIGHT)
+        self.update_status_label.configure(bootstyle=SECONDARY)
 
     def prompt_old_executable_cleanup(self):
         obsolete_executables = get_obsolete_local_executables(os.path.abspath(sys.executable), __version__)
