@@ -26,7 +26,7 @@ from modules.downtime_codes import get_code_number, normalize_code_value
 from modules.utils import ensure_external_directory, external_path, local_or_resource_path, resource_path
 
 __module_name__ = "Data Handler"
-__version__ = "1.1.0"
+__version__ = "1.1.1"
 
 class DataHandler:
     def __init__(self, config_name="layout_config.json"):
@@ -95,6 +95,86 @@ class DataHandler:
             if digits:
                 return digits.zfill(3)[-3:]
         return formatted
+
+    def get_header_fields(self):
+        return self.config.get("header_fields", [])
+
+    def get_header_field_ids(self):
+        return [field.get("id") for field in self.get_header_fields() if field.get("id")]
+
+    def format_numeric_text(self, value, allow_decimal=False):
+        text = str(value or "").strip()
+        if not text:
+            return ""
+        try:
+            numeric_value = float(text)
+        except Exception:
+            return text
+
+        if numeric_value.is_integer():
+            return str(int(numeric_value))
+        if allow_decimal:
+            return f"{numeric_value:.2f}".rstrip("0").rstrip(".")
+        return str(int(round(numeric_value)))
+
+    def normalize_date_text(self, value):
+        text = str(value or "").strip()
+        if not text:
+            return ""
+        parsed = self.parse_export_date(text)
+        if parsed is None:
+            return text
+        return parsed.strftime("%m/%d/%Y")
+
+    def compute_target_time(self, raw_hours):
+        try:
+            total_minutes = int(round(float(raw_hours or 0) * 60))
+        except Exception:
+            return ""
+        return f"{total_minutes} min" if total_minutes > 0 else ""
+
+    def normalize_target_time_text(self, value):
+        total_minutes = self.parse_total_minutes(value)
+        if total_minutes is None or total_minutes <= 0:
+            return ""
+        return f"{total_minutes} min"
+
+    def normalize_header_field_value(self, field_id, value, header_data=None):
+        header_data = header_data or {}
+        text = str(value or "").strip()
+
+        if field_id == "date":
+            return self.normalize_date_text(text)
+        if field_id == "hours":
+            return self.format_numeric_text(text, allow_decimal=True)
+        if field_id in {"shift", "goal_mph", "ret_south", "ret_north"}:
+            return self.format_numeric_text(text, allow_decimal=False)
+        if field_id == "cast_date":
+            computed = self.compute_cast_date(header_data.get("date"))
+            return computed or self.format_header_value(field_id, text)
+        if field_id == "target_time":
+            computed = self.compute_target_time(header_data.get("hours"))
+            return computed or self.normalize_target_time_text(text)
+        return text
+
+    def normalize_header_data(self, header_data):
+        normalized = {}
+        raw_header = {
+            field_id: str(header_data.get(field_id, "") or "").strip()
+            for field_id in self.get_header_field_ids()
+        }
+
+        for field_id in self.get_header_field_ids():
+            if field_id in {"cast_date", "target_time"}:
+                continue
+            normalized[field_id] = self.normalize_header_field_value(field_id, raw_header.get(field_id, ""), {**raw_header, **normalized})
+
+        if "cast_date" in raw_header:
+            normalized["cast_date"] = self.normalize_header_field_value("cast_date", raw_header.get("cast_date", ""), {**raw_header, **normalized})
+        if "target_time" in raw_header:
+            normalized["target_time"] = self.normalize_header_field_value("target_time", raw_header.get("target_time", ""), {**raw_header, **normalized})
+
+        return normalized
 
     def compute_cast_date(self, raw_date):
         parsed = self.parse_export_date(raw_date)

@@ -27,12 +27,13 @@ import sys
 import webbrowser
 
 from modules import recovery_viewer
+from modules.data_handler import DataHandler
 from modules.downtime_codes import get_code_options, normalize_code_value
 from modules.persistence import write_json_with_backup
 from modules.utils import external_path, local_or_resource_path, resource_path
 
 __module_name__ = "Production Log"
-__version__ = "1.2.2"
+__version__ = "1.2.5"
 BALANCE_DOWNTIME_CAUSE = "Time Balance Adjustment"
 DEFAULT_GHOST_LABEL = "Ghost Time: 0 min"
 
@@ -45,6 +46,7 @@ class ProductionLog:
         self.config_path = local_or_resource_path("layout_config.json")
 
         self.dt_codes = get_code_options()
+        self.data_handler = DataHandler()
 
         self.production_rows = []
         self.downtime_rows = []
@@ -87,8 +89,22 @@ class ProductionLog:
         os.makedirs(history_dir, exist_ok=True)
         return history_dir
 
+    def get_raw_header_data(self):
+        return {fid: ent.get() for fid, ent in self.entries.items()}
+
+    def collect_header_data(self):
+        return self.data_handler.normalize_header_data(self.get_raw_header_data())
+
+    def apply_header_data(self, header_data, mark_dirty=False):
+        normalized_header = self.data_handler.normalize_header_data(header_data)
+        for field_id, value in normalized_header.items():
+            self.set_entry_value(field_id, value)
+        if mark_dirty:
+            self.mark_dirty()
+        return normalized_header
+
     def collect_ui_data(self):
-        header_data = {fid: ent.get() for fid, ent in self.entries.items()}
+        header_data = self.collect_header_data()
         prod_data = []
         for row in self.production_rows:
             prod_data.append({
@@ -112,7 +128,7 @@ class ProductionLog:
         header = data["header"]
         significant_header_values = [
             value for key, value in header.items()
-            if key not in {"hours", "goal_mph", "cast_date"} and str(value).strip()
+            if key not in {"hours", "goal_mph", "cast_date", "target_time"} and str(value).strip()
         ]
         production_has_data = any(
             any(str(row.get(key, "")).strip() for key in ("shop_order", "part_number", "molds"))
@@ -212,6 +228,22 @@ class ProductionLog:
             Messagebox.show_error(f"Could not save draft: {e}", "Draft Save Error")
 
     def setup_ui(self):
+        self.build_recovery_section()
+        self.build_header_section()
+        self.build_production_section()
+        self.build_downtime_section()
+        self.build_footer_section()
+
+        self.add_production_row()
+        self.add_downtime_row()
+        self.apply_header_data(self.get_raw_header_data(), mark_dirty=False)
+        self.update_target_time_display()
+        self.update_ghost_total_display()
+        self.update_export_action_state()
+        self.mark_clean()
+        self.update_recovery_ui()
+
+    def build_recovery_section(self):
         recovery_wrapper = tb.Labelframe(self.parent, text=" Draft Status ", padding=10, style="Martin.Recovery.TLabelframe")
         recovery_wrapper.pack(fill=X, padx=10, pady=(10, 0))
         self.recovery_status_lbl = tb.Label(recovery_wrapper, text="Checking draft state...", style="Martin.Muted.TLabel")
@@ -223,6 +255,7 @@ class ProductionLog:
         self.delete_current_draft_btn = tb.Button(recovery_wrapper, text="Delete Current Draft", bootstyle=DANGER, command=self.delete_current_draft)
         self.delete_current_draft_btn.pack(side=LEFT, padx=5)
 
+    def build_header_section(self):
         header_wrapper = tb.Labelframe(self.parent, text=" Form 510-09: Production Header ", padding=15)
         header_wrapper.pack(fill=X, padx=10, pady=10)
         
@@ -245,15 +278,8 @@ class ProductionLog:
                 self.entries[field["id"]] = ent
                 if not field.get("readonly"):
                     self.bind_dirty_tracking(ent, ("<KeyRelease>",))
+                    ent.bind("<FocusOut>", self.on_header_field_focus_out, add="+")
 
-            summary_row = (max((field.get("row", 0) for field in config["header_fields"]), default=0) + 1)
-            tb.Label(header_wrapper, text="Target Time").grid(row=summary_row, column=0, padx=5, pady=(10, 5), sticky=W)
-            self.target_time_entry = tb.Entry(header_wrapper, width=12)
-            self.target_time_entry.config(state="readonly", bootstyle=INFO)
-            self.target_time_entry.grid(row=summary_row, column=1, padx=5, pady=(10, 5), sticky=W)
-
-            if "date" in self.entries:
-                self.entries["date"].bind("<FocusOut>", self.sync_julian_cast_date)
             if "hours" in self.entries:
                 self.entries["hours"].bind("<KeyRelease>", self.on_hours_changed, add="+")
             if "goal_mph" in self.entries:
@@ -261,6 +287,7 @@ class ProductionLog:
         except Exception as e:
             tb.Label(header_wrapper, text=f"Layout Error: {e}", bootstyle=DANGER).pack()
 
+    def build_production_section(self):
         prod_wrapper = tb.Labelframe(self.parent, text=" Production Jobs ", padding=10)
         prod_wrapper.pack(fill=X, padx=10, pady=5)
         prod_columns = tb.Frame(prod_wrapper)
@@ -277,11 +304,13 @@ class ProductionLog:
         self.production_container = tb.Frame(prod_wrapper)
         self.production_container.pack(fill=X)
 
+    def build_downtime_section(self):
         dt_wrapper = tb.Labelframe(self.parent, text=" Downtime Issues ", padding=10)
         dt_wrapper.pack(fill=X, padx=10, pady=5)
         self.downtime_container = tb.Frame(dt_wrapper)
         self.downtime_container.pack(fill=X)
 
+    def build_footer_section(self):
         footer = tb.Frame(self.parent, padding=20)
         footer.pack(fill=X)
         self.eff_display_lbl = tb.Label(footer, text="EFF%: 0.00", font=('-size 14 -weight bold'))
@@ -298,14 +327,6 @@ class ProductionLog:
         self.print_export_btn.pack(side=LEFT, padx=5)
         tb.Button(footer, text="Balance Downtime", command=self.balance_downtime_to_shift, bootstyle=WARNING).pack(side=LEFT, padx=5)
         tb.Button(footer, text="Import Excel", command=self.import_from_excel_ui, bootstyle=INFO).pack(side=LEFT, padx=5)
-
-        self.add_production_row()
-        self.add_downtime_row()
-        self.update_target_time_display()
-        self.update_ghost_total_display()
-        self.update_export_action_state()
-        self.mark_clean()
-        self.update_recovery_ui()
 
     def add_production_row(self):
         row_frame = tb.Frame(self.production_container)
@@ -392,6 +413,9 @@ class ProductionLog:
     def on_goal_changed(self, _event=None):
         self.update_row_math()
         self.calculate_metrics()
+
+    def on_header_field_focus_out(self, _event=None):
+        self.apply_header_data(self.get_raw_header_data(), mark_dirty=False)
 
     def load_rates_data(self):
         rates_data = {}
@@ -505,13 +529,17 @@ class ProductionLog:
         self.update_row_math()
 
     def update_target_time_display(self):
-        if not hasattr(self, "target_time_entry"):
+        target_time_entry = self.entries.get("target_time")
+        if target_time_entry is None:
             return
-        target_minutes = self.get_shift_total_minutes()
-        self.target_time_entry.config(state="normal")
-        self.target_time_entry.delete(0, END)
-        self.target_time_entry.insert(0, f"{target_minutes} min" if target_minutes > 0 else "")
-        self.target_time_entry.config(state="readonly")
+        target_value = self.data_handler.compute_target_time(self.entries.get("hours").get() if self.entries.get("hours") else "")
+        original_state = target_time_entry.cget("state")
+        if original_state == "readonly":
+            target_time_entry.config(state="normal")
+        target_time_entry.delete(0, END)
+        target_time_entry.insert(0, target_value)
+        if original_state == "readonly":
+            target_time_entry.config(state="readonly")
 
     def update_ghost_total_display(self):
         if not hasattr(self, "ghost_total_lbl"):
@@ -792,11 +820,7 @@ class ProductionLog:
         self.downtime_rows.clear()
 
     def populate_from_data(self, data, source_path=None, mark_dirty_after_load=False):
-        for fid, val in data.get("header", {}).items():
-            self.set_entry_value(fid, val)
-
-        if not str(data.get("header", {}).get("cast_date", "")).strip():
-            self.sync_julian_cast_date()
+        self.apply_header_data(data.get("header", {}), mark_dirty=False)
 
         self.clear_dynamic_rows()
 
@@ -1174,23 +1198,7 @@ class ProductionLog:
 
     def sync_julian_cast_date(self, event=None):
         try:
-            date_box = self.entries.get("date")
-            cast_box = self.entries.get("cast_date")
-            raw_date = date_box.get().strip()
-            date_obj = None
-            for fmt in ("%m/%d/%Y", "%m-%d-%Y", "%Y-%m-%d", "%m%d%Y"):
-                try:
-                    date_obj = datetime.strptime(raw_date, fmt)
-                    break
-                except ValueError:
-                    continue
-            if date_obj is None:
-                return
-            julian = f"{date_obj.timetuple().tm_yday:03}"
-            cast_box.config(state="normal")
-            cast_box.delete(0, END); cast_box.insert(0, julian)
-            cast_box.config(state="readonly")
-            self.mark_dirty()
+            self.apply_header_data(self.get_raw_header_data(), mark_dirty=True)
         except Exception:
             pass
 

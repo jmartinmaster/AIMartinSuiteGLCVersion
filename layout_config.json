@@ -54,6 +54,15 @@
             "cell": "D2"
         },
         {
+            "id": "target_time",
+            "label": "Target Time",
+            "row": 4,
+            "col": 0,
+            "width": 12,
+            "readonly": true,
+            "cell": "H4"
+        },
+        {
             "id": "mtd_pct",
             "label": "MTD %",
             "row": 1,
