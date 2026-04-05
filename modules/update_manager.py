@@ -36,7 +36,7 @@ from modules.persistence import write_json_with_backup
 from modules.utils import ensure_external_directory, external_path, resolve_local_venv_python
 
 __module_name__ = "Update Manager"
-__version__ = "2.0.7"
+__version__ = "2.0.9"
 
 GITHUB_REMOTE_PATTERN = re.compile(r"github\.com[:/](?P<owner>[^/]+)/(?P<repo>[^/.]+?)(?:\.git)?$")
 MODULE_NAME_PATTERN = re.compile(r"__module_name__\s*=\s*[\"']([^\"']+)[\"']")
@@ -127,13 +127,243 @@ def _is_supported_update_version(version_parts):
     return len(version_parts) == 3 and version_parts[2] % 2 == 0
 
 
+def _detect_branch_name():
+    return "main"
+
+
+def _detect_remote_info():
+    remote_url = None
+    git_config_path = os.path.join(os.path.abspath("."), ".git", "config")
+    if os.path.exists(git_config_path):
+        try:
+            with open(git_config_path, "r", encoding="utf-8") as handle:
+                config_text = handle.read()
+            match = re.search(r"url\s*=\s*(.+)", config_text)
+            if match:
+                remote_url = match.group(1).strip()
+        except Exception:
+            remote_url = None
+    remote_url = remote_url or "https://github.com/jmartinmaster/AIMartinSuiteGLCVersion.git"
+    match = GITHUB_REMOTE_PATTERN.search(remote_url)
+    if not match:
+        return {"owner": None, "repo": None, "url": remote_url, "display": remote_url}
+    owner = match.group("owner")
+    repo = match.group("repo")
+    return {
+        "owner": owner,
+        "repo": repo,
+        "url": remote_url,
+        "display": f"{owner}/{repo}",
+    }
+
+
+def discover_module_payload_options(modules_path):
+    options = []
+    if modules_path and os.path.isdir(modules_path):
+        for file_name in sorted(os.listdir(modules_path)):
+            if not file_name.endswith(".py"):
+                continue
+            module_key = os.path.splitext(file_name)[0]
+            if module_key in MODULE_PAYLOAD_EXCLUDED_KEYS:
+                continue
+
+            relative_path = f"modules/{file_name}"
+            fallback_name = _default_module_payload_name(module_key)
+            metadata = _read_module_metadata_from_path(os.path.join(modules_path, file_name), fallback_name) or {
+                "module_name": fallback_name,
+                "version": "Unknown",
+            }
+            module_name = metadata.get("module_name", fallback_name)
+            options.append({
+                "kind": "module",
+                "key": module_key,
+                "file_name": file_name,
+                "relative_path": relative_path,
+                "fallback_name": fallback_name,
+                "module_name": module_name,
+                "display": f"{module_name} ({file_name})",
+            })
+
+    for spec in JSON_PAYLOAD_OPTIONS:
+        options.append({
+            "kind": "json",
+            "key": spec["key"],
+            "relative_path": spec["relative_path"],
+            "fallback_name": spec["fallback_name"],
+            "module_name": spec["fallback_name"],
+            "backup_dir": spec["backup_dir"],
+            "display": f"{spec['fallback_name']} ({os.path.basename(spec['relative_path'])})",
+        })
+
+    return options
+
+
+def get_local_module_payload_metadata(dispatcher, option):
+    if not option:
+        return {"module_name": "No payload selected", "version": "Unknown"}
+
+    if option.get("kind") == "json":
+        local_path = external_path(option["relative_path"])
+        if not os.path.exists(local_path):
+            return _parse_json_payload_metadata("", option["fallback_name"])
+        try:
+            with open(local_path, "r", encoding="utf-8") as handle:
+                return _parse_json_payload_metadata(handle.read(), option["fallback_name"])
+        except OSError:
+            return {"module_name": option["module_name"], "version": "Unreadable JSON", "compare_token": None}
+
+    override_path = dispatcher.get_external_module_override_path(option["key"])
+    override_metadata = _read_module_metadata_from_path(override_path, option["fallback_name"])
+    if override_metadata:
+        return override_metadata
+
+    local_module_path = os.path.join(dispatcher.modules_path, option["file_name"])
+    local_metadata = _read_module_metadata_from_path(local_module_path, option["fallback_name"])
+    if local_metadata:
+        return local_metadata
+
+    module = dispatcher.loaded_modules.get(option["key"]) or sys.modules.get(f"modules.{option['key']}")
+    if module is not None:
+        return {
+            "module_name": getattr(module, "__module_name__", option["fallback_name"]),
+            "version": getattr(module, "__version__", "Unknown"),
+        }
+
+    return {"module_name": option["module_name"], "version": "Unknown"}
+
+
+def fetch_remote_payload_text(remote_info, branch_name, relative_path, timeout=15):
+    owner = remote_info.get("owner") if isinstance(remote_info, dict) else None
+    repo = remote_info.get("repo") if isinstance(remote_info, dict) else None
+    if not owner or not repo or not branch_name:
+        raise RuntimeError("Repository origin or branch could not be determined.")
+
+    url = _build_raw_github_url(owner, repo, branch_name, relative_path, cache_bust=int(time.time() * 1000))
+    request = urllib.request.Request(url, headers={"User-Agent": "MartinSuiteUpdater/1.0", "Cache-Control": "no-cache"})
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        return response.read().decode("utf-8")
+
+
+def evaluate_module_payload_option(dispatcher, option, branch_name, remote_info):
+    local_metadata = get_local_module_payload_metadata(dispatcher, option)
+    local_version = local_metadata.get("version", "Unknown")
+    module_name = local_metadata.get("module_name", option.get("module_name", option.get("fallback_name", "Unknown")))
+
+    try:
+        remote_text = fetch_remote_payload_text(remote_info, branch_name, option["relative_path"])
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            return {
+                "option": option.copy(),
+                "module_name": module_name,
+                "local_metadata": local_metadata,
+                "remote_version": "Missing",
+                "status": "Not in repository branch",
+                "note": f"The selected {module_name} payload does not exist on the repository branch.",
+                "update_available": False,
+                "remote_text": None,
+            }
+        return {
+            "option": option.copy(),
+            "module_name": module_name,
+            "local_metadata": local_metadata,
+            "remote_version": "Unavailable",
+            "status": "Module check failed",
+            "note": f"Could not read the remote {module_name} payload: {exc}",
+            "update_available": False,
+            "remote_text": None,
+        }
+    except Exception as exc:
+        return {
+            "option": option.copy(),
+            "module_name": module_name,
+            "local_metadata": local_metadata,
+            "remote_version": "Unavailable",
+            "status": "Module check failed",
+            "note": f"Could not read the remote {module_name} payload: {exc}",
+            "update_available": False,
+            "remote_text": None,
+        }
+
+    current_option = option.copy()
+    update_available = False
+    if option.get("kind") == "json":
+        remote_metadata = _parse_json_payload_metadata(remote_text, option["fallback_name"])
+        remote_version = remote_metadata.get("version", "Unknown")
+        local_token = local_metadata.get("compare_token")
+        remote_token = remote_metadata.get("compare_token")
+        if remote_version != "Valid JSON":
+            status = "Repository JSON unreadable"
+            note = f"The repository copy for {module_name} is not valid JSON and cannot be restored safely."
+        elif local_version == "Missing":
+            status = "JSON restore available"
+            note = f"The local {module_name} file is missing and can be restored from the repository copy."
+            update_available = True
+        elif local_version == "Unreadable JSON":
+            status = "JSON restore available"
+            note = f"The local {module_name} file is unreadable and can be restored from the repository copy."
+            update_available = True
+        elif local_token == remote_token:
+            status = "Up to date"
+            note = f"The selected {module_name} JSON file already matches the repository copy."
+        else:
+            status = "JSON restore available"
+            note = f"The local {module_name} JSON file differs from the repository copy and can be restored."
+            update_available = True
+    else:
+        remote_metadata = _parse_module_metadata(remote_text, option["fallback_name"])
+        remote_version = remote_metadata.get("version", "Unknown")
+        module_name = remote_metadata.get("module_name", module_name)
+        current_option["module_name"] = module_name
+        local_compare = parse_version(local_version)
+        remote_compare = parse_version(remote_version)
+
+        if remote_compare and local_compare and normalize_version(remote_compare) > normalize_version(local_compare):
+            status = "Module update available"
+            note = f"A newer {module_name} payload is available and can be installed without rebuilding the EXE."
+            update_available = True
+        elif remote_version == local_version:
+            status = "Up to date"
+            note = f"The selected {module_name} payload already matches the repository version."
+        else:
+            status = "Module version unreadable"
+            note = f"The selected {module_name} payload could not be compared cleanly."
+
+    return {
+        "option": current_option,
+        "module_name": module_name,
+        "local_metadata": local_metadata,
+        "remote_version": remote_version,
+        "status": status,
+        "note": note,
+        "update_available": update_available,
+        "remote_text": remote_text,
+    }
+
+
+def scan_available_module_payload_updates(dispatcher, branch_name=None, remote_info=None):
+    resolved_branch_name = branch_name or _detect_branch_name()
+    resolved_remote_info = remote_info or _detect_remote_info()
+    options = discover_module_payload_options(getattr(dispatcher, "modules_path", None))
+    results = [
+        evaluate_module_payload_option(dispatcher, option, resolved_branch_name, resolved_remote_info)
+        for option in options
+    ]
+    return {
+        "branch_name": resolved_branch_name,
+        "remote_info": resolved_remote_info,
+        "results": results,
+        "available_results": [result for result in results if result.get("update_available")],
+    }
+
+
 class UpdateManager:
     def __init__(self, parent, dispatcher):
         self.parent = None
         self.dispatcher = dispatcher
         self.coordinator = self.dispatcher.update_coordinator
-        self.branch_name = self.coordinator.branch_name or self._detect_branch_name()
-        self.remote_info = self.coordinator.remote_info if self.coordinator.remote_info.get("display") != "Unknown repository" else self._detect_remote_info()
+        self.branch_name = self.coordinator.branch_name or _detect_branch_name()
+        self.remote_info = self.coordinator.remote_info if self.coordinator.remote_info.get("display") != "Unknown repository" else _detect_remote_info()
         self.local_manifest = self.coordinator.local_manifest
         self.comparison_rows = self.coordinator.comparison_rows
         self.status_var = self.coordinator.status_var
@@ -179,48 +409,7 @@ class UpdateManager:
         return None
 
     def _discover_payload_options(self):
-        options = []
-        modules_path = getattr(self.dispatcher, "modules_path", None)
-        if not modules_path or not os.path.isdir(modules_path):
-            modules_path = None
-
-        if modules_path:
-            for file_name in sorted(os.listdir(modules_path)):
-                if not file_name.endswith(".py"):
-                    continue
-                module_key = os.path.splitext(file_name)[0]
-                if module_key in MODULE_PAYLOAD_EXCLUDED_KEYS:
-                    continue
-
-                relative_path = f"modules/{file_name}"
-                fallback_name = _default_module_payload_name(module_key)
-                metadata = _read_module_metadata_from_path(os.path.join(modules_path, file_name), fallback_name) or {
-                    "module_name": fallback_name,
-                    "version": "Unknown",
-                }
-                module_name = metadata.get("module_name", fallback_name)
-                options.append({
-                    "kind": "module",
-                    "key": module_key,
-                    "file_name": file_name,
-                    "relative_path": relative_path,
-                    "fallback_name": fallback_name,
-                    "module_name": module_name,
-                    "display": f"{module_name} ({file_name})",
-                })
-
-        for spec in JSON_PAYLOAD_OPTIONS:
-            options.append({
-                "kind": "json",
-                "key": spec["key"],
-                "relative_path": spec["relative_path"],
-                "fallback_name": spec["fallback_name"],
-                "module_name": spec["fallback_name"],
-                "backup_dir": spec["backup_dir"],
-                "display": f"{spec['fallback_name']} ({os.path.basename(spec['relative_path'])})",
-            })
-
-        return options
+        return discover_module_payload_options(getattr(self.dispatcher, "modules_path", None))
 
     def _get_selected_module_payload_option(self):
         selected_display = self.module_payload_selection_var.get().strip()
@@ -230,37 +419,10 @@ class UpdateManager:
         return self.module_payload_options[0] if self.module_payload_options else None
 
     def _get_local_module_payload_metadata(self, option):
-        if not option:
-            return {"module_name": "No payload selected", "version": "Unknown"}
+        return get_local_module_payload_metadata(self.dispatcher, option)
 
-        if option.get("kind") == "json":
-            local_path = external_path(option["relative_path"])
-            if not os.path.exists(local_path):
-                return _parse_json_payload_metadata("", option["fallback_name"])
-            try:
-                with open(local_path, "r", encoding="utf-8") as handle:
-                    return _parse_json_payload_metadata(handle.read(), option["fallback_name"])
-            except OSError:
-                return {"module_name": option["module_name"], "version": "Unreadable JSON", "compare_token": None}
-
-        override_path = self.dispatcher.get_external_module_override_path(option["key"])
-        override_metadata = _read_module_metadata_from_path(override_path, option["fallback_name"])
-        if override_metadata:
-            return override_metadata
-
-        local_module_path = os.path.join(self.dispatcher.modules_path, option["file_name"])
-        local_metadata = _read_module_metadata_from_path(local_module_path, option["fallback_name"])
-        if local_metadata:
-            return local_metadata
-
-        module = self.dispatcher.loaded_modules.get(option["key"]) or sys.modules.get(f"modules.{option['key']}")
-        if module is not None:
-            return {
-                "module_name": getattr(module, "__module_name__", option["fallback_name"]),
-                "version": getattr(module, "__version__", "Unknown"),
-            }
-
-        return {"module_name": option["module_name"], "version": "Unknown"}
+    def _evaluate_selected_module_payload(self, option):
+        return evaluate_module_payload_option(self.dispatcher, option, self.branch_name, self.remote_info)
 
     def handle_module_payload_selection_change(self, _event=None):
         option = self._get_selected_module_payload_option()
@@ -390,70 +552,14 @@ class UpdateManager:
             )
             return
 
-        local_metadata = self._get_local_module_payload_metadata(option)
-        local_version = local_metadata.get("version", "Unknown")
-        try:
-            remote_text = self._fetch_remote_file(option["relative_path"])
-        except urllib.error.HTTPError as exc:
-            if exc.code == 404:
-                self.refresh_module_payload_summary(
-                    remote_version="Missing",
-                    status="Not in repository branch",
-                    note=f"The selected {option['module_name']} payload does not exist on the repository branch.",
-                )
-                return
-            self.refresh_module_payload_summary(
-                remote_version="Unavailable",
-                status="Module check failed",
-                note=f"Could not read the remote {option['module_name']} payload: {exc}",
-            )
-            return
-        except Exception as exc:
-            self.refresh_module_payload_summary(
-                remote_version="Unavailable",
-                status="Module check failed",
-                note=f"Could not read the remote {option['module_name']} payload: {exc}",
-            )
-            return
-
-        if option.get("kind") == "json":
-            remote_metadata = _parse_json_payload_metadata(remote_text, option["fallback_name"])
-            remote_version = remote_metadata.get("version", "Unknown")
-            local_token = local_metadata.get("compare_token")
-            remote_token = remote_metadata.get("compare_token")
-            if remote_version != "Valid JSON":
-                status = "Repository JSON unreadable"
-                note = f"The repository copy for {option['module_name']} is not valid JSON and cannot be restored safely."
-            elif local_version == "Missing":
-                status = "JSON restore available"
-                note = f"The local {option['module_name']} file is missing and can be restored from the repository copy."
-            elif local_version == "Unreadable JSON":
-                status = "JSON restore available"
-                note = f"The local {option['module_name']} file is unreadable and can be restored from the repository copy."
-            elif local_token == remote_token:
-                status = "Up to date"
-                note = f"The selected {option['module_name']} JSON file already matches the repository copy."
-            else:
-                status = "JSON restore available"
-                note = f"The local {option['module_name']} JSON file differs from the repository copy and can be restored."
-        else:
-            remote_metadata = _parse_module_metadata(remote_text, option["fallback_name"])
-            remote_version = remote_metadata.get("version", "Unknown")
-            option["module_name"] = remote_metadata.get("module_name", option["module_name"])
-            local_compare = parse_version(local_version)
-            remote_compare = parse_version(remote_version)
-
-            if remote_compare and local_compare and normalize_version(remote_compare) > normalize_version(local_compare):
-                status = "Module update available"
-                note = f"A newer {option['module_name']} payload is available and can be installed without rebuilding the EXE."
-            elif remote_version == local_version:
-                status = "Up to date"
-                note = f"The selected {option['module_name']} payload already matches the repository version."
-            else:
-                status = "Module version unreadable"
-                note = f"The selected {option['module_name']} payload could not be compared cleanly."
-
-        self.refresh_module_payload_summary(remote_version=remote_version, status=status, note=note)
+        result = self._evaluate_selected_module_payload(option)
+        option.update(result.get("option", {}))
+        self.refresh_module_payload_summary(
+            remote_version=result.get("remote_version", "Unavailable"),
+            status=result.get("status", "Module check failed"),
+            note=result.get("note", "Could not evaluate the selected payload."),
+            option=option,
+        )
 
     def _finish_module_payload_install(self, option, installed_path, remote_version):
         self.module_payload_in_progress = False
@@ -498,6 +604,26 @@ class UpdateManager:
         self.dispatcher.set_update_status(f"{option['module_name']} payload install failed.", DANGER, active=True, mode="module")
         Messagebox.show_error(f"Could not install the {option['module_name']} payload:\n\n{exc}", "Module Payload Error")
 
+    def _install_module_payload_option(self, option, remote_text=None):
+        payload_text = remote_text if remote_text is not None else self._fetch_remote_file(option["relative_path"])
+        if option.get("kind") == "json":
+            remote_metadata = _parse_json_payload_metadata(payload_text, option["fallback_name"])
+            if remote_metadata.get("version") != "Valid JSON":
+                raise RuntimeError(f"The repository copy for {option['module_name']} is not valid JSON.")
+            target_path = external_path(option["relative_path"])
+            write_json_with_backup(
+                target_path,
+                remote_metadata["payload"],
+                backup_dir=external_path(option["backup_dir"]),
+                keep_count=12,
+            )
+            return target_path, remote_metadata.get("version", "Unknown")
+
+        remote_metadata = _parse_module_metadata(payload_text, option["fallback_name"])
+        option["module_name"] = remote_metadata.get("module_name", option["module_name"])
+        installed_path, _module = self.dispatcher.install_module_override(option["key"], payload_text)
+        return installed_path, remote_metadata.get("version", "Unknown")
+
     def apply_module_payload_update(self):
         if self.module_payload_in_progress or self.coordinator.download_in_progress or self.coordinator.source_job_in_progress:
             self.dispatcher.show_toast("Update Manager", "Another update job is already running in the background.", WARNING)
@@ -515,24 +641,7 @@ class UpdateManager:
 
         def worker():
             try:
-                remote_text = self._fetch_remote_file(option["relative_path"])
-                if option.get("kind") == "json":
-                    remote_metadata = _parse_json_payload_metadata(remote_text, option["fallback_name"])
-                    if remote_metadata.get("version") != "Valid JSON":
-                        raise RuntimeError(f"The repository copy for {option['module_name']} is not valid JSON.")
-                    target_path = external_path(option["relative_path"])
-                    write_json_with_backup(
-                        target_path,
-                        remote_metadata["payload"],
-                        backup_dir=external_path(option["backup_dir"]),
-                        keep_count=12,
-                    )
-                    installed_path = target_path
-                    remote_version = remote_metadata.get("version", "Unknown")
-                else:
-                    remote_metadata = _parse_module_metadata(remote_text, option["fallback_name"])
-                    installed_path, _module = self.dispatcher.install_module_override(option["key"], remote_text)
-                    remote_version = remote_metadata.get("version", "Unknown")
+                installed_path, remote_version = self._install_module_payload_option(option, remote_text=None)
             except Exception as exc:
                 self.dispatcher.root.after(0, lambda current_option=option.copy(), error=exc: self._handle_module_payload_failure(current_option, error))
                 return
@@ -542,32 +651,10 @@ class UpdateManager:
         threading.Thread(target=worker, daemon=True).start()
 
     def _detect_branch_name(self):
-        return "main"
+        return _detect_branch_name()
 
     def _detect_remote_info(self):
-        remote_url = None
-        git_config_path = os.path.join(os.path.abspath("."), ".git", "config")
-        if os.path.exists(git_config_path):
-            try:
-                with open(git_config_path, "r", encoding="utf-8") as handle:
-                    config_text = handle.read()
-                match = re.search(r"url\s*=\s*(.+)", config_text)
-                if match:
-                    remote_url = match.group(1).strip()
-            except Exception:
-                remote_url = None
-        remote_url = remote_url or "https://github.com/jmartinmaster/AIMartinSuiteGLCVersion.git"
-        match = GITHUB_REMOTE_PATTERN.search(remote_url)
-        if not match:
-            return {"owner": None, "repo": None, "url": remote_url, "display": remote_url}
-        owner = match.group("owner")
-        repo = match.group("repo")
-        return {
-            "owner": owner,
-            "repo": repo,
-            "url": remote_url,
-            "display": f"{owner}/{repo}",
-        }
+        return _detect_remote_info()
 
     def refresh_local_manifest(self):
         dispatcher_module = self.dispatcher.loaded_modules.get("main") or sys.modules.get("main") or sys.modules.get("__main__")
@@ -595,15 +682,89 @@ class UpdateManager:
             self.note_var.set("Run a repository check to compare the packaged release target.")
 
     def _fetch_remote_file(self, relative_path):
-        owner = self.remote_info.get("owner")
-        repo = self.remote_info.get("repo")
-        if not owner or not repo or not self.branch_name:
-            raise RuntimeError("Repository origin or branch could not be determined.")
+        return fetch_remote_payload_text(self.remote_info, self.branch_name, relative_path, timeout=15)
 
-        url = _build_raw_github_url(owner, repo, self.branch_name, relative_path, cache_bust=int(time.time() * 1000))
-        request = urllib.request.Request(url, headers={"User-Agent": "MartinSuiteUpdater/1.0", "Cache-Control": "no-cache"})
-        with urllib.request.urlopen(request, timeout=15) as response:
-            return response.read().decode("utf-8")
+    def _finish_apply_all_module_payload_updates(self, installed_items, failed_items):
+        self.module_payload_in_progress = False
+        installed_count = len(installed_items)
+        failed_count = len(failed_items)
+
+        if installed_items:
+            last_item = installed_items[-1]
+            self.refresh_module_payload_summary(
+                remote_version=last_item["remote_version"],
+                status="Installed",
+                note=f"Installed {installed_count} available payload(s).",
+                option=last_item["option"],
+            )
+            self.handle_module_payload_selection_change()
+
+        if failed_count:
+            self.status_var.set(f"Installed {installed_count} payload(s). {failed_count} failed.")
+            self.dispatcher.set_update_status("Module payload bulk install completed with errors.", WARNING, active=True, mode="module")
+            failure_lines = [f"{item['option']['module_name']}: {item['error']}" for item in failed_items]
+            Messagebox.show_error("Could not install all available payloads:\n\n" + "\n".join(failure_lines), "Bulk Module Payload Error")
+            if installed_count:
+                self.dispatcher.show_toast("Update Manager", f"Installed {installed_count} payload(s), but {failed_count} failed.", WARNING)
+            return
+
+        if installed_count:
+            self.status_var.set(f"Installed {installed_count} available payload(s).")
+            self.dispatcher.set_update_status(f"Installed {installed_count} available module payload(s).", SUCCESS, active=True, mode="module")
+            self.dispatcher.show_toast("Update Manager", f"Installed {installed_count} available payload(s).", SUCCESS)
+            return
+
+        self.status_var.set("No payload updates were available.")
+        self.dispatcher.show_toast("Update Manager", "No payload updates were available to install.", INFO)
+
+    def apply_all_module_payload_updates(self):
+        if self.module_payload_in_progress or self.coordinator.download_in_progress or self.coordinator.source_job_in_progress:
+            self.dispatcher.show_toast("Update Manager", "Another update job is already running in the background.", WARNING)
+            return
+
+        if not self.module_payload_options:
+            self.dispatcher.show_toast("Update Manager", "No payload-eligible modules are available to install.", INFO)
+            return
+
+        self.module_payload_in_progress = True
+        self.module_payload_status_var.set("Checking all payloads")
+        self.module_payload_note_var.set("Checking the repository for all available payload restores before installing them.")
+        self.status_var.set("Checking all payload updates...")
+        self.dispatcher.set_update_status("Checking all payload updates...", INFO, active=True, mode="module")
+
+        def worker():
+            installed_items = []
+            failed_items = []
+            try:
+                scan_result = scan_available_module_payload_updates(self.dispatcher, branch_name=self.branch_name, remote_info=self.remote_info)
+                available_results = scan_result.get("available_results", [])
+                if not available_results:
+                    self.dispatcher.root.after(0, lambda: self._finish_apply_all_module_payload_updates([], []))
+                    return
+
+                for result in available_results:
+                    option = result["option"].copy()
+                    try:
+                        installed_path, remote_version = self._install_module_payload_option(option, remote_text=result.get("remote_text"))
+                        installed_items.append({
+                            "option": option,
+                            "installed_path": installed_path,
+                            "remote_version": remote_version,
+                        })
+                    except Exception as exc:
+                        failed_items.append({
+                            "option": option,
+                            "error": exc,
+                        })
+            except Exception as exc:
+                failed_items.append({
+                    "option": {"module_name": "Module payload scan"},
+                    "error": exc,
+                })
+
+            self.dispatcher.root.after(0, lambda installed=installed_items, failed=failed_items: self._finish_apply_all_module_payload_updates(installed, failed))
+
+        threading.Thread(target=worker, daemon=True).start()
 
     def _fetch_remote_bytes(self, relative_path):
         owner = self.remote_info.get("owner")
@@ -746,6 +907,16 @@ class UpdateManager:
 
     def _finish_downloaded_update(self, downloaded_path):
         self.coordinator.download_in_progress = False
+        removed_overrides = []
+        try:
+            removed_overrides = self.dispatcher.remove_external_module_overrides()
+        except Exception as exc:
+            Messagebox.show_error(f"The update was downloaded, but old module overrides could not be cleared:\n\n{exc}", "Override Cleanup Error")
+            self.status_var.set("Update downloaded, but override cleanup failed.")
+            self.coordinator.set_job_phase("failed", "Stable update downloaded, but override cleanup failed.", mode="stable")
+            self.dispatcher.set_update_status("Stable update downloaded, but override cleanup failed.", DANGER, active=True, mode="stable")
+            return
+
         try:
             os.startfile(downloaded_path)
         except Exception as exc:
@@ -755,8 +926,10 @@ class UpdateManager:
             self.dispatcher.set_update_status("Stable update downloaded, but launch failed.", DANGER, active=True, mode="stable")
             return
 
+        removed_count = len(removed_overrides)
+        status_detail = f"Launched {os.path.basename(downloaded_path)} and cleared {removed_count} stale module override(s) before closing the current version."
         self.status_var.set("Updated executable launched. Closing the current version.")
-        self.coordinator.set_job_phase("handoff", f"Launched {os.path.basename(downloaded_path)} and closing the current version.", mode="stable")
+        self.coordinator.set_job_phase("handoff", status_detail, mode="stable")
         self.dispatcher.set_update_status("Stable update launched. Closing the current version.", SUCCESS, active=True, mode="stable")
         self.dispatcher.root.after(300, self.dispatcher.root.destroy)
 
@@ -932,6 +1105,12 @@ class UpdateManager:
         self.coordinator.set_source_phase("source_relaunch", f"Launching rebuilt executable {os.path.basename(final_exe_path)}.")
         self.status_var.set("Advanced source rebuild complete. Launching the rebuilt executable.")
         self.dispatcher.set_update_status("Advanced source rebuild complete. Launching the rebuilt executable.", SUCCESS, active=True, mode="advanced")
+        try:
+            self.dispatcher.remove_external_module_overrides()
+        except Exception as exc:
+            self.coordinator.set_job_phase("failed", f"Source rebuild succeeded, but override cleanup failed: {exc}", mode="advanced")
+            self.dispatcher.set_update_status("Advanced source rebuild succeeded, but override cleanup failed.", DANGER, active=True, mode="advanced")
+            return
         try:
             os.startfile(final_exe_path)
         except Exception as exc:
@@ -1272,6 +1451,7 @@ class UpdateManager:
         payload_controls.pack(anchor=W, pady=(10, 0))
         tb.Button(payload_controls, text="Check Selected Payload", bootstyle=PRIMARY, command=self.check_module_payload_update).pack(side=LEFT)
         tb.Button(payload_controls, text="Install Selected Payload", bootstyle=SUCCESS, command=self.apply_module_payload_update).pack(side=LEFT, padx=(8, 0))
+        tb.Button(payload_controls, text="Install All Available Payloads", bootstyle=WARNING, command=self.apply_all_module_payload_updates).pack(side=LEFT, padx=(8, 0))
 
         tb.Label(container, textvariable=self.status_var, bootstyle=SECONDARY).pack(anchor=W, pady=(12, 0))
 

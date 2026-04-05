@@ -48,18 +48,20 @@ The Martin Suite is designed to be bundled into a standalone `.exe` for deployme
 python build.py
 ```
 
-The compiled executable will be located in the `dist/` directory as a versioned file such as `TheMartinSuite_GLC_v1.5.2.exe`. Older versioned EXEs are moved into `dist/Old_exe`, where up to 10 archived builds are retained in version order.
+The compiled executable will be located in the `dist/` directory as a versioned file such as `TheMartinSuite_GLC_v1.5.4.exe`. Older versioned EXEs are moved into `dist/Old_exe`, where up to 10 archived builds are retained in version order.
 
 ## Update Behavior
 
 - Source / Python mode can inspect repository versions and hand off into the published packaged EXE by downloading it into local `dist`.
 - Packaged EXE mode uses Dispatcher Core as the master version check.
-- The current stable Dispatcher Core release is `1.5.2`.
+- The current stable Dispatcher Core release is `1.5.4`.
 - Two-part versions such as `1.07` are valid update targets.
 - Three-part versions only update when the third number is even, such as `1.07.2`.
 - Stable executable updates also require a matching published EXE artifact in `dist/`.
-- Packaged EXE updates download a versioned EXE beside the current copy, launch it, and let the newer build offer cleanup of older local EXEs.
+- Packaged EXE updates download a versioned EXE beside the current copy, clear stale bundled-module overrides, launch it, and let the newer build offer cleanup of older local EXEs.
 - Packaged EXE mode can also install selected module payload overrides directly from `modules/` without rebuilding the EXE.
+- Packaged EXE mode can check for available payload restores at startup and show a toast notification when they are found.
+- Packaged EXE mode can also install all available module and JSON payload restores in one pass.
 - Packaged EXE mode can also restore tracked JSON files such as `layout_config.json` and `rates.json` from the repository while preserving local backups.
 - `main.py` remains outside that payload list and still moves only through the packaged EXE update path.
 - The Help Center now uses a single-page document layout with top link navigation and horizontal scrolling for smaller windows.

@@ -19,6 +19,7 @@ import sys
 import importlib
 import json
 import ctypes
+import threading
 import time
 import tkinter as tk
 from tkinter import messagebox
@@ -33,7 +34,7 @@ from modules.theme_manager import apply_readability_overrides, normalize_theme, 
 from modules.utils import external_path, local_or_resource_path, resource_path
 
 __module_name__ = "Dispatcher Core"
-__version__ = "1.5.2"
+__version__ = "1.5.4"
 WINDOWS_APP_ID = "JamieMartin.TheMartinSuite.GLC"
 APP_ICON_RELATIVE_PATH = "icon.ico"
 APP_ICON_IMAGE_RELATIVE_PATHS = [
@@ -487,6 +488,8 @@ class Dispatcher:
         self._transition_in_progress = False
         self.update_coordinator = UpdateCoordinator(self.root)
         self.runtime_settings_listeners = []
+        self.module_update_check_in_progress = False
+        self.last_module_update_notification_signature = None
         self.refresh_animation_settings()
 
         self._setup_ui()
@@ -497,6 +500,7 @@ class Dispatcher:
         self.refresh_update_status_visibility()
         self.load_module("production_log", use_transition=False)
         self.root.after(900, self.prompt_old_executable_cleanup)
+        self.root.after(1800, self.check_for_available_module_updates)
 
     def _configure_module_import_paths(self):
         bundled_base_dir = os.path.dirname(self.modules_path)
@@ -560,6 +564,19 @@ class Dispatcher:
                 module_names.append(module_name)
         return sorted(module_names)
 
+    def get_bundled_module_names(self):
+        if not os.path.isdir(self.modules_path):
+            return []
+
+        module_names = []
+        for file_name in os.listdir(self.modules_path):
+            if not file_name.endswith(".py") or file_name == "__init__.py":
+                continue
+            module_name = os.path.splitext(file_name)[0]
+            if module_name not in module_names:
+                module_names.append(module_name)
+        return sorted(module_names)
+
     def has_external_module_overrides(self):
         return bool(self.get_external_module_override_names())
 
@@ -613,6 +630,39 @@ class Dispatcher:
         os.replace(temp_path, target_path)
         module = self.import_managed_module(module_name, force_fresh=True)
         return target_path, module
+
+    def remove_external_module_overrides(self, module_names=None, include_bytecode=True):
+        if not self.has_external_modules_directory():
+            return []
+
+        managed_names = module_names or self.get_bundled_module_names()
+        removed_paths = []
+        pycache_dir = os.path.join(self.external_modules_path, "__pycache__")
+
+        for module_name in managed_names:
+            override_path = os.path.join(self.external_modules_path, f"{module_name}.py")
+            if os.path.isfile(override_path):
+                os.remove(override_path)
+                removed_paths.append(override_path)
+
+            if include_bytecode and os.path.isdir(pycache_dir):
+                cache_prefix = f"{module_name}."
+                for cache_name in os.listdir(pycache_dir):
+                    if not cache_name.startswith(cache_prefix):
+                        continue
+                    cache_path = os.path.join(pycache_dir, cache_name)
+                    if os.path.isfile(cache_path):
+                        os.remove(cache_path)
+                        removed_paths.append(cache_path)
+
+        if include_bytecode and os.path.isdir(pycache_dir):
+            try:
+                if not os.listdir(pycache_dir):
+                    os.rmdir(pycache_dir)
+            except OSError:
+                pass
+
+        return removed_paths
 
     def _setup_menu(self):
         menubar = tk.Menu(self.root)
@@ -911,8 +961,11 @@ class Dispatcher:
             "enable_screen_transitions": True,
             "screen_transition_duration_ms": 360,
             "toast_duration_sec": 5,
+            "enable_module_update_notifications": True,
+            "module_update_notifications_legacy_checked": False,
             "persistent_modules": [],
         }
+        loaded = None
         if os.path.exists(self.settings_path):
             try:
                 with open(self.settings_path, 'r', encoding='utf-8') as handle:
@@ -927,12 +980,15 @@ class Dispatcher:
         except Exception:
             settings["toast_duration_sec"] = 5
         settings["enable_screen_transitions"] = bool(settings.get("enable_screen_transitions", True))
+        settings["enable_module_update_notifications"] = bool(settings.get("enable_module_update_notifications", True))
         try:
             settings["screen_transition_duration_ms"] = max(0, min(500, int(settings.get("screen_transition_duration_ms", 360))))
         except Exception:
             settings["screen_transition_duration_ms"] = 360
         settings["theme"] = normalize_theme(settings.get("theme", DEFAULT_THEME))
         settings["persistent_modules"] = self.normalize_persistent_modules(settings.get("persistent_modules", []))
+        settings["module_update_notifications_legacy_checked"] = bool(settings.get("module_update_notifications_legacy_checked", False))
+        settings["_module_update_notifications_explicit"] = isinstance(loaded, dict) and "enable_module_update_notifications" in loaded
         return settings
 
     def refresh_runtime_settings(self):
@@ -965,6 +1021,104 @@ class Dispatcher:
 
     def get_setting(self, key, default=None):
         return self.runtime_settings.get(key, default)
+
+    def _has_explicit_module_update_notification_setting(self):
+        return bool(self.runtime_settings.get("_module_update_notifications_explicit", False))
+
+    def _has_completed_legacy_module_update_check(self):
+        return bool(self.runtime_settings.get("module_update_notifications_legacy_checked", False))
+
+    def _mark_legacy_module_update_check_complete(self):
+        if self._has_explicit_module_update_notification_setting() or self._has_completed_legacy_module_update_check():
+            return
+
+        settings_payload = {}
+        if os.path.exists(self.settings_path):
+            try:
+                with open(self.settings_path, 'r', encoding='utf-8') as handle:
+                    loaded = json.load(handle)
+                if isinstance(loaded, dict):
+                    settings_payload = loaded
+            except Exception:
+                settings_payload = {}
+
+        settings_payload["module_update_notifications_legacy_checked"] = True
+
+        try:
+            write_json_with_backup(
+                self.settings_path,
+                settings_payload,
+                backup_dir=external_path("data/backups/settings"),
+                keep_count=12,
+            )
+        except Exception as exc:
+            log_exception("dispatcher.mark_legacy_module_update_check_complete", exc)
+            return
+
+        self.runtime_settings["module_update_notifications_legacy_checked"] = True
+
+    def check_for_available_module_updates(self, force=False):
+        if self.module_update_check_in_progress:
+            return
+        if not force:
+            if self._has_explicit_module_update_notification_setting():
+                if not bool(self.get_setting("enable_module_update_notifications", True)):
+                    return
+            elif self._has_completed_legacy_module_update_check():
+                return
+
+        if not force and not self._has_explicit_module_update_notification_setting():
+            self._mark_legacy_module_update_check_complete()
+
+        self.module_update_check_in_progress = True
+
+        def worker():
+            try:
+                update_manager_module = self.loaded_modules.get("update_manager") or sys.modules.get("modules.update_manager")
+                if update_manager_module is None:
+                    update_manager_module = importlib.import_module("modules.update_manager")
+                scan_result = update_manager_module.scan_available_module_payload_updates(self)
+            except Exception as exc:
+                self.root.after(0, lambda error=exc: self._finish_module_update_check(error=error))
+                return
+
+            self.root.after(0, lambda result=scan_result: self._finish_module_update_check(result=result))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _finish_module_update_check(self, result=None, error=None):
+        self.module_update_check_in_progress = False
+        if error is not None:
+            log_exception("dispatcher.check_for_available_module_updates", error)
+            return
+        if not result:
+            return
+
+        available_results = result.get("available_results", [])
+        if not available_results:
+            return
+
+        signature = tuple(sorted(item["option"].get("relative_path", "") for item in available_results))
+        if signature == self.last_module_update_notification_signature:
+            return
+        self.last_module_update_notification_signature = signature
+
+        available_names = []
+        for item in available_results:
+            label = item.get("module_name") or item["option"].get("module_name") or item["option"].get("fallback_name")
+            if label and label not in available_names:
+                available_names.append(label)
+
+        preview = ", ".join(available_names[:3])
+        if len(available_names) > 3:
+            preview = f"{preview}, and {len(available_names) - 3} more"
+
+        if len(available_results) == 1:
+            message = f"A module payload update is available for {preview}. Open Update Manager to review or install it."
+        else:
+            message = f"{len(available_results)} module payload updates are available: {preview}. Open Update Manager to review or install them all."
+
+        self.show_toast("Update Manager", message, INFO)
 
     def get_mousewheel_units(self, event):
         if getattr(event, "num", None) == 4:

@@ -4,6 +4,20 @@ This changelog tracks the main branch release line for The Martin Suite (GLC Edi
 
 Version headings below are aligned to the current `1.x` release line used by Dispatcher Core. Earlier work has been grouped into practical release milestones so the shipped feature history is easier to follow without rewriting older module version markers.
 
+## [1.5.4] - 2026-04-05
+
+### Changed
+
+- Promoted Dispatcher Core to stable version `1.5.4` for the updater notification and packaged handoff cleanup release.
+- Added default-on startup checks for module payload updates, with a one-time legacy fallback when the new preference has not been saved yet.
+- Added toast notifications when repository payload restores are available so packaged operators do not need to open Update Manager first.
+- Added an `Install All Available Payloads` action in Update Manager to apply all module and JSON payload restores in one pass.
+- Cleared stale external module override files before launching downloaded or rebuilt packaged executables so EXE handoff uses the newly bundled modules.
+
+### Notes
+
+- Newer settings files may now include `enable_module_update_notifications` and `module_update_notifications_legacy_checked`. Older builds can ignore these keys safely, but they will not provide the new startup payload check behavior.
+
 ## [1.5.2] - 2026-04-05
 
 ### Changed

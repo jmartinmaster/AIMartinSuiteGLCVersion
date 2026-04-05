@@ -50,6 +50,13 @@ def clean_previous_builds():
         if os.path.exists(folder_path):
             shutil.rmtree(folder_path, onexc=remove_readonly)
 
+    if PRESERVE_DIST:
+        # Keep archived builds and editable JSON artifacts, but remove stale external module overrides
+        # so the packaged executable reflects the current bundled code after each build.
+        preserved_override_dir = os.path.join(os.path.abspath("dist"), "modules")
+        if os.path.exists(preserved_override_dir):
+            shutil.rmtree(preserved_override_dir, onexc=remove_readonly)
+
 
 def archive_previous_builds():
     if not PRESERVE_DIST:
@@ -96,6 +103,7 @@ clean_previous_builds()
 PyInstaller.__main__.run([
     SPEC_FILE,
     '--noconfirm',
+    '--clean',
 ])
 
 archive_previous_builds()
