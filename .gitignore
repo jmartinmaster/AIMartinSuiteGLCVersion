@@ -8,8 +8,10 @@ env/
 # Application Data & Config
 data/
 exports/
+logs/
 settings.json
 Sample_Data/
+.vault
 
 # Generated backup artifacts
 *.bak
@@ -23,3 +25,6 @@ dist/
 # IDEs
 .vscode/
 .idea/
+
+# Local trash mirrors
+.Trash-1000/

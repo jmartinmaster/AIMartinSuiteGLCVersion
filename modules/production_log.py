@@ -30,6 +30,7 @@ from modules import recovery_viewer
 from modules.data_handler import DataHandler
 from modules.downtime_codes import get_code_options, normalize_code_value
 from modules.persistence import write_json_with_backup
+from modules.theme_manager import get_theme_tokens
 from modules.utils import external_path, local_or_resource_path, resource_path
 
 __module_name__ = "Production Log"
@@ -41,6 +42,7 @@ class ProductionLog:
     def __init__(self, parent, dispatcher):
         self.parent = parent 
         self.dispatcher = dispatcher
+        self.theme_tokens = get_theme_tokens(root=self.parent.winfo_toplevel())
         
         # Prefer the local config so Layout Manager saves are used immediately in dev and packaged builds.
         self.config_path = local_or_resource_path("layout_config.json")
@@ -256,14 +258,14 @@ class ProductionLog:
         self.delete_current_draft_btn.pack(side=LEFT, padx=5)
 
     def build_header_section(self):
-        header_wrapper = tb.Labelframe(self.parent, text=" Form 510-09: Production Header ", padding=15)
+        header_wrapper = tb.Labelframe(self.parent, text=" Form 510-09: Production Header ", padding=15, style="Martin.Card.TLabelframe")
         header_wrapper.pack(fill=X, padx=10, pady=10)
         
         try:
             with open(self.config_path, 'r') as f:
                 config = json.load(f)
             for field in config["header_fields"]:
-                tb.Label(header_wrapper, text=field["label"]).grid(row=field["row"], column=field["col"], padx=5, pady=5, sticky=W)
+                tb.Label(header_wrapper, text=field["label"], style="Martin.Section.TLabel").grid(row=field["row"], column=field["col"], padx=5, pady=5, sticky=W)
                 ent = tb.Entry(header_wrapper, width=field.get("width", 10))
                 
                 default_val = field.get("default", "")
@@ -288,30 +290,30 @@ class ProductionLog:
             tb.Label(header_wrapper, text=f"Layout Error: {e}", bootstyle=DANGER).pack()
 
     def build_production_section(self):
-        prod_wrapper = tb.Labelframe(self.parent, text=" Production Jobs ", padding=10)
+        prod_wrapper = tb.Labelframe(self.parent, text=" Production Jobs ", padding=10, style="Martin.Card.TLabelframe")
         prod_wrapper.pack(fill=X, padx=10, pady=5)
-        prod_columns = tb.Frame(prod_wrapper)
+        prod_columns = tb.Frame(prod_wrapper, style="Martin.Surface.TFrame")
         prod_columns.pack(fill=X, pady=(0, 4))
         for text, width, side in (
-            ("Shop Order", 15, LEFT),
-            ("Part Number", 15, LEFT),
-            ("Rate", 12, LEFT),
-            ("Override", 8, LEFT),
-            ("Molds", 10, LEFT),
-            ("Time", 10, RIGHT),
+            ("Shop Order", 12, LEFT),
+            ("Part Number", 12, LEFT),
+            ("Rate", 9, LEFT),
+            ("Override", 7, LEFT),
+            ("Molds", 8, LEFT),
+            ("Time", 8, RIGHT),
         ):
             tb.Label(prod_columns, text=text, width=width, anchor=W if side == LEFT else E, style="Martin.Muted.TLabel").pack(side=side, padx=5)
-        self.production_container = tb.Frame(prod_wrapper)
+        self.production_container = tb.Frame(prod_wrapper, style="Martin.Surface.TFrame")
         self.production_container.pack(fill=X)
 
     def build_downtime_section(self):
-        dt_wrapper = tb.Labelframe(self.parent, text=" Downtime Issues ", padding=10)
+        dt_wrapper = tb.Labelframe(self.parent, text=" Downtime Issues ", padding=10, style="Martin.Card.TLabelframe")
         dt_wrapper.pack(fill=X, padx=10, pady=5)
-        self.downtime_container = tb.Frame(dt_wrapper)
+        self.downtime_container = tb.Frame(dt_wrapper, style="Martin.Surface.TFrame")
         self.downtime_container.pack(fill=X)
 
     def build_footer_section(self):
-        footer = tb.Frame(self.parent, padding=20)
+        footer = tb.Frame(self.parent, padding=20, style="Martin.Content.TFrame")
         footer.pack(fill=X)
         self.eff_display_lbl = tb.Label(footer, text="EFF%: 0.00", font=('-size 14 -weight bold'))
         self.eff_display_lbl.pack(side=LEFT, padx=10)
@@ -332,11 +334,11 @@ class ProductionLog:
         row_frame = tb.Frame(self.production_container)
         row_frame.pack(fill=X, pady=2)
         row = {
-            "shop_order": tb.Entry(row_frame, width=15),
-            "part_number": tb.Entry(row_frame, width=15),
-            "rate_lookup": tb.Entry(row_frame, width=12),
-            "molds": tb.Entry(row_frame, width=10),
-            "time_calc": tb.Label(row_frame, text="0 min", width=10, font=('', 10, 'bold'))
+            "shop_order": tb.Entry(row_frame, width=12),
+            "part_number": tb.Entry(row_frame, width=12),
+            "rate_lookup": tb.Entry(row_frame, width=9),
+            "molds": tb.Entry(row_frame, width=8),
+            "time_calc": tb.Label(row_frame, text="0 min", width=8, font=('', 10, 'bold'))
         }
         row["rate_override_enabled_var"] = tk.BooleanVar(value=False)
         row["rate_override_enabled"] = tb.Checkbutton(
@@ -365,11 +367,11 @@ class ProductionLog:
         row_frame = tb.Frame(self.downtime_container)
         row_frame.pack(fill=X, pady=2)
         row = {
-            "start": tb.Entry(row_frame, width=10),
-            "stop": tb.Entry(row_frame, width=10),
-            "code": tb.Combobox(row_frame, values=self.dt_codes, width=25, state="readonly"),
+            "start": tb.Entry(row_frame, width=8),
+            "stop": tb.Entry(row_frame, width=8),
+            "code": tb.Combobox(row_frame, values=self.dt_codes, width=18, state="readonly"),
             "cause": tb.Entry(row_frame),
-            "time_calc": tb.Label(row_frame, text="0 min", width=10, foreground="red", font=('', 10, 'bold'))
+            "time_calc": tb.Label(row_frame, text="0 min", width=8, foreground="red", font=('', 10, 'bold'))
         }
         row["start"].pack(side=LEFT, padx=5)
         row["stop"].pack(side=LEFT, padx=5)
@@ -1132,7 +1134,7 @@ class ProductionLog:
         outer = tb.Frame(top, padding=10)
         outer.pack(fill=BOTH, expand=True)
 
-        canvas = tk.Canvas(outer, highlightthickness=0)
+        canvas = tk.Canvas(outer, highlightthickness=0, background=self.theme_tokens["canvas_bg"])
         canvas.pack(side=LEFT, fill=BOTH, expand=True)
 
         scrollbar = tb.Scrollbar(outer, orient=VERTICAL, command=canvas.yview)

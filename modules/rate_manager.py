@@ -21,6 +21,7 @@ import json
 import os
 import sys
 from modules.persistence import write_json_with_backup
+from modules.theme_manager import get_theme_tokens
 from modules.utils import ensure_external_directory, external_path, local_or_resource_path, resource_path
 
 __module_name__ = "Rate Manager"
@@ -67,12 +68,22 @@ class RateManager:
             Messagebox.show_error(f"Failed to save rates: {e}", "Save Error")
 
     def setup_ui(self):
-        container = tb.Frame(self.parent, padding=10)
+        get_theme_tokens(root=self.parent.winfo_toplevel())
+        container = tb.Frame(self.parent, padding=18, style="Martin.Content.TFrame")
         container.pack(fill=BOTH, expand=True)
 
-        # --- Table ---
-        # Note: I added a scrollbar here; once you get 20+ parts, you'll need it!
-        table_frame = tb.Frame(container)
+        tb.Label(container, text="Rate Manager", style="Martin.PageTitle.TLabel").pack(anchor=W, pady=(0, 6))
+        tb.Label(
+            container,
+            text="Maintain the target rates used by Production Log. This screen follows the active Theme Manager palette and writes to the local editable rates file.",
+            style="Martin.Subtitle.TLabel",
+            justify=LEFT,
+            wraplength=720,
+        ).pack(anchor=W, pady=(0, 14))
+
+        table_card = tb.Labelframe(container, text=" Rate Table ", padding=14, style="Martin.Card.TLabelframe")
+        table_card.pack(fill=BOTH, expand=True)
+        table_frame = tb.Frame(table_card, style="Martin.Surface.TFrame")
         table_frame.pack(fill=BOTH, expand=True)
 
         self.tree = tb.Treeview(table_frame, columns=("Part", "Rate"), show="headings", bootstyle=INFO)
@@ -88,7 +99,7 @@ class RateManager:
 
         # --- Form & Buttons ---
         # [Form layout remains the same as your draft]
-        self.form = tb.Labelframe(container, text=" Rate Entry Form ", padding=15)
+        self.form = tb.Labelframe(container, text=" Rate Entry Form ", padding=15, style="Martin.Card.TLabelframe")
         self.form.pack(fill=X, pady=15)
 
         tb.Label(self.form, text="Part #:").grid(row=0, column=0, padx=5)

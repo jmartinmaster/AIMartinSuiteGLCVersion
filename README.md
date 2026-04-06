@@ -26,7 +26,8 @@ These two forms do not have identical behavior. The Python version has access to
 - Shared viewport scrolling keeps wider modules usable in narrower windows instead of clipping the right side of the page.
 - Backup / Recovery viewer for browsing and restoring draft snapshots and configuration backups.
 - Settings management for export paths, theme selection, production defaults, editable downtime code labels, and per-module live-session persistence.
-- Settings Manager includes advanced tools for inspecting and editing external module override files beside the app.
+- Multi-vault security with passwordless general vaults, admin and developer roles, native Windows security-key support, and a non-secure mode that still keeps developer tools protected behind developer login.
+- Security Admin now owns developer-only update configuration and external module editing instead of exposing those controls directly in Settings Manager.
 - Configurable page-transition fades, including the ability to tune the duration or disable them.
 - Configurable toast notifications for non-blocking status messages.
 - Automatic per-file external module overrides when a matching `.py` file exists in the external `modules` folder.
@@ -65,6 +66,7 @@ These two forms do not have identical behavior. The Python version has access to
 - Does not have the same direct access to repository source files or local build tooling that the Python version has.
 - Bundles the help documentation and `LICENSE.txt` for in-app access.
 - Uses the Update Manager for packaged EXE release checks plus selectable module payload installs.
+- Update checks default to the main repository URL and can be overridden or cleared from Security Admin.
 - Uses local editable JSON files and external module override files beside the EXE when they exist.
 - Packaged builds now use versioned EXE filenames so a newer build can download beside the current one, launch separately, and leave the older copy available until cleanup is confirmed.
 - Local builds now keep the current EXE in `dist/` and archive up to 10 older versioned EXEs in `dist/Old_exe`.
@@ -73,11 +75,12 @@ These two forms do not have identical behavior. The Python version has access to
 ## Update Manager Status
 
 - The updater checks only the Dispatcher Core version in `main.py` as the master version.
-- The current stable Dispatcher Core release is `1.5.6`.
+- The current stable Dispatcher Core release is `1.5.8`.
 - Two-part versions such as `1.07` trigger an executable update when greater than the local version.
 - Three-part versions only trigger an executable update when the third number is even, such as `1.07.2`.
 - Odd patch versions such as `1.07.1` are ignored.
 - Update availability now also requires a matching published EXE artifact in `dist/`.
+- Update Manager defaults to the main repository URL, and the Security Admin developer tools can override or clear it when needed.
 - In Python/source mode, stable updates download the published EXE into local `dist` and launch it for handoff testing.
 - In packaged EXE mode, stable updates download a versioned EXE beside the current copy, clear stale bundled-module overrides, launch the newer build, and let the newer build offer cleanup of older local EXEs.
 - Packaged EXE mode also supports selected module payload installs from the `modules/` package without rebuilding the EXE.
@@ -86,6 +89,7 @@ These two forms do not have identical behavior. The Python version has access to
 - Update Manager can now install all available module and JSON payload restores in one pass.
 - Packaged EXE mode can also restore tracked JSON files such as `layout_config.json` and `rates.json` from the repository copy with local backups preserved before overwrite.
 - Packaged EXE mode can also restore the bundled Help Center markdown files and `LICENSE.txt` as one grouped documentation update.
+- The updater status bar now mounts above the content viewport and successful module payload installs auto-hide after a short delay.
 - `main.py` remains the Dispatcher Core boundary and still updates only through the stable EXE release path.
-- `About System v1.0.7` remains the first module payload target for packaged update testing after the `1.5.6` EXE handoff.
+- `About System v1.0.7` remains the first module payload target for packaged update testing after the current stable EXE handoff.
 - The Help Center now uses a modern single-page layout with top link navigation, a Hidden Modules guide, and section chips for User Guide module pages instead of notebook tabs.
