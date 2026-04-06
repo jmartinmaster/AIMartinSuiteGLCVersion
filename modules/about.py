@@ -22,6 +22,7 @@ import subprocess
 import sys
 import os
 import time
+from modules.theme_manager import get_theme_tokens
 
 __module_name__ = "About System"
 __version__ = "1.0.7"
@@ -33,12 +34,13 @@ class AboutSection:
         self.setup_ui()
 
     def setup_ui(self):
-        container = tb.Frame(self.parent, padding=30)
+        get_theme_tokens(root=self.parent.winfo_toplevel())
+        container = tb.Frame(self.parent, padding=30, style="Martin.Content.TFrame")
         container.pack(fill=BOTH, expand=True)
 
         # Header / Branding
-        tb.Label(container, text="THE MARTIN SUITE", font=("-size 24 -weight bold")).pack()
-        tb.Label(container, text="GLC Edition", font=("-size 14 -slant italic"), bootstyle=INFO).pack(pady=5)
+        tb.Label(container, text="THE MARTIN SUITE", style="Martin.PageTitle.TLabel").pack()
+        tb.Label(container, text="GLC Edition", style="Martin.Subtitle.TLabel").pack(pady=5)
         
         tb.Separator(container, orient=HORIZONTAL).pack(fill=X, pady=20)
 
@@ -59,7 +61,7 @@ class AboutSection:
         ).pack(pady=(0, 10))
 
         # Module Manifest
-        version_frame = tb.Labelframe(container, text=" Module Manifest ", padding=15)
+        version_frame = tb.Labelframe(container, text=" Module Manifest ", padding=15, style="Martin.Card.TLabelframe")
         version_frame.pack(fill=X, pady=20)
 
         loaded = getattr(self.dispatcher, 'loaded_modules', {})
@@ -75,13 +77,13 @@ class AboutSection:
                 version = getattr(mod_obj, '__version__', "Unknown")
                 source_suffix = " (external)" if self.dispatcher.is_module_loaded_from_external(mod_key, mod_obj) else ""
                 
-                tb.Label(row, text=f"{display_name}{source_suffix}", font=("-weight bold")).pack(side=LEFT)
-                tb.Label(row, text=f"v{version}", bootstyle=SECONDARY).pack(side=RIGHT)
+                tb.Label(row, text=f"{display_name}{source_suffix}", font=("-weight bold"), style="Martin.Section.TLabel").pack(side=LEFT)
+                tb.Label(row, text=f"v{version}", style="Martin.Muted.TLabel").pack(side=RIGHT)
 
         # --- REPACK UTILITY SECTION ---
         # Only show this if we are actually running as an EXE
         if getattr(sys, 'frozen', False):
-            repack_frame = tb.Frame(container, padding=10)
+            repack_frame = tb.Frame(container, padding=10, style="Martin.Content.TFrame")
             repack_frame.pack(fill=X, side=BOTTOM, pady=20)
             
             tb.Separator(repack_frame, orient=HORIZONTAL).pack(fill=X, pady=10)
@@ -98,11 +100,11 @@ class AboutSection:
                 repack_frame, 
                 text="Note: This will bake current JSON/Module changes into a new EXE and restart.",
                 font=("-size 8"),
-                bootstyle=SECONDARY
+                style="Martin.Muted.TLabel"
             ).pack()
 
         # Footer
-        tb.Label(container, text="Copyright © 2026 Jamie Martin", font=("-size 8")).pack(side=BOTTOM)
+        tb.Label(container, text="Copyright © 2026 Jamie Martin", font=("-size 8"), bootstyle=SECONDARY).pack(side=BOTTOM)
 
     def confirm_repack(self):
         """Ask before we blow up the current session."""

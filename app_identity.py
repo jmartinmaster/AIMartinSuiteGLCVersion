@@ -21,6 +21,7 @@ import re
 APP_NAME = "TheMartinSuite_GLC"
 LEGACY_EXE_NAME = f"{APP_NAME}.exe"
 MAIN_FILE_NAME = "main.py"
+DEFAULT_UPDATE_REPOSITORY_URL = "https://github.com/jmartinmaster/AIMartinSuiteGLCVersion"
 VERSION_PATTERN = re.compile(r"__version__\s*=\s*[\"']([^\"']+)[\"']")
 VERSIONED_EXE_PATTERN = re.compile(
     rf"^{re.escape(APP_NAME)}_v(?P<version>\d+\.\d+(?:\.\d+)?)\.exe$",

@@ -23,19 +23,38 @@ import threading
 import time
 import tkinter as tk
 import webbrowser
-from tkinter import messagebox
+from tkinter import messagebox, PhotoImage
 from ctypes import wintypes
 import ttkbootstrap as tb
 from ttkbootstrap.constants import *
 from ttkbootstrap.widgets import ToastNotification
-from app_identity import LEGACY_EXE_NAME, normalize_version, parse_version, parse_versioned_exe_name
+from app_identity import DEFAULT_UPDATE_REPOSITORY_URL, LEGACY_EXE_NAME, normalize_version, parse_version, parse_versioned_exe_name
 from modules.app_logging import log_exception
 from modules.persistence import write_json_with_backup
-from modules.theme_manager import apply_readability_overrides, normalize_theme, DEFAULT_THEME
+from modules.theme_manager import apply_readability_overrides, get_theme_tokens, normalize_theme, resolve_base_theme, DEFAULT_THEME
 from modules.utils import external_path, local_or_resource_path, resource_path
+from PIL import Image
+
+BOTH = tk.BOTH
+LEFT = tk.LEFT
+RIGHT = tk.RIGHT
+TOP = tk.TOP
+BOTTOM = tk.BOTTOM
+X = tk.X
+Y = tk.Y
+W = tk.W
+VERTICAL = tk.VERTICAL
+HORIZONTAL = tk.HORIZONTAL
+INFO = "info"
+SUCCESS = "success"
+WARNING = "warning"
+DANGER = "danger"
+SECONDARY = "secondary"
+DARK = "dark"
+LIGHT = "light"
 
 __module_name__ = "Dispatcher Core"
-__version__ = "1.5.6"
+__version__ = "1.5.8"
 ISSUE_REPORT_URL = "https://github.com/jmartinmaster/AIMartinSuiteGLCVersion/issues/new/choose"
 WINDOWS_APP_ID = "JamieMartin.TheMartinSuite.GLC"
 APP_ICON_RELATIVE_PATH = "icon.ico"
@@ -208,28 +227,51 @@ def apply_windows_window_icons(root):
         log_exception("apply_windows_window_icons", exc)
 
 
-def apply_app_icon(root):
-    icon_path = resource_path(APP_ICON_RELATIVE_PATH)
+def convert_png_to_ico(png_paths, output_ico_path):
     try:
-        if os.path.exists(icon_path):
-            root.iconbitmap(default=icon_path)
+        images = [Image.open(png_path) for png_path in png_paths if os.path.exists(png_path)]
+        if images:
+            images[0].save(output_ico_path, format='ICO', sizes=[(16, 16), (32, 32), (48, 48), (64, 64)])
+            return True
+        else:
+            log_exception("convert_png_to_ico", "No valid PNG files found to convert.")
+            return False
     except Exception as exc:
-        log_exception("apply_app_icon.iconbitmap", exc)
+        log_exception("convert_png_to_ico", exc)
+        return False
+
+
+def apply_app_icon(window, icon_path="icon.png"):
     try:
         icon_images = []
+
         for relative_path in APP_ICON_IMAGE_RELATIVE_PATHS:
             icon_image_path = resource_path(relative_path)
-            if os.path.exists(icon_image_path):
-                icon_images.append(tk.PhotoImage(file=icon_image_path))
+            if not os.path.exists(icon_image_path):
+                continue
+            try:
+                icon_images.append(PhotoImage(file=icon_image_path))
+            except Exception as exc:
+                log_exception("apply_app_icon.iconphoto_image", exc)
+
+        if not icon_images:
+            for relative_path in APP_ICON_SOURCE_RELATIVE_PATHS:
+                icon_image_path = resource_path(relative_path)
+                if not os.path.exists(icon_image_path):
+                    continue
+                try:
+                    icon_images.append(PhotoImage(file=icon_image_path))
+                    break
+                except Exception as exc:
+                    log_exception("apply_app_icon.iconphoto_source", exc)
+
         if icon_images:
-            root._app_icon_images = icon_images
-            root.iconphoto(True, *icon_images)
+            window.iconphoto(False, *icon_images)
+            window._app_icon_images = icon_images
+
+        apply_windows_window_icons(window)
     except Exception as exc:
-        log_exception("apply_app_icon.iconphoto", exc)
-    try:
-        root.after_idle(lambda widget=root: apply_windows_window_icons(widget) if widget.winfo_exists() else None)
-    except Exception as exc:
-        log_exception("apply_app_icon.after_idle", exc)
+        log_exception("apply_app_icon", exc)
 
 
 class UpdateCoordinator:
@@ -464,7 +506,12 @@ class Dispatcher:
         apply_windows_app_id()
         self.root = root
         self.root.title(f"The Martin Suite - {__version__}")
-        self.root.geometry("1000x600")
+        screen_width = max(1, self.root.winfo_screenwidth())
+        screen_height = max(1, self.root.winfo_screenheight())
+        initial_width = max(1040, min(1440, int(screen_width * 0.78)))
+        initial_height = max(620, min(920, int(screen_height * 0.82)))
+        self.root.geometry(f"{initial_width}x{initial_height}")
+        self.root.minsize(max(820, int(screen_width * 0.5)), max(520, int(screen_height * 0.5)))
         apply_app_icon(self.root)
 
         self.modules_path = resource_path("modules")
@@ -488,10 +535,13 @@ class Dispatcher:
         self.transitions_enabled = True
         self.transition_min_alpha = 0.82
         self._transition_in_progress = False
+        self.transition_slide_distance_px = 34
+        self._update_status_hide_after_id = None
         self.update_coordinator = UpdateCoordinator(self.root)
         self.runtime_settings_listeners = []
         self.module_update_check_in_progress = False
         self.last_module_update_notification_signature = None
+        self.nav_buttons = {}
         self.refresh_animation_settings()
 
         self._setup_ui()
@@ -729,37 +779,43 @@ class Dispatcher:
                 log_exception(f"pre_load_manifest.{mod_name}", e)
 
     def _setup_ui(self):
-        self.main_container = tb.Frame(self.root)
+        self.main_container = tb.Frame(self.root, style="Martin.App.TFrame")
         self.main_container.pack(fill=BOTH, expand=True)
 
-        self.sidebar = tb.Frame(self.main_container, bootstyle=DARK, width=200)
+        self.sidebar = tb.Frame(self.main_container, style="Martin.Sidebar.TFrame", width=184, padding=(8, 14, 8, 12))
         self.sidebar.pack(side=LEFT, fill=Y)
         self.sidebar.pack_propagate(False)
 
-        tb.Label(self.sidebar, text="MARTIN SUITE", font=("Helvetica", 14, "bold"), 
-                 bootstyle="inverse-dark").pack(pady=20, padx=10)
+        self.sidebar_title = tb.Label(
+            self.sidebar,
+            text="MARTIN SUITE",
+            style="Martin.SidebarTitle.TLabel",
+            anchor=W,
+            justify=LEFT,
+        )
+        self.sidebar_title.pack(fill=X, pady=(6, 14), padx=(2, 2))
 
-        self.nav_container = tb.Frame(self.sidebar, bootstyle=DARK)
+        self.nav_container = tb.Frame(self.sidebar, style="Martin.Sidebar.TFrame")
         self.nav_container.pack(fill=BOTH, expand=True)
 
-        self.right_container = tb.Frame(self.main_container)
+        self.right_container = tb.Frame(self.main_container, style="Martin.Content.TFrame", padding=(10, 10, 10, 10))
         self.right_container.pack(side=RIGHT, fill=BOTH, expand=True)
 
-        self.update_status_frame = tb.Frame(self.right_container, padding=(12, 6), bootstyle=LIGHT)
-        self.update_status_frame.pack(side=BOTTOM, fill=X)
+        self.update_status_frame = tb.Frame(self.right_container, padding=(14, 8), style="Martin.Status.TFrame")
+        self.update_status_frame.pack(side=TOP, fill=X, pady=(0, 8))
         self.update_status_label = tb.Label(
             self.update_status_frame,
             textvariable=self.update_coordinator.banner_var,
-            bootstyle=SECONDARY,
+            style="Martin.Status.TLabel",
             anchor=W,
         )
         self.update_status_label.pack(fill=X)
 
-        self.canvas = tk.Canvas(self.right_container, highlightthickness=0)
+        self.canvas = tk.Canvas(self.right_container, highlightthickness=0, bd=0)
         self.scrollbar = tb.Scrollbar(self.right_container, orient=VERTICAL, command=self.canvas.yview)
         self.x_scrollbar = tb.Scrollbar(self.right_container, orient=HORIZONTAL, command=self.canvas.xview)
         
-        self.content_area = tb.Frame(self.canvas)
+        self.content_area = tb.Frame(self.canvas, style="Martin.Content.TFrame")
         self.canvas_window = self.canvas.create_window((0, 0), window=self.content_area, anchor="nw")
         
         self.canvas.configure(yscrollcommand=self.scrollbar.set, xscrollcommand=self.x_scrollbar.set)
@@ -769,21 +825,95 @@ class Dispatcher:
 
         self.content_area.bind("<Configure>", self.sync_content_canvas_layout)
         self.canvas.bind("<Configure>", self.sync_content_canvas_layout)
+        self._apply_shell_theme()
 
     def _load_modules_list(self):
+        self.nav_buttons = {}
         for display_name, module_name in self.get_navigation_modules():
-            tb.Button(
+            button = tb.Button(
                 self.nav_container,
                 text=display_name,
-                bootstyle="link-light",
-                command=lambda m=module_name: self.load_module(m),
-            ).pack(fill=X, padx=5, pady=2)
+                style="Martin.Nav.TButton",
+                command=lambda m=module_name: self.secure_load(m),
+            )
+            button.pack(fill=X, pady=3)
+            self.nav_buttons[module_name] = button
+        self._set_active_navigation_button(self.active_module_name)
 
+    def _apply_shell_theme(self):
+        tokens = get_theme_tokens(root=self.root)
+        self.main_container.configure(style="Martin.App.TFrame")
+        self.sidebar.configure(style="Martin.Sidebar.TFrame")
+        self.sidebar_title.configure(style="Martin.SidebarTitle.TLabel")
+        self.nav_container.configure(style="Martin.Sidebar.TFrame")
+        self.right_container.configure(style="Martin.Content.TFrame")
+        self.update_status_frame.configure(style="Martin.Status.TFrame")
+        self.update_status_label.configure(style="Martin.Status.TLabel")
+        self.content_area.configure(style="Martin.Content.TFrame")
+        self.canvas.configure(background=tokens["canvas_bg"])
+        self.root.configure(bg=tokens["app_bg"])
+        self._set_active_navigation_button(self.active_module_name)
+
+    def _set_active_navigation_button(self, module_name):
+        for button_module_name, button in self.nav_buttons.items():
+            button.configure(style="Martin.NavActive.TButton" if button_module_name == module_name else "Martin.Nav.TButton")
+
+    def _animate_module_frame(self, module_frame):
+        if (
+            module_frame is None
+            or not module_frame.winfo_exists()
+            or not self.transitions_enabled
+            or self.transition_duration_ms <= 0
+            or self._transition_in_progress
+        ):
+            return
+
+        self._transition_in_progress = True
+        steps = 8
+        step_delay = max(0.008, self.transition_duration_ms / 1000 / steps)
+
+        try:
+            self.root.update_idletasks()
+            viewport_width = max(self.canvas.winfo_width(), 1)
+            viewport_height = max(self.canvas.winfo_height(), 1)
+            start_x = min(self.transition_slide_distance_px, max(18, viewport_width // 22))
+            start_y = 8
+
+            module_frame.pack_forget()
+            module_frame.place(in_=self.content_area, x=start_x, y=start_y, width=viewport_width, height=viewport_height)
+
+            for step in range(steps):
+                progress = (step + 1) / steps
+                eased = 1 - pow(1 - progress, 3)
+                offset_x = round(start_x * (1 - eased))
+                offset_y = round(start_y * (1 - eased))
+                module_frame.place_configure(x=offset_x, y=offset_y)
+                self.root.update_idletasks()
+                self.root.update()
+                time.sleep(step_delay)
+        finally:
+            if module_frame.winfo_exists():
+                module_frame.place_forget()
+                module_frame.pack(fill=BOTH, expand=True)
+            self._transition_in_progress = False
+
+    def secure_load(self, module_name):
+        try:
+            from modules.security import gatekeeper
+            if not gatekeeper.require_module_access(module_name, parent=self.root):
+                return
+        except Exception as exc:
+            log_exception(f"secure_load.error.{module_name}", exc)
+            messagebox.showerror("Security Error", f"Auth failed: {exc}")
+            return
+
+        self.load_module(module_name)
+        
     def get_navigation_modules(self):
         if not os.path.exists(self.modules_path):
             return []
 
-        hidden_modules = {"about", "app_logging", "data_handler", "downtime_codes", "help_viewer", "persistence", "splash", "theme_manager", "utils"}
+        hidden_modules = {"about", "security", "app_logging", "data_handler", "downtime_codes", "help_viewer", "persistence", "splash", "theme_manager", "utils"}
         nav_modules = []
 
         for filename in os.listdir(self.modules_path):
@@ -927,10 +1057,13 @@ class Dispatcher:
                     self.active_module_frame = cached_frame
                     cached_frame.pack(fill=BOTH, expand=True)
                     self.content_area.update_idletasks()
+                    if use_transition and previous_module_name is not None:
+                        self._animate_module_frame(cached_frame)
+                    self._set_active_navigation_button(module_name)
                     return
                 self.persistent_module_instances.pop(module_name, None)
 
-            module_frame = tb.Frame(self.content_area)
+            module_frame = tb.Frame(self.content_area, style="Martin.Surface.TFrame")
             module_frame.pack(fill=BOTH, expand=True)
 
             module = self.import_managed_module(module_name, force_fresh=True)
@@ -944,12 +1077,13 @@ class Dispatcher:
                         "instance": self.active_module_instance,
                         "frame": module_frame,
                     }
+                self.content_area.update_idletasks()
+                if use_transition and previous_module_name is not None:
+                    self._animate_module_frame(module_frame)
+                self._set_active_navigation_button(module_name)
 
         try:
-            if use_transition and self.active_module_name is not None:
-                self._run_window_transition(perform_load)
-            else:
-                perform_load()
+            perform_load()
         except Exception as e:
             log_exception(f"load_module.{module_name}", e)
             tb.Label(self.content_area, text=f"Error loading {module_name}: {e}", bootstyle=DANGER).pack(pady=20)
@@ -972,6 +1106,7 @@ class Dispatcher:
             "screen_transition_duration_ms": 360,
             "toast_duration_sec": 5,
             "enable_module_update_notifications": True,
+            "update_repository_url": DEFAULT_UPDATE_REPOSITORY_URL,
             "module_update_notifications_legacy_checked": False,
             "persistent_modules": [],
         }
@@ -991,6 +1126,7 @@ class Dispatcher:
             settings["toast_duration_sec"] = 5
         settings["enable_screen_transitions"] = bool(settings.get("enable_screen_transitions", True))
         settings["enable_module_update_notifications"] = bool(settings.get("enable_module_update_notifications", True))
+        settings["update_repository_url"] = str(settings.get("update_repository_url", DEFAULT_UPDATE_REPOSITORY_URL) or "").strip()
         try:
             settings["screen_transition_duration_ms"] = max(0, min(500, int(settings.get("screen_transition_duration_ms", 360))))
         except Exception:
@@ -1176,7 +1312,7 @@ class Dispatcher:
     def refresh_update_status_visibility(self):
         if self.update_coordinator.active:
             if not self.update_status_frame.winfo_manager():
-                self.update_status_frame.pack(side=BOTTOM, fill=X)
+                self.update_status_frame.pack(side=TOP, fill=X, pady=(0, 8), before=self.canvas)
             self.update_status_frame.configure(bootstyle=INFO)
             self.update_status_label.configure(bootstyle=self.update_coordinator.banner_bootstyle)
             return
@@ -1184,11 +1320,33 @@ class Dispatcher:
         if self.update_status_frame.winfo_manager():
             self.update_status_frame.pack_forget()
 
+    def _cancel_update_status_autohide(self):
+        if self._update_status_hide_after_id is not None:
+            try:
+                self.root.after_cancel(self._update_status_hide_after_id)
+            except Exception:
+                pass
+            self._update_status_hide_after_id = None
+
+    def _schedule_update_status_autohide(self, expected_message, delay_ms=4200):
+        self._cancel_update_status_autohide()
+
+        def clear_if_unchanged():
+            self._update_status_hide_after_id = None
+            if self.update_coordinator.banner_var.get() == expected_message and self.update_coordinator.active:
+                self.clear_update_status()
+
+        self._update_status_hide_after_id = self.root.after(delay_ms, clear_if_unchanged)
+
     def set_update_status(self, message, bootstyle=INFO, active=True, mode=None):
+        self._cancel_update_status_autohide()
         self.update_coordinator.set_banner(message, bootstyle=bootstyle, active=active, mode=mode)
         self.refresh_update_status_visibility()
+        if active and bootstyle == SUCCESS and mode == "module":
+            self._schedule_update_status_autohide(message)
 
     def clear_update_status(self):
+        self._cancel_update_status_autohide()
         self.update_coordinator.clear_banner()
         self.refresh_update_status_visibility()
 
@@ -1229,8 +1387,9 @@ class Dispatcher:
     def apply_theme(self, theme_name, redraw=False):
         normalized_theme = normalize_theme(theme_name)
         style = tb.Style.get_instance() or tb.Style()
-        style.theme_use(normalized_theme)
-        apply_readability_overrides(self.root)
+        style.theme_use(resolve_base_theme(normalized_theme))
+        apply_readability_overrides(self.root, normalized_theme)
+        self._apply_shell_theme()
         self.root.update_idletasks()
 
         return normalized_theme
@@ -1270,8 +1429,8 @@ if __name__ == "__main__":
             log_exception("main.__main__.load_theme", exc)
     
     apply_windows_app_id()
-    app_root = tb.Window(themename=theme_name)
-    apply_readability_overrides(app_root)
+    app_root = tb.Window(themename=resolve_base_theme(theme_name))
+    apply_readability_overrides(app_root, theme_name)
     apply_app_icon(app_root)
     from modules.splash import show_splash_screen
     show_splash_screen(app_root, duration=5000, logo_path=resource_path(SPLASH_LOGO_RELATIVE_PATH))

@@ -4,6 +4,20 @@ This changelog tracks the main branch release line for The Martin Suite (GLC Edi
 
 Version headings below are aligned to the current `1.x` release line used by Dispatcher Core. Earlier work has been grouped into practical release milestones so the shipped feature history is easier to follow without rewriting older module version markers.
 
+## [1.5.8] - 2026-04-06
+
+### Changed
+
+- Promoted Dispatcher Core to stable version `1.5.8` for the security-mode, developer-tools, and documentation refresh release.
+- Moved update repository configuration and external module editing out of Settings Manager and into Security Admin as developer-only tools.
+- Added a persisted non-secure mode so normal visible modules can open without vault prompts while developer tools remain protected behind developer login.
+- Restricted developer-vault deletion so only an active developer session can remove a developer vault, including while non-secure mode is enabled.
+- Updated the Security Admin dialog to support responsive scrolling, developer login, and the new non-secure mode toggle.
+- Updated the update-status banner to mount above the content viewport and auto-hide successful module payload completion messages.
+- Refreshed README and Help Center documentation to match the current security and updater workflows.
+- Aligned the icon pipeline so packaged builds regenerate `icon.ico` and the runtime PNG icon set from the repository PNG artwork before packaging, while the app now applies the full PNG icon set plus Windows-native icon handles at startup.
+- Restored the default Update Repository URL to the main GitHub repository so new main-branch settings and updater fallbacks point back to the published release source.
+
 ## [1.5.6] - 2026-04-05
 
 ### Changed

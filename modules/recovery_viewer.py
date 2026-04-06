@@ -24,6 +24,7 @@ from ttkbootstrap.constants import *
 from ttkbootstrap.dialogs import Messagebox
 
 from modules.persistence import write_json_with_backup
+from modules.theme_manager import get_theme_tokens
 from modules.utils import external_path
 
 __module_name__ = "Backup / Recovery"
@@ -41,18 +42,19 @@ class RecoveryViewer:
         self.refresh_records()
 
     def setup_ui(self):
-        container = tb.Frame(self.parent, padding=20)
+        get_theme_tokens(root=self.parent.winfo_toplevel())
+        container = tb.Frame(self.parent, padding=20, style="Martin.Content.TFrame")
         container.pack(fill=BOTH, expand=True)
 
-        tb.Label(container, text="Backup / Recovery", font=("Helvetica", 18, "bold")).pack(anchor=W, pady=(0, 8))
+        tb.Label(container, text="Backup / Recovery", style="Martin.PageTitle.TLabel").pack(anchor=W, pady=(0, 8))
         tb.Label(
             container,
             text=(
                 "Browse pending drafts, recovery snapshots, and configuration backups. "
                 "Use Restore to copy a selected backup back into the active working file."
             ),
-            bootstyle=SECONDARY,
-            wraplength=760,
+            style="Martin.Subtitle.TLabel",
+            wraplength=680,
             justify=LEFT,
         ).pack(anchor=W, pady=(0, 12))
 
@@ -64,7 +66,9 @@ class RecoveryViewer:
         tb.Button(action_row, text="Open Selected File", bootstyle=SECONDARY, command=self.open_selected_file).pack(side=LEFT, padx=8)
         tb.Button(action_row, text="Open Containing Folder", bootstyle=SECONDARY, command=self.open_selected_folder).pack(side=LEFT, padx=8)
 
-        table_frame = tb.Frame(container)
+        table_card = tb.Labelframe(container, text=" Recovery Items ", padding=14, style="Martin.Card.TLabelframe")
+        table_card.pack(fill=BOTH, expand=True)
+        table_frame = tb.Frame(table_card, style="Martin.Surface.TFrame")
         table_frame.pack(fill=BOTH, expand=True)
 
         columns = ("kind", "name", "saved", "target")
@@ -73,10 +77,10 @@ class RecoveryViewer:
         self.tree.heading("name", text="File")
         self.tree.heading("saved", text="Saved")
         self.tree.heading("target", text="Restore Target")
-        self.tree.column("kind", width=170, anchor=W)
-        self.tree.column("name", width=250, anchor=W)
-        self.tree.column("saved", width=170, anchor=W)
-        self.tree.column("target", width=220, anchor=W)
+        self.tree.column("kind", width=135, minwidth=110, anchor=W, stretch=False)
+        self.tree.column("name", width=220, minwidth=150, anchor=W, stretch=True)
+        self.tree.column("saved", width=150, minwidth=130, anchor=W, stretch=False)
+        self.tree.column("target", width=190, minwidth=140, anchor=W, stretch=True)
 
         y_scroll = tb.Scrollbar(table_frame, orient=VERTICAL, command=self.tree.yview)
         self.tree.configure(yscrollcommand=y_scroll.set)
@@ -84,7 +88,7 @@ class RecoveryViewer:
         y_scroll.pack(side=RIGHT, fill=Y)
         self.dispatcher.bind_mousewheel_to_widget_tree(self.tree, self.tree)
 
-        tb.Label(container, textvariable=self.status_var, bootstyle=SECONDARY).pack(anchor=W, pady=(12, 0))
+        tb.Label(container, textvariable=self.status_var, style="Martin.Muted.TLabel").pack(anchor=W, pady=(12, 0))
 
     def refresh_records(self):
         self.records = []

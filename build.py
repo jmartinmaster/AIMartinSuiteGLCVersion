@@ -19,6 +19,9 @@ import os
 import shutil
 import stat
 import subprocess
+from pathlib import Path
+
+from PIL import Image
 
 from app_identity import APP_NAME, LEGACY_EXE_NAME, format_versioned_exe_name, load_version_from_main, normalize_version, parse_version, parse_versioned_exe_name
 
@@ -27,6 +30,62 @@ EXE_NAME = format_versioned_exe_name(load_version_from_main())
 PRESERVE_DIST = os.environ.get("MARTIN_KEEP_DIST", "1") != "0"
 SKIP_TASKKILL = os.environ.get("MARTIN_SKIP_TASKKILL", "0") == "1"
 MAX_OLD_EXE_ARCHIVE = 10
+SENSITIVE_RUNTIME_PATHS = [
+    ".vault",
+    os.path.join("data", "security"),
+    os.path.join("data", "backups", "security"),
+]
+ICON_SOURCE_CANDIDATE_PATHS = [
+    Path("icon.png"),
+    Path("icon.jpg"),
+]
+ICON_RUNTIME_PNG_SIZES = [16, 24, 32, 48, 64]
+ICON_ICO_SIZES = [(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)]
+
+
+def get_icon_source_path():
+    for path in ICON_SOURCE_CANDIDATE_PATHS:
+        if path.exists():
+            return path
+    raise FileNotFoundError("No icon source artwork found. Expected icon.png or icon.jpg in the repo root.")
+
+
+def sync_icon_assets():
+    source_path = get_icon_source_path()
+    output_directory = source_path.parent
+
+    with Image.open(source_path) as source_image:
+        working_image = source_image.convert("RGBA")
+
+        available_ico_sizes = []
+        for size in ICON_RUNTIME_PNG_SIZES:
+            output_path = output_directory / f"icon-{size}.png"
+            resized_image = working_image.resize((size, size), Image.Resampling.LANCZOS)
+            resized_image.save(output_path, format="PNG")
+            available_ico_sizes.append((size, size))
+
+        if working_image.width >= 128 and working_image.height >= 128:
+            available_ico_sizes.append((128, 128))
+        if working_image.width >= 256 and working_image.height >= 256:
+            available_ico_sizes.append((256, 256))
+
+        icon_ico_path = output_directory / "icon.ico"
+        working_image.save(icon_ico_path, format="ICO", sizes=available_ico_sizes or ICON_ICO_SIZES)
+
+
+def remove_path(path, remove_readonly):
+    if not os.path.exists(path):
+        return
+    if os.path.isdir(path):
+        shutil.rmtree(path, onexc=remove_readonly)
+        return
+    os.chmod(path, stat.S_IWRITE)
+    os.remove(path)
+
+
+def scrub_preserved_runtime_state(base_dir, remove_readonly):
+    for relative_path in ["modules", *SENSITIVE_RUNTIME_PATHS]:
+        remove_path(os.path.join(base_dir, relative_path), remove_readonly)
 
 
 def clean_previous_builds():
@@ -51,11 +110,9 @@ def clean_previous_builds():
             shutil.rmtree(folder_path, onexc=remove_readonly)
 
     if PRESERVE_DIST:
-        # Keep archived builds and editable JSON artifacts, but remove stale external module overrides
-        # so the packaged executable reflects the current bundled code after each build.
-        preserved_override_dir = os.path.join(os.path.abspath("dist"), "modules")
-        if os.path.exists(preserved_override_dir):
-            shutil.rmtree(preserved_override_dir, onexc=remove_readonly)
+        # Keep archived builds and editable JSON artifacts, but remove stale external runtime state
+        # so preserved dist output never carries forward local overrides or credentials into a new build.
+        scrub_preserved_runtime_state(os.path.abspath("dist"), remove_readonly)
 
 
 def archive_previous_builds():
@@ -99,6 +156,7 @@ def archive_previous_builds():
 
 
 clean_previous_builds()
+sync_icon_assets()
 
 PyInstaller.__main__.run([
     SPEC_FILE,

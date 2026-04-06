@@ -24,11 +24,11 @@ import json
 import os
 import sys
 from modules.persistence import write_json_with_backup
-from modules.theme_manager import normalize_theme
+from modules.theme_manager import get_theme_tokens, normalize_theme
 from modules.utils import external_path, local_or_resource_path, resource_path
 
 __module_name__ = "Layout Manager"
-__version__ = "1.0.4"
+__version__ = "1.0.5"
 
 class LayoutManager:
     def __init__(self, parent, dispatcher):
@@ -38,6 +38,13 @@ class LayoutManager:
         self.preview_after_id = None
         self.preview_tooltip = None
         self.suppress_modified_event = False
+        self.current_block_config = None
+        self.card_shells = {}
+        self.header_card_widgets = []
+        self.mapping_card_widgets = []
+        self.preview_cells = []
+        self.preview_field_labels = {}
+        self.selected_block_item = None
         
         # 1. Logic: Read from local config when present, otherwise fall back to the packaged default.
         self.local_config = external_path("layout_config.json")
@@ -51,23 +58,27 @@ class LayoutManager:
         self.setup_ui()
 
     def setup_ui(self):
-        theme_name = normalize_theme(tb.Style.get_instance().theme.name)
+        theme_name = normalize_theme(getattr(self.parent.winfo_toplevel(), "_martin_theme_name", tb.Style.get_instance().theme.name))
+        theme_tokens = get_theme_tokens(theme_name, root=self.parent.winfo_toplevel())
         self.is_dark_theme = theme_name in {"darkly", "superhero"}
-        self.block_canvas_bg = "#1f242b" if self.is_dark_theme else "#f4f6f8"
-        self.preview_grid_bg = "#1f242b" if self.is_dark_theme else "#eef2f5"
-        self.preview_cell_bg = "#2a313a" if self.is_dark_theme else "#ffffff"
-        self.preview_muted_fg = "#d6dde5" if self.is_dark_theme else "#6c757d"
-        self.preview_empty_fg = "#9fb0c0" if self.is_dark_theme else "#6c757d"
-        self.preview_text_fg = "#f8f9fa" if self.is_dark_theme else "#212529"
-        self.preview_readonly_fg = "#7cc4ff" if self.is_dark_theme else "#0b5ed7"
-        self.preview_border = "#5f6b78" if self.is_dark_theme else "#8b98a5"
+        self.block_canvas_bg = theme_tokens["canvas_bg"]
+        self.preview_grid_bg = theme_tokens["canvas_bg"]
+        self.preview_cell_bg = theme_tokens["surface_bg"]
+        self.preview_muted_fg = theme_tokens["muted_fg"]
+        self.preview_empty_fg = theme_tokens["muted_fg"]
+        self.preview_text_fg = theme_tokens["surface_fg"]
+        self.preview_readonly_fg = theme_tokens["accent"]
+        self.preview_border = theme_tokens["border_color"]
+        self.preview_selected_bg = theme_tokens["accent_soft"]
+        self.preview_selected_border = theme_tokens["accent"]
+        self.card_shell_bg = self.block_canvas_bg
 
-        self.main_container = tb.Frame(self.parent, padding=10)
+        self.main_container = tb.Frame(self.parent, padding=10, style="Martin.Content.TFrame")
         self.main_container.pack(fill=BOTH, expand=True)
 
-        # LEFT SIDE: Editor
-        editor_frame = tb.Frame(self.main_container)
-        editor_frame.pack(side=LEFT, fill=BOTH, expand=True, padx=5)
+        # TOP: Editor
+        editor_frame = tb.Frame(self.main_container, style="Martin.Content.TFrame")
+        editor_frame.pack(fill=BOTH, expand=True, padx=5)
 
         tb.Label(editor_frame, text="JSON Editor", font=("-size 12 -weight bold")).pack(anchor=W)
         self.source_label = tb.Label(editor_frame, bootstyle=SECONDARY)
@@ -83,12 +94,12 @@ class LayoutManager:
 
         block_help = tb.Label(
             block_tab,
-            text="Block View lets you adjust field placement without working directly in raw JSON. Use JSON Editor for advanced edits.",
+            text="Block View lets you adjust field placement without working directly in raw JSON. Cards wrap into compact columns, and clicking a preview field highlights its matching card.",
             bootstyle=INFO
         )
         block_help.pack(anchor=W, pady=(0, 5))
 
-        block_scroll_frame = tb.Frame(block_tab)
+        block_scroll_frame = tb.Frame(block_tab, style="Martin.Content.TFrame")
         block_scroll_frame.pack(fill=BOTH, expand=True)
         self.block_canvas = tk.Canvas(block_scroll_frame, highlightthickness=0, background=self.block_canvas_bg)
         self.block_canvas.pack(side=LEFT, fill=BOTH, expand=True)
@@ -100,7 +111,7 @@ class LayoutManager:
         self.block_inner.bind("<Configure>", self.on_block_frame_configure)
         self.block_canvas.bind("<Configure>", self.on_block_canvas_configure)
 
-        editor_text_frame = tb.Frame(json_tab)
+        editor_text_frame = tb.Frame(json_tab, style="Martin.Content.TFrame")
         editor_text_frame.pack(fill=BOTH, expand=True)
 
         self.text_area = tk.Text(editor_text_frame, wrap=NONE, font=("Monospace", 10), undo=True)
@@ -116,13 +127,6 @@ class LayoutManager:
         self.text_area.configure(yscrollcommand=y_scroll.set, xscrollcommand=x_scroll.set)
         self.text_area.bind("<<Modified>>", self.on_text_modified)
 
-        # RIGHT SIDE: Preview
-        self.preview_wrapper = tb.Labelframe(self.main_container, text=" Live Grid Preview ", padding=10)
-        self.preview_wrapper.pack(side=RIGHT, fill=BOTH, expand=True, padx=5)
-        
-        self.preview_canvas = tb.Frame(self.preview_wrapper)
-        self.preview_canvas.pack(fill=BOTH, expand=True)
-
         # BUTTONS
         btn_frame = tb.Frame(editor_frame)
         btn_frame.pack(fill=X, pady=5)
@@ -136,6 +140,13 @@ class LayoutManager:
 
         self.status_label = tb.Label(editor_frame, text="", bootstyle=SECONDARY)
         self.status_label.pack(anchor=W, pady=(0, 2))
+
+        # BOTTOM: Preview
+        self.preview_wrapper = tb.Labelframe(editor_frame, text=" Live Grid Preview ", padding=10)
+        self.preview_wrapper.pack(fill=X, expand=False, pady=(8, 0))
+
+        self.preview_canvas = tb.Frame(self.preview_wrapper)
+        self.preview_canvas.pack(fill=BOTH, expand=True)
 
         self.load_config()
         self.update_preview()
@@ -167,8 +178,95 @@ class LayoutManager:
 
     def on_block_canvas_configure(self, event):
         self.block_canvas.itemconfigure(self.block_canvas_window, width=event.width)
+        self.parent.after_idle(self._relayout_block_cards)
+
+    def _card_key_for_field(self, field_id):
+        return f"field:{field_id}"
+
+    def _reset_block_registries(self):
+        self.card_shells = {}
+        self.header_card_widgets = []
+        self.mapping_card_widgets = []
+
+    def _create_card_shell(self, parent, item_key, title):
+        shell = tk.Frame(
+            parent,
+            bg=self.card_shell_bg,
+            highlightthickness=1,
+            highlightbackground=self.preview_border,
+            highlightcolor=self.preview_border,
+            bd=0,
+        )
+        card = tb.Labelframe(shell, text=f" {title} ", padding=8, style="Martin.Card.TLabelframe")
+        card.pack(fill=BOTH, expand=True)
+        self.card_shells[item_key] = shell
+        return shell, card
+
+    def _relayout_card_group(self, container, widgets):
+        if container is None or not widgets:
+            return
+        available_width = max(container.winfo_width(), self.block_canvas.winfo_width() - 36, 320)
+        columns = 4 if available_width >= 1500 else 3 if available_width >= 1080 else 2 if available_width >= 700 else 1
+        for column_index in range(3):
+            container.columnconfigure(column_index, weight=0, uniform="")
+        container.columnconfigure(3, weight=0, uniform="")
+        for column_index in range(columns):
+            container.columnconfigure(column_index, weight=1, uniform="layout-cards")
+        for index, widget in enumerate(widgets):
+            widget.grid_forget()
+            widget.grid(row=index // columns, column=index % columns, padx=6, pady=6, sticky=NW)
+
+    def _relayout_block_cards(self):
+        self._relayout_card_group(getattr(self, "header_cards_container", None), self.header_card_widgets)
+        self._relayout_card_group(getattr(self, "mapping_cards_container", None), self.mapping_card_widgets)
+        self.on_block_frame_configure()
+
+    def select_block_item(self, item_key, scroll=False):
+        if item_key not in self.card_shells:
+            return
+        self.selected_block_item = item_key
+        self._apply_selection_state()
+        if scroll:
+            self._scroll_card_into_view(item_key)
+
+    def _scroll_card_into_view(self, item_key):
+        shell = self.card_shells.get(item_key)
+        if shell is None:
+            return
+        self.block_canvas.update_idletasks()
+        scroll_region = self.block_canvas.bbox("all")
+        if not scroll_region:
+            return
+        total_height = max(1, scroll_region[3] - scroll_region[1])
+        y_position = max(0, shell.winfo_y() - 12)
+        self.block_canvas.yview_moveto(min(1.0, y_position / total_height))
+
+    def _apply_selection_state(self):
+        for item_key, shell in self.card_shells.items():
+            selected = item_key == self.selected_block_item
+            shell.configure(
+                highlightthickness=2 if selected else 1,
+                highlightbackground=self.preview_selected_border if selected else self.preview_border,
+                highlightcolor=self.preview_selected_border if selected else self.preview_border,
+            )
+
+        for cell_info in self.preview_cells:
+            selected = self.selected_block_item in cell_info["item_keys"]
+            background = self.preview_selected_bg if selected else self.preview_cell_bg
+            border = self.preview_selected_border if selected else self.preview_border
+            frame = cell_info["frame"]
+            frame.configure(bg=background, highlightbackground=border)
+            for child in frame.winfo_children():
+                if isinstance(child, tk.Label):
+                    child.configure(bg=background)
+
+        for labels in self.preview_field_labels.values():
+            for widget, foreground in labels:
+                widget.configure(fg=foreground)
 
     def refresh_block_view(self, config):
+        self.current_block_config = config
+        self._reset_block_registries()
         for child in self.block_inner.winfo_children():
             child.destroy()
 
@@ -181,14 +279,22 @@ class LayoutManager:
 
         tb.Separator(self.block_inner, bootstyle=PRIMARY).pack(fill=X, pady=(0, 8))
 
+        self.header_cards_container = tb.Frame(self.block_inner)
+        self.header_cards_container.pack(fill=X)
+
         for field in config.get("header_fields", []):
             is_locked_readonly = field.get("id") == "cast_date"
-            card = tb.Labelframe(self.block_inner, text=f" {field.get('label', 'Unnamed Field')} ", padding=10, style="Martin.Card.TLabelframe")
-            card.pack(fill=X, pady=4)
+            item_key = self._card_key_for_field(field.get("id", ""))
+            card_shell, card = self._create_card_shell(self.header_cards_container, item_key, field.get("label", "Unnamed Field"))
+            self.header_card_widgets.append(card_shell)
 
             header_row = tb.Frame(card)
-            header_row.pack(fill=X, pady=(0, 8))
+            header_row.pack(fill=X, pady=(0, 6))
             tb.Label(header_row, text=f"ID: {field.get('id', '(missing)')}", style="Martin.Section.TLabel").pack(side=LEFT)
+            button_row = tb.Frame(header_row)
+            button_row.pack(side=RIGHT)
+            tb.Button(button_row, text="Up", width=4, bootstyle=SECONDARY, command=lambda field_id=field.get("id"): self.move_header_field(field_id, -1)).pack(side=LEFT, padx=(4, 0))
+            tb.Button(button_row, text="Down", width=5, bootstyle=SECONDARY, command=lambda field_id=field.get("id"): self.move_header_field(field_id, 1)).pack(side=LEFT, padx=(4, 0))
 
             state_bits = []
             if field.get("readonly"):
@@ -199,45 +305,43 @@ class LayoutManager:
                 state_bits.append("editable")
 
             action_row = tb.Frame(card)
-            action_row.pack(fill=X, pady=(0, 8))
+            action_row.pack(fill=X, pady=(0, 6))
             tb.Label(action_row, text=f"State: {', '.join(state_bits)}", style="Martin.Muted.TLabel").pack(side=LEFT)
-            tb.Button(action_row, text="Up", bootstyle=SECONDARY, command=lambda field_id=field.get("id"): self.move_header_field(field_id, -1)).pack(side=RIGHT, padx=(4, 0))
-            tb.Button(action_row, text="Down", bootstyle=SECONDARY, command=lambda field_id=field.get("id"): self.move_header_field(field_id, 1)).pack(side=RIGHT, padx=(4, 0))
 
             remove_button = tb.Button(action_row, text="Remove", bootstyle=DANGER, command=lambda field_id=field.get("id"): self.remove_header_field(field_id))
             remove_button.pack(side=RIGHT, padx=(4, 0))
             if field.get("id") in self.protected_field_ids:
                 remove_button.state(["disabled"])
 
-            form_row = tb.Frame(card)
-            form_row.pack(fill=X)
-
-            tb.Label(form_row, text="Row", bootstyle=PRIMARY).grid(row=0, column=0, padx=(0, 6), pady=2, sticky=W)
+            grid_row = tb.Frame(card)
+            grid_row.pack(fill=X)
+            tb.Label(grid_row, text="Row", bootstyle=PRIMARY).pack(side=LEFT)
             row_var = tk.StringVar(value=str(field.get("row", 0)))
-            tb.Entry(form_row, textvariable=row_var, width=6).grid(row=0, column=1, padx=(0, 12), pady=2, sticky=W)
+            tb.Entry(grid_row, textvariable=row_var, width=5).pack(side=LEFT, padx=(6, 10))
 
-            tb.Label(form_row, text="Column", bootstyle=PRIMARY).grid(row=0, column=2, padx=(0, 6), pady=2, sticky=W)
+            tb.Label(grid_row, text="Col", bootstyle=PRIMARY).pack(side=LEFT)
             col_var = tk.StringVar(value=str(field.get("col", 0)))
-            tb.Entry(form_row, textvariable=col_var, width=6).grid(row=0, column=3, padx=(0, 12), pady=2, sticky=W)
-
-            tb.Label(form_row, text="Cell", bootstyle=PRIMARY).grid(row=0, column=4, padx=(0, 6), pady=2, sticky=W)
-            cell_var = tk.StringVar(value=str(field.get("cell", "")))
-            cell_entry = tb.Entry(form_row, textvariable=cell_var, width=10)
-            cell_entry.grid(row=0, column=5, padx=(0, 12), pady=2, sticky=W)
+            tb.Entry(grid_row, textvariable=col_var, width=5).pack(side=LEFT, padx=(6, 10))
 
             width_var = tk.StringVar(value=str(field.get("width", 10)))
             readonly_var = tk.BooleanVar(value=bool(field.get("readonly", False)))
             default_var = tk.StringVar(value=str(field.get("default", "")))
 
             if not is_locked_readonly:
-                tb.Label(form_row, text="Width", bootstyle=PRIMARY).grid(row=0, column=6, padx=(0, 6), pady=2, sticky=W)
-                tb.Entry(form_row, textvariable=width_var, width=6).grid(row=0, column=7, padx=(0, 12), pady=2, sticky=W)
+                tb.Label(grid_row, text="Width", bootstyle=PRIMARY).pack(side=LEFT)
+                tb.Entry(grid_row, textvariable=width_var, width=5).pack(side=LEFT, padx=(6, 0))
 
-                readonly_toggle = tb.Checkbutton(form_row, text="Readonly", variable=readonly_var, bootstyle="round-toggle")
-                readonly_toggle.grid(row=0, column=8, padx=(0, 12), pady=2, sticky=W)
+            edit_row = tb.Frame(card)
+            edit_row.pack(fill=X, pady=(6, 0))
+            tb.Label(edit_row, text="Cell", bootstyle=PRIMARY).pack(side=LEFT)
+            cell_var = tk.StringVar(value=str(field.get("cell", "")))
+            tb.Entry(edit_row, textvariable=cell_var, width=9).pack(side=LEFT, padx=(6, 12))
+
+            if not is_locked_readonly:
+                tb.Checkbutton(edit_row, text="Readonly", variable=readonly_var, bootstyle="round-toggle").pack(side=LEFT, padx=(0, 12))
 
             tb.Button(
-                form_row,
+                edit_row,
                 text="Apply",
                 bootstyle=SUCCESS,
                 command=lambda field_id=field.get("id"), row_var=row_var, col_var=col_var, cell_var=cell_var, width_var=width_var, readonly_var=readonly_var, default_var=default_var: self.update_header_field_from_block(
@@ -249,17 +353,17 @@ class LayoutManager:
                     readonly_var.get(),
                     default_var.get()
                 )
-            ).grid(row=0, column=9 if not is_locked_readonly else 6, padx=(0, 8), pady=2, sticky=W)
+            ).pack(side=RIGHT)
 
             if is_locked_readonly:
                 note_row = tb.Frame(card)
-                note_row.pack(fill=X, pady=(8, 0))
-                tb.Label(note_row, text="Cast Date can only be repositioned here. It stays readonly and is driven from Date.", style="Martin.Muted.TLabel").pack(side=LEFT)
+                note_row.pack(fill=X, pady=(6, 0))
+                tb.Label(note_row, text="Cast Date can only be moved here. It stays readonly and is derived from Date.", style="Martin.Muted.TLabel", wraplength=250, justify=LEFT).pack(side=LEFT)
             else:
                 meta_row = tb.Frame(card)
-                meta_row.pack(fill=X, pady=(8, 0))
+                meta_row.pack(fill=X, pady=(6, 0))
                 tb.Label(meta_row, text="Default", bootstyle=PRIMARY).pack(side=LEFT)
-                tb.Entry(meta_row, textvariable=default_var, width=18).pack(side=LEFT, padx=(6, 12))
+                tb.Entry(meta_row, textvariable=default_var, width=14).pack(side=LEFT, padx=(6, 10))
                 tb.Label(meta_row, text=f"Current: {field.get('default', '(none)')}", style="Martin.Muted.TLabel").pack(side=LEFT)
 
         mappings_title = tb.Label(self.block_inner, text="Mappings", font=("-size 12 -weight bold"), bootstyle=PRIMARY)
@@ -267,43 +371,57 @@ class LayoutManager:
 
         tb.Separator(self.block_inner, bootstyle=PRIMARY).pack(fill=X, pady=(0, 8))
 
+        self.mapping_cards_container = tb.Frame(self.block_inner)
+        self.mapping_cards_container.pack(fill=X)
+
         self.add_mapping_block(
             "Production Mapping",
             config.get("production_mapping", {}),
-            self.block_inner
+            self.mapping_cards_container
         )
         self.add_mapping_block(
             "Downtime Mapping",
             config.get("downtime_mapping", {}),
-            self.block_inner
+            self.mapping_cards_container
         )
+        if self.selected_block_item not in self.card_shells:
+            self.selected_block_item = None
+        self._relayout_block_cards()
+        self._apply_selection_state()
         self.dispatcher.bind_mousewheel_to_widget_tree(self.block_inner, self.block_canvas)
 
     def add_mapping_block(self, title, mapping, parent):
-        card = tb.Labelframe(parent, text=f" {title} ", padding=10, style="Martin.Card.TLabelframe")
-        card.pack(fill=X, pady=4)
         mapping_name = title.lower().replace(" ", "_")
+        item_key = f"mapping:{mapping_name}"
+        card_shell, card = self._create_card_shell(parent, item_key, title)
+        self.mapping_card_widgets.append(card_shell)
 
         top_row = tb.Frame(card)
-        top_row.pack(fill=X, pady=(0, 8))
+        top_row.pack(fill=X, pady=(0, 6))
         tb.Label(top_row, text="Start Row", bootstyle=PRIMARY).pack(side=LEFT)
         start_row_var = tk.StringVar(value=str(mapping.get('start_row', '')))
-        tb.Entry(top_row, textvariable=start_row_var, width=8).pack(side=LEFT, padx=(6, 12))
+        tb.Entry(top_row, textvariable=start_row_var, width=6).pack(side=LEFT, padx=(6, 0))
 
         columns = mapping.get("columns", {})
         column_vars = {}
         if columns:
-            for key, value in columns.items():
-                row = tb.Frame(card)
-                row.pack(fill=X, pady=2)
-                tb.Label(row, text=key.replace("_", " ").title(), bootstyle=PRIMARY, width=18).pack(side=LEFT)
+            columns_frame = tb.Frame(card)
+            columns_frame.pack(fill=X)
+            for column_index in range(2):
+                columns_frame.columnconfigure(column_index, weight=1, uniform="mapping-fields")
+            for index, (key, value) in enumerate(columns.items()):
+                row = tb.Frame(columns_frame)
+                row.grid(row=index // 2, column=index % 2, padx=4, pady=2, sticky=EW)
+                tb.Label(row, text=key.replace("_", " ").title(), bootstyle=PRIMARY).pack(anchor=W)
                 column_vars[key] = tk.StringVar(value=str(value))
-                tb.Entry(row, textvariable=column_vars[key], width=10).pack(side=LEFT, padx=(6, 0))
+                tb.Entry(row, textvariable=column_vars[key], width=8).pack(anchor=W, pady=(2, 0))
         else:
             tb.Label(card, text="No columns configured", style="Martin.Muted.TLabel").pack(anchor=W)
 
+        action_row = tb.Frame(card)
+        action_row.pack(fill=X, pady=(8, 0))
         tb.Button(
-            card,
+            action_row,
             text="Apply Mapping",
             bootstyle=SUCCESS,
             command=lambda mapping_name=mapping_name, start_row_var=start_row_var, column_vars=column_vars: self.update_mapping_from_block(
@@ -311,7 +429,7 @@ class LayoutManager:
                 start_row_var.get(),
                 {key: variable.get() for key, variable in column_vars.items()}
             )
-        ).pack(anchor=W, pady=(8, 0))
+        ).pack(side=RIGHT)
 
     def build_layout_update(self, config, status_message):
         self.set_editor_text(config, mark_clean=False)
@@ -544,7 +662,7 @@ class LayoutManager:
             text="\n".join(tooltip_lines),
             justify=LEFT,
             padding=8,
-            bootstyle="light"
+            style="Martin.Section.TLabel"
         )
         tooltip_label.pack()
 
@@ -557,6 +675,8 @@ class LayoutManager:
         """Renders the current text area JSON into a visual grid."""
         self.preview_after_id = None
         self.hide_preview_tooltip()
+        self.preview_cells = []
+        self.preview_field_labels = {}
         # Clear existing preview
         for child in self.preview_canvas.winfo_children():
             child.destroy()
@@ -591,16 +711,25 @@ class LayoutManager:
                     cell_frame.grid_propagate(False)
                     cell_frame.configure(width=130, height=70)
 
-                    tk.Label(cell_frame, text=f"({row}, {col})", bg=self.preview_cell_bg, fg=self.preview_muted_fg, anchor="w").pack(anchor=NW)
+                    coord_label = tk.Label(cell_frame, text=f"({row}, {col})", bg=self.preview_cell_bg, fg=self.preview_muted_fg, anchor="w")
+                    coord_label.pack(anchor=NW)
 
                     fields_here = field_positions.get((row, col), [])
                     if fields_here:
+                        item_keys = [self._card_key_for_field(field.get("id", "")) for field in fields_here if field.get("id")]
+                        self.preview_cells.append({"frame": cell_frame, "item_keys": item_keys})
+                        if item_keys:
+                            primary_item_key = item_keys[0]
+                            cell_frame.bind("<Button-1>", lambda _event, item_key=primary_item_key: self.select_block_item(item_key, scroll=True))
+                            coord_label.bind("<Button-1>", lambda _event, item_key=primary_item_key: self.select_block_item(item_key, scroll=True))
                         for field in fields_here:
+                            item_key = self._card_key_for_field(field.get("id", ""))
+                            label_fg = self.preview_readonly_fg if field.get("readonly") else self.preview_text_fg
                             field_label = tk.Label(
                                 cell_frame,
                                 text=field.get("label", field.get("id", "Unnamed")),
                                 bg=self.preview_cell_bg,
-                                fg=self.preview_readonly_fg if field.get("readonly") else self.preview_text_fg,
+                                fg=label_fg,
                                 wraplength=110,
                                 justify=LEFT,
                                 anchor="w"
@@ -608,6 +737,8 @@ class LayoutManager:
                             field_label.pack(anchor=W, pady=(4, 0))
                             self.bind_preview_tooltip(field_label, field)
                             self.bind_preview_tooltip(cell_frame, field)
+                            field_label.bind("<Button-1>", lambda _event, key=item_key: self.select_block_item(key, scroll=True))
+                            self.preview_field_labels.setdefault(item_key, []).append((field_label, label_fg))
                     else:
                         tk.Label(cell_frame, text="empty", bg=self.preview_cell_bg, fg=self.preview_empty_fg, anchor="w").pack(anchor=W, pady=(8, 0))
 
@@ -618,6 +749,7 @@ class LayoutManager:
                 f"Preview updated: {len(fields)} header fields on a {max_row + 1}x{max_col + 1} grid",
                 SUCCESS
             )
+            self._apply_selection_state()
 
         except Exception as e:
             tb.Label(self.preview_canvas, text=f"Preview Error: {e}", bootstyle=DANGER).pack()

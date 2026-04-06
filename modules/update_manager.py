@@ -31,12 +31,13 @@ from tkinter import messagebox
 import ttkbootstrap as tb
 from ttkbootstrap.constants import *
 from ttkbootstrap.dialogs import Messagebox
-from app_identity import LEGACY_EXE_NAME, format_versioned_exe_name, load_version_from_main, normalize_version, parse_version
+from app_identity import DEFAULT_UPDATE_REPOSITORY_URL, LEGACY_EXE_NAME, format_versioned_exe_name, load_version_from_main, normalize_version, parse_version
 from modules.persistence import write_json_with_backup, write_text_with_backup
+from modules.theme_manager import get_theme_tokens
 from modules.utils import ensure_external_directory, external_path, local_or_resource_path, resolve_local_venv_python
 
 __module_name__ = "Update Manager"
-__version__ = "2.1.0"
+__version__ = "2.1.1"
 
 GITHUB_REMOTE_PATTERN = re.compile(r"github\.com[:/](?P<owner>[^/]+)/(?P<repo>[^/.]+?)(?:\.git)?$")
 MODULE_NAME_PATTERN = re.compile(r"__module_name__\s*=\s*[\"']([^\"']+)[\"']")
@@ -61,6 +62,7 @@ JSON_PAYLOAD_OPTIONS = [
 DOCUMENTATION_PAYLOAD_RELATIVE_ROOT = os.path.join("docs", "help")
 DOCUMENTATION_PAYLOAD_BACKUP_ROOT = os.path.join("data", "backups", "docs")
 DOCUMENTATION_STANDALONE_FILES = ["LICENSE.txt"]
+SETTINGS_RELATIVE_PATH = "settings.json"
 
 
 def _default_module_payload_name(module_key):
@@ -161,6 +163,67 @@ def _build_snapshot_github_url(owner, repo, branch_name):
     return f"https://codeload.github.com/{owner}/{repo}/zip/refs/heads/{branch_name}"
 
 
+def _normalize_update_repository_url(raw_value):
+    return str(raw_value or "").strip()
+
+
+def _load_external_settings_payload():
+    settings_path = external_path(SETTINGS_RELATIVE_PATH)
+    if not os.path.exists(settings_path):
+        return {}
+    try:
+        with open(settings_path, "r", encoding="utf-8") as handle:
+            loaded = json.load(handle)
+        return loaded if isinstance(loaded, dict) else {}
+    except Exception:
+        return {}
+
+
+def _get_configured_update_repository_url(dispatcher=None):
+    if dispatcher is not None:
+        try:
+            configured_value = dispatcher.get_setting("update_repository_url", None)
+        except Exception:
+            configured_value = None
+        if configured_value is not None:
+            return _normalize_update_repository_url(configured_value)
+
+    settings_payload = _load_external_settings_payload()
+    return _normalize_update_repository_url(settings_payload.get("update_repository_url", DEFAULT_UPDATE_REPOSITORY_URL))
+
+
+def _build_remote_info_from_url(remote_url):
+    normalized_url = _normalize_update_repository_url(remote_url)
+    if not normalized_url:
+        return {"owner": None, "repo": None, "url": "", "display": "Updates not configured"}
+
+    match = GITHUB_REMOTE_PATTERN.search(normalized_url)
+    if not match:
+        return {"owner": None, "repo": None, "url": normalized_url, "display": "Unsupported update URL"}
+
+    owner = match.group("owner")
+    repo = match.group("repo")
+    return {
+        "owner": owner,
+        "repo": repo,
+        "url": normalized_url,
+        "display": f"{owner}/{repo}",
+    }
+
+
+def _remote_updates_available(remote_info, branch_name=None):
+    if not isinstance(remote_info, dict):
+        return False
+    return bool(remote_info.get("owner") and remote_info.get("repo") and (branch_name or "").strip())
+
+
+def _update_configuration_note(remote_info=None):
+    normalized_remote_info = remote_info if isinstance(remote_info, dict) else {}
+    if normalized_remote_info.get("display") == "Unsupported update URL":
+        return "The configured Update Repository URL is not a supported GitHub repository address. Open Security Admin with a developer login and enter a standard GitHub repository URL to enable updates."
+    return "No Update Repository URL is configured yet. Open Security Admin and sign in with the developer vault to enable update checks and payload restores."
+
+
 def _is_supported_update_version(version_parts):
     if version_parts is None:
         return False
@@ -173,30 +236,8 @@ def _detect_branch_name():
     return "main"
 
 
-def _detect_remote_info():
-    remote_url = None
-    git_config_path = os.path.join(os.path.abspath("."), ".git", "config")
-    if os.path.exists(git_config_path):
-        try:
-            with open(git_config_path, "r", encoding="utf-8") as handle:
-                config_text = handle.read()
-            match = re.search(r"url\s*=\s*(.+)", config_text)
-            if match:
-                remote_url = match.group(1).strip()
-        except Exception:
-            remote_url = None
-    remote_url = remote_url or "https://github.com/jmartinmaster/AIMartinSuiteGLCVersion.git"
-    match = GITHUB_REMOTE_PATTERN.search(remote_url)
-    if not match:
-        return {"owner": None, "repo": None, "url": remote_url, "display": remote_url}
-    owner = match.group("owner")
-    repo = match.group("repo")
-    return {
-        "owner": owner,
-        "repo": repo,
-        "url": remote_url,
-        "display": f"{owner}/{repo}",
-    }
+def _detect_remote_info(dispatcher=None):
+    return _build_remote_info_from_url(_get_configured_update_repository_url(dispatcher))
 
 
 def discover_module_payload_options(modules_path):
@@ -497,8 +538,17 @@ def evaluate_documentation_payload_option(option, branch_name, remote_info):
 
 def scan_available_module_payload_updates(dispatcher, branch_name=None, remote_info=None):
     resolved_branch_name = branch_name or _detect_branch_name()
-    resolved_remote_info = remote_info or _detect_remote_info()
+    resolved_remote_info = remote_info or _detect_remote_info(dispatcher)
     options = discover_module_payload_options(getattr(dispatcher, "modules_path", None))
+    if not _remote_updates_available(resolved_remote_info, resolved_branch_name):
+        return {
+            "branch_name": resolved_branch_name,
+            "remote_info": resolved_remote_info,
+            "results": [],
+            "available_results": [],
+            "configured": False,
+            "note": _update_configuration_note(resolved_remote_info),
+        }
     results = [
         evaluate_module_payload_option(dispatcher, option, resolved_branch_name, resolved_remote_info)
         for option in options
@@ -515,6 +565,15 @@ def scan_available_documentation_payload_updates(branch_name=None, remote_info=N
     resolved_branch_name = branch_name or _detect_branch_name()
     resolved_remote_info = remote_info or _detect_remote_info()
     options = discover_documentation_payload_options()
+    if not _remote_updates_available(resolved_remote_info, resolved_branch_name):
+        return {
+            "branch_name": resolved_branch_name,
+            "remote_info": resolved_remote_info,
+            "results": [],
+            "available_results": [],
+            "configured": False,
+            "note": _update_configuration_note(resolved_remote_info),
+        }
     results = [evaluate_documentation_payload_option(option, resolved_branch_name, resolved_remote_info) for option in options]
     return {
         "branch_name": resolved_branch_name,
@@ -529,8 +588,8 @@ class UpdateManager:
         self.parent = None
         self.dispatcher = dispatcher
         self.coordinator = self.dispatcher.update_coordinator
-        self.branch_name = self.coordinator.branch_name or _detect_branch_name()
-        self.remote_info = self.coordinator.remote_info if self.coordinator.remote_info.get("display") != "Unknown repository" else _detect_remote_info()
+        self.branch_name = _detect_branch_name()
+        self.remote_info = _detect_remote_info(self.dispatcher)
         self.local_manifest = self.coordinator.local_manifest
         self.comparison_rows = self.coordinator.comparison_rows
         self.status_var = self.coordinator.status_var
@@ -562,10 +621,8 @@ class UpdateManager:
         self.documentation_payload_note_var = tb.StringVar(value="Documentation restores are grouped into one action so bundled help files can be refreshed without choosing individual documents.")
         self.documentation_payload_in_progress = False
         self.container = None
-        self.coordinator.branch_name = self.branch_name
-        self.coordinator.remote_info = self.remote_info
-        self.branch_var.set(self.branch_name or "Unknown")
-        self.repo_var.set(self.remote_info.get("display", "Unknown repository"))
+        self.dispatcher.register_runtime_settings_listener(self._handle_runtime_settings_change)
+        self._apply_remote_configuration()
         self.refresh_local_manifest()
         self.refresh_summary()
         self.refresh_module_payload_summary()
@@ -579,7 +636,25 @@ class UpdateManager:
         return None
 
     def on_unload(self):
+        self.dispatcher.unregister_runtime_settings_listener(self._handle_runtime_settings_change)
         return None
+
+    def _handle_runtime_settings_change(self, _settings):
+        self._apply_remote_configuration()
+
+    def _apply_remote_configuration(self):
+        self.branch_name = _detect_branch_name()
+        self.remote_info = _detect_remote_info(self.dispatcher)
+        self.coordinator.branch_name = self.branch_name
+        self.coordinator.remote_info = self.remote_info
+        self.branch_var.set(self.branch_name or "Unknown")
+        self.repo_var.set(self.remote_info.get("display", "Updates not configured"))
+
+    def _updates_configured(self):
+        return _remote_updates_available(self.remote_info, self.branch_name)
+
+    def _update_configuration_note(self):
+        return _update_configuration_note(self.remote_info)
 
     def _discover_payload_options(self):
         return discover_module_payload_options(getattr(self.dispatcher, "modules_path", None))
@@ -620,6 +695,13 @@ class UpdateManager:
         option["module_name"] = local_metadata.get("module_name", option["module_name"])
         self.module_payload_name_var.set(option["module_name"])
         self.module_payload_path_var.set(option["relative_path"])
+        if not self._updates_configured():
+            self.refresh_module_payload_summary(
+                remote_version="Not configured",
+                status="Unavailable",
+                note=self._update_configuration_note(),
+            )
+            return
         self.refresh_module_payload_summary(
             remote_version="Not checked",
             status="Pending",
@@ -742,6 +824,15 @@ class UpdateManager:
             )
             return
 
+        if not self._updates_configured():
+            self.refresh_module_payload_summary(
+                remote_version="Not configured",
+                status="Unavailable",
+                note=self._update_configuration_note(),
+                option=option,
+            )
+            return
+
         result = self._evaluate_selected_module_payload(option)
         option.update(result.get("option", {}))
         self.refresh_module_payload_summary(
@@ -757,6 +848,14 @@ class UpdateManager:
                 remote_state="Unavailable",
                 status="Unavailable",
                 note="No tracked documentation files are available for grouped restore checks.",
+            )
+            return
+
+        if not self._updates_configured():
+            self.refresh_documentation_payload_summary(
+                remote_state="Not configured",
+                status="Unavailable",
+                note=self._update_configuration_note(),
             )
             return
 
@@ -976,7 +1075,7 @@ class UpdateManager:
         return _detect_branch_name()
 
     def _detect_remote_info(self):
-        return _detect_remote_info()
+        return _detect_remote_info(self.dispatcher)
 
     def refresh_local_manifest(self):
         dispatcher_module = self.dispatcher.loaded_modules.get("main") or sys.modules.get("main") or sys.modules.get("__main__")
@@ -995,6 +1094,10 @@ class UpdateManager:
         self.target_name_var.set(entry["module_name"])
         self.local_version_var.set(entry.get("local_version", "Unknown"))
         self.remote_version_var.set(row.get("remote_version", "Not checked") if row else "Not checked")
+        if not self._updates_configured():
+            self.result_var.set("Unavailable")
+            self.note_var.set(self._update_configuration_note())
+            return
         self.result_var.set(row.get("status", "Pending") if row else "Pending")
         if row and row.get("update_available"):
             self.note_var.set("A newer stable executable target is available from the repository branch.")
@@ -1042,6 +1145,15 @@ class UpdateManager:
     def apply_all_module_payload_updates(self):
         if self._payload_job_is_busy():
             self.dispatcher.show_toast("Update Manager", "Another update job is already running in the background.", WARNING)
+            return
+
+        if not self._updates_configured():
+            self.refresh_module_payload_summary(
+                remote_version="Not configured",
+                status="Unavailable",
+                note=self._update_configuration_note(),
+            )
+            self.dispatcher.show_toast("Update Manager", "Open Security Admin with the developer vault to configure the Update Repository URL before checking or installing payload updates.", INFO)
             return
 
         if not self.module_payload_options:
@@ -1142,6 +1254,13 @@ class UpdateManager:
         return None, None
 
     def check_for_updates(self):
+        if not self._updates_configured():
+            self.comparison_rows[:] = []
+            self.refresh_summary()
+            self.status_var.set("Executable update checks are disabled until an Update Repository URL is configured.")
+            self.coordinator.set_job_phase("idle", self._update_configuration_note(), mode="stable")
+            return
+
         self.coordinator.set_job_phase("checking", "Checking the repository for newer executable targets.", mode="stable")
         self.refresh_local_manifest()
         comparison_rows = []
@@ -1699,11 +1818,12 @@ class UpdateManager:
         if self.container is not None and self.container.winfo_exists():
             self.container.destroy()
 
-        container = tb.Frame(self.parent, padding=20)
+        get_theme_tokens(root=self.parent.winfo_toplevel())
+        container = tb.Frame(self.parent, padding=20, style="Martin.Content.TFrame")
         container.pack(fill=BOTH, expand=True)
         self.container = container
 
-        tb.Label(container, text="Update Manager", font=("Helvetica", 18, "bold")).pack(anchor=W, pady=(0, 10))
+        tb.Label(container, text="Update Manager", style="Martin.PageTitle.TLabel").pack(anchor=W, pady=(0, 10))
         tb.Label(
             container,
             text=(
@@ -1711,11 +1831,12 @@ class UpdateManager:
                 "Odd third patch numbers stay in-progress and are ignored by the updater. "
                 "Stable EXE updates require a published EXE artifact and can be launched from either source mode or the packaged build."
             ),
-            wraplength=760,
+            wraplength=680,
             justify=LEFT,
+            style="Martin.Subtitle.TLabel",
         ).pack(anchor=W, pady=(0, 12))
 
-        summary = tb.Labelframe(container, text=" Release Target ", padding=14)
+        summary = tb.Labelframe(container, text=" Release Target ", padding=14, style="Martin.Card.TLabelframe")
         summary.pack(fill=X, pady=(0, 12))
         tb.Label(summary, textvariable=self.target_name_var, font=("Helvetica", 12, "bold")).grid(row=0, column=0, columnspan=2, sticky=W, pady=(0, 8))
         tb.Label(summary, text="Repository", bootstyle=SECONDARY).grid(row=1, column=0, sticky=W, padx=(0, 12), pady=2)
@@ -1730,23 +1851,23 @@ class UpdateManager:
         tb.Label(summary, textvariable=self.result_var).grid(row=5, column=1, sticky=W, pady=2)
         tb.Label(summary, text="Job Phase", bootstyle=SECONDARY).grid(row=6, column=0, sticky=W, padx=(0, 12), pady=2)
         tb.Label(summary, textvariable=self.job_phase_var).grid(row=6, column=1, sticky=W, pady=2)
-        tb.Label(summary, textvariable=self.note_var, bootstyle=INFO, wraplength=720, justify=LEFT).grid(row=7, column=0, columnspan=2, sticky=W, pady=(10, 0))
-        tb.Label(summary, textvariable=self.job_detail_var, bootstyle=SECONDARY, wraplength=720, justify=LEFT).grid(row=8, column=0, columnspan=2, sticky=W, pady=(8, 0))
+        tb.Label(summary, textvariable=self.note_var, bootstyle=INFO, wraplength=620, justify=LEFT).grid(row=7, column=0, columnspan=2, sticky=W, pady=(10, 0))
+        tb.Label(summary, textvariable=self.job_detail_var, bootstyle=SECONDARY, wraplength=620, justify=LEFT).grid(row=8, column=0, columnspan=2, sticky=W, pady=(8, 0))
 
-        controls = tb.Frame(container)
+        controls = tb.Frame(container, style="Martin.Content.TFrame")
         controls.pack(fill=X, pady=(12, 0))
         tb.Button(controls, text="Check Repository", bootstyle=PRIMARY, command=self.check_for_updates).pack(side=LEFT)
         tb.Button(controls, text="Apply Stable Updates", bootstyle=SUCCESS, command=self.apply_updates).pack(side=LEFT, padx=8)
 
-        module_payload = tb.Labelframe(container, text=" Payload Restores ", padding=14)
+        module_payload = tb.Labelframe(container, text=" Payload Restores ", padding=14, style="Martin.Card.TLabelframe")
         module_payload.pack(fill=X, pady=(12, 0))
         tb.Label(
             module_payload,
             text="Choose a single module or tracked config payload to compare and restore without rebuilding the EXE. Dispatcher Core (main.py) stays outside this list and continues to update through the stable EXE path above.",
-            wraplength=720,
+            wraplength=620,
             justify=LEFT,
         ).pack(anchor=W)
-        payload_grid = tb.Frame(module_payload)
+        payload_grid = tb.Frame(module_payload, style="Martin.Surface.TFrame")
         payload_grid.pack(fill=X, pady=(10, 0))
         tb.Label(payload_grid, text="Payload", bootstyle=SECONDARY).grid(row=0, column=0, sticky=W, padx=(0, 12), pady=2)
         module_payload_selector = tb.Combobox(
@@ -1754,7 +1875,7 @@ class UpdateManager:
             textvariable=self.module_payload_selection_var,
             values=[option["display"] for option in self.module_payload_options],
             state="readonly" if self.module_payload_options else "disabled",
-            width=42,
+            width=30,
         )
         module_payload_selector.grid(row=0, column=1, sticky=W, pady=2)
         module_payload_selector.bind("<<ComboboxSelected>>", self.handle_module_payload_selection_change)
@@ -1768,22 +1889,22 @@ class UpdateManager:
         tb.Label(payload_grid, textvariable=self.module_payload_remote_version_var).grid(row=4, column=1, sticky=W, pady=2)
         tb.Label(payload_grid, text="Status", bootstyle=SECONDARY).grid(row=5, column=0, sticky=W, padx=(0, 12), pady=2)
         tb.Label(payload_grid, textvariable=self.module_payload_status_var).grid(row=5, column=1, sticky=W, pady=2)
-        tb.Label(module_payload, textvariable=self.module_payload_note_var, bootstyle=INFO, wraplength=720, justify=LEFT).pack(anchor=W, pady=(10, 0))
-        payload_controls = tb.Frame(module_payload)
+        tb.Label(module_payload, textvariable=self.module_payload_note_var, bootstyle=INFO, wraplength=620, justify=LEFT).pack(anchor=W, pady=(10, 0))
+        payload_controls = tb.Frame(module_payload, style="Martin.Surface.TFrame")
         payload_controls.pack(anchor=W, pady=(10, 0))
         tb.Button(payload_controls, text="Check Selected Payload", bootstyle=PRIMARY, command=self.check_module_payload_update).pack(side=LEFT)
         tb.Button(payload_controls, text="Install Selected Payload", bootstyle=SUCCESS, command=self.apply_module_payload_update).pack(side=LEFT, padx=(8, 0))
         tb.Button(payload_controls, text="Install All Available Module/Config Payloads", bootstyle=WARNING, command=self.apply_all_module_payload_updates).pack(side=LEFT, padx=(8, 0))
 
-        documentation_payload = tb.Labelframe(container, text=" Documentation Restores ", padding=14)
+        documentation_payload = tb.Labelframe(container, text=" Documentation Restores ", padding=14, style="Martin.Card.TLabelframe")
         documentation_payload.pack(fill=X, pady=(12, 0))
         tb.Label(
             documentation_payload,
             text="Restore the bundled Help Center documents as one grouped update. Individual documentation files are not selectable here.",
-            wraplength=720,
+            wraplength=620,
             justify=LEFT,
         ).pack(anchor=W)
-        documentation_grid = tb.Frame(documentation_payload)
+        documentation_grid = tb.Frame(documentation_payload, style="Martin.Surface.TFrame")
         documentation_grid.pack(fill=X, pady=(10, 0))
         tb.Label(documentation_grid, text="Tracked Files", bootstyle=SECONDARY).grid(row=0, column=0, sticky=W, padx=(0, 12), pady=2)
         tb.Label(documentation_grid, textvariable=self.documentation_payload_tracked_var).grid(row=0, column=1, sticky=W, pady=2)
@@ -1791,13 +1912,21 @@ class UpdateManager:
         tb.Label(documentation_grid, textvariable=self.documentation_payload_remote_state_var).grid(row=1, column=1, sticky=W, pady=2)
         tb.Label(documentation_grid, text="Status", bootstyle=SECONDARY).grid(row=2, column=0, sticky=W, padx=(0, 12), pady=2)
         tb.Label(documentation_grid, textvariable=self.documentation_payload_status_var).grid(row=2, column=1, sticky=W, pady=2)
-        tb.Label(documentation_payload, textvariable=self.documentation_payload_note_var, bootstyle=INFO, wraplength=720, justify=LEFT).pack(anchor=W, pady=(10, 0))
-        documentation_controls = tb.Frame(documentation_payload)
+        tb.Label(documentation_payload, textvariable=self.documentation_payload_note_var, bootstyle=INFO, wraplength=620, justify=LEFT).pack(anchor=W, pady=(10, 0))
+        documentation_controls = tb.Frame(documentation_payload, style="Martin.Surface.TFrame")
         documentation_controls.pack(anchor=W, pady=(10, 0))
         tb.Button(documentation_controls, text="Check Documentation Updates", bootstyle=PRIMARY, command=self.check_documentation_payload_updates).pack(side=LEFT)
         tb.Button(documentation_controls, text="Install Documentation Updates", bootstyle=SUCCESS, command=self.apply_documentation_payload_updates).pack(side=LEFT, padx=(8, 0))
 
         tb.Label(container, textvariable=self.status_var, bootstyle=SECONDARY).pack(anchor=W, pady=(12, 0))
+
+        self.handle_module_payload_selection_change()
+        if not self._updates_configured():
+            self.refresh_documentation_payload_summary(
+                remote_state="Not configured",
+                status="Unavailable",
+                note=self._update_configuration_note(),
+            )
 
 
 def get_ui(parent, dispatcher):
