@@ -1,4 +1,4 @@
-# The Martin Suite (GLC Edition)
+# Production Logging Center (GLC Edition)
 # Copyright (C) 2026 Jamie Martin
 #
 # This program is free software: you can redistribute it and/or modify
@@ -18,6 +18,7 @@ import tkinter as tk
 from tkinter import messagebox
 import ttkbootstrap as tb
 from ttkbootstrap.constants import *
+import tkinter.ttk as ttk
 from ttkbootstrap.dialogs import Messagebox
 from datetime import datetime
 import json
@@ -33,12 +34,31 @@ from modules.persistence import write_json_with_backup
 from modules.theme_manager import get_theme_tokens
 from modules.utils import external_path, local_or_resource_path, resource_path
 
-__module_name__ = "Production Log"
+__module_name__ = "Production Logging Center"
 __version__ = "1.2.5"
 BALANCE_DOWNTIME_CAUSE = "Time Balance Adjustment"
 DEFAULT_GHOST_LABEL = "Ghost Time: 0 min"
 
 class ProductionLog:
+    def get_widget_value(self, widget):
+        # Robustly extract value from Entry, Label, StringVar, or fallback
+        if isinstance(widget, tk.StringVar):
+            return widget.get()
+        # Prefer .get() if available (Entry, custom, etc.)
+        if hasattr(widget, 'get'):
+            try:
+                return widget.get()
+            except Exception:
+                pass
+        # Only call .cget('text') if it's a Label and does not have .get()
+        # (should never be reached for StringVar or Entry)
+        # Defensive: skip .cget if .get exists
+        if isinstance(widget, (tk.Label, tb.Label, ttk.Label)) and not hasattr(widget, 'get'):
+            try:
+                return widget.cget("text")
+            except Exception:
+                pass
+        return str(widget)
     def __init__(self, parent, dispatcher):
         self.parent = parent 
         self.dispatcher = dispatcher
@@ -92,10 +112,19 @@ class ProductionLog:
         return history_dir
 
     def get_raw_header_data(self):
-        return {fid: ent.get() for fid, ent in self.entries.items()}
+        # Use helper for all header fields
+        return {fid: self.get_widget_value(ent) for fid, ent in self.entries.items()}
 
     def collect_header_data(self):
-        return self.data_handler.normalize_header_data(self.get_raw_header_data())
+        # Collect and normalize header data, then inject total_molds
+        header = self.data_handler.normalize_header_data(self.get_raw_header_data())
+        # Calculate total_molds from production rows
+        try:
+            total_molds = sum(int(row["molds"].get() or 0) for row in self.production_rows)
+        except Exception:
+            total_molds = 0
+        header["total_molds"] = str(total_molds)
+        return header
 
     def apply_header_data(self, header_data, mark_dirty=False):
         normalized_header = self.data_handler.normalize_header_data(header_data)
@@ -110,14 +139,17 @@ class ProductionLog:
         prod_data = []
         for row in self.production_rows:
             prod_data.append({
-                "shop_order": row["shop_order"].get(),
-                "part_number": row["part_number"].get(),
-                "rate_lookup": row["rate_lookup"].get(),
-                "rate_override_enabled": bool(row["rate_override_enabled_var"].get()),
-                "molds": row["molds"].get(),
-                "time_calc": row["time_calc"].cget("text"),
+                "shop_order": self.get_widget_value(row["shop_order"]),
+                "part_number": self.get_widget_value(row["part_number"]),
+                "rate_lookup": self.get_widget_value(row["rate_lookup"]),
+                "rate_override_enabled": bool(self.get_widget_value(row["rate_override_enabled_var"])),
+                "molds": self.get_widget_value(row["molds"]),
+                "time_calc": self.get_widget_value(row["time_calc"])
             })
-        dt_data = [{k: (v.get() if hasattr(v, 'get') else v.cget("text")) for k, v in row.items()} for row in self.downtime_rows]
+        dt_data = []
+        for row in self.downtime_rows:
+            dt_row = {k: self.get_widget_value(v) for k, v in row.items()}
+            dt_data.append(dt_row)
         return {"header": header_data, "production": prod_data, "downtime": dt_data}
 
     def serialize_ui_data(self, data=None):
@@ -258,30 +290,35 @@ class ProductionLog:
         self.delete_current_draft_btn.pack(side=LEFT, padx=5)
 
     def build_header_section(self):
-        header_wrapper = tb.Labelframe(self.parent, text=" Form 510-09: Production Header ", padding=15, style="Martin.Card.TLabelframe")
+        header_wrapper = tb.Labelframe(self.parent, text=" Form 510-09: Production Logging Center Header ", padding=15, style="Martin.Card.TLabelframe")
         header_wrapper.pack(fill=X, padx=10, pady=10)
-        
         try:
             with open(self.config_path, 'r') as f:
                 config = json.load(f)
             for field in config["header_fields"]:
                 tb.Label(header_wrapper, text=field["label"], style="Martin.Section.TLabel").grid(row=field["row"], column=field["col"], padx=5, pady=5, sticky=W)
-                ent = tb.Entry(header_wrapper, width=field.get("width", 10))
-                
-                default_val = field.get("default", "")
-                if field["id"] == "hours":
-                    default_val = self.default_hours
-                elif field["id"] == "goal_mph":
-                    default_val = self.default_goal
-                    
-                if default_val: ent.insert(0, default_val)
-                if field.get("readonly"): ent.config(state="readonly", bootstyle=INFO)
-                ent.grid(row=field["row"], column=field["col"]+1, padx=5, pady=5, sticky=W)
-                self.entries[field["id"]] = ent
-                if not field.get("readonly"):
-                    self.bind_dirty_tracking(ent, ("<KeyRelease>",))
-                    ent.bind("<FocusOut>", self.on_header_field_focus_out, add="+")
-
+                if field["id"] == "total_molds":
+                    # Display as readonly label, not entry
+                    val = tk.StringVar(value="0")
+                    ent = tb.Label(header_wrapper, textvariable=val, width=field.get("width", 10), style="Martin.Section.TLabel")
+                    ent.grid(row=field["row"], column=field["col"]+1, padx=5, pady=5, sticky=W)
+                    self.entries[field["id"]] = val
+                else:
+                    ent = tb.Entry(header_wrapper, width=field.get("width", 10))
+                    default_val = field.get("default", "")
+                    if field["id"] == "hours":
+                        default_val = self.default_hours
+                    elif field["id"] == "goal_mph":
+                        default_val = self.default_goal
+                    if default_val:
+                        ent.insert(0, default_val)
+                    if field.get("readonly"):
+                        ent.config(state="readonly", bootstyle=INFO)
+                    ent.grid(row=field["row"], column=field["col"]+1, padx=5, pady=5, sticky=W)
+                    self.entries[field["id"]] = ent
+                    if not field.get("readonly"):
+                        self.bind_dirty_tracking(ent, ("<KeyRelease>",))
+                        ent.bind("<FocusOut>", self.on_header_field_focus_out, add="+")
             if "hours" in self.entries:
                 self.entries["hours"].bind("<KeyRelease>", self.on_hours_changed, add="+")
             if "goal_mph" in self.entries:
@@ -290,7 +327,7 @@ class ProductionLog:
             tb.Label(header_wrapper, text=f"Layout Error: {e}", bootstyle=DANGER).pack()
 
     def build_production_section(self):
-        prod_wrapper = tb.Labelframe(self.parent, text=" Production Jobs ", padding=10, style="Martin.Card.TLabelframe")
+        prod_wrapper = tb.Labelframe(self.parent, text=" Production Logging Center Jobs ", padding=10, style="Martin.Card.TLabelframe")
         prod_wrapper.pack(fill=X, padx=10, pady=5)
         prod_columns = tb.Frame(prod_wrapper, style="Martin.Surface.TFrame")
         prod_columns.pack(fill=X, pady=(0, 4))
@@ -307,7 +344,7 @@ class ProductionLog:
         self.production_container.pack(fill=X)
 
     def build_downtime_section(self):
-        dt_wrapper = tb.Labelframe(self.parent, text=" Downtime Issues ", padding=10, style="Martin.Card.TLabelframe")
+        dt_wrapper = tb.Labelframe(self.parent, text=" Production Logging Center Downtime Issues ", padding=10, style="Martin.Card.TLabelframe")
         dt_wrapper.pack(fill=X, padx=10, pady=5)
         self.downtime_container = tb.Frame(dt_wrapper, style="Martin.Surface.TFrame")
         self.downtime_container.pack(fill=X)
@@ -535,11 +572,18 @@ class ProductionLog:
         if target_time_entry is None:
             return
         target_value = self.data_handler.compute_target_time(self.entries.get("hours").get() if self.entries.get("hours") else "")
-        original_state = target_time_entry.cget("state")
+        # Only call .cget('state') if widget supports it
+        original_state = None
+        if hasattr(target_time_entry, 'cget'):
+            try:
+                original_state = target_time_entry.cget("state")
+            except Exception:
+                original_state = None
         if original_state == "readonly":
             target_time_entry.config(state="normal")
-        target_time_entry.delete(0, END)
-        target_time_entry.insert(0, target_value)
+        if hasattr(target_time_entry, 'delete') and hasattr(target_time_entry, 'insert'):
+            target_time_entry.delete(0, END)
+            target_time_entry.insert(0, target_value)
         if original_state == "readonly":
             target_time_entry.config(state="readonly")
 
@@ -583,7 +627,10 @@ class ProductionLog:
             if stop_minutes < start_minutes:
                 stop_minutes += 24 * 60
             return stop_minutes - start_minutes
-        return self.parse_minutes_label(row["time_calc"].cget("text"))
+        # Robustly get time_calc text
+        tc = row["time_calc"]
+        val = self.get_widget_value(tc)
+        return self.parse_minutes_label(val)
 
     def is_balance_downtime_row(self, row):
         return row["cause"].get().strip() == BALANCE_DOWNTIME_CAUSE
@@ -622,7 +669,12 @@ class ProductionLog:
             return 0
 
     def get_production_total_minutes(self):
-        return sum(self.parse_minutes_label(row["time_calc"].cget("text")) for row in self.production_rows)
+        total = 0
+        for row in self.production_rows:
+            tc = row["time_calc"]
+            val = self.get_widget_value(tc)
+            total += self.parse_minutes_label(val)
+        return total
 
     def get_total_downtime_minutes(self):
         return sum(self.get_row_duration_minutes(row) for row in self.downtime_rows)
@@ -804,11 +856,18 @@ class ProductionLog:
         if field_id not in self.entries:
             return
         entry = self.entries[field_id]
-        original_state = entry.cget("state")
+        # Only call .cget('state') if widget supports it
+        original_state = None
+        if hasattr(entry, 'cget'):
+            try:
+                original_state = entry.cget("state")
+            except Exception:
+                original_state = None
         if original_state == "readonly":
             entry.config(state="normal")
-        entry.delete(0, END)
-        entry.insert(0, str(value) if value is not None else "")
+        if hasattr(entry, 'delete') and hasattr(entry, 'insert'):
+            entry.delete(0, END)
+            entry.insert(0, str(value) if value is not None else "")
         if original_state == "readonly":
             entry.config(state="readonly")
 
@@ -1005,17 +1064,24 @@ class ProductionLog:
         rates_data = self.load_rates_data()
         global_goal = self.get_global_goal_rate()
 
+        total_molds = 0
         for row in self.production_rows:
             if not bool(row["rate_override_enabled_var"].get()):
                 lookup_rate = self.resolve_lookup_rate(row["part_number"].get(), rates_data, global_goal)
                 self.set_rate_lookup_value(row, self.format_rate_value(lookup_rate), editable=False)
             try:
                 molds = float(row["molds"].get() or 0)
+                total_molds += int(molds)
                 rate = self.get_row_rate(row, rates_data, global_goal)
                 minutes = (molds / rate) * 60 if rate and rate > 0 else 0
                 row["time_calc"].config(text=f"{int(minutes)} min")
             except Exception:
                 row["time_calc"].config(text="0 min")
+        # Update total_molds header field if present
+        if "total_molds" in self.entries:
+            entry = self.entries["total_molds"]
+            if hasattr(entry, "set"):
+                entry.set(str(total_molds))
 
         for row in self.downtime_rows:
             try:

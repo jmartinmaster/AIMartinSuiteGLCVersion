@@ -16,7 +16,7 @@
 				"approve": true,
 				"matchCommandLine": true
 			},
-			"/^& \\.\\\\dist\\\\TheMartinSuite_GLC\\\\TheMartinSuite_GLC\\.exe$/": {
+			"/^& \\.\\\\dist\\\\ProductionLoggingCenter_GLC\\\\ProductionLoggingCenter_GLC\\.exe$/": {
 				"approve": true,
 				"matchCommandLine": true
 			}

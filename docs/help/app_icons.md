@@ -1,6 +1,6 @@
 # App Icon Reference
 
-The Martin Suite now treats the repository PNG artwork as the source of truth so the app window, taskbar icon, and packaged EXE stay aligned.
+Logging Center now treats the repository PNG artwork as the source of truth so the app window, taskbar icon, and packaged EXE stay aligned.
 
 ## Hard-Coded Icon Files
 

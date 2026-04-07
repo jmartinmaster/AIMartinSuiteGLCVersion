@@ -1,6 +1,6 @@
 # Hidden Modules
 
-These modules are bundled with the suite but intentionally do not appear in the left navigation because they are support components, internal services, or context-specific tools.
+These modules are bundled with Logging Center but intentionally do not appear in the left navigation because they are support components, internal services, or context-specific tools.
 
 ## About System
 
@@ -51,6 +51,6 @@ These modules are bundled with the suite but intentionally do not appear in the 
 
 ## Notes
 
-- Hidden does not mean unused. These modules are active support layers used throughout the suite.
+- Hidden does not mean unused. These modules are active support layers used throughout Logging Center.
 - Backup / Recovery is user-facing and stays in the sidebar even though it works closely with the internal persistence helper.
 - Update Manager remains visible because it is a user workflow, even though some of its behavior also overlaps with internal support logic.

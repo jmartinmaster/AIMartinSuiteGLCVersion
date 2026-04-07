@@ -1,4 +1,4 @@
-# The Martin Suite (GLC Edition)
+# Production Logging Center (GLC Edition)
 # Copyright (C) 2026 Jamie Martin
 #
 # This program is free software: you can redistribute it and/or modify
@@ -18,7 +18,7 @@ import os
 import re
 
 
-APP_NAME = "TheMartinSuite_GLC"
+APP_NAME = "Production Logging Center"
 LEGACY_EXE_NAME = f"{APP_NAME}.exe"
 MAIN_FILE_NAME = "main.py"
 DEFAULT_UPDATE_REPOSITORY_URL = "https://github.com/jmartinmaster/AIMartinSuiteGLCVersion"

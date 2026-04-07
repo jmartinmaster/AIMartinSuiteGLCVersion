@@ -1,4 +1,4 @@
-# The Martin Suite (GLC Edition)
+# Production Logging Center (GLC Edition)
 # Copyright (C) 2026 Jamie Martin
 #
 # This program is free software: you can redistribute it and/or modify
@@ -26,9 +26,14 @@ from modules.downtime_codes import get_code_number, normalize_code_value
 from modules.utils import ensure_external_directory, external_path, local_or_resource_path, resource_path
 
 __module_name__ = "Data Handler"
-__version__ = "1.1.2"
+__version__ = "1.1.4"
 
 class DataHandler:
+    def get_header_field_config(self, field_id):
+        for field in self.get_header_fields():
+            if field.get("id") == field_id:
+                return field
+        return {}
     def __init__(self, config_name="layout_config.json"):
         # Prefer the local config so Layout Manager changes are reflected in import/export.
         self.config_path = local_or_resource_path(config_name)
@@ -131,13 +136,18 @@ class DataHandler:
             total_minutes = int(round(float(raw_hours or 0) * 60))
         except Exception:
             return ""
-        return f"{total_minutes} min" if total_minutes > 0 else ""
+        # Get suffix from config if present
+        field_cfg = self.get_header_field_config("target_time")
+        suffix = field_cfg.get("suffix", " min")
+        return f"{total_minutes}{suffix}" if total_minutes > 0 else ""
 
     def normalize_target_time_text(self, value):
         total_minutes = self.parse_total_minutes(value)
         if total_minutes is None or total_minutes <= 0:
             return ""
-        return f"{total_minutes} min"
+        field_cfg = self.get_header_field_config("target_time")
+        suffix = field_cfg.get("suffix", " min")
+        return f"{total_minutes}{suffix}"
 
     def normalize_header_field_value(self, field_id, value, header_data=None):
         header_data = header_data or {}
@@ -391,6 +401,7 @@ class DataHandler:
         ws = wb.active
 
         # 1. Map Header
+        # Export all header fields with export_enabled True (default True)
         for field in self.config['header_fields']:
             cell_coord = field.get('cell')
             val = ui_data['header'].get(field['id'])
@@ -433,19 +444,22 @@ class DataHandler:
             ws[f"{d_cols['cause']}{curr_row}"] = row_data.get('cause')
 
         wb.save(target_path)
+        wb.close()
         return target_path
 
     # ... [import_from_excel method remains the same] ...
 
     # Import Production
     def import_from_excel(self, file_path):
-            import openpyxl
-            wb = openpyxl.load_workbook(file_path, data_only=True)
-            formula_wb = openpyxl.load_workbook(file_path, data_only=False)
+        import openpyxl
+        wb = openpyxl.load_workbook(file_path, data_only=True)
+        formula_wb = openpyxl.load_workbook(file_path, data_only=False)
+        data = None
+        try:
             ws = wb.active
             formula_ws = formula_wb.active
             formula_cache = {}
-            
+
             data = {"header": {}, "production": [], "downtime": []}
 
             # 2. Import Header (Date, Shift, etc.)
@@ -469,7 +483,7 @@ class DataHandler:
                 shop_order = ws[f"{p_cols['shop_order']}{row_idx}"].value
                 if shop_order is None:
                     shop_order = self.resolve_import_cell_value(formula_wb, formula_ws, f"{p_cols['shop_order']}{row_idx}", formula_cache)
-                
+
                 # If the shop order cell is empty, we've reached the end of the list
                 if not shop_order:
                     break
@@ -496,7 +510,7 @@ class DataHandler:
                 start_time = ws[f"{d_cols['start']}{row_idx}"].value
                 if start_time is None:
                     start_time = self.resolve_import_cell_value(formula_wb, formula_ws, f"{d_cols['start']}{row_idx}", formula_cache)
-                
+
                 if not start_time:
                     break
 
@@ -518,5 +532,7 @@ class DataHandler:
                     "code": full_code,
                     "cause": self.format_cell_value(cause)
                 })
-
-            return data
+        finally:
+            wb.close()
+            formula_wb.close()
+        return data

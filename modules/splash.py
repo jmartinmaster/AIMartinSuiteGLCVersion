@@ -1,4 +1,4 @@
-# The Martin Suite (GLC Edition)
+# Production Logging Center (GLC Edition)
 # Copyright (C) 2026 Jamie Martin
 #
 # This program is free software: you can redistribute it and/or modify
@@ -38,7 +38,7 @@ def show_splash_screen(root, duration=5000, logo_path=None):
     splash.attributes('-topmost', True) # Keep it on top of other windows
     apply_app_icon(splash)
     
-    width = 520
+    width = 620  # Increased width for longer title
     height = 470 if logo_path else 280
     
     # Center the splash screen on the monitor
@@ -73,7 +73,7 @@ def show_splash_screen(root, duration=5000, logo_path=None):
         except Exception as e:
             print(f"Error loading splash logo: {e}")
 
-    tb.Label(content, text="THE MARTIN SUITE", font=("-size 24 -weight bold")).pack(pady=(8, 0))
+    tb.Label(content, text="PRODUCTION LOGGING CENTER", font=("-size 18 -weight bold")).pack(pady=(8, 0))
     tb.Label(content, text="GLC Edition", font=("-size 14 -slant italic"), bootstyle=INFO).pack(pady=5)
     
     tb.Label(footer, text="Copyright © 2026 Jamie Martin", font=("-size 10")).pack()
