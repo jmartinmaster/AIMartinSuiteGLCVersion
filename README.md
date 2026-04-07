@@ -1,6 +1,7 @@
-# AIMartinSuiteGLCVersion
 
-The Martin Suite is a desktop production support application for GLC operators. It is built with Python, Tkinter, and ttkbootstrap and is packaged for Windows with PyInstaller.
+# Production Logging Center
+
+Production Logging Center is a desktop production support application for GLC operators. It is built with Python, Tkinter, and ttkbootstrap and is packaged for Windows with PyInstaller.
 
 ## Two Working Modes
 
@@ -10,6 +11,7 @@ The project currently operates in two different forms:
 - Packaged EXE mode: the app is run from the built standalone Windows executable.
 
 These two forms do not have identical behavior. The Python version has access to the repository files and build tooling, while the EXE version is a packaged release with a more limited update path.
+
 
 ## Shared Capabilities
 
@@ -38,6 +40,7 @@ These two forms do not have identical behavior. The Python version has access to
 - Rotated backup copies for settings, layout, and rate file saves.
 - Hard-coded application icon assets with documented replacement steps.
 
+
 ## Data Safety And Recovery
 
 - `settings.json`, `layout_config.json`, and `rates.json` now save through an atomic write path instead of direct overwrite-only writes.
@@ -45,19 +48,22 @@ These two forms do not have identical behavior. The Python version has access to
 - Production Log drafts continue to save in `data/pending`, and overwritten drafts now keep recovery snapshots under `data/pending/history`.
 - Backup / Recovery gives operators a single place to restore saved drafts, recovery snapshots, and JSON backup copies without using Windows Explorer.
 
+
 ## Compatibility Notes
 
 - The current `layout_config.json` routes `target_time` through `header_fields`. Older local builds from before the config-driven Target Time change may not present that field correctly if they reuse the newer layout file.
 - The current `settings.json` includes `persistent_modules`. Older builds ignore that key safely, but they do not preserve module state across navigation.
+
 
 ## Source / Python Mode
 
 - Runs directly from the repository source files.
 - Can use the local project structure, docs, templates, and module files directly.
 - Can be rebuilt locally with `build.py` and PyInstaller.
-- Prefers the suite's own local `.venv` for source-build runtime discovery before falling back to environment or system Python.
+- Prefers Logging Center's own local `.venv` for source-build runtime discovery before falling back to environment or system Python.
 - Can be used to develop, test, and package new EXE releases.
 - The Update Manager can now hand off from source mode by downloading the published packaged EXE into local `dist` and launching it.
+
 
 ## Packaged EXE Mode
 

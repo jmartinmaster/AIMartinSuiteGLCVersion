@@ -49,7 +49,7 @@
 
 - `theme`
   - Type: string
-  - Purpose: One of the curated readable theme names supported by the suite.
+  - Purpose: One of the curated readable theme names supported by Logging Center.
 
 - `enable_screen_transitions`
   - Type: boolean

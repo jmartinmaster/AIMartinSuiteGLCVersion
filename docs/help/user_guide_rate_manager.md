@@ -12,6 +12,6 @@ These rates are used by Production Log when calculating per-row time and overall
 
 ## JSON Relationship
 
-- Rate Manager edits the live rate file used by the suite.
+- Rate Manager edits the live rate file used by Logging Center.
 - Use Rate Manager when possible instead of editing `rates.json` manually.
 - Saving rates also keeps recovery copies under `data/backups/rates`.

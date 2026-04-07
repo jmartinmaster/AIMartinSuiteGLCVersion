@@ -1,4 +1,4 @@
-# The Martin Suite (GLC Edition)
+# Production Logging Center (GLC Edition)
 # Copyright (C) 2026 Jamie Martin
 #
 # This program is free software: you can redistribute it and/or modify
@@ -54,7 +54,7 @@ DARK = "dark"
 LIGHT = "light"
 
 __module_name__ = "Dispatcher Core"
-__version__ = "1.5.8"
+__version__ = "1.6.0"
 ISSUE_REPORT_URL = "https://github.com/jmartinmaster/AIMartinSuiteGLCVersion/issues/new/choose"
 WINDOWS_APP_ID = "JamieMartin.TheMartinSuite.GLC"
 APP_ICON_RELATIVE_PATH = "icon.ico"
@@ -505,7 +505,7 @@ class Dispatcher:
     def __init__(self, root):
         apply_windows_app_id()
         self.root = root
-        self.root.title(f"The Martin Suite - {__version__}")
+        self.root.title(f"Production Logging Center - {__version__}")
         screen_width = max(1, self.root.winfo_screenwidth())
         screen_height = max(1, self.root.winfo_screenheight())
         initial_width = max(1040, min(1440, int(screen_width * 0.78)))
@@ -788,7 +788,7 @@ class Dispatcher:
 
         self.sidebar_title = tb.Label(
             self.sidebar,
-            text="MARTIN SUITE",
+            text="LOGGING CENTER",
             style="Martin.SidebarTitle.TLabel",
             anchor=W,
             justify=LEFT,
@@ -913,7 +913,7 @@ class Dispatcher:
         if not os.path.exists(self.modules_path):
             return []
 
-        hidden_modules = {"about", "security", "app_logging", "data_handler", "downtime_codes", "help_viewer", "persistence", "splash", "theme_manager", "utils"}
+        hidden_modules = {"about", "security", "app_logging", "data_handler", "downtime_codes", "help_viewer", "persistence", "splash", "theme_manager", "utils", "dev_logging"}
         nav_modules = []
 
         for filename in os.listdir(self.modules_path):

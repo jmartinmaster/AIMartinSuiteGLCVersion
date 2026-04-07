@@ -1,4 +1,4 @@
-# The Martin Suite (GLC Edition)
+# Production Logging Center (GLC Edition)
 # Copyright (C) 2026 Jamie Martin
 #
 # This program is free software: you can redistribute it and/or modify
@@ -326,10 +326,16 @@ class LayoutManager:
             width_var = tk.StringVar(value=str(field.get("width", 10)))
             readonly_var = tk.BooleanVar(value=bool(field.get("readonly", False)))
             default_var = tk.StringVar(value=str(field.get("default", "")))
+            export_enabled_var = tk.BooleanVar(value=field.get("export_enabled", True))
+            import_enabled_var = tk.BooleanVar(value=field.get("import_enabled", True))
+            suffix_var = tk.StringVar(value=str(field.get("suffix", "")))
 
             if not is_locked_readonly:
                 tb.Label(grid_row, text="Width", bootstyle=PRIMARY).pack(side=LEFT)
                 tb.Entry(grid_row, textvariable=width_var, width=5).pack(side=LEFT, padx=(6, 0))
+                # Export/Import toggles
+                tb.Checkbutton(grid_row, text="Export", variable=export_enabled_var, bootstyle="round-toggle").pack(side=LEFT, padx=(6, 0))
+                tb.Checkbutton(grid_row, text="Import", variable=import_enabled_var, bootstyle="round-toggle").pack(side=LEFT, padx=(6, 0))
 
             edit_row = tb.Frame(card)
             edit_row.pack(fill=X, pady=(6, 0))
@@ -340,18 +346,24 @@ class LayoutManager:
             if not is_locked_readonly:
                 tb.Checkbutton(edit_row, text="Readonly", variable=readonly_var, bootstyle="round-toggle").pack(side=LEFT, padx=(0, 12))
 
+            # Suffix field (always shown for clarity)
+            tb.Label(edit_row, text="Suffix", bootstyle=PRIMARY).pack(side=LEFT, padx=(0, 4))
+            tb.Entry(edit_row, textvariable=suffix_var, width=10).pack(side=LEFT, padx=(0, 12))
             tb.Button(
                 edit_row,
                 text="Apply",
                 bootstyle=SUCCESS,
-                command=lambda field_id=field.get("id"), row_var=row_var, col_var=col_var, cell_var=cell_var, width_var=width_var, readonly_var=readonly_var, default_var=default_var: self.update_header_field_from_block(
+                command=lambda field_id=field.get("id"), row_var=row_var, col_var=col_var, cell_var=cell_var, width_var=width_var, readonly_var=readonly_var, default_var=default_var, suffix_var=suffix_var: self.update_header_field_from_block(
                     field_id,
                     row_var.get(),
                     col_var.get(),
                     cell_var.get(),
                     width_var.get(),
                     readonly_var.get(),
-                    default_var.get()
+                    default_var.get(),
+                    export_enabled_var.get(),
+                    import_enabled_var.get(),
+                    suffix_var.get()
                 )
             ).pack(side=RIGHT)
 
@@ -496,7 +508,7 @@ class LayoutManager:
         except Exception as e:
             Messagebox.show_error(f"Could not remove header field: {e}", "Layout Edit Error")
 
-    def update_header_field_from_block(self, field_id, row_value, col_value, cell_value, width_value, readonly_value, default_value):
+    def update_header_field_from_block(self, field_id, row_value, col_value, cell_value, width_value, readonly_value, default_value, export_enabled_value=True, import_enabled_value=True, suffix_value=None):
         try:
             if not field_id:
                 raise ValueError("Field ID is missing.")
@@ -528,6 +540,8 @@ class LayoutManager:
             else:
                 target_field["width"] = width
                 target_field.pop("readonly", None)
+            target_field["export_enabled"] = bool(export_enabled_value)
+            target_field["import_enabled"] = bool(import_enabled_value)
             if target_field.get("id") != "cast_date":
                 if cell:
                     target_field["cell"] = cell
@@ -537,6 +551,12 @@ class LayoutManager:
                     target_field["default"] = default_text
                 else:
                     target_field.pop("default", None)
+                # Suffix
+                if suffix_value is not None:
+                    if str(suffix_value).strip():
+                        target_field["suffix"] = str(suffix_value)
+                    else:
+                        target_field.pop("suffix", None)
 
             self.build_layout_update(config, f"Updated field '{field_id}'")
         except Exception as e:

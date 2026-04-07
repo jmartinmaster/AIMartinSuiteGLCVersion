@@ -1,14 +1,14 @@
 # Changelog
 
-This changelog tracks the main branch release line for The Martin Suite (GLC Edition).
+This changelog tracks the main branch release line for Production Logging Center (GLC Edition).
 
 Version headings below are aligned to the current `1.x` release line used by Dispatcher Core. Earlier work has been grouped into practical release milestones so the shipped feature history is easier to follow without rewriting older module version markers.
 
-## [1.5.8] - 2026-04-06
+## [1.6.0] - 2026-04-07
 
 ### Changed
 
-- Promoted Dispatcher Core to stable version `1.5.8` for the security-mode, developer-tools, and documentation refresh release.
+- Promoted Dispatcher Core to stable version `1.6.0` for workbook resource management, build system fix, and version bump.
 - Moved update repository configuration and external module editing out of Settings Manager and into Security Admin as developer-only tools.
 - Added a persisted non-secure mode so normal visible modules can open without vault prompts while developer tools remain protected behind developer login.
 - Restricted developer-vault deletion so only an active developer session can remove a developer vault, including while non-secure mode is enabled.
@@ -23,7 +23,7 @@ Version headings below are aligned to the current `1.x` release line used by Dis
 ### Changed
 
 - Promoted Dispatcher Core to stable version `1.5.6` for the grouped documentation restore and Help menu issue-report release.
-- Updated `Data Handler` to version `1.1.2` for export-folder naming cleanup under configured base export directories.
+- Updated `Data Handler` to version `1.1.4` for workbook resource management and version bump.
 - Changed organized exports to use `YYYY/MM MonthName` month folders under the selected base export directory.
 - Added automatic migration so a legacy `YYYY/MM` export folder is renamed in place to `YYYY/MM MonthName` when that export month is used.
 - Added grouped documentation restores in Update Manager so Help Center markdown files and `LICENSE.txt` can be refreshed without rebuilding the EXE or choosing individual doc files.
@@ -63,7 +63,7 @@ Version headings below are aligned to the current `1.x` release line used by Dis
 
 - Promoted Dispatcher Core to stable version `1.5.0` for the runtime-control and module-source selection release.
 - Added settings-controlled module persistence so selected tools can keep their live in-progress state across navigation within the current app session.
-- Changed source-build runtime resolution to prefer the suite's own `.venv` before environment-variable or system Python fallbacks.
+- Changed source-build runtime resolution to prefer Logging Center's own `.venv` before environment-variable or system Python fallbacks.
 - Changed external module loading to automatic per-file fallback so a matching file in the external `modules` folder is used first and bundled modules remain active everywhere else.
 - Updated About so loaded module entries can show `(external)` when the live module came from the external `modules` folder, even when its version matches the bundled copy.
 - Routed Production Log header values through shared normalization so header edits, JSON drafts, and Excel import/export stay formatted consistently, including derived `Target Time`.
@@ -89,7 +89,7 @@ Version headings below are aligned to the current `1.x` release line used by Dis
 ### Changed
 
 - Promoted Dispatcher Core to stable version `1.2.4` for the versioned packaged updater release.
-- Switched packaged builds to versioned EXE names such as `TheMartinSuite_GLC_v1.2.4.exe`.
+- Switched packaged builds to versioned EXE names such as `ProductionLoggingCenter_GLC_v1.2.4.exe`.
 - Updated the build flow so preserved versioned EXEs can coexist in `dist` during side-by-side update testing.
 - Reworked packaged updates so the newer EXE downloads beside the current one, launches separately, and leaves the older copy available for testing until cleanup is confirmed.
 - Extended the updater so source-mode checks now require a published EXE artifact and can download and launch that packaged EXE for handoff testing.
@@ -172,7 +172,7 @@ Version headings below are aligned to the current `1.x` release line used by Dis
 - Added a visible Target Time field in the Production Log header, a derived Ghost Time indicator in the footer, and a dedicated Downtime action row so Balance Downtime stays visible during entry.
 - Routed the Production Log Target Time field through `header_fields` so it now saves in draft JSON and participates in the normal workbook header mapping.
 - Added a Settings option for keeping selected modules live across navigation so returning to a chosen module restores the same in-progress UI state during the current app session.
-- Changed source-build runtime discovery to prefer the suite's own `.venv` before environment-variable or system Python fallbacks.
+- Changed source-build runtime discovery to prefer Logging Center's own `.venv` before environment-variable or system Python fallbacks.
 - Added a Settings-controlled External Module Overrides switch so downloaded or user-supplied files in the external `modules` folder can be activated explicitly instead of always taking precedence.
 - Updated About so modules currently loaded from the external `modules` folder are marked with `(external)` even when the version number matches the bundled copy.
 - Hardened Production Log import so production columns are detected from real workbook headers, which keeps older `F = Molds` logs and newer `G = Molds` logs loading correctly while keeping Ghost internal to the app's balancing workflow.
@@ -273,7 +273,7 @@ Version headings below are aligned to the current `1.x` release line used by Dis
 
 ### Added
 
-- Initial release of The Martin Suite (GLC Edition).
+- Initial release of Production Logging Center (GLC Edition).
 - Production Log workflow for shift entry and export handling.
 - Dynamic export organization and settings-driven defaults.
 - Rate Manager and Layout Manager modules.

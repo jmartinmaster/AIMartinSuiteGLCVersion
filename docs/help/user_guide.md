@@ -1,10 +1,11 @@
-# The Martin Suite User Guide
 
-## What This Program Does
+# Production Logging Center User Guide
 
-The Martin Suite is a floor-focused desktop application for recording Disamatic production, tracking downtime, managing standard production rates, and exporting the finished shift record into the plant Excel template.
 
-The suite is built around four day-to-day jobs:
+Production Logging Center is a floor-focused desktop application for recording Disamatic production, tracking downtime, managing standard production rates, and exporting the finished shift record into the plant Excel template.
+
+
+Logging Center is built around four day-to-day jobs:
 
 1. Fill out the current shift production log.
 2. Save and recover draft work during the shift.
@@ -49,9 +50,11 @@ The draft status area at the top of Production Log helps prevent lost work witho
 - The status line shows the latest draft name, current draft name, dirty/saved state, pending count, and recovery count.
 - Draft saves, imports, and exports now use toast notifications for routine success messages.
 
-If you load a draft or import Excel while unsaved changes exist, the suite asks for confirmation before replacing the current session.
+
+If you load a draft or import Excel while unsaved changes exist, Logging Center asks for confirmation before replacing the current session.
 
 ## Excel Import And Export Notes
+
 
 - Export uses the template path stored in `layout_config.json`.
 - Export writes into the configured base export folder and, when date organization is enabled, uses `YYYY/MM MonthName` subfolders.

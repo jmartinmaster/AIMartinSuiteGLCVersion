@@ -32,7 +32,7 @@ Use Production Log to enter the current shift data.
 - The status line shows the latest draft name, current draft name, dirty/saved state, pending count, and recovery count.
 - Draft saves, imports, and exports use toast notifications for routine success messages.
 
-If you load a draft or import Excel while unsaved changes exist, the suite asks for confirmation before replacing the current session.
+If you load a draft or import Excel while unsaved changes exist, Logging Center asks for confirmation before replacing the current session.
 
 ## Excel Import And Export Notes
 

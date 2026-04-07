@@ -1,4 +1,4 @@
-# The Martin Suite (GLC Edition)
+# Production Logging Center (GLC Edition)
 # Copyright (C) 2026 Jamie Martin
 #
 # This program is free software: you can redistribute it and/or modify

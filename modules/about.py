@@ -1,4 +1,4 @@
-# The Martin Suite (GLC Edition)
+# Production Logging Center (GLC Edition)
 # Copyright (C) 2026 Jamie Martin
 #
 # This program is free software: you can redistribute it and/or modify
@@ -39,7 +39,7 @@ class AboutSection:
         container.pack(fill=BOTH, expand=True)
 
         # Header / Branding
-        tb.Label(container, text="THE MARTIN SUITE", style="Martin.PageTitle.TLabel").pack()
+        tb.Label(container, text="PRODUCTION LOGGING CENTER", style="Martin.PageTitle.TLabel").pack()
         tb.Label(container, text="GLC Edition", style="Martin.Subtitle.TLabel").pack(pady=5)
         
         tb.Separator(container, orient=HORIZONTAL).pack(fill=X, pady=20)
