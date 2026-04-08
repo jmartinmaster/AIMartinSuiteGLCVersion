@@ -35,7 +35,7 @@ from modules.theme_manager import get_theme_tokens
 from modules.utils import external_path, local_or_resource_path, resource_path
 
 __module_name__ = "Production Logging Center"
-__version__ = "1.2.5"
+__version__ = "1.2.8"
 BALANCE_DOWNTIME_CAUSE = "Time Balance Adjustment"
 DEFAULT_GHOST_LABEL = "Ghost Time: 0 min"
 
@@ -86,7 +86,15 @@ class ProductionLog:
         
         self.default_hours = str(self.settings.get("default_shift_hours", 8.0))
         self.default_goal = str(self.settings.get("default_goal_mph", 240))
-        self.auto_save_interval = int(self.settings.get("auto_save_interval_min", 5)) * 60000
+        # Robustly parse auto_save_interval_min, fallback to 5 if missing/invalid
+        asi_raw = self.settings.get("auto_save_interval_min", 5)
+        try:
+            asi_int = int(str(asi_raw).strip())
+            if asi_int <= 0:
+                asi_int = 5
+        except Exception:
+            asi_int = 5
+        self.auto_save_interval = asi_int * 60000
         self.current_draft_path = None
         self.latest_draft_path = None
         self.last_export_path = None
@@ -119,8 +127,13 @@ class ProductionLog:
         # Collect and normalize header data, then inject total_molds
         header = self.data_handler.normalize_header_data(self.get_raw_header_data())
         # Calculate total_molds from production rows
+        def safe_int(val):
+            try:
+                return int(val)
+            except Exception:
+                return 0
         try:
-            total_molds = sum(int(row["molds"].get() or 0) for row in self.production_rows)
+            total_molds = sum(safe_int(row["molds"].get()) for row in self.production_rows)
         except Exception:
             total_molds = 0
         header["total_molds"] = str(total_molds)
@@ -224,7 +237,7 @@ class ProductionLog:
         filename = f"draft_{raw_date}_shift{shift_str}.json"
         return os.path.join(self.get_pending_dir(), filename)
 
-    def save_draft(self, is_auto=False):
+    def save_draft(self, is_auto=False, suppress_toast=False):
         try:
             data = self.collect_ui_data()
             if is_auto and not self.has_unsaved_changes:
@@ -253,7 +266,7 @@ class ProductionLog:
             self.current_draft_path = draft_path
             self.mark_clean(data)
 
-            if not is_auto:
+            if not is_auto and not suppress_toast:
                 message = f"Draft saved to {os.path.basename(draft_path)}."
                 if backup_info.get("versioned_backup_path"):
                     message += " A recovery snapshot of the previous draft was stored in data/pending/history."
@@ -285,9 +298,20 @@ class ProductionLog:
         self.resume_latest_btn = tb.Button(recovery_wrapper, text="Resume Latest", bootstyle=PRIMARY, command=self.resume_latest_draft)
         self.resume_latest_btn.pack(side=LEFT, padx=5)
         tb.Button(recovery_wrapper, text="Pending Drafts", bootstyle=SECONDARY, command=self.show_pending).pack(side=LEFT, padx=5)
-        tb.Button(recovery_wrapper, text="Backup / Recovery", bootstyle=INFO, command=self.open_recovery_viewer).pack(side=LEFT, padx=5)
+        # Add Refresh View button to reload the module and open previous draft
+        tb.Button(recovery_wrapper, text="Refresh View", bootstyle=INFO, command=self.refresh_view).pack(side=LEFT, padx=5)
         self.delete_current_draft_btn = tb.Button(recovery_wrapper, text="Delete Current Draft", bootstyle=DANGER, command=self.delete_current_draft)
         self.delete_current_draft_btn.pack(side=LEFT, padx=5)
+
+    def refresh_view(self):
+        """
+        Reloads the module and opens the previous draft (latest draft).
+        """
+        latest = self.get_latest_pending_draft()
+        if latest:
+            self.load_draft_path(latest["path"])
+        else:
+            self.dispatcher.show_toast("Refresh View", "No previous draft found to reload.", INFO)
 
     def build_header_section(self):
         header_wrapper = tb.Labelframe(self.parent, text=" Form 510-09: Production Logging Center Header ", padding=15, style="Martin.Card.TLabelframe")
@@ -359,7 +383,7 @@ class ProductionLog:
         
         tb.Button(footer, text="Calculate All", command=self.calculate_metrics, bootstyle=INFO).pack(side=RIGHT)
         tb.Button(footer, text="Save Draft", command=self.save_draft, bootstyle=SECONDARY).pack(side=LEFT, padx=5)
-        tb.Button(footer, text="Export Excel", command=self.export_to_excel, bootstyle=SUCCESS).pack(side=LEFT, padx=5)
+        tb.Button(footer, text="Save and Open", command=self.export_to_excel, bootstyle=SUCCESS).pack(side=LEFT, padx=5)
         self.open_export_btn = tb.Button(footer, text="Open Last Export", command=self.open_last_exported_file, bootstyle=INFO)
         self.open_export_btn.pack(side=LEFT, padx=5)
         self.print_export_btn = tb.Button(footer, text="Print Last Export", command=self.print_last_exported_file, bootstyle=WARNING)
@@ -383,6 +407,10 @@ class ProductionLog:
             variable=row["rate_override_enabled_var"],
             command=lambda current_row=row: self.on_rate_override_toggled(current_row),
         )
+        # Add delete button at the start
+        del_btn = tb.Button(row_frame, text="✖", width=2, bootstyle=DANGER, command=lambda r=row: self.delete_production_row_with_save_reload(r))
+        del_btn.pack(side=LEFT, padx=(0, 2))
+        row["_delete_btn"] = del_btn
         row["rate_lookup"].config(state="readonly")
         for key in ("shop_order", "part_number", "rate_lookup", "rate_override_enabled", "molds"):
             row[key].pack(side=LEFT, padx=5)
@@ -410,6 +438,10 @@ class ProductionLog:
             "cause": tb.Entry(row_frame),
             "time_calc": tb.Label(row_frame, text="0 min", width=8, foreground="red", font=('', 10, 'bold'))
         }
+        # Add delete button at the start
+        del_btn = tb.Button(row_frame, text="✖", width=2, bootstyle=DANGER, command=lambda r=row: self.delete_downtime_row_with_save_reload(r))
+        del_btn.pack(side=LEFT, padx=(0, 2))
+        row["_delete_btn"] = del_btn
         row["start"].pack(side=LEFT, padx=5)
         row["stop"].pack(side=LEFT, padx=5)
         row["code"].pack(side=LEFT, padx=5)
@@ -426,6 +458,61 @@ class ProductionLog:
         self.bind_dirty_tracking(row["cause"], ("<KeyRelease>",))
         self.downtime_rows.append(row)
         return row
+
+    def delete_production_row_with_save_reload(self, row):
+        # Save draft, delete row from draft file, reload draft (no toast)
+        self.save_draft(suppress_toast=True)
+        if self.current_draft_path and os.path.exists(self.current_draft_path):
+            try:
+                with open(self.current_draft_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                # Find the index of the row to delete by matching unique fields
+                prod_data = data.get('production', [])
+                # Try to match by all fields in the row
+                def row_match(d):
+                    return (
+                        str(d.get('shop_order', '')) == str(self.get_widget_value(row['shop_order'])) and
+                        str(d.get('part_number', '')) == str(self.get_widget_value(row['part_number'])) and
+                        str(d.get('rate_lookup', '')) == str(self.get_widget_value(row['rate_lookup'])) and
+                        str(d.get('molds', '')) == str(self.get_widget_value(row['molds'])) and
+                        str(d.get('time_calc', '')) == str(self.get_widget_value(row['time_calc']))
+                    )
+                idx = next((i for i, d in enumerate(prod_data) if row_match(d)), None)
+                if idx is not None:
+                    del prod_data[idx]
+                    data['production'] = prod_data
+                    with open(self.current_draft_path, 'w', encoding='utf-8') as f:
+                        json.dump(data, f, indent=2)
+            except Exception as e:
+                Messagebox.show_error(f"Could not update draft after row delete: {e}", "Draft Update Error")
+            self.load_draft_path(self.current_draft_path)
+
+
+    def delete_downtime_row_with_save_reload(self, row):
+        # Save draft, delete row from draft file, reload draft (no toast)
+        self.save_draft(suppress_toast=True)
+        if self.current_draft_path and os.path.exists(self.current_draft_path):
+            try:
+                with open(self.current_draft_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                dt_data = data.get('downtime', [])
+                def row_match(d):
+                    return (
+                        str(d.get('start', '')) == str(self.get_widget_value(row['start'])) and
+                        str(d.get('stop', '')) == str(self.get_widget_value(row['stop'])) and
+                        str(d.get('code', '')) == str(self.get_widget_value(row['code'])) and
+                        str(d.get('cause', '')) == str(self.get_widget_value(row['cause'])) and
+                        str(d.get('time_calc', '')) == str(self.get_widget_value(row['time_calc']))
+                    )
+                idx = next((i for i, d in enumerate(dt_data) if row_match(d)), None)
+                if idx is not None:
+                    del dt_data[idx]
+                    data['downtime'] = dt_data
+                    with open(self.current_draft_path, 'w', encoding='utf-8') as f:
+                        json.dump(data, f, indent=2)
+            except Exception as e:
+                Messagebox.show_error(f"Could not update draft after row delete: {e}", "Draft Update Error")
+            self.load_draft_path(self.current_draft_path)
 
     def refresh_downtime_codes(self):
         self.dt_codes = get_code_options()
@@ -1100,8 +1187,13 @@ class ProductionLog:
         self.update_ghost_total_display()
 
     def calculate_metrics(self):
+        def safe_int(val):
+            try:
+                return int(val)
+            except Exception:
+                return 0
         try:
-            total_molds = sum(int(row["molds"].get() or 0) for row in self.production_rows)
+            total_molds = sum(safe_int(row["molds"].get()) for row in self.production_rows)
             hours = float(self.entries["hours"].get() or 8.0)
             goal = float(self.entries["goal_mph"].get() or 240)
             eff = (total_molds / (hours * goal)) * 100 if hours and goal else 0
@@ -1132,11 +1224,8 @@ class ProductionLog:
                 SUCCESS,
             )
 
-            if messagebox.askyesno(
-                "Export Complete",
-                f"Workbook created successfully.\n\n{target_path}\n\nOpen it in the default application now so you can review it before printing?",
-            ):
-                self.open_last_exported_file(show_prompt=False)
+            # Always open the file automatically after export
+            self.open_last_exported_file(show_prompt=False)
         except Exception as e:
             Messagebox.show_error(f"Export failed: {e}", "Error")
 

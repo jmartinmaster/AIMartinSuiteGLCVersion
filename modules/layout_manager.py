@@ -28,7 +28,7 @@ from modules.theme_manager import get_theme_tokens, normalize_theme
 from modules.utils import external_path, local_or_resource_path, resource_path
 
 __module_name__ = "Layout Manager"
-__version__ = "1.0.5"
+__version__ = "1.0.8"
 
 class LayoutManager:
     def __init__(self, parent, dispatcher):
@@ -203,18 +203,20 @@ class LayoutManager:
         return shell, card
 
     def _relayout_card_group(self, container, widgets):
+        # Arrange cards in two columns: left and right, but card content stays left-aligned
         if container is None or not widgets:
             return
-        available_width = max(container.winfo_width(), self.block_canvas.winfo_width() - 36, 320)
-        columns = 4 if available_width >= 1500 else 3 if available_width >= 1080 else 2 if available_width >= 700 else 1
-        for column_index in range(3):
+        # Remove all column configurations
+        for column_index in range(10):
             container.columnconfigure(column_index, weight=0, uniform="")
-        container.columnconfigure(3, weight=0, uniform="")
-        for column_index in range(columns):
-            container.columnconfigure(column_index, weight=1, uniform="layout-cards")
+        container.columnconfigure(0, weight=1, uniform="layout-cards")
+        container.columnconfigure(1, weight=1, uniform="layout-cards")
         for index, widget in enumerate(widgets):
             widget.grid_forget()
-            widget.grid(row=index // columns, column=index % columns, padx=6, pady=6, sticky=NW)
+            row = index // 2
+            col = index % 2
+            sticky = NW if col == 0 else NE
+            widget.grid(row=row, column=col, padx=6, pady=6, sticky=sticky)
 
     def _relayout_block_cards(self):
         self._relayout_card_group(getattr(self, "header_cards_container", None), self.header_card_widgets)
@@ -267,6 +269,20 @@ class LayoutManager:
     def refresh_block_view(self, config):
         self.current_block_config = config
         self._reset_block_registries()
+
+        # --- PATCH: Robustly handle block_inner and canvas window ---
+        # Check if block_inner still exists as a valid child of block_canvas
+        try:
+            # This will raise if block_inner is invalid
+            self.block_inner.winfo_exists()
+        except Exception:
+            # Recreate block_inner and canvas window if missing
+            self.block_inner = tb.Frame(self.block_canvas)
+            self.block_canvas_window = self.block_canvas.create_window((0, 0), window=self.block_inner, anchor="nw")
+            self.block_inner.bind("<Configure>", self.on_block_frame_configure)
+            self.block_canvas.bind("<Configure>", self.on_block_canvas_configure)
+
+        # Remove all children of block_inner (but not block_inner itself)
         for child in self.block_inner.winfo_children():
             child.destroy()
 
@@ -692,7 +708,7 @@ class LayoutManager:
             self.preview_tooltip = None
 
     def update_preview(self):
-        """Renders the current text area JSON into a visual grid."""
+        """Renders a simplified grid: only outer row/col indicators and clickable field label/id with position."""
         self.preview_after_id = None
         self.hide_preview_tooltip()
         self.preview_cells = []
@@ -713,6 +729,7 @@ class LayoutManager:
             preview_grid = tk.Frame(self.preview_canvas, bg=self.preview_grid_bg)
             preview_grid.pack(anchor=NW, fill=BOTH, expand=True)
 
+            # Outer col indicators
             tb.Label(preview_grid, text=" ", width=6, bootstyle=PRIMARY).grid(row=0, column=0, padx=3, pady=3)
             for col in range(max_col + 1):
                 tb.Label(preview_grid, text=f"Col {col}", width=14, bootstyle=PRIMARY).grid(row=0, column=col + 1, padx=3, pady=3, sticky=EW)
@@ -723,44 +740,38 @@ class LayoutManager:
                 field_positions.setdefault(position, []).append(field)
 
             for row in range(max_row + 1):
+                # Outer row indicators
                 tb.Label(preview_grid, text=f"Row {row}", width=8, bootstyle=PRIMARY).grid(row=row + 1, column=0, padx=3, pady=3, sticky=NS)
 
                 for col in range(max_col + 1):
                     cell_frame = tk.Frame(preview_grid, bg=self.preview_cell_bg, highlightthickness=1, highlightbackground=self.preview_border)
                     cell_frame.grid(row=row + 1, column=col + 1, padx=3, pady=3, sticky=NSEW)
                     cell_frame.grid_propagate(False)
-                    cell_frame.configure(width=130, height=70)
-
-                    coord_label = tk.Label(cell_frame, text=f"({row}, {col})", bg=self.preview_cell_bg, fg=self.preview_muted_fg, anchor="w")
-                    coord_label.pack(anchor=NW)
+                    cell_frame.configure(width=130, height=40)
 
                     fields_here = field_positions.get((row, col), [])
                     if fields_here:
-                        item_keys = [self._card_key_for_field(field.get("id", "")) for field in fields_here if field.get("id")]
-                        self.preview_cells.append({"frame": cell_frame, "item_keys": item_keys})
-                        if item_keys:
-                            primary_item_key = item_keys[0]
-                            cell_frame.bind("<Button-1>", lambda _event, item_key=primary_item_key: self.select_block_item(item_key, scroll=True))
-                            coord_label.bind("<Button-1>", lambda _event, item_key=primary_item_key: self.select_block_item(item_key, scroll=True))
-                        for field in fields_here:
-                            item_key = self._card_key_for_field(field.get("id", ""))
-                            label_fg = self.preview_readonly_fg if field.get("readonly") else self.preview_text_fg
-                            field_label = tk.Label(
-                                cell_frame,
-                                text=field.get("label", field.get("id", "Unnamed")),
-                                bg=self.preview_cell_bg,
-                                fg=label_fg,
-                                wraplength=110,
-                                justify=LEFT,
-                                anchor="w"
-                            )
-                            field_label.pack(anchor=W, pady=(4, 0))
-                            self.bind_preview_tooltip(field_label, field)
-                            self.bind_preview_tooltip(cell_frame, field)
-                            field_label.bind("<Button-1>", lambda _event, key=item_key: self.select_block_item(key, scroll=True))
-                            self.preview_field_labels.setdefault(item_key, []).append((field_label, label_fg))
+                        # Only show the first field in the cell (usually only one)
+                        field = fields_here[0]
+                        item_key = self._card_key_for_field(field.get("id", ""))
+                        label_fg = self.preview_readonly_fg if field.get("readonly") else self.preview_text_fg
+                        label_text = f"{field.get('label', field.get('id', 'Unnamed'))}\n({row}, {col})"
+                        field_label = tk.Label(
+                            cell_frame,
+                            text=label_text,
+                            bg=self.preview_cell_bg,
+                            fg=label_fg,
+                            wraplength=120,
+                            justify=LEFT,
+                            anchor="center"
+                        )
+                        field_label.pack(expand=True, fill=BOTH)
+                        field_label.bind("<Button-1>", lambda _event, key=item_key: self.select_block_item(key, scroll=True))
+                        self.preview_cells.append({"frame": cell_frame, "item_keys": [item_key]})
+                        self.preview_field_labels.setdefault(item_key, []).append((field_label, label_fg))
                     else:
-                        tk.Label(cell_frame, text="empty", bg=self.preview_cell_bg, fg=self.preview_empty_fg, anchor="w").pack(anchor=W, pady=(8, 0))
+                        # Empty cell: keep minimal
+                        pass
 
             for col in range(max_col + 2):
                 preview_grid.columnconfigure(col, weight=1)
