@@ -155,6 +155,18 @@ class LayoutManager:
         self.dispatcher.bind_mousewheel_to_widget_tree(self.block_inner, self.block_canvas)
         self.dispatcher.bind_mousewheel_to_widget_tree(self.text_area, self.text_area)
 
+    def on_unload(self):
+        if self.preview_after_id is not None:
+            try:
+                self.parent.after_cancel(self.preview_after_id)
+            except tk.TclError:
+                pass
+            self.preview_after_id = None
+        try:
+            self.parent.unbind_all("<Control-s>")
+        except tk.TclError:
+            pass
+
     def set_editor_text(self, config_data, mark_clean=True):
         self.suppress_modified_event = True
         self.text_area.delete("1.0", END)
@@ -219,6 +231,11 @@ class LayoutManager:
             widget.grid(row=row, column=col, padx=6, pady=6, sticky=sticky)
 
     def _relayout_block_cards(self):
+        try:
+            if not self.block_canvas.winfo_exists():
+                return
+        except tk.TclError:
+            return
         self._relayout_card_group(getattr(self, "header_cards_container", None), self.header_card_widgets)
         self._relayout_card_group(getattr(self, "mapping_cards_container", None), self.mapping_card_widgets)
         self.on_block_frame_configure()
@@ -710,6 +727,11 @@ class LayoutManager:
     def update_preview(self):
         """Renders a simplified grid: only outer row/col indicators and clickable field label/id with position."""
         self.preview_after_id = None
+        try:
+            if not self.preview_canvas.winfo_exists():
+                return
+        except tk.TclError:
+            return
         self.hide_preview_tooltip()
         self.preview_cells = []
         self.preview_field_labels = {}
