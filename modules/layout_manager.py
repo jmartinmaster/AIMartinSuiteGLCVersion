@@ -28,7 +28,7 @@ from modules.theme_manager import get_theme_tokens, normalize_theme
 from modules.utils import external_path, local_or_resource_path, resource_path
 
 __module_name__ = "Layout Manager"
-__version__ = "1.0.8"
+__version__ = "1.1.0"
 
 class LayoutManager:
     def __init__(self, parent, dispatcher):
