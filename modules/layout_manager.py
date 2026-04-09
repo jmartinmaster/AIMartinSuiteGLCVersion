@@ -28,7 +28,7 @@ from modules.theme_manager import get_theme_tokens, normalize_theme
 from modules.utils import external_path, local_or_resource_path, resource_path
 
 __module_name__ = "Layout Manager"
-__version__ = "1.0.8"
+__version__ = "1.1.0"
 
 class LayoutManager:
     def __init__(self, parent, dispatcher):
@@ -53,7 +53,7 @@ class LayoutManager:
         # Save operations always target the local config so packaged builds remain editable.
         self.config_path = local_or_resource_path("layout_config.json")
         self.save_path = self.local_config
-        self.protected_field_ids = {"date", "cast_date", "shift", "hours", "goal_mph"}
+        self.protected_field_ids = {"date", "cast_date", "shift", "hours", "goal_mph", "total_molds"}
         
         self.setup_ui()
 
