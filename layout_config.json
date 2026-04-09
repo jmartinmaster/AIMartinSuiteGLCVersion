@@ -115,7 +115,7 @@
             "row": 2,
             "col": 0,
             "width": 10,
-            "readonly": true,
+            "readonly": false,
             "cell": "H27",
             "export_enabled": true,
             "import_enabled": false
