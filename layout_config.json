@@ -108,6 +108,17 @@
             "cell": "A4",
             "export_enabled": true,
             "import_enabled": true
+        },
+        {
+            "id": "total_molds",
+            "label": "Total Molds",
+            "row": 2,
+            "col": 0,
+            "width": 10,
+            "readonly": true,
+            "cell": "H27",
+            "export_enabled": true,
+            "import_enabled": false
         }
     ],
     "production_mapping": {

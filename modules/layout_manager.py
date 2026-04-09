@@ -53,7 +53,7 @@ class LayoutManager:
         # Save operations always target the local config so packaged builds remain editable.
         self.config_path = local_or_resource_path("layout_config.json")
         self.save_path = self.local_config
-        self.protected_field_ids = {"date", "cast_date", "shift", "hours", "goal_mph"}
+        self.protected_field_ids = {"date", "cast_date", "shift", "hours", "goal_mph", "total_molds"}
         
         self.setup_ui()
 

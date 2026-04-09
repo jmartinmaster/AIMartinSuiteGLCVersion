@@ -321,28 +321,23 @@ class ProductionLog:
                 config = json.load(f)
             for field in config["header_fields"]:
                 tb.Label(header_wrapper, text=field["label"], style="Martin.Section.TLabel").grid(row=field["row"], column=field["col"], padx=5, pady=5, sticky=W)
-                if field["id"] == "total_molds":
-                    # Display as readonly label, not entry
-                    val = tk.StringVar(value="0")
-                    ent = tb.Label(header_wrapper, textvariable=val, width=field.get("width", 10), style="Martin.Section.TLabel")
-                    ent.grid(row=field["row"], column=field["col"]+1, padx=5, pady=5, sticky=W)
-                    self.entries[field["id"]] = val
-                else:
-                    ent = tb.Entry(header_wrapper, width=field.get("width", 10))
-                    default_val = field.get("default", "")
-                    if field["id"] == "hours":
-                        default_val = self.default_hours
-                    elif field["id"] == "goal_mph":
-                        default_val = self.default_goal
-                    if default_val:
-                        ent.insert(0, default_val)
-                    if field.get("readonly"):
-                        ent.config(state="readonly", bootstyle=INFO)
-                    ent.grid(row=field["row"], column=field["col"]+1, padx=5, pady=5, sticky=W)
-                    self.entries[field["id"]] = ent
-                    if not field.get("readonly"):
-                        self.bind_dirty_tracking(ent, ("<KeyRelease>",))
-                        ent.bind("<FocusOut>", self.on_header_field_focus_out, add="+")
+                ent = tb.Entry(header_wrapper, width=field.get("width", 10))
+                default_val = field.get("default", "")
+                if field["id"] == "hours":
+                    default_val = self.default_hours
+                elif field["id"] == "goal_mph":
+                    default_val = self.default_goal
+                elif field["id"] == "total_molds":
+                    default_val = "0"
+                if default_val:
+                    ent.insert(0, default_val)
+                if field.get("readonly"):
+                    ent.config(state="readonly", bootstyle=INFO)
+                ent.grid(row=field["row"], column=field["col"]+1, padx=5, pady=5, sticky=W)
+                self.entries[field["id"]] = ent
+                if not field.get("readonly"):
+                    self.bind_dirty_tracking(ent, ("<KeyRelease>",))
+                    ent.bind("<FocusOut>", self.on_header_field_focus_out, add="+")
             if "hours" in self.entries:
                 self.entries["hours"].bind("<KeyRelease>", self.on_hours_changed, add="+")
             if "goal_mph" in self.entries:
@@ -1166,9 +1161,7 @@ class ProductionLog:
                 row["time_calc"].config(text="0 min")
         # Update total_molds header field if present
         if "total_molds" in self.entries:
-            entry = self.entries["total_molds"]
-            if hasattr(entry, "set"):
-                entry.set(str(total_molds))
+            self.set_entry_value("total_molds", str(total_molds))
 
         for row in self.downtime_rows:
             try:
