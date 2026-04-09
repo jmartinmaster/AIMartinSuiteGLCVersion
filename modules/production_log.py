@@ -35,7 +35,7 @@ from modules.theme_manager import get_theme_tokens
 from modules.utils import external_path, local_or_resource_path, resource_path
 
 __module_name__ = "Production Logging Center"
-__version__ = "1.2.8"
+__version__ = "1.3.0"
 BALANCE_DOWNTIME_CAUSE = "Time Balance Adjustment"
 DEFAULT_GHOST_LABEL = "Ghost Time: 0 min"
 
