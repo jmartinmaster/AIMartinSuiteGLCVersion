@@ -1,6 +1,6 @@
 # App Icon Reference
 
-The Martin Suite uses a fixed icon pipeline so the app window, taskbar icon, and packaged EXE all stay aligned.
+Production Logging Center uses a fixed icon pipeline so the app window, taskbar icon, and packaged EXE all stay aligned.
 
 ## Hard-Coded Icon Files
 

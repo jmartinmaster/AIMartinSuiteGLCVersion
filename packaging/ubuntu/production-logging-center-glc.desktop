@@ -1,0 +1,10 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Production Logging Center
+Comment=Desktop production support application for GLC operators
+Exec=/usr/bin/production-logging-center-glc
+Icon=production-logging-center-glc
+Terminal=false
+Categories=Utility;Office;
+StartupWMClass=production-logging-center-glc

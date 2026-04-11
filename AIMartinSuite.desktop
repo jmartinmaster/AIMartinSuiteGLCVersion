@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=AIMartinSuite
+Exec=/home/jamie/Documents/AI-Martin/Security\ version/launch.sh
+Icon=/home/jamie/Documents/AI-Martin/Security version/assets/icons/icon.png
+Terminal=false
+Categories=Utility;Application;
