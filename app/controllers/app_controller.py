@@ -68,7 +68,7 @@ MANAGED_MODULE_NAMES = [
 class Dispatcher:
     def __init__(self, root, main_module=None):
         self.root = root
-        self.root.title(f"Production Logging Center - {getattr(main_module, '__version__', '2.0.4')}")
+        self.root.title(f"Production Logging Center - {getattr(main_module, '__version__', '2.0.5')}")
         self.root.geometry("1000x600")
         self._update_status_clear_after_id = None
 
@@ -628,6 +628,8 @@ class Dispatcher:
                     self.active_module_instance = session.get("instance")
                     self.active_module_frame = cached_frame
                     cached_frame.pack(fill=BOTH, expand=True)
+                    if hasattr(self.active_module_instance, "apply_theme"):
+                        self.active_module_instance.apply_theme()
                     self.content_area.update_idletasks()
                     self.view.set_active_navigation_button(module_name)
                     return
@@ -642,6 +644,8 @@ class Dispatcher:
                 self.active_module_name = module_name
                 self.active_module_instance = module.get_ui(module_frame, self)
                 self.active_module_frame = module_frame
+                if hasattr(self.active_module_instance, "apply_theme"):
+                    self.active_module_instance.apply_theme()
                 if self.is_module_persistent(module_name):
                     self.persistent_module_instances[module_name] = {
                         "instance": self.active_module_instance,
@@ -893,7 +897,7 @@ class Dispatcher:
             self._update_status_clear_after_id = None
 
     def prompt_old_executable_cleanup(self):
-        obsolete_executables = get_obsolete_local_executables(os.path.abspath(sys.executable), getattr(self.main_module, "__version__", "2.0.4"))
+        obsolete_executables = get_obsolete_local_executables(os.path.abspath(sys.executable), getattr(self.main_module, "__version__", "2.0.5"))
         if not obsolete_executables:
             return
 
@@ -932,6 +936,8 @@ class Dispatcher:
         style.theme_use(resolve_base_theme(normalized_theme))
         apply_readability_overrides(self.root, normalized_theme)
         self.view.apply_theme()
+        if hasattr(self.active_module_instance, "apply_theme"):
+            self.active_module_instance.apply_theme()
         self.root.update_idletasks()
         return normalized_theme
 

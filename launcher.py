@@ -25,7 +25,7 @@ from app.controllers.app_controller import Dispatcher
 from app.app_platform import SPLASH_LOGO_RELATIVE_PATH, apply_app_icon, apply_windows_app_id, apply_windows_window_icons
 
 __module_name__ = "Dispatcher Core"
-__version__ = "2.0.4"
+__version__ = "2.0.5"
 
 
 def run_application(main_module=None):

@@ -127,6 +127,7 @@ class SettingsManagerController:
         session = gatekeeper.get_session()
         return {
             "session_summary": gatekeeper.get_session_summary(),
+            "non_secure_mode": gatekeeper.is_non_secure_mode_enabled(),
             "session_vault_name": session.vault_name if session else None,
             "vaults": [self._serialize_vault(vault) for vault in gatekeeper.list_vaults()],
             "role_defaults": {key: list(value) for key, value in ROLE_DEFAULT_RIGHTS.items()},
@@ -205,6 +206,14 @@ class SettingsManagerController:
         gatekeeper.change_vault_password(vault_name, password)
         self._refresh_security_ui()
         self.view.show_toast("Security", f"Updated password for {vault_name}.")
+        return self.get_security_admin_state()
+
+    def set_security_non_secure_mode(self, enabled):
+        gatekeeper.set_non_secure_mode(bool(enabled))
+        self._refresh_security_ui()
+        message = "Non-secure mode is enabled. Protected-module authentication is bypassed." if enabled else "Non-secure mode is disabled. Protected modules are locked again."
+        bootstyle = "warning" if enabled else "success"
+        self.view.show_toast("Security", message, bootstyle)
         return self.get_security_admin_state()
 
     def open_developer_admin_dialog(self):

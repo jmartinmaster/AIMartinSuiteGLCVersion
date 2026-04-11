@@ -93,6 +93,12 @@ class DataHandlerService:
     def get_header_fields(self):
         return self.config.get("header_fields", [])
 
+    def get_header_field_config(self, field_id):
+        for field in self.get_header_fields():
+            if field.get("id") == field_id:
+                return field
+        return {}
+
     def get_header_field_ids(self):
         return [field.get("id") for field in self.get_header_fields() if field.get("id")]
 
