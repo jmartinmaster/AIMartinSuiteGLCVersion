@@ -23,12 +23,16 @@ class RateManagerController:
     def __init__(self, parent, dispatcher):
         self.dispatcher = dispatcher
         self.model = RateManagerModel()
+        self.view = None
         self.view = RateManagerView(parent, dispatcher, self, self.model)
         self.refresh_table()
         self._sync_shared_data()
 
     def __getattr__(self, attribute_name):
-        return getattr(self.view, attribute_name)
+        view = self.__dict__.get("view")
+        if view is None:
+            raise AttributeError(attribute_name)
+        return getattr(view, attribute_name)
 
     def _sync_shared_data(self):
         if hasattr(self.dispatcher, "shared_data"):

@@ -25,6 +25,7 @@ class AboutView:
         self.parent = parent
         self.dispatcher = dispatcher
         self.controller = controller
+        self.controller.view = self
         self.setup_ui()
 
     def setup_ui(self):

@@ -18,7 +18,7 @@ from ttkbootstrap.constants import BOTH, END, INFO, LEFT, PRIMARY, RIGHT, SECOND
 from ttkbootstrap.dialogs import Messagebox
 
 __module_name__ = "Backup / Recovery"
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 
 
 class RecoveryViewerView:
@@ -26,6 +26,7 @@ class RecoveryViewerView:
         self.parent = parent
         self.dispatcher = dispatcher
         self.controller = controller
+        self.controller.view = self
         self.status_var = tb.StringVar(value="Ready")
         self.tree = None
         self.setup_ui()

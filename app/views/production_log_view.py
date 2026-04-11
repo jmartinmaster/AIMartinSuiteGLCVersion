@@ -13,32 +13,28 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-import json
 import os
-import sys
 import tkinter as tk
-import webbrowser
-from datetime import datetime
-from tkinter import messagebox
+from tkinter import filedialog, messagebox
 
 import ttkbootstrap as tb
 from ttkbootstrap.constants import *
 import tkinter.ttk as ttk
 from ttkbootstrap.dialogs import Messagebox
 
-from app import recovery_viewer
-from app.persistence import write_json_with_backup
 from app.models.production_log_model import BALANCE_DOWNTIME_CAUSE, DEFAULT_GHOST_LABEL
 from app.theme_manager import get_theme_tokens
 
 __module_name__ = "Production Log"
-__version__ = "1.2.5"
+__version__ = "1.2.6"
 
 
 class ProductionLogView:
-    def __init__(self, parent, dispatcher, model):
+    def __init__(self, parent, dispatcher, controller, model):
         self.parent = parent
         self.dispatcher = dispatcher
+        self.controller = controller
+        self.controller.view = self
         self.model = model
         self.config_path = self.model.config_path
         self.dt_codes = list(self.model.dt_codes)
@@ -60,36 +56,35 @@ class ProductionLogView:
         self.summary_resize_after_id = None
         self.summary_theme_tokens = {}
         self.content_stack = None
+        self.displayed_ghost_minutes = 0
+        self.balanceable_ghost_minutes = 0
+        self.balance_target_downtime_total_minutes = 0
+        self.balance_action_mode = "balance"
+        self.balance_downtime_btn = None
+        self.balance_mix_var = tk.DoubleVar(value=100.0)
+        self.balance_mix_value_lbl = None
 
         self.setup_ui()
         self.parent.after(self.auto_save_interval, self.auto_save)
 
     def auto_save(self):
-        if self.has_unsaved_changes and not self.is_form_blank():
-            self.save_draft(is_auto=True)
+        self.controller.auto_save()
         self.parent.after(self.auto_save_interval, self.auto_save)
 
     def get_pending_dir(self):
-        return self.model.get_pending_dir()
+        return self.controller.get_pending_dir()
 
     def get_pending_history_dir(self):
-        return self.model.get_pending_history_dir()
+        return self.controller.get_pending_history_dir()
 
     def get_raw_header_data(self):
         return {field_id: entry.get() for field_id, entry in self.entries.items()}
 
     def collect_header_data(self):
-        header_data = self.data_handler.normalize_header_data(self.get_raw_header_data())
-        header_data["total_molds"] = str(self.calculate_total_molds())
-        return header_data
+        return self.controller.collect_header_data()
 
     def apply_header_data(self, header_data, mark_dirty=False):
-        normalized_header = self.data_handler.normalize_header_data(header_data)
-        for field_id, value in normalized_header.items():
-            self.set_entry_value(field_id, value)
-        if mark_dirty:
-            self.mark_dirty()
-        return normalized_header
+        return self.controller.apply_header_data(header_data, mark_dirty=mark_dirty)
 
     def collect_ui_data(self):
         header_data = self.collect_header_data()
@@ -104,29 +99,20 @@ class ProductionLogView:
                 "time_calc": row["time_calc"].cget("text"),
             })
         downtime_data = [{key: (value.get() if hasattr(value, "get") else value.cget("text")) for key, value in row.items()} for row in self.downtime_rows]
-        return {"header": header_data, "production": production_data, "downtime": downtime_data}
+        return {
+            "header": header_data,
+            "production": production_data,
+            "downtime": downtime_data,
+            "balance_state": self.collect_balance_state(),
+        }
 
     def serialize_ui_data(self, data=None):
         if data is None:
             data = self.collect_ui_data()
-        return json.dumps(data, sort_keys=True, default=str)
+        return self.model.serialize_ui_data(data)
 
     def is_form_blank(self):
-        data = self.collect_ui_data()
-        header = data["header"]
-        significant_header_values = [
-            value for key, value in header.items()
-            if key not in {"hours", "goal_mph", "cast_date", "target_time", "total_molds"} and str(value).strip()
-        ]
-        production_has_data = any(
-            any(str(row.get(key, "")).strip() for key in ("shop_order", "part_number", "molds"))
-            for row in data["production"]
-        )
-        downtime_has_data = any(
-            any(str(row.get(key, "")).strip() for key in ("start", "stop", "code", "cause"))
-            for row in data["downtime"]
-        )
-        return not significant_header_values and not production_has_data and not downtime_has_data
+        return self.model.is_form_blank(self.collect_ui_data())
 
     def mark_dirty(self, _event=None):
         self.has_unsaved_changes = True
@@ -173,44 +159,10 @@ class ProductionLogView:
         self.ensure_open_downtime_row()
 
     def build_draft_path(self, header_data):
-        return self.model.build_draft_path(header_data)
+        return self.controller.build_draft_path(header_data)
 
     def save_draft(self, is_auto=False, suppress_toast=False):
-        try:
-            data = self.collect_ui_data()
-            if is_auto and not self.has_unsaved_changes:
-                return
-            if self.is_form_blank():
-                return
-
-            draft_path = self.build_draft_path(data["header"])
-            payload = {
-                "meta": {
-                    "saved_at": datetime.now().isoformat(timespec="seconds"),
-                    "auto_save": is_auto,
-                    "version": __version__,
-                    "draft_name": os.path.basename(draft_path),
-                },
-                **data,
-            }
-
-            backup_info = write_json_with_backup(
-                draft_path,
-                payload,
-                backup_dir=self.get_pending_history_dir(),
-                keep_count=20,
-            )
-
-            self.current_draft_path = draft_path
-            self.mark_clean(data)
-
-            if not is_auto and not suppress_toast:
-                message = f"Draft saved to {os.path.basename(draft_path)}."
-                if backup_info.get("versioned_backup_path"):
-                    message += " A recovery snapshot of the previous draft was stored in data/pending/history."
-                self.dispatcher.show_toast("Draft Saved", message, SUCCESS)
-        except Exception as exc:
-            Messagebox.show_error(f"Could not save draft: {exc}", "Draft Save Error")
+        return self.controller.save_draft(is_auto=is_auto, suppress_toast=suppress_toast)
 
     def setup_ui(self):
         self.content_stack = tb.Frame(self.parent, style="Martin.Content.TFrame")
@@ -237,34 +189,59 @@ class ProductionLogView:
         self.schedule_summary_refresh()
 
     def build_recovery_section(self):
-        recovery_wrapper = tb.Labelframe(self.content_stack, text=" Draft Status ", padding=10, style="Martin.Recovery.TLabelframe")
-        recovery_wrapper.pack(fill=X, padx=10, pady=(10, 0))
-        self.recovery_status_lbl = tb.Label(recovery_wrapper, text="Checking draft state...", style="Martin.Muted.TLabel")
-        self.recovery_status_lbl.pack(side=LEFT, padx=(0, 10))
-        self.resume_latest_btn = tb.Button(recovery_wrapper, text="Resume Latest", bootstyle=PRIMARY, command=self.resume_latest_draft)
-        self.resume_latest_btn.pack(side=LEFT, padx=5)
-        tb.Button(recovery_wrapper, text="Pending Drafts", bootstyle=SECONDARY, command=self.show_pending).pack(side=LEFT, padx=5)
-        # Add Refresh View button to reload the module and open previous draft
-        tb.Button(recovery_wrapper, text="Refresh View", bootstyle=INFO, command=self.refresh_view).pack(side=LEFT, padx=5)
-        self.delete_current_draft_btn = tb.Button(recovery_wrapper, text="Delete Current Draft", bootstyle=DANGER, command=self.delete_current_draft)
+        self.recovery_wrapper = tb.Labelframe(self.content_stack, text=" Draft Status ", padding=10, style="Martin.Recovery.TLabelframe")
+        self.recovery_wrapper.pack(fill=X, padx=10, pady=(10, 0))
+        self.recovery_wrapper.columnconfigure(0, weight=1)
+
+        self.recovery_status_lbl = tb.Label(
+            self.recovery_wrapper,
+            text="Checking draft state...",
+            style="Martin.Muted.TLabel",
+            anchor=W,
+            justify=LEFT,
+            wraplength=420,
+        )
+        self.recovery_status_lbl.grid(row=0, column=0, sticky="ew", pady=(0, 8))
+
+        self.recovery_actions = tb.Frame(self.recovery_wrapper)
+        self.recovery_actions.grid(row=1, column=0, sticky=W)
+
+        self.resume_latest_btn = tb.Button(self.recovery_actions, text="Resume Latest", bootstyle=PRIMARY, command=self.controller.resume_latest_draft)
+        self.resume_latest_btn.pack(side=LEFT, padx=(0, 5))
+        tb.Button(self.recovery_actions, text="Pending Drafts", bootstyle=SECONDARY, command=self.controller.show_pending).pack(side=LEFT, padx=5)
+        tb.Button(self.recovery_actions, text="Refresh View", bootstyle=INFO, command=self.controller.refresh_view).pack(side=LEFT, padx=5)
+        self.delete_current_draft_btn = tb.Button(self.recovery_actions, text="Delete Current Draft", bootstyle=DANGER, command=self.controller.delete_current_draft)
         self.delete_current_draft_btn.pack(side=LEFT, padx=5)
 
+        self.recovery_wrapper.bind("<Configure>", self.on_recovery_wrapper_resized, add="+")
+        self.recovery_wrapper.after_idle(self.update_recovery_wraplength)
+
+    def on_recovery_wrapper_resized(self, _event=None):
+        self.update_recovery_wraplength()
+
+    def update_recovery_wraplength(self):
+        if not hasattr(self, "recovery_wrapper"):
+            return
+        width = self.recovery_wrapper.winfo_width()
+        if width <= 1:
+            return
+        self.recovery_status_lbl.configure(wraplength=max(280, width - 40))
+
+    def build_recovery_status_text(self, latest, current_name, dirty_text, pending_count, snapshot_count):
+        latest_text = f"Latest: {latest['filename']} ({latest['saved_at']})" if latest else "Latest: No pending drafts"
+        detail_text = (
+            f"Current: {current_name} | State: {dirty_text} | Pending: {pending_count} | Recovery: {snapshot_count}"
+        )
+        return f"{latest_text}\n{detail_text}"
+
     def refresh_view(self):
-        """
-        Reloads the module and opens the previous draft (latest draft).
-        """
-        latest = self.get_latest_pending_draft()
-        if latest:
-            self.load_draft_path(latest["path"])
-        else:
-            self.dispatcher.show_toast("Refresh View", "No previous draft found to reload.", INFO)
+        return self.controller.refresh_view()
 
     def build_header_section(self):
         header_wrapper = tb.Labelframe(self.content_stack, text=" Form 510-09: Production Logging Center Header ", padding=15, style="Martin.Card.TLabelframe")
         header_wrapper.pack(fill=X, padx=10, pady=10)
         try:
-            with open(self.config_path, "r", encoding="utf-8") as handle:
-                config = json.load(handle)
+            config = self.model.load_layout_config()
             for field in config["header_fields"]:
                 tb.Label(header_wrapper, text=field["label"]).grid(row=field["row"], column=field["col"], padx=5, pady=5, sticky=W)
                 entry = tb.Entry(header_wrapper, width=field.get("width", 10))
@@ -283,12 +260,12 @@ class ProductionLogView:
                 self.entries[field["id"]] = entry
                 if not field.get("readonly"):
                     self.bind_dirty_tracking(entry, ("<KeyRelease>",))
-                    entry.bind("<FocusOut>", self.on_header_field_focus_out, add="+")
+                    entry.bind("<FocusOut>", self.controller.on_header_field_focus_out, add="+")
 
             if "hours" in self.entries:
-                self.entries["hours"].bind("<KeyRelease>", self.on_hours_changed, add="+")
+                self.entries["hours"].bind("<KeyRelease>", self.controller.on_hours_changed, add="+")
             if "goal_mph" in self.entries:
-                self.entries["goal_mph"].bind("<KeyRelease>", self.on_goal_changed, add="+")
+                self.entries["goal_mph"].bind("<KeyRelease>", self.controller.on_goal_changed, add="+")
         except Exception as exc:
             tb.Label(header_wrapper, text=f"Layout Error: {exc}", bootstyle=DANGER).pack()
 
@@ -319,19 +296,58 @@ class ProductionLogView:
     def build_footer_section(self):
         self.footer = tb.Frame(self.content_stack, padding=20, style="Martin.Content.TFrame")
         self.footer.pack(fill=X)
-        self.eff_display_lbl = tb.Label(self.footer, text="EFF%: 0.00", font=("-size 14 -weight bold"))
-        self.eff_display_lbl.pack(side=LEFT, padx=10)
-        self.ghost_total_lbl = tb.Label(self.footer, text=DEFAULT_GHOST_LABEL, font=("-size 12 -weight bold"))
-        self.ghost_total_lbl.pack(side=LEFT, padx=10)
-        tb.Button(self.footer, text="Calculate All", command=self.calculate_metrics, bootstyle=INFO).pack(side=RIGHT)
-        tb.Button(self.footer, text="Save Draft", command=self.save_draft, bootstyle=SECONDARY).pack(side=LEFT, padx=5)
-        tb.Button(self.footer, text="Save and Open", command=self.export_to_excel, bootstyle=SUCCESS).pack(side=LEFT, padx=5)
-        self.open_export_btn = tb.Button(self.footer, text="Open Last Export", command=self.open_last_exported_file, bootstyle=INFO)
-        self.open_export_btn.pack(side=LEFT, padx=5)
-        self.print_export_btn = tb.Button(self.footer, text="Print Last Export", command=self.print_last_exported_file, bootstyle=WARNING)
-        self.print_export_btn.pack(side=LEFT, padx=5)
-        tb.Button(self.footer, text="Balance Downtime", command=self.balance_downtime_to_shift, bootstyle=WARNING).pack(side=LEFT, padx=5)
-        tb.Button(self.footer, text="Import Excel", command=self.import_from_excel_ui, bootstyle=INFO).pack(side=LEFT, padx=5)
+        self.footer.columnconfigure(0, weight=1)
+
+        footer_metrics = tb.Frame(self.footer, style="Martin.Content.TFrame")
+        footer_metrics.grid(row=0, column=0, sticky=W, pady=(0, 10))
+
+        self.eff_display_lbl = tb.Label(footer_metrics, text="EFF%: 0.00", font=("-size 14 -weight bold"))
+        self.eff_display_lbl.pack(side=LEFT, padx=(0, 10))
+        self.ghost_total_lbl = tb.Label(footer_metrics, text=DEFAULT_GHOST_LABEL, font=("-size 12 -weight bold"))
+        self.ghost_total_lbl.pack(side=LEFT, padx=(0, 10))
+
+        footer_actions = tb.Frame(self.footer, style="Martin.Content.TFrame")
+        footer_actions.grid(row=1, column=0, sticky=W)
+
+        button_specs = [
+            (None, "Calculate All", self.controller.calculate_metrics, INFO),
+            (None, "Save Draft", self.controller.save_draft, SECONDARY),
+            (None, "Save and Open", self.controller.export_to_excel, SUCCESS),
+            ("open_export_btn", "Open Last Export", self.controller.open_last_exported_file, INFO),
+            ("print_export_btn", "Print Last Export", self.controller.print_last_exported_file, WARNING),
+            ("balance_downtime_btn", "Balance Downtime", self.controller.balance_downtime_to_shift, WARNING),
+            (None, "Import Excel", self.controller.import_from_excel_ui, INFO),
+        ]
+
+        for index, (attribute_name, text, command, bootstyle) in enumerate(button_specs):
+            button = tb.Button(footer_actions, text=text, command=command, bootstyle=bootstyle)
+            button.grid(row=index // 4, column=index % 4, padx=(0, 8), pady=4, sticky=W)
+            if attribute_name is not None:
+                setattr(self, attribute_name, button)
+
+        balance_controls = tb.Frame(self.footer, style="Martin.Content.TFrame")
+        balance_controls.grid(row=2, column=0, sticky="ew", pady=(8, 0))
+        balance_controls.columnconfigure(2, weight=1)
+
+        tb.Label(balance_controls, text="Balance Mix", style="Martin.Muted.TLabel").grid(row=0, column=0, sticky=W, padx=(0, 10))
+        tb.Label(balance_controls, text="Even", style="Martin.Muted.TLabel").grid(row=0, column=1, sticky=W)
+
+        self.balance_mix_scale = ttk.Scale(
+            balance_controls,
+            from_=0,
+            to=100,
+            orient=HORIZONTAL,
+            variable=self.balance_mix_var,
+            command=self.on_balance_mix_changed,
+            length=180,
+        )
+        self.balance_mix_scale.grid(row=0, column=2, sticky="ew", padx=8)
+
+        tb.Label(balance_controls, text="Weighted", style="Martin.Muted.TLabel").grid(row=0, column=3, sticky=E, padx=(0, 8))
+        self.balance_mix_value_lbl = tb.Label(balance_controls, style="Martin.Muted.TLabel")
+        self.balance_mix_value_lbl.grid(row=0, column=4, sticky=E)
+        self.update_balance_mix_display()
+        self.update_balance_downtime_button()
 
     def build_summary_section(self):
         self.summary_shell = tb.Frame(self.parent, padding=(10, 0, 10, 10), style="Martin.Content.TFrame")
@@ -415,10 +431,16 @@ class ProductionLogView:
         self.summary_refresh_after_id = self.parent.after(delay, self.refresh_summary_panel)
 
     def should_show_summary_panel(self):
+        canvas = getattr(self.dispatcher, "canvas", None)
         width = self.parent.winfo_width() or self.parent.winfo_reqwidth()
         height = self.parent.winfo_height() or self.parent.winfo_reqheight()
-        minimum_width = 980
+        if canvas is not None:
+            width = canvas.winfo_width() or width
+            height = canvas.winfo_height() or height
+
+        minimum_width = 900
         minimum_height = 620
+        wide_layout_width = 980
         if width < minimum_width or height < minimum_height:
             return False
 
@@ -431,7 +453,7 @@ class ProductionLogView:
                 occupied_height = 0
 
         spare_height = height - occupied_height
-        return spare_height >= 120 or width >= 1080
+        return spare_height >= 120 or width >= wide_layout_width
 
     def refresh_summary_panel(self):
         self.summary_refresh_after_id = None
@@ -513,13 +535,19 @@ class ProductionLogView:
         return segments
 
     def get_time_breakdown_segments(self):
-        palette = self.get_chart_palette()
+        palette = self.get_time_chart_palette()
         segments = [
             {"label": "Production", "value": max(0, self.get_production_total_minutes()), "color": palette[0]},
             {"label": "Downtime", "value": max(0, self.get_total_downtime_minutes()), "color": palette[1]},
             {"label": "Ghost", "value": max(0, self.get_ghost_time_minutes()), "color": palette[2]},
         ]
         return segments
+
+    def get_time_chart_palette(self):
+        style = tb.Style.get_instance()
+        if style is not None:
+            return [style.colors.success, style.colors.danger, style.colors.warning]
+        return ["#6abf69", "#d9534f", "#ffb84d"]
 
     def get_chart_palette(self):
         accent = self.summary_theme_tokens.get("accent", "#0f7c8f")
@@ -530,18 +558,18 @@ class ProductionLogView:
         muted = self.summary_theme_tokens.get("muted_fg", "#637782")
         return [accent, warning_color, info_color, success_color, accent_soft, muted]
 
-    def draw_mold_chart(self, segments):
-        canvas = self.mold_chart_canvas
+    def draw_donut_chart(self, canvas, segments, empty_message, center_value, center_label, legend_formatter):
         self.prepare_chart_canvas(canvas)
         width = max(canvas.winfo_width(), 1)
         height = max(canvas.winfo_height(), 1)
         if width < 120 or height < 120:
             return
-        if not segments:
-            self.draw_empty_chart_state(canvas, width, height, "No mold data yet")
+
+        total = sum(max(0, segment["value"]) for segment in segments)
+        if total <= 0:
+            self.draw_empty_chart_state(canvas, width, height, empty_message)
             return
 
-        total = sum(segment["value"] for segment in segments)
         donut_size = max(120, min(int(width * 0.42), int(height * 0.72)))
         left = 24
         top = max(20, (height - donut_size) // 2)
@@ -550,69 +578,50 @@ class ProductionLogView:
         start = 90.0
 
         for segment in segments:
-            extent = (segment["value"] / total) * 360 if total else 0
+            value = max(0, segment["value"])
+            if value <= 0:
+                continue
+            extent = (value / total) * 360
             canvas.create_arc(left, top, right, bottom, start=start, extent=-extent, fill=segment["color"], outline="")
             start -= extent
 
         inner_margin = max(26, donut_size // 5)
         inner_color = self.summary_theme_tokens.get("surface_bg", "#ffffff")
         canvas.create_oval(left + inner_margin, top + inner_margin, right - inner_margin, bottom - inner_margin, fill=inner_color, outline="")
+
         fg = self.summary_theme_tokens.get("surface_fg", "#152129")
         muted_fg = self.summary_theme_tokens.get("muted_fg", "#637782")
-        canvas.create_text((left + right) / 2, top + donut_size / 2 - 10, text=str(total), fill=fg, font=("Segoe UI", 22, "bold"))
-        canvas.create_text((left + right) / 2, top + donut_size / 2 + 16, text="Total molds", fill=muted_fg, font=("Segoe UI", 10))
+        canvas.create_text((left + right) / 2, top + donut_size / 2 - 10, text=center_value, fill=fg, font=("Segoe UI", 22, "bold"))
+        canvas.create_text((left + right) / 2, top + donut_size / 2 + 16, text=center_label, fill=muted_fg, font=("Segoe UI", 10))
 
         legend_x = right + 28
         legend_y = 28
         for segment in segments:
-            percentage = (segment["value"] / total) * 100 if total else 0
+            percentage = (max(0, segment["value"]) / total) * 100 if total else 0
             canvas.create_rectangle(legend_x, legend_y, legend_x + 14, legend_y + 14, fill=segment["color"], outline="")
             canvas.create_text(legend_x + 24, legend_y + 7, anchor="w", text=segment["label"], fill=fg, font=("Segoe UI", 10, "bold"))
-            canvas.create_text(width - 18, legend_y + 7, anchor="e", text=f"{segment['value']} ({percentage:.0f}%)", fill=muted_fg, font=("Segoe UI", 10))
+            canvas.create_text(width - 18, legend_y + 7, anchor="e", text=legend_formatter(segment, percentage), fill=muted_fg, font=("Segoe UI", 10))
             legend_y += 28
+
+    def draw_mold_chart(self, segments):
+        self.draw_donut_chart(
+            self.mold_chart_canvas,
+            segments,
+            "No mold data yet",
+            str(sum(segment["value"] for segment in segments)),
+            "Total molds",
+            lambda segment, percentage: f"{segment['value']} ({percentage:.0f}%)",
+        )
 
     def draw_time_chart(self, segments):
-        canvas = self.time_chart_canvas
-        self.prepare_chart_canvas(canvas)
-        width = max(canvas.winfo_width(), 1)
-        height = max(canvas.winfo_height(), 1)
-        if width < 120 or height < 120:
-            return
-        total = sum(segment["value"] for segment in segments)
-        if total <= 0:
-            self.draw_empty_chart_state(canvas, width, height, "No tracked time yet")
-            return
-
-        fg = self.summary_theme_tokens.get("surface_fg", "#152129")
-        muted_fg = self.summary_theme_tokens.get("muted_fg", "#637782")
-        accent_soft = self.summary_theme_tokens.get("accent_soft", "#d6eef2")
-        bar_left = 28
-        bar_right = width - 28
-        bar_top = max(44, int(height * 0.26))
-        bar_bottom = bar_top + 46
-        canvas.create_rectangle(bar_left, bar_top, bar_right, bar_bottom, fill=accent_soft, outline="")
-
-        current_left = bar_left
-        for segment in segments:
-            if segment["value"] <= 0:
-                continue
-            span = ((bar_right - bar_left) * segment["value"]) / total
-            next_left = bar_right if segment is segments[-1] else current_left + span
-            canvas.create_rectangle(current_left, bar_top, next_left, bar_bottom, fill=segment["color"], outline="")
-            if next_left - current_left >= 70:
-                canvas.create_text((current_left + next_left) / 2, (bar_top + bar_bottom) / 2, text=f"{segment['label']}\n{segment['value']} min", fill="#ffffff", font=("Segoe UI", 9, "bold"), justify=CENTER)
-            current_left = next_left
-
-        canvas.create_text(bar_left, 22, anchor="w", text=f"Shift accounting: {total} min", fill=fg, font=("Segoe UI", 12, "bold"))
-        canvas.create_text(bar_right, 22, anchor="e", text=self.ghost_total_lbl.cget("text"), fill=muted_fg, font=("Segoe UI", 10))
-
-        legend_y = bar_bottom + 28
-        for segment in segments:
-            percentage = (segment["value"] / total) * 100 if total else 0
-            canvas.create_rectangle(bar_left, legend_y, bar_left + 14, legend_y + 14, fill=segment["color"], outline="")
-            canvas.create_text(bar_left + 24, legend_y + 7, anchor="w", text=segment["label"], fill=fg, font=("Segoe UI", 10, "bold"))
-            canvas.create_text(width - 18, legend_y + 7, anchor="e", text=f"{segment['value']} min ({percentage:.0f}%)", fill=muted_fg, font=("Segoe UI", 10))
-            legend_y += 28
+        self.draw_donut_chart(
+            self.time_chart_canvas,
+            segments,
+            "No tracked time yet",
+            str(sum(segment["value"] for segment in segments)),
+            "Tracked min",
+            lambda segment, percentage: f"{segment['value']} min ({percentage:.0f}%)",
+        )
 
     def prepare_chart_canvas(self, canvas):
         canvas.delete("all")
@@ -640,23 +649,23 @@ class ProductionLogView:
         row["rate_override_enabled"] = tb.Checkbutton(
             row_frame,
             variable=row["rate_override_enabled_var"],
-            command=lambda current_row=row: self.on_rate_override_toggled(current_row),
+            command=lambda current_row=row: self.controller.on_rate_override_toggled(current_row),
         )
         row["delete_btn"] = tb.Button(
             row_frame,
             text="X",
             width=3,
             bootstyle=DANGER,
-            command=lambda current_row=row: self.remove_production_row(current_row),
+            command=lambda current_row=row: self.controller.remove_production_row(current_row),
         )
         row["rate_lookup"].config(state="readonly")
         row["delete_btn"].pack(side=LEFT, padx=5)
         for key in ("shop_order", "part_number", "rate_lookup", "rate_override_enabled", "molds"):
             row[key].pack(side=LEFT, padx=5)
         row["time_calc"].pack(side=RIGHT, padx=10)
-        row["part_number"].bind("<KeyRelease>", lambda _event: self.update_row_math(), add="+")
-        row["rate_lookup"].bind("<KeyRelease>", lambda _event: self.update_row_math(), add="+")
-        row["molds"].bind("<KeyRelease>", lambda _event: self.update_row_math(), add="+")
+        row["part_number"].bind("<KeyRelease>", lambda _event: self.controller.update_row_math(), add="+")
+        row["rate_lookup"].bind("<KeyRelease>", lambda _event: self.controller.update_row_math(), add="+")
+        row["molds"].bind("<KeyRelease>", lambda _event: self.controller.update_row_math(), add="+")
         row["shop_order"].bind("<KeyRelease>", self.on_production_row_edited, add="+")
         self.bind_dirty_tracking(row["shop_order"], ("<KeyRelease>",))
         self.bind_dirty_tracking(row["part_number"], ("<KeyRelease>",))
@@ -681,7 +690,7 @@ class ProductionLogView:
             text="X",
             width=3,
             bootstyle=DANGER,
-            command=lambda current_row=row: self.remove_downtime_row(current_row),
+            command=lambda current_row=row: self.controller.remove_downtime_row(current_row),
         )
         row["delete_btn"].pack(side=LEFT, padx=5)
         row["start"].pack(side=LEFT, padx=5)
@@ -689,8 +698,10 @@ class ProductionLogView:
         row["code"].pack(side=LEFT, padx=5)
         row["time_calc"].pack(side=RIGHT, padx=10)
         row["cause"].pack(side=LEFT, fill=X, expand=True, padx=5)
-        row["start"].bind("<KeyRelease>", lambda _event: self.update_row_math(), add="+")
-        row["stop"].bind("<KeyRelease>", lambda _event: self.update_row_math(), add="+")
+        row["start"].bind("<KeyRelease>", lambda _event: self.controller.update_row_math(), add="+")
+        row["stop"].bind("<KeyRelease>", lambda _event: self.controller.update_row_math(), add="+")
+        row["start"].bind("<KeyRelease>", self.on_downtime_row_value_changed, add="+")
+        row["stop"].bind("<KeyRelease>", self.on_downtime_row_value_changed, add="+")
         row["code"].bind("<<ComboboxSelected>>", self.mark_dirty, add="+")
         row["code"].bind("<<ComboboxSelected>>", self.on_downtime_row_edited, add="+")
         row["cause"].bind("<KeyRelease>", self.on_downtime_row_edited, add="+")
@@ -701,102 +712,35 @@ class ProductionLogView:
         return row
 
     def delete_production_row_with_save_reload(self, row):
-        # Save draft, delete row from draft file, reload draft (no toast)
-        self.save_draft(suppress_toast=True)
-        if self.current_draft_path and os.path.exists(self.current_draft_path):
-            try:
-                with open(self.current_draft_path, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                # Find the index of the row to delete by matching unique fields
-                prod_data = data.get('production', [])
-                # Try to match by all fields in the row
-                def row_match(d):
-                    return (
-                        str(d.get('shop_order', '')) == str(self.get_widget_value(row['shop_order'])) and
-                        str(d.get('part_number', '')) == str(self.get_widget_value(row['part_number'])) and
-                        str(d.get('rate_lookup', '')) == str(self.get_widget_value(row['rate_lookup'])) and
-                        str(d.get('molds', '')) == str(self.get_widget_value(row['molds'])) and
-                        str(d.get('time_calc', '')) == str(self.get_widget_value(row['time_calc']))
-                    )
-                idx = next((i for i, d in enumerate(prod_data) if row_match(d)), None)
-                if idx is not None:
-                    del prod_data[idx]
-                    data['production'] = prod_data
-                    with open(self.current_draft_path, 'w', encoding='utf-8') as f:
-                        json.dump(data, f, indent=2)
-            except Exception as e:
-                Messagebox.show_error(f"Could not update draft after row delete: {e}", "Draft Update Error")
-            self.load_draft_path(self.current_draft_path)
+        return self.controller.delete_production_row_with_save_reload(row)
 
 
     def delete_downtime_row_with_save_reload(self, row):
-        # Save draft, delete row from draft file, reload draft (no toast)
-        self.save_draft(suppress_toast=True)
-        if self.current_draft_path and os.path.exists(self.current_draft_path):
-            try:
-                with open(self.current_draft_path, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                dt_data = data.get('downtime', [])
-                def row_match(d):
-                    return (
-                        str(d.get('start', '')) == str(self.get_widget_value(row['start'])) and
-                        str(d.get('stop', '')) == str(self.get_widget_value(row['stop'])) and
-                        str(d.get('code', '')) == str(self.get_widget_value(row['code'])) and
-                        str(d.get('cause', '')) == str(self.get_widget_value(row['cause'])) and
-                        str(d.get('time_calc', '')) == str(self.get_widget_value(row['time_calc']))
-                    )
-                idx = next((i for i, d in enumerate(dt_data) if row_match(d)), None)
-                if idx is not None:
-                    del dt_data[idx]
-                    data['downtime'] = dt_data
-                    with open(self.current_draft_path, 'w', encoding='utf-8') as f:
-                        json.dump(data, f, indent=2)
-            except Exception as e:
-                Messagebox.show_error(f"Could not update draft after row delete: {e}", "Draft Update Error")
-            self.load_draft_path(self.current_draft_path)
+        return self.controller.delete_downtime_row_with_save_reload(row)
 
     def refresh_downtime_codes(self):
-        self.dt_codes = self.model.refresh_downtime_codes()
-        for row in self.downtime_rows:
-            code_widget = row.get("code")
-            if code_widget is None:
-                continue
-            current_value = code_widget.get().strip()
-            code_widget.configure(values=self.dt_codes)
-            if current_value:
-                code_widget.set(current_value)
+        return self.controller.refresh_downtime_codes()
 
     def parse_minutes_label(self, value):
         return self.model.parse_minutes_label(value)
 
     def on_hours_changed(self, _event=None):
-        self.update_target_time_display()
-        self.calculate_metrics()
+        return self.controller.on_hours_changed(_event)
 
     def on_goal_changed(self, _event=None):
-        self.update_row_math()
-        self.calculate_metrics()
+        return self.controller.on_goal_changed(_event)
 
     def on_header_field_focus_out(self, _event=None):
-        self.apply_header_data(self.get_raw_header_data(), mark_dirty=False)
+        return self.controller.on_header_field_focus_out(_event)
 
     def load_rates_data(self):
         return self.model.load_rates_data()
 
     def get_global_goal_rate(self):
-        try:
-            return float(self.entries["goal_mph"].get() or 240)
-        except Exception:
-            return 240
+        return self.controller.get_global_goal_rate()
 
     def calculate_total_molds(self):
-        total_molds = 0
-        for row in self.production_rows:
-            try:
-                total_molds += int(float(row["molds"].get() or 0))
-            except Exception:
-                continue
-        return total_molds
+        return self.controller.calculate_total_molds()
 
     def format_rate_value(self, value):
         return self.model.format_rate_value(value)
@@ -812,35 +756,16 @@ class ProductionLogView:
         rate_entry.config(state=("normal" if editable else "readonly"))
 
     def get_row_rate(self, row, rates_data, global_goal):
-        if bool(row["rate_override_enabled_var"].get()):
-            try:
-                return float(row["rate_lookup"].get().strip())
-            except Exception:
-                return None
-        return self.resolve_lookup_rate(row["part_number"].get(), rates_data, global_goal)
+        return self.controller.get_row_rate(row, rates_data, global_goal)
 
     def on_rate_override_toggled(self, row):
-        override_enabled = bool(row["rate_override_enabled_var"].get())
-        if override_enabled:
-            lookup_rate = self.resolve_lookup_rate(row["part_number"].get(), self.load_rates_data(), self.get_global_goal_rate())
-            current_value = row["rate_lookup"].get().strip() or self.format_rate_value(lookup_rate)
-            self.set_rate_lookup_value(row, current_value, editable=True)
-            row["rate_lookup"].focus_set()
-            row["rate_lookup"].selection_range(0, END)
-        else:
-            self.set_rate_lookup_value(
-                row,
-                self.format_rate_value(self.resolve_lookup_rate(row["part_number"].get(), self.load_rates_data(), self.get_global_goal_rate())),
-                editable=False,
-            )
-        self.mark_dirty()
-        self.update_row_math()
+        return self.controller.on_rate_override_toggled(row)
 
     def update_target_time_display(self):
         target_time_entry = self.entries.get("target_time")
         if target_time_entry is None:
             return
-        target_value = self.data_handler.compute_target_time(self.entries.get("hours").get() if self.entries.get("hours") else "")
+        target_value = self.controller.get_target_time_value()
         # Only call .cget('state') if widget supports it
         original_state = None
         if hasattr(target_time_entry, 'cget'):
@@ -860,6 +785,7 @@ class ProductionLogView:
         if not hasattr(self, "ghost_total_lbl"):
             return
         ghost_minutes = self.get_ghost_time_minutes()
+        self.displayed_ghost_minutes = ghost_minutes
         if ghost_minutes > 0:
             message = f"Ghost Time: {ghost_minutes} min missing"
             bootstyle = DANGER
@@ -872,6 +798,58 @@ class ProductionLogView:
         self.ghost_total_lbl.config(text=message, bootstyle=bootstyle)
         self.schedule_summary_refresh()
 
+    def collect_balance_state(self):
+        return self.controller.collect_balance_state()
+
+    def apply_balance_state(self, balance_state=None):
+        return self.controller.apply_balance_state(balance_state)
+
+    def reset_balance_state(self):
+        return self.controller.reset_balance_state()
+
+    def collect_balance_reference_minutes(self):
+        return self.controller.collect_balance_reference_minutes()
+
+    def apply_balance_reference_minutes(self, reference_minutes=None):
+        return self.controller.apply_balance_reference_minutes(reference_minutes)
+
+    def invalidate_balance_reference(self, reset_mode=True):
+        return self.controller.invalidate_balance_reference(reset_mode=reset_mode)
+
+    def capture_balance_reference(self, weighted_rows):
+        return self.controller.capture_balance_reference(weighted_rows)
+
+    def remember_balance_state(self, balanced_ghost_minutes, target_downtime_total):
+        return self.controller.remember_balance_state(balanced_ghost_minutes, target_downtime_total)
+
+    def update_balance_downtime_button(self):
+        return self.controller.update_balance_downtime_button()
+
+    def on_balance_mix_changed(self, _value=None):
+        return self.controller.on_balance_mix_changed(_value)
+
+    def on_downtime_row_value_changed(self, _event=None):
+        return self.controller.on_downtime_row_value_changed(_event)
+
+    def get_balance_mix_ratio(self):
+        try:
+            percentage = float(self.balance_mix_var.get())
+        except Exception:
+            percentage = 100.0
+        return max(0.0, min(1.0, percentage / 100.0))
+
+    def update_balance_mix_display(self):
+        if self.balance_mix_value_lbl is None:
+            return
+        weighted_percentage = int(round(self.get_balance_mix_ratio() * 100))
+        if weighted_percentage <= 0:
+            message = "100% even"
+        elif weighted_percentage >= 100:
+            message = "100% weighted"
+        else:
+            message = f"{weighted_percentage}% weighted"
+        self.balance_mix_value_lbl.config(text=message)
+
     def parse_clock_value(self, value):
         return self.model.parse_clock_value(value)
 
@@ -879,39 +857,19 @@ class ProductionLogView:
         return self.model.format_clock_value(total_minutes)
 
     def get_row_duration_minutes(self, row):
-        start_minutes = self.parse_clock_value(row["start"].get())
-        stop_minutes = self.parse_clock_value(row["stop"].get())
-        if start_minutes is not None and stop_minutes is not None:
-            if stop_minutes < start_minutes:
-                stop_minutes += 24 * 60
-            return stop_minutes - start_minutes
-        # Robustly get time_calc text
-        tc = row["time_calc"]
-        val = self.get_widget_value(tc)
-        return self.parse_minutes_label(val)
+        return self.controller.get_row_duration_minutes(row)
 
     def is_balance_downtime_row(self, row):
-        return row["cause"].get().strip() == BALANCE_DOWNTIME_CAUSE
+        return self.controller.is_balance_downtime_row(row)
 
     def find_balance_downtime_row(self):
-        for row in self.downtime_rows:
-            if self.is_balance_downtime_row(row):
-                return row
-        return None
+        return self.controller.find_balance_downtime_row()
 
     def remove_production_row(self, row):
-        row["shop_order"].master.destroy()
-        if row in self.production_rows:
-            self.production_rows.remove(row)
-        self.mark_dirty()
-        self.update_row_math()
+        return self.controller.remove_production_row(row)
 
     def remove_downtime_row(self, row):
-        row["start"].master.destroy()
-        if row in self.downtime_rows:
-            self.downtime_rows.remove(row)
-        self.mark_dirty()
-        self.update_row_math()
+        return self.controller.remove_downtime_row(row)
 
     def set_downtime_row_duration(self, row, duration_minutes, set_balance_metadata=False):
         duration_minutes = max(0, int(duration_minutes))
@@ -929,144 +887,25 @@ class ProductionLogView:
             row["cause"].insert(0, BALANCE_DOWNTIME_CAUSE)
 
     def get_shift_total_minutes(self):
-        try:
-            return int(round(float(self.entries["hours"].get() or 0) * 60))
-        except Exception:
-            return 0
+        return self.controller.get_shift_total_minutes()
 
     def get_production_total_minutes(self):
-        total = 0
-        for row in self.production_rows:
-            tc = row["time_calc"]
-            val = self.get_widget_value(tc)
-            total += self.parse_minutes_label(val)
-        return total
+        return self.controller.get_production_total_minutes()
 
     def get_total_downtime_minutes(self):
-        return sum(self.get_row_duration_minutes(row) for row in self.downtime_rows)
+        return self.controller.get_total_downtime_minutes()
 
     def get_ghost_time_minutes(self):
-        shift_total = self.get_shift_total_minutes()
-        if shift_total <= 0:
-            return 0
-        return shift_total - self.get_production_total_minutes() - self.get_total_downtime_minutes()
+        return self.controller.get_ghost_time_minutes()
 
     def get_weighted_downtime_rows(self):
-        weighted_rows = []
-        for row in self.downtime_rows:
-            if self.is_balance_downtime_row(row):
-                continue
-            duration = self.get_row_duration_minutes(row)
-            if duration > 0:
-                weighted_rows.append((row, duration))
-        return weighted_rows
-
-    def allocate_weighted_minutes(self, weighted_rows, target_total_minutes):
-        target_total_minutes = max(0, int(target_total_minutes))
-        total_weight = sum(duration for _, duration in weighted_rows)
-        if total_weight <= 0:
-            return []
-        allocations = []
-        used_minutes = 0
-        for row, duration in weighted_rows:
-            exact = target_total_minutes * (duration / total_weight)
-            allocated = int(exact)
-            allocations.append({"row": row, "allocated": allocated, "remainder": exact - allocated})
-            used_minutes += allocated
-        leftover = target_total_minutes - used_minutes
-        for item in sorted(allocations, key=lambda entry: entry["remainder"], reverse=True):
-            if leftover <= 0:
-                break
-            item["allocated"] += 1
-            leftover -= 1
-        return allocations
-
-    def build_downtime_timeline(self, weighted_rows):
-        timeline = []
-        day_offset = 0
-        previous_start = None
-        for row, _duration in weighted_rows:
-            start_minutes = self.parse_clock_value(row["start"].get())
-            absolute_start = None
-            if start_minutes is not None:
-                if previous_start is not None and start_minutes < previous_start:
-                    day_offset += 24 * 60
-                absolute_start = day_offset + start_minutes
-                previous_start = start_minutes
-            timeline.append({"row": row, "start_absolute": absolute_start})
-        return timeline
-
-    def apply_spillover_allocations(self, weighted_rows, target_total_minutes):
-        allocations = self.allocate_weighted_minutes(weighted_rows, target_total_minutes)
-        timeline = self.build_downtime_timeline(weighted_rows)
-        spill_minutes = 0
-        for index, (timeline_item, allocation_item) in enumerate(zip(timeline, allocations)):
-            row = timeline_item["row"]
-            desired_minutes = allocation_item["allocated"] + spill_minutes
-            spill_minutes = 0
-            actual_minutes = desired_minutes
-            current_start = timeline_item["start_absolute"]
-            next_start = timeline[index + 1]["start_absolute"] if index + 1 < len(timeline) else None
-            if current_start is not None and next_start is not None:
-                max_minutes = max(0, next_start - current_start)
-                if actual_minutes > max_minutes:
-                    spill_minutes = actual_minutes - max_minutes
-                    actual_minutes = max_minutes
-            self.set_downtime_row_duration(row, actual_minutes, set_balance_metadata=False)
-        if spill_minutes > 0 and timeline:
-            last_row = timeline[-1]["row"]
-            last_duration = self.get_row_duration_minutes(last_row)
-            self.set_downtime_row_duration(last_row, last_duration + spill_minutes, set_balance_metadata=False)
+        return self.controller.get_weighted_downtime_rows()
 
     def apply_weighted_downtime_balance(self, target_total_minutes):
-        weighted_rows = self.get_weighted_downtime_rows()
-        if not weighted_rows:
-            return False
-        balance_row = self.find_balance_downtime_row()
-        if balance_row is not None:
-            self.remove_downtime_row(balance_row)
-        self.apply_spillover_allocations(weighted_rows, target_total_minutes)
-        return True
+        return self.controller.apply_weighted_downtime_balance(target_total_minutes)
 
     def balance_downtime_to_shift(self):
-        self.update_row_math()
-        shift_total = self.get_shift_total_minutes()
-        production_total = self.get_production_total_minutes()
-        current_downtime_total = self.get_total_downtime_minutes()
-        ghost_minutes = self.get_ghost_time_minutes()
-        target_downtime_total = shift_total - production_total
-        delta_minutes = target_downtime_total - current_downtime_total
-        balance_row = self.find_balance_downtime_row()
-        if shift_total <= 0:
-            self.dispatcher.show_toast("Balance Downtime", "Enter a valid shift hour value before balancing.", WARNING)
-            return
-        if ghost_minutes < 0:
-            self.dispatcher.show_toast("Balance Downtime", f"Accounted time exceeds the shift total by {abs(ghost_minutes)} minutes. Review or remove downtime manually before export.", WARNING)
-            return
-        if target_downtime_total == 0:
-            self.dispatcher.show_toast("Balance Downtime", "Accounted time already matches the shift total.", INFO)
-            return
-        if delta_minutes < 0:
-            self.dispatcher.show_toast("Balance Downtime", f"Recorded downtime exceeds the remaining shift time by {abs(delta_minutes)} minutes. Remove downtime manually if you want to rebalance.", WARNING)
-            return
-        if self.apply_weighted_downtime_balance(target_downtime_total):
-            self.update_row_math()
-            self.mark_dirty()
-            message = f"Added {delta_minutes} downtime minutes across the existing downtime rows to match the shift total." if delta_minutes > 0 else "Existing downtime rows already matched the shift total."
-            self.dispatcher.show_toast("Balance Downtime", message, SUCCESS)
-            return
-        if balance_row is None:
-            balance_row = self.add_downtime_row()
-        self.set_downtime_row_duration(balance_row, target_downtime_total, set_balance_metadata=True)
-        self.update_row_math()
-        self.mark_dirty()
-        if delta_minutes > 0:
-            message = f"Added {delta_minutes} downtime minutes to the balance row because there were no existing downtime durations to distribute."
-        elif delta_minutes < 0:
-            message = f"Removed {abs(delta_minutes)} downtime minutes from the balance row to match the shift total."
-        else:
-            message = "The downtime balance row already matched the shift total."
-        self.dispatcher.show_toast("Balance Downtime", message, SUCCESS)
+        return self.controller.balance_downtime_to_shift()
 
     def set_entry_value(self, field_id, value):
         if field_id not in self.entries:
@@ -1113,6 +952,7 @@ class ProductionLogView:
         self.schedule_summary_refresh()
 
     def populate_from_data(self, data, source_path=None, mark_dirty_after_load=False):
+        balance_state = data.get("balance_state", {})
         self.apply_header_data(data.get("header", {}), mark_dirty=False)
         self.clear_dynamic_rows()
         for production_data in data.get("production", []):
@@ -1147,6 +987,7 @@ class ProductionLogView:
         self.calculate_metrics()
         self.update_target_time_display()
         self.update_ghost_total_display()
+        self.apply_balance_state(balance_state)
         self.current_draft_path = source_path
         if mark_dirty_after_load:
             self.mark_dirty()
@@ -1155,13 +996,13 @@ class ProductionLogView:
         self.schedule_summary_refresh()
 
     def list_pending_drafts(self):
-        return self.model.list_pending_drafts()
+        return self.controller.list_pending_drafts()
 
     def list_recovery_snapshots(self):
-        return self.model.list_recovery_snapshots()
+        return self.controller.list_recovery_snapshots()
 
     def get_latest_pending_draft(self):
-        return self.model.get_latest_pending_draft()
+        return self.controller.get_latest_pending_draft()
 
     def update_recovery_ui(self):
         drafts = self.list_pending_drafts()
@@ -1172,10 +1013,12 @@ class ProductionLogView:
         pending_count = len(drafts)
         snapshot_count = len(recovery_snapshots)
         dirty_text = "Unsaved changes" if self.has_unsaved_changes else "Saved"
-        latest_text = f"Latest: {latest['filename']} ({latest['saved_at']})" if latest else "No pending drafts"
-        self.recovery_status_lbl.config(text=f"{latest_text} | Current: {current_name} | State: {dirty_text} | Pending: {pending_count} | Recovery: {snapshot_count}")
+        self.recovery_status_lbl.config(
+            text=self.build_recovery_status_text(latest, current_name, dirty_text, pending_count, snapshot_count)
+        )
         self.resume_latest_btn.config(state=(NORMAL if latest else DISABLED))
         self.delete_current_draft_btn.config(state=(NORMAL if self.current_draft_path and os.path.exists(self.current_draft_path) else DISABLED))
+        self.update_recovery_wraplength()
 
     def confirm_discard_unsaved_changes(self):
         if not self.has_unsaved_changes:
@@ -1183,159 +1026,40 @@ class ProductionLogView:
         return messagebox.askyesno("Unsaved Changes", "You have unsaved changes in the current session. Continue and discard them?")
 
     def resume_latest_draft(self):
-        latest = self.get_latest_pending_draft()
-        if not latest:
-            self.dispatcher.show_toast("Resume Latest", "No pending drafts are available.", INFO)
-            return
-        self.load_draft_path(latest["path"])
+        return self.controller.resume_latest_draft()
 
     def open_recovery_viewer(self):
-        top = tb.Toplevel(title="Backup / Recovery")
-        top.geometry("980x620")
-        top.minsize(820, 520)
-        recovery_viewer.get_ui(top, self.dispatcher)
+        return self.controller.open_recovery_viewer()
 
     def delete_current_draft(self):
-        if not self.current_draft_path or not os.path.exists(self.current_draft_path):
-            self.dispatcher.show_toast("Delete Draft", "There is no saved draft attached to the current session.", INFO)
-            return
-        if not messagebox.askyesno("Delete Current Draft", f"Delete {os.path.basename(self.current_draft_path)}?"):
-            return
-        self.delete_draft_file(self.current_draft_path)
-        self.current_draft_path = None
-        self.mark_dirty()
+        return self.controller.delete_current_draft()
 
     def delete_draft_file(self, draft_path):
-        if os.path.exists(draft_path):
-            os.remove(draft_path)
-        if self.current_draft_path == draft_path:
-            self.current_draft_path = None
-        self.update_recovery_ui()
+        return self.controller.delete_draft_file(draft_path)
 
     def load_draft_path(self, draft_path, window=None):
-        if not self.confirm_discard_unsaved_changes():
-            return
-        try:
-            with open(draft_path, "r", encoding="utf-8") as handle:
-                data = json.load(handle)
-            self.populate_from_data(data, source_path=draft_path, mark_dirty_after_load=False)
-        except Exception as exc:
-            Messagebox.show_error(f"Error loading draft: {exc}", "Draft Load Error")
-        if window is not None:
-            window.destroy()
+        return self.controller.load_draft_path(draft_path, window=window)
 
     def update_row_math(self):
-        rates_data = self.load_rates_data()
-        global_goal = self.get_global_goal_rate()
-        total_molds = 0
-        for row in self.production_rows:
-            if not bool(row["rate_override_enabled_var"].get()):
-                lookup_rate = self.resolve_lookup_rate(row["part_number"].get(), rates_data, global_goal)
-                self.set_rate_lookup_value(row, self.format_rate_value(lookup_rate), editable=False)
-            try:
-                molds = float(row["molds"].get() or 0)
-                total_molds += int(molds)
-                rate = self.get_row_rate(row, rates_data, global_goal)
-                minutes = (molds / rate) * 60 if rate and rate > 0 else 0
-                row["time_calc"].config(text=f"{int(minutes)} min")
-            except Exception:
-                row["time_calc"].config(text="0 min")
-        if "total_molds" in self.entries:
-            self.set_entry_value("total_molds", str(total_molds))
-        for row in self.downtime_rows:
-            try:
-                s_raw, e_raw = row["start"].get().zfill(4), row["stop"].get().zfill(4)
-                if len(s_raw) == 4 and len(e_raw) == 4:
-                    s_m = int(s_raw[:2]) * 60 + int(s_raw[2:])
-                    e_m = int(e_raw[:2]) * 60 + int(e_raw[2:])
-                    diff = (e_m - s_m) if e_m >= s_m else (1440 - s_m + e_m)
-                    row["time_calc"].config(text=f"{diff} min")
-            except Exception:
-                row["time_calc"].config(text="--")
-        self.ensure_open_production_row()
-        self.ensure_open_downtime_row()
-        self.update_target_time_display()
-        self.update_ghost_total_display()
-        self.schedule_summary_refresh()
+        return self.controller.update_row_math()
 
     def calculate_metrics(self):
-        def safe_int(val):
-            try:
-                return int(val)
-            except Exception:
-                return 0
-        try:
-            total_molds = self.calculate_total_molds()
-            hours = float(self.entries["hours"].get() or 8.0)
-            goal = float(self.entries["goal_mph"].get() or 240)
-            eff = (total_molds / (hours * goal)) * 100 if hours and goal else 0
-            self.eff_display_lbl.config(text=f"EFF%: {eff:.2f}")
-        except Exception:
-            pass
-        self.update_target_time_display()
-        self.update_ghost_total_display()
-        self.schedule_summary_refresh()
+        return self.controller.calculate_metrics()
 
     def export_to_excel(self):
-        ghost_minutes = self.get_ghost_time_minutes()
-        if ghost_minutes != 0:
-            if messagebox.askyesno("Unbalanced Time", f"Your accounted time is off by {abs(ghost_minutes)} minutes. Do you want to Auto-Balance your downtime before exporting?"):
-                self.balance_downtime_to_shift()
-        try:
-            ui_data = self.collect_ui_data()
-            shift = ui_data["header"].get("shift", "0")
-            date = ui_data["header"].get("date", "00-00-00").replace("/", "")
-            target_path = self.data_handler.export_to_template(ui_data, shift, date)
-            self.last_export_path = target_path
-            self.update_export_action_state()
-            self.dispatcher.show_toast("Export Complete", f"Excel export completed successfully: {os.path.basename(target_path)}", SUCCESS)
-            if messagebox.askyesno("Export Complete", f"Workbook created successfully.\n\n{target_path}\n\nOpen it in the default application now so you can review it before printing?"):
-                self.open_last_exported_file(show_prompt=False)
-        except Exception as exc:
-            Messagebox.show_error(f"Export failed: {exc}", "Error")
+        return self.controller.export_to_excel()
 
     def get_last_export_path(self):
-        if self.last_export_path and os.path.exists(self.last_export_path):
-            return self.last_export_path
-        return None
+        return self.controller.get_last_export_path()
 
     def update_export_action_state(self):
-        state = NORMAL if self.get_last_export_path() else DISABLED
-        if hasattr(self, "open_export_btn"):
-            self.open_export_btn.config(state=state)
-        if hasattr(self, "print_export_btn"):
-            self.print_export_btn.config(state=state)
+        return self.controller.update_export_action_state()
 
     def open_last_exported_file(self, show_prompt=True):
-        export_path = self.get_last_export_path()
-        if not export_path:
-            if show_prompt:
-                Messagebox.show_error("No exported workbook is available yet.", "Open Export")
-            return
-        try:
-            if sys.platform.startswith("win"):
-                os.startfile(export_path)
-            else:
-                webbrowser.open(export_path)
-        except Exception as exc:
-            Messagebox.show_error(f"Could not open exported workbook: {exc}", "Open Export")
+        return self.controller.open_last_exported_file(show_prompt=show_prompt)
 
     def print_last_exported_file(self):
-        export_path = self.get_last_export_path()
-        if not export_path:
-            Messagebox.show_error("Export a workbook first so there is something to print.", "Print Export")
-            return
-        if not messagebox.askyesno("Print Export", f"Print this workbook using the default application print action?\n\n{export_path}\n\nReview it first with 'Open Last Export' if needed."):
-            return
-        try:
-            if sys.platform.startswith("win"):
-                os.startfile(export_path, "print")
-                self.dispatcher.show_toast("Printing", "Sent Excel file to the default printer.", INFO)
-            else:
-                self.open_last_exported_file(show_prompt=False)
-                self.dispatcher.show_toast("Print Review", "Opened the exported workbook for manual printing in the default application.", INFO)
-        except Exception as exc:
-            Messagebox.show_error(f"Could not print exported workbook: {exc}", "Print Export")
+        return self.controller.print_last_exported_file()
 
     def show_pending(self):
         top = tb.Toplevel(title="Pending Drafts")
@@ -1390,18 +1114,22 @@ class ProductionLogView:
         self.load_draft_path(path, window)
 
     def import_from_excel_ui(self):
-        from tkinter import filedialog
+        return self.controller.import_from_excel_ui()
 
-        file_path = filedialog.askopenfilename(title="Select Excel File to Import", filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")])
-        if file_path:
-            if not self.confirm_discard_unsaved_changes():
-                return
-            try:
-                data = self.data_handler.import_from_excel(file_path)
-                self.populate_from_data(data, source_path=None, mark_dirty_after_load=True)
-                self.dispatcher.show_toast("Import Complete", "Excel import completed successfully.", SUCCESS)
-            except Exception as exc:
-                Messagebox.show_error(f"Failed to import Excel: {exc}", "Import Error")
+    def show_error(self, title, message):
+        Messagebox.show_error(message, title)
+
+    def show_toast(self, title, message, bootstyle=SUCCESS):
+        self.dispatcher.show_toast(title, message, bootstyle)
+
+    def ask_yes_no(self, title, message):
+        return messagebox.askyesno(title, message)
+
+    def ask_import_file_path(self):
+        return filedialog.askopenfilename(
+            title="Select Excel File to Import",
+            filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")],
+        )
 
     def sync_julian_cast_date(self, event=None):
         try:

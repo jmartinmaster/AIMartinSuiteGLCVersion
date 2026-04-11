@@ -129,6 +129,7 @@ class HelpViewerView:
         self.parent = parent
         self.dispatcher = dispatcher
         self.controller = controller
+        self.controller.view = self
         self.palette = {
             "page_bg": "#223548",
             "hero_bg": "#D8E1EA",
