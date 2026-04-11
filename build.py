@@ -37,7 +37,19 @@ PRESERVE_DIST = os.environ.get("MARTIN_KEEP_DIST", "1") != "0"
 SKIP_TASKKILL = os.environ.get("MARTIN_SKIP_TASKKILL", "0") == "1"
 MARTIN_BUILD_TARGET_ENV = "MARTIN_BUILD_TARGET"
 MARTIN_WSL_DISTRO_ENV = "MARTIN_WSL_DISTRO"
+MARTIN_BUILD_PYTHON_ENV = "MARTIN_BUILD_PYTHON"
 MAX_OLD_EXE_ARCHIVE = 10
+REQUIRED_BUILD_MODULES = [
+    "PIL",
+    "PyInstaller",
+    "openpyxl",
+    "ttkbootstrap",
+    "tkinter",
+]
+WSL_VENV_CANDIDATE_PATHS = [
+    ".venv-linux/bin/python",
+    ".venv/bin/python",
+]
 SENSITIVE_RUNTIME_PATHS = [
     ".vault",
     os.path.join("data", "security"),
@@ -606,30 +618,38 @@ def resolve_wsl_path(wsl_distro=None):
 
 def invoke_ubuntu_build_via_wsl(wsl_distro=None):
     linux_repo_root = resolve_wsl_path(wsl_distro)
+    linux_venv_selection = " ".join(
+        f"elif [ -x {shlex.quote(candidate_path)} ]; then BUILD_PYTHON={shlex.quote(candidate_path)}; "
+        for candidate_path in WSL_VENV_CANDIDATE_PATHS
+    )
     bash_script = (
         "set -euo pipefail; "
         f"cd {shlex.quote(linux_repo_root)}; "
-        "if [ -x .venv/bin/python ]; then BUILD_PYTHON=.venv/bin/python; "
+        f"if [ -n \"${{{MARTIN_BUILD_PYTHON_ENV}:-}}\" ] && [ -x \"${{{MARTIN_BUILD_PYTHON_ENV}}}\" ]; then BUILD_PYTHON=\"${{{MARTIN_BUILD_PYTHON_ENV}}}\"; "
+        f"{linux_venv_selection}"
         "elif command -v python3 >/dev/null 2>&1; then BUILD_PYTHON=$(command -v python3); "
         "else echo 'No python3 runtime was found in the selected WSL distribution.' >&2; exit 1; fi; "
-        "if ! \"$BUILD_PYTHON\" -c 'import PIL, PyInstaller' >/dev/null 2>&1; then "
-        "echo 'The selected WSL Python runtime is missing Pillow or PyInstaller.' >&2; exit 1; fi; "
+        "if ! \"$BUILD_PYTHON\" -c 'import PIL, PyInstaller, openpyxl, ttkbootstrap, tkinter' >/dev/null 2>&1; then "
+        "echo 'The selected WSL Python runtime is missing one or more required build modules: Pillow, PyInstaller, openpyxl, ttkbootstrap, tkinter.' >&2; "
+        "echo 'Create .venv-linux inside WSL or install the modules into the selected WSL Python runtime before building.' >&2; exit 1; fi; "
         "if ! command -v dpkg-deb >/dev/null 2>&1; then "
         "echo 'dpkg-deb is required inside WSL to build the Ubuntu package.' >&2; exit 1; fi; "
         "exec \"$BUILD_PYTHON\" build.py --target ubuntu --non-interactive"
     )
     command = resolve_wsl_command_prefix(wsl_distro) + ["bash", "-lc", bash_script]
-    result = run_command(command, cwd=resolve_wsl_invocation_cwd())
+    result = run_command(command, capture_output=True, cwd=resolve_wsl_invocation_cwd())
     if result.returncode != 0:
         distro_suffix = f" in WSL distro '{wsl_distro}'" if wsl_distro else " in WSL"
+        failure_detail = (result.stderr or result.stdout or "").strip()
+        detail_suffix = f" Details: {failure_detail}" if failure_detail else ""
         raise BuildError(
             "The Ubuntu build failed"
-            f"{distro_suffix}. Confirm that the distro can access this repo and has Python, Pillow, PyInstaller, and dpkg-deb installed."
+            f"{distro_suffix}. Confirm that the distro can access this repo and has Python, Pillow, PyInstaller, openpyxl, ttkbootstrap, tkinter, and dpkg-deb installed.{detail_suffix}"
         )
 
 
 def run_windows_build():
-    ensure_python_modules(["PIL", "PyInstaller"])
+    ensure_python_modules(REQUIRED_BUILD_MODULES)
     pyinstaller_main = importlib.import_module("PyInstaller.__main__")
 
     clean_previous_builds(WINDOWS_TARGET)
@@ -647,7 +667,7 @@ def run_windows_build():
 
 def run_ubuntu_build_direct():
     ensure_command_available("dpkg-deb")
-    ensure_python_modules(["PIL", "PyInstaller"])
+    ensure_python_modules(REQUIRED_BUILD_MODULES)
     ensure_template_exists(UBUNTU_DESKTOP_TEMPLATE_PATH)
     ensure_template_exists(UBUNTU_LAUNCHER_TEMPLATE_PATH)
 

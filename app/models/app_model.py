@@ -1,3 +1,4 @@
+import threading
 from dataclasses import dataclass, field
 
 
@@ -23,3 +24,10 @@ class AppModel:
     transition_in_progress: bool = False
     module_update_check_in_progress: bool = False
     last_module_update_notification_signature: tuple = None
+    managed_source_signature: tuple = field(default_factory=tuple)
+    managed_source_generation: int = 0
+    preloaded_module_names: set = field(default_factory=set)
+    module_import_lock: object = field(default_factory=threading.RLock)
+    module_preload_stop_event: object = field(default_factory=threading.Event)
+    module_preload_thread: object = None
+    module_preload_poll_seconds: float = 1.0

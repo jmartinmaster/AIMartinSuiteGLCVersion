@@ -23,6 +23,7 @@ from app.update_state import UpdateCoordinator
 
 ISSUE_REPORT_URL = "https://github.com/jmartinmaster/AIMartinSuiteGLCVersion/issues/new/choose"
 PROTECTED_MODULES = ["layout_manager", "settings_manager", "rate_manager", "update_manager"]
+MODULE_PRELOAD_POLL_SECONDS = 1.0
 MANAGED_MODULE_NAMES = [
     "about",
     "app_logging",
@@ -51,9 +52,9 @@ MANAGED_MODULE_NAMES = [
 
 
 class Dispatcher:
-    def __init__(self, root, main_module=None):
+    def __init__(self, root, main_module=None, initial_module_name=None):
         self.root = root
-        self.root.title(f"Production Logging Center - {getattr(main_module, '__version__', '2.0.4')}")
+        self.root.title(f"Production Logging Center - {getattr(main_module, '__version__', '2.1.2')}")
         self.root.geometry("1000x600")
         self._update_status_clear_after_id = None
 
@@ -76,8 +77,10 @@ class Dispatcher:
         self._configure_module_import_paths()
         self.model.runtime_settings = self.load_runtime_settings()
         self.model.window_alpha_supported = self._supports_window_alpha()
+        self.model.module_preload_poll_seconds = MODULE_PRELOAD_POLL_SECONDS
         self.update_coordinator = UpdateCoordinator(self.root)
         self.refresh_animation_settings()
+        self.root.protocol("WM_DELETE_WINDOW", self.shutdown)
 
         self.view = AppShellView(self.root, self.update_coordinator)
         self.view.build()
@@ -87,7 +90,7 @@ class Dispatcher:
         self._load_modules_list()
         self._bind_mousewheel()
         self.refresh_update_status_visibility()
-        self.load_module("production_log", use_transition=False)
+        self.load_module(self._resolve_initial_module_name(initial_module_name), use_transition=False)
         self.root.after(1200, self.notify_non_secure_mode_state)
         self.root.after(1500, self.notify_external_override_policy_state)
         self.root.after(900, self.prompt_old_executable_cleanup)
@@ -201,18 +204,137 @@ class Dispatcher:
         os.makedirs(self.external_modules_path, exist_ok=True)
         self._configure_module_import_paths()
 
-    def import_managed_module(self, module_name, force_fresh=True):
+    def import_managed_module(self, module_name, force_fresh=True, track_loaded=True):
         module_path = self._resolve_managed_module_path(module_name)
-        self._configure_module_import_paths()
-        if force_fresh and module_path in sys.modules:
-            del sys.modules[module_path]
-        importlib.invalidate_caches()
-        module = importlib.import_module(module_path)
-        self.loaded_modules[module_name] = module
+        with self.model.module_import_lock:
+            self._configure_module_import_paths()
+            if force_fresh and module_path in sys.modules:
+                del sys.modules[module_path]
+            importlib.invalidate_caches()
+            module = importlib.import_module(module_path)
+        if track_loaded:
+            self.loaded_modules[module_name] = module
         return module
 
     def _resolve_managed_module_path(self, module_name):
         return f"app.{module_name}"
+
+    def _resolve_initial_module_name(self, module_name):
+        available_module_names = {name for _display_name, name in self.get_navigation_modules()}
+        if module_name in available_module_names:
+            return module_name
+        return "production_log"
+
+    def _iter_managed_source_files(self):
+        source_roots = [("bundled", self.modules_path)]
+        if self.has_external_modules_directory():
+            source_roots.append(("external", self.external_modules_path))
+
+        for root_kind, root_path in source_roots:
+            if not os.path.isdir(root_path):
+                continue
+            for current_root, dir_names, file_names in os.walk(root_path):
+                dir_names[:] = [directory for directory in dir_names if directory != "__pycache__"]
+                for file_name in file_names:
+                    if not file_name.endswith(".py"):
+                        continue
+                    absolute_path = os.path.join(current_root, file_name)
+                    try:
+                        file_stat = os.stat(absolute_path)
+                    except OSError:
+                        continue
+                    relative_path = os.path.relpath(absolute_path, root_path).replace("\\", "/")
+                    yield (root_kind, relative_path, file_stat.st_mtime_ns, file_stat.st_size)
+
+    def _build_managed_source_signature(self):
+        return tuple(sorted(self._iter_managed_source_files()))
+
+    def _invalidate_managed_module_cache_locked(self, new_signature=None):
+        self.model.managed_source_signature = tuple(new_signature or ())
+        self.model.managed_source_generation += 1
+        self.model.preloaded_module_names.clear()
+        for module_name in list(self.loaded_modules):
+            if module_name == "main":
+                continue
+            self.loaded_modules.pop(module_name, None)
+        for module_key in [key for key in sys.modules if key.startswith("app.")]:
+            sys.modules.pop(module_key, None)
+        importlib.invalidate_caches()
+
+    def invalidate_managed_module_cache(self, new_signature=None):
+        signature = new_signature or self._build_managed_source_signature()
+        with self.model.module_import_lock:
+            self._invalidate_managed_module_cache_locked(signature)
+
+    def _sync_managed_source_signature(self, force=False):
+        current_signature = self._build_managed_source_signature()
+        with self.model.module_import_lock:
+            if force or current_signature != self.model.managed_source_signature:
+                self._invalidate_managed_module_cache_locked(current_signature)
+                return True
+        return False
+
+    def _get_module_preload_targets(self):
+        targets = []
+        if self.active_module_name:
+            targets.append(self.active_module_name)
+        for module_name in self.get_user_facing_modules(apply_whitelist=False):
+            if module_name not in targets:
+                targets.append(module_name)
+        return targets
+
+    def _run_module_preload_cycle(self):
+        self._sync_managed_source_signature(force=False)
+        for module_name in self._get_module_preload_targets():
+            if self.model.module_preload_stop_event.is_set():
+                return
+            module_path = self._resolve_managed_module_path(module_name)
+            with self.model.module_import_lock:
+                if module_path in sys.modules:
+                    self.model.preloaded_module_names.add(module_name)
+                    continue
+            try:
+                self.import_managed_module(module_name, force_fresh=False, track_loaded=False)
+                self.model.preloaded_module_names.add(module_name)
+            except Exception as exc:
+                log_exception(f"module_preload.{module_name}", exc)
+
+    def _module_preloader_worker(self):
+        while not self.model.module_preload_stop_event.is_set():
+            try:
+                self._run_module_preload_cycle()
+            except Exception as exc:
+                log_exception("module_preloader.worker", exc)
+            if self.model.module_preload_stop_event.wait(self.model.module_preload_poll_seconds):
+                break
+
+    def start_module_preloader(self):
+        thread = self.model.module_preload_thread
+        if thread is not None and thread.is_alive():
+            return
+        self.model.module_preload_stop_event.clear()
+        self.model.module_preload_thread = threading.Thread(
+            target=self._module_preloader_worker,
+            name="ModulePreloader",
+            daemon=True,
+        )
+        self.model.module_preload_thread.start()
+
+    def stop_module_preloader(self):
+        thread = self.model.module_preload_thread
+        if thread is None:
+            return
+        self.model.module_preload_stop_event.set()
+        if thread.is_alive() and thread is not threading.current_thread():
+            thread.join(timeout=1.5)
+        self.model.module_preload_thread = None
+
+    def shutdown(self):
+        self.stop_module_preloader()
+        try:
+            self.root.destroy()
+        except Exception:
+            pass
 
     def get_external_module_override_path(self, module_name):
         if module_name not in MANAGED_MODULE_NAMES:
@@ -281,14 +403,8 @@ class Dispatcher:
             if frame is not None and frame.winfo_exists():
                 frame.destroy()
             self.persistent_module_instances.pop(module_name, None)
-
-        for module_name in list(self.loaded_modules):
-            if module_name == "main" or (keep_active and module_name == active_name):
-                continue
-            self.loaded_modules.pop(module_name, None)
-            sys.modules.pop(module_name, None)
-            sys.modules.pop(f"app.{module_name}", None)
-            sys.modules.pop(f"the_golden_standard.{module_name}", None)
+        if not keep_active:
+            self.invalidate_managed_module_cache()
 
     def install_module_override(self, module_name, module_text):
         self.ensure_external_modules_package()
@@ -348,7 +464,7 @@ class Dispatcher:
             lambda: self.load_module("help_viewer"),
             self.open_issue_report_page,
             lambda: self.load_module("about"),
-            self.root.quit,
+            self.shutdown,
         )
 
     def open_issue_report_page(self):
@@ -381,13 +497,8 @@ class Dispatcher:
             self.active_module_instance.import_from_excel_ui()
 
     def pre_load_manifest(self):
-        module_list = ["production_log", "layout_manager", "data_handler", "about", "settings_manager", "theme_manager", "help_viewer", "update_manager", "recovery_viewer"]
-        for mod_name in module_list:
-            try:
-                if mod_name not in self.loaded_modules:
-                    self.import_managed_module(mod_name, force_fresh=False)
-            except Exception as exc:
-                log_exception(f"pre_load_manifest.{mod_name}", exc)
+        self._sync_managed_source_signature(force=True)
+        self.start_module_preloader()
 
     def _load_modules_list(self):
         self.view.populate_navigation(self.get_navigation_modules(), self.secure_load, self.active_module_name)
@@ -583,6 +694,7 @@ class Dispatcher:
 
     def load_module(self, module_name, use_transition=True):
         def perform_load():
+            self._sync_managed_source_signature(force=False)
             previous_module_name = self.active_module_name
             previous_module_instance = self.active_module_instance
             previous_module_frame = self.active_module_frame
@@ -608,7 +720,8 @@ class Dispatcher:
             if self.is_module_persistent(module_name) and module_name in self.persistent_module_instances:
                 session = self.persistent_module_instances[module_name]
                 cached_frame = session.get("frame")
-                if cached_frame is not None and cached_frame.winfo_exists():
+                session_generation = session.get("generation")
+                if session_generation == self.model.managed_source_generation and cached_frame is not None and cached_frame.winfo_exists():
                     self.active_module_name = module_name
                     self.active_module_instance = session.get("instance")
                     self.active_module_frame = cached_frame
@@ -616,12 +729,20 @@ class Dispatcher:
                     self.content_area.update_idletasks()
                     self.view.set_active_navigation_button(module_name)
                     return
+                stale_instance = session.get("instance")
+                if hasattr(stale_instance, "on_unload"):
+                    try:
+                        stale_instance.on_unload()
+                    except Exception as exc:
+                        log_exception(f"persistent_module_stale.{module_name}", exc)
+                if cached_frame is not None and cached_frame.winfo_exists():
+                    cached_frame.destroy()
                 self.persistent_module_instances.pop(module_name, None)
 
             module_frame = tb.Frame(self.content_area, style="Martin.Surface.TFrame")
             module_frame.pack(fill=BOTH, expand=True)
 
-            module = self.import_managed_module(module_name, force_fresh=True)
+            module = self.import_managed_module(module_name, force_fresh=False)
 
             if hasattr(module, "get_ui"):
                 self.active_module_name = module_name
@@ -631,6 +752,7 @@ class Dispatcher:
                     self.persistent_module_instances[module_name] = {
                         "instance": self.active_module_instance,
                         "frame": module_frame,
+                        "generation": self.model.managed_source_generation,
                     }
                 self.view.set_active_navigation_button(module_name)
 
@@ -878,7 +1000,7 @@ class Dispatcher:
             self._update_status_clear_after_id = None
 
     def prompt_old_executable_cleanup(self):
-        obsolete_executables = get_obsolete_local_executables(os.path.abspath(sys.executable), getattr(self.main_module, "__version__", "2.0.4"))
+        obsolete_executables = get_obsolete_local_executables(os.path.abspath(sys.executable), getattr(self.main_module, "__version__", "2.1.2"))
         if not obsolete_executables:
             return
 

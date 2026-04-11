@@ -17,21 +17,51 @@ class ProductionLogModel:
         self.dt_codes = get_code_options()
         self.data_handler = DataHandlerService()
         self.settings = self.load_settings()
-        self.default_hours = str(self.settings.get("default_shift_hours", 8.0))
-        self.default_goal = str(self.settings.get("default_goal_mph", 240))
-        self.auto_save_interval = int(self.settings.get("auto_save_interval_min", 5)) * 60000
+        self.default_hours = self._format_number(self.settings.get("default_shift_hours", 8.0))
+        self.default_goal = self._format_number(self.settings.get("default_goal_mph", 240.0))
+        self.auto_save_interval = self._coerce_positive_int(self.settings.get("auto_save_interval_min", 5), 5) * 60000
 
     def load_settings(self):
+        settings = {
+            "auto_save_interval_min": 5,
+            "default_shift_hours": 8.0,
+            "default_goal_mph": 240.0,
+        }
         settings_path = external_path("settings.json")
         if os.path.exists(settings_path):
             try:
                 with open(settings_path, "r", encoding="utf-8") as handle:
                     loaded = json.load(handle)
                 if isinstance(loaded, dict):
-                    return loaded
+                    settings.update(loaded)
             except Exception:
                 pass
-        return {}
+        settings["auto_save_interval_min"] = self._coerce_positive_int(settings.get("auto_save_interval_min", 5), 5)
+        settings["default_shift_hours"] = self._coerce_float(settings.get("default_shift_hours", 8.0), 8.0)
+        settings["default_goal_mph"] = self._coerce_float(settings.get("default_goal_mph", 240.0), 240.0)
+        return settings
+
+    def _coerce_positive_int(self, value, default):
+        try:
+            normalized = int(float(str(value).strip()))
+        except Exception:
+            return default
+        return max(1, normalized)
+
+    def _coerce_float(self, value, default):
+        try:
+            return float(str(value).strip())
+        except Exception:
+            return default
+
+    def _format_number(self, value):
+        try:
+            numeric_value = float(value)
+        except Exception:
+            return str(value)
+        if numeric_value.is_integer():
+            return str(int(numeric_value))
+        return str(numeric_value)
 
     def refresh_downtime_codes(self):
         self.dt_codes = get_code_options()

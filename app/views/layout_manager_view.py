@@ -5,7 +5,7 @@ from tkinter import messagebox
 from tkinter import ttk
 
 import ttkbootstrap as tb
-from ttkbootstrap.constants import BOTH, DANGER, END, EW, HORIZONTAL, INFO, LEFT, NONE, NS, NSEW, NW, PRIMARY, RIGHT, SECONDARY, SUCCESS, VERTICAL, W, X, Y
+from ttkbootstrap.constants import BOTH, DANGER, END, EW, HORIZONTAL, INFO, LEFT, NE, NONE, NS, NSEW, NW, PRIMARY, RIGHT, SECONDARY, SUCCESS, VERTICAL, W, X, Y
 from ttkbootstrap.dialogs import Messagebox
 
 from app.theme_manager import normalize_theme
@@ -31,11 +31,17 @@ class LayoutManagerView:
         self.block_canvas_bg = "#1f242b" if is_dark_theme else "#f4f6f8"
         self.preview_grid_bg = "#1f242b" if is_dark_theme else "#eef2f5"
         self.preview_cell_bg = "#2a313a" if is_dark_theme else "#ffffff"
+        self.card_shell_bg = self.preview_cell_bg
         self.preview_muted_fg = "#d6dde5" if is_dark_theme else "#6c757d"
         self.preview_empty_fg = "#9fb0c0" if is_dark_theme else "#6c757d"
         self.preview_text_fg = "#f8f9fa" if is_dark_theme else "#212529"
         self.preview_readonly_fg = "#7cc4ff" if is_dark_theme else "#0b5ed7"
         self.preview_border = "#5f6b78" if is_dark_theme else "#8b98a5"
+        self.preview_selected_bg = "#31465a" if is_dark_theme else "#dceeff"
+        self.preview_selected_border = "#7cc4ff" if is_dark_theme else "#0b5ed7"
+        self.selected_block_item = None
+        self.preview_cells = []
+        self.preview_field_labels = {}
 
         self.main_container = tb.Frame(self.parent, padding=10, style="Martin.Content.TFrame")
         self.main_container.pack(fill=BOTH, expand=True)
@@ -317,8 +323,8 @@ class LayoutManagerView:
                 readonly_toggle = tb.Checkbutton(form_row, text="Readonly", variable=readonly_var, bootstyle="round-toggle")
                 readonly_toggle.grid(row=0, column=8, padx=(0, 12), pady=2, sticky=W)
 
-            if not is_locked_readonly:
-                tb.Checkbutton(edit_row, text="Readonly", variable=readonly_var, bootstyle="round-toggle").pack(side=LEFT, padx=(0, 12))
+            edit_row = tb.Frame(card)
+            edit_row.pack(fill=X, pady=(6, 0))
 
             # Suffix field (always shown for clarity)
             tb.Label(edit_row, text="Suffix", bootstyle=PRIMARY).pack(side=LEFT, padx=(0, 4))
@@ -336,7 +342,7 @@ class LayoutManagerView:
                     readonly_var.get(),
                     default_var.get(),
                 ),
-            ).grid(row=0, column=9 if not is_locked_readonly else 6, padx=(0, 8), pady=2, sticky=W)
+            ).pack(side=LEFT, padx=(0, 8))
 
             if is_locked_readonly:
                 note_row = tb.Frame(card)
@@ -352,12 +358,17 @@ class LayoutManagerView:
         mappings_title = tb.Label(self.block_inner, text="Mappings", font=("-size 12 -weight bold"), bootstyle=PRIMARY)
         mappings_title.pack(anchor=W, pady=(10, 6))
         tb.Separator(self.block_inner, bootstyle=PRIMARY).pack(fill=X, pady=(0, 8))
-        self.add_mapping_block("Production Mapping", config.get("production_mapping", {}), self.block_inner)
-        self.add_mapping_block("Downtime Mapping", config.get("downtime_mapping", {}), self.block_inner)
+        self.mapping_cards_container = tb.Frame(self.block_inner)
+        self.mapping_cards_container.pack(fill=X)
+        self.add_mapping_block("Production Mapping", config.get("production_mapping", {}), self.mapping_cards_container)
+        self.add_mapping_block("Downtime Mapping", config.get("downtime_mapping", {}), self.mapping_cards_container)
         self.dispatcher.bind_mousewheel_to_widget_tree(self.block_inner, self.block_canvas)
 
     def add_mapping_block(self, title, mapping, parent):
         mapping_name = title.lower().replace(" ", "_")
+        item_key = f"mapping:{mapping_name}"
+        card_shell, card = self._create_card_shell(parent, item_key, title)
+        self.mapping_card_widgets.append(card_shell)
         top_row = tb.Frame(card)
         top_row.pack(fill=X, pady=(0, 6))
         tb.Label(top_row, text="Start Row", bootstyle=PRIMARY).pack(side=LEFT)
@@ -476,6 +487,8 @@ class LayoutManagerView:
         self.hide_preview_tooltip()
         for child in self.preview_canvas.winfo_children():
             child.destroy()
+        self.preview_cells = []
+        self.preview_field_labels = {}
         try:
             config = self.get_current_config()
             fields = config.get("header_fields", [])
@@ -498,10 +511,14 @@ class LayoutManagerView:
                     cell_frame.grid(row=row + 1, column=col + 1, padx=3, pady=3, sticky=NSEW)
                     cell_frame.grid_propagate(False)
                     cell_frame.configure(width=130, height=70)
+                    cell_info = {"frame": cell_frame, "item_keys": []}
+                    self.preview_cells.append(cell_info)
                     tk.Label(cell_frame, text=f"({row}, {col})", bg=self.preview_cell_bg, fg=self.preview_muted_fg, anchor="w").pack(anchor=NW)
                     fields_here = field_positions.get((row, col), [])
                     if fields_here:
                         for field in fields_here:
+                            item_key = self._card_key_for_field(field.get("id", ""))
+                            cell_info["item_keys"].append(item_key)
                             field_label = tk.Label(
                                 cell_frame,
                                 text=field.get("label", field.get("id", "Unnamed")),
@@ -512,6 +529,9 @@ class LayoutManagerView:
                                 anchor="w",
                             )
                             field_label.pack(anchor=W, pady=(4, 0))
+                            self.preview_field_labels.setdefault(item_key, []).append(
+                                (field_label, self.preview_readonly_fg if field.get("readonly") else self.preview_text_fg)
+                            )
                             self.bind_preview_tooltip(field_label, field)
                             self.bind_preview_tooltip(cell_frame, field)
                     else:

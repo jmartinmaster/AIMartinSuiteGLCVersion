@@ -763,6 +763,21 @@ class ProductionLogView:
         if original_state == "readonly":
             entry.config(state="readonly")
 
+    def get_widget_value(self, widget):
+        if widget is None:
+            return ""
+        if hasattr(widget, "get"):
+            try:
+                return widget.get()
+            except Exception:
+                pass
+        if hasattr(widget, "cget"):
+            try:
+                return widget.cget("text")
+            except Exception:
+                pass
+        return ""
+
     def clear_dynamic_rows(self):
         for widget in self.production_container.winfo_children():
             widget.destroy()

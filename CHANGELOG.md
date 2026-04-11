@@ -4,6 +4,17 @@ This changelog tracks the main branch release line for Production Logging Center
 
 Version headings below are aligned to the current `2.x` release line used by Dispatcher Core. Earlier work has been grouped into practical release milestones so the shipped feature history is easier to follow without rewriting older module version markers.
 
+## [2.1.2] - 2026-04-11
+
+### Changed
+
+- Promoted Dispatcher Core to stable version `2.1.2` for the post-refactor runtime stabilization pass.
+- Kept focused module launching at the application boundary through `launcher.py --module ...` so the MVC module wrappers remain thin controller delegates.
+- Hardened source startup after the MVC split by fixing blank numeric settings handling in Production Log, restoring missing widget/config helpers, and repairing Layout Manager preview/editor initialization.
+- Added a background managed-module preloader plus generation-based source invalidation so page switches stay warm while edited files still rebuild on the next visit.
+- Corrected Dispatcher Core release metadata resolution so source rebuild/update flows read the canonical version from `launcher.py` instead of attempting to parse `main.py` for a local assignment.
+- Refreshed README guidance and the release regression checklist to match the focused-launch workflow and hot-swap-aware preload behavior.
+
 ## [2.1.0] - 2026-04-10
 
 ### Changed

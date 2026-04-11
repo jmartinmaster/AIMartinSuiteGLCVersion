@@ -30,6 +30,9 @@ Use this checklist before packaging or publishing the next Dispatcher Core relea
 ## Runtime And Packaging Checks
 
 - Run `py_compile` on touched Python files before release.
-- Smoke-test startup from source mode.
+- Smoke-test startup from source mode with `python main.py`.
+- Smoke-test focused source launch with `python launcher.py --module about`.
+- Confirm the first round of module switches stays responsive after the background preload cycle completes.
+- Touch a managed source file, reopen the affected module, and confirm the page rebuilds instead of reusing stale UI state.
 - If packaging on Windows, confirm the packaged EXE starts, loads bundled modules by default, and respects override trust after admin changes.
 - If packaging on Windows, confirm side-by-side EXE handoff still works and older EXE cleanup remains available.

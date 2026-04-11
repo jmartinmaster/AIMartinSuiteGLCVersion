@@ -27,7 +27,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name='Production Logging Center_GLC_v2.0.4',
+    name='Production Logging Center_GLC_v2.1.2',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -47,5 +47,5 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name='Production Logging Center_GLC_v2.0.4',
+    name='Production Logging Center_GLC_v2.1.2',
 )
