@@ -165,13 +165,8 @@ class ProductionLogModel:
         part_text = str(value or "").strip().upper()
         return " ".join(part_text.split())
 
-    def strip_leading_zeros_from_segments(self, value):
-        def replace_match(match):
-            digits = match.group(0)
-            stripped = digits.lstrip("0")
-            return stripped or "0"
-
-        return re.sub(r"\d+", replace_match, value)
+    def strip_lookup_separators(self, value):
+        return str(value or "").replace(" ", "").replace("-", "")
 
     def build_part_lookup_keys(self, value):
         normalized = self.normalize_part_number(value)
@@ -180,10 +175,9 @@ class ProductionLogModel:
 
         candidates = []
         compact = normalized.replace(" ", "")
-        zero_normalized = self.strip_leading_zeros_from_segments(normalized)
-        zero_compact = self.strip_leading_zeros_from_segments(compact)
+        separator_compact = self.strip_lookup_separators(normalized)
 
-        for candidate in (normalized, compact, zero_normalized, zero_compact):
+        for candidate in (normalized, compact, separator_compact):
             if candidate and candidate not in candidates:
                 candidates.append(candidate)
         return candidates

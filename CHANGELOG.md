@@ -4,6 +4,21 @@ This changelog tracks the main branch release line for Production Logging Center
 
 Version headings below are aligned to the current `2.x` release line used by Dispatcher Core. Earlier work has been grouped into practical release milestones so the shipped feature history is easier to follow without rewriting older module version markers.
 
+## [2.0.5] - 2026-04-11
+
+### Changed
+
+- Advanced Dispatcher Core to development version `2.0.5` as a checkpoint for the in-progress Production Log responsive-summary work.
+- Added a responsive Production Log visual summary area with a mold-contribution chart and a production-versus-downtime-versus-ghost-time chart rendered with native Tk canvas widgets.
+- Wired the new Production Log summary area into existing production totals, downtime totals, ghost-time calculations, resize handling, theme application, and draft/import refresh paths.
+- Lowered the first-pass chart visibility threshold so the summary area can appear sooner on moderately sized windows.
+- Captured the remaining Production Log top-whitespace defect and chart-visibility follow-up in the handoff and regression documents so the work can continue on another machine without rediscovery.
+
+### Notes
+
+- This odd patch release is intended as a development checkpoint and is ignored by the packaged EXE update gate.
+- The Production Log top whitespace above `Draft Status` remains unresolved at this checkpoint and is the next priority before treating the summary charts as release-ready.
+
 ## [2.1.0] - 2026-04-10
 
 ### Changed

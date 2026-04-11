@@ -207,3 +207,42 @@ class LayoutManagerModel:
                 raise ValueError(f"Column '{key}' cannot be empty.")
             mapping.setdefault("columns", {})[key] = cleaned_value
         return config, f"Updated mapping '{mapping_name}'"
+
+    def get_field_item_key(self, field_id):
+        return f"field:{field_id}"
+
+    def get_mapping_item_key(self, mapping_name):
+        return f"mapping:{mapping_name}"
+
+    def build_preview_grid(self, config):
+        fields = config.get("header_fields", [])
+        max_row = max((int(field.get("row", 0)) for field in fields), default=0)
+        max_col = max((int(field.get("col", 0)) for field in fields), default=0)
+        field_positions = {}
+
+        for field in fields:
+            row = int(field.get("row", 0))
+            col = int(field.get("col", 0))
+            preview_field = dict(field)
+            preview_field["item_key"] = self.get_field_item_key(field.get("id", ""))
+            field_positions.setdefault((row, col), []).append(preview_field)
+
+        cells = []
+        for row in range(max_row + 1):
+            for col in range(max_col + 1):
+                fields_here = field_positions.get((row, col), [])
+                cells.append(
+                    {
+                        "row": row,
+                        "col": col,
+                        "fields": fields_here,
+                        "item_keys": [field["item_key"] for field in fields_here if field.get("item_key")],
+                    }
+                )
+
+        return {
+            "field_count": len(fields),
+            "max_row": max_row,
+            "max_col": max_col,
+            "cells": cells,
+        }

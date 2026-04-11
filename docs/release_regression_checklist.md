@@ -33,3 +33,9 @@ Use this checklist before packaging or publishing the next Dispatcher Core relea
 - Smoke-test startup from source mode.
 - If packaging on Windows, confirm the packaged EXE starts, loads bundled modules by default, and respects override trust after admin changes.
 - If packaging on Windows, confirm side-by-side EXE handoff still works and older EXE cleanup remains available.
+
+## Production Log Follow-Up Checks
+
+- Confirm Production Log no longer shows a large blank region above `Draft Status` inside the shared app shell.
+- Confirm the Production Log responsive summary charts appear at the intended window size after the whitespace issue is resolved.
+- Confirm the summary panel does not force the main shell canvas to remain scrolled away from the top when the module loads or resizes.

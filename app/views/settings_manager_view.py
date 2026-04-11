@@ -39,6 +39,7 @@ class SettingsManagerView:
         self.parent = parent
         self.dispatcher = dispatcher
         self.controller = controller
+        self._active_modal_parent = None
         self.entries = {}
         self.module_whitelist_var = tk.StringVar(value="All visible modules")
         self.persistent_modules_var = tk.StringVar(value="Disabled")
@@ -296,11 +297,19 @@ class SettingsManagerView:
     def ask_for_export_directory(self):
         return filedialog.askdirectory()
 
-    def ask_for_password_pair(self, title, prompt_text):
-        first = simpledialog.askstring(title, prompt_text, show="*", parent=self.parent)
+    def _resolve_modal_parent(self, explicit_parent=None):
+        if explicit_parent is not None:
+            return explicit_parent
+        if self._active_modal_parent is not None and self._active_modal_parent.winfo_exists():
+            return self._active_modal_parent
+        return self.parent
+
+    def ask_for_password_pair(self, title, prompt_text, parent=None):
+        modal_parent = self._resolve_modal_parent(parent)
+        first = simpledialog.askstring(title, prompt_text, show="*", parent=modal_parent)
         if first is None:
             return None
-        second = simpledialog.askstring(title, "Re-enter the password:", show="*", parent=self.parent)
+        second = simpledialog.askstring(title, "Re-enter the password:", show="*", parent=modal_parent)
         if second is None:
             return None
         if first != second:
@@ -311,8 +320,8 @@ class SettingsManagerView:
             return None
         return first
 
-    def ask_yes_no(self, title, message):
-        return bool(messagebox.askyesno(title, message, parent=self.parent))
+    def ask_yes_no(self, title, message, parent=None):
+        return bool(messagebox.askyesno(title, message, parent=self._resolve_modal_parent(parent)))
 
     def show_error(self, title, message):
         Messagebox.show_error(message, title)
@@ -327,12 +336,33 @@ class SettingsManagerView:
         top = tb.Toplevel(title="Security Administration")
         top.geometry("980x720")
         top.minsize(900, 640)
+        previous_modal_parent = self._active_modal_parent
+        self._active_modal_parent = top
 
-        container = tb.Frame(top, padding=20)
-        container.pack(fill=BOTH, expand=True)
+        outer = tb.Frame(top, padding=0)
+        outer.pack(fill=BOTH, expand=True)
+        canvas = tk.Canvas(outer, highlightthickness=0)
+        canvas.pack(side=LEFT, fill=BOTH, expand=True)
+        scrollbar = tb.Scrollbar(outer, orient=VERTICAL, command=canvas.yview)
+        scrollbar.pack(side=RIGHT, fill=Y)
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        container = tb.Frame(canvas, padding=20)
+        window_id = canvas.create_window((0, 0), window=container, anchor="nw")
         container.columnconfigure(0, weight=0)
         container.columnconfigure(1, weight=1)
-        container.rowconfigure(1, weight=1)
+
+        def sync_scroll_region(_event=None):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+
+        def sync_window_width(event):
+            canvas.itemconfigure(window_id, width=event.width)
+
+        container.bind("<Configure>", sync_scroll_region)
+        canvas.bind("<Configure>", sync_window_width)
+        self.dispatcher.bind_mousewheel_to_widget_tree(outer, canvas)
+        self.dispatcher.bind_mousewheel_to_widget_tree(canvas, canvas)
+        self.dispatcher.bind_mousewheel_to_widget_tree(scrollbar, canvas)
 
         session_var = tk.StringVar(value=state.get("session_summary", "Locked"))
         security_note_var = tk.StringVar(value="")
@@ -340,6 +370,7 @@ class SettingsManagerView:
         name_var = tk.StringVar(value="")
         role_var = tk.StringVar(value="general")
         enabled_var = tk.BooleanVar(value=True)
+        non_secure_var = tk.BooleanVar(value=bool(state.get("non_secure_mode", False)))
         password_note_var = tk.StringVar(value="General vaults can remain passwordless.")
 
         tb.Label(container, text="Security Administration", font=("Segoe UI", 16, "bold")).grid(row=0, column=0, columnspan=2, sticky=W)
@@ -430,6 +461,8 @@ class SettingsManagerView:
             update_role_note()
 
         def rebuild_vault_list(preferred_name=None):
+            if not vault_listbox.winfo_exists():
+                return
             vaults = current_state["value"].get("vaults", [])
             vault_listbox.delete(0, tk.END)
             target_index = None
@@ -520,15 +553,51 @@ class SettingsManagerView:
             session_var.set(new_state.get("session_summary", "Locked"))
             rebuild_vault_list(preferred_name=selected_record["existing_name"])
 
+        security_mode_frame = tb.Labelframe(right_frame, text=" Security Mode ", padding=12)
+        security_mode_frame.grid(row=form_row + 1, column=0, columnspan=2, sticky=EW, pady=(14, 0))
+        tb.Checkbutton(
+            security_mode_frame,
+            text="Persistently bypass protected-module authentication",
+            variable=non_secure_var,
+            bootstyle="round-toggle",
+        ).pack(anchor=W)
+        tb.Label(
+            security_mode_frame,
+            text="This is a global persisted setting intended for controlled admin use only.",
+            bootstyle=SECONDARY,
+            justify=LEFT,
+            wraplength=540,
+        ).pack(anchor=W, pady=(6, 0))
+
+        def handle_save_security_mode():
+            desired_state = bool(non_secure_var.get())
+            current_mode = bool(current_state["value"].get("non_secure_mode", False))
+            if desired_state == current_mode:
+                return
+            action_text = "enable" if desired_state else "disable"
+            if not self.ask_yes_no("Confirm Security Change", f"Are you sure you want to {action_text} persisted non-secure mode?"):
+                non_secure_var.set(current_mode)
+                return
+            try:
+                new_state = self.controller.set_security_non_secure_mode(desired_state)
+            except Exception as exc:
+                self.show_error("Security", str(exc))
+                non_secure_var.set(current_mode)
+                return
+            current_state["value"] = new_state
+            session_var.set(new_state.get("session_summary", "Locked"))
+            non_secure_var.set(bool(new_state.get("non_secure_mode", False)))
+
         action_row = tb.Frame(right_frame)
-        action_row.grid(row=form_row + 1, column=0, columnspan=2, sticky=EW, pady=(14, 0))
+        action_row.grid(row=form_row + 2, column=0, columnspan=2, sticky=EW, pady=(14, 0))
         tb.Button(action_row, text="New Vault", bootstyle=SECONDARY, command=lambda: fill_form(None)).pack(side=LEFT)
         tb.Button(action_row, text="Role Defaults", bootstyle=INFO, command=apply_role_defaults).pack(side=LEFT, padx=(8, 0))
         tb.Button(action_row, text="Save Vault", bootstyle=SUCCESS, command=handle_save).pack(side=LEFT, padx=(8, 0))
         tb.Button(action_row, text="Save + Reset Password", bootstyle=INFO, command=lambda: handle_save(reset_password=True)).pack(side=LEFT, padx=(8, 0))
+        tb.Button(action_row, text="Save Security Mode", bootstyle="warning", command=handle_save_security_mode).pack(side=LEFT, padx=(8, 0))
 
         secondary_actions = tb.Frame(right_frame)
-        secondary_actions.grid(row=form_row + 2, column=0, columnspan=2, sticky=EW, pady=(10, 0))
+        secondary_actions.grid(row=form_row + 3, column=0, columnspan=2, sticky=EW, pady=(10, 0))
         tb.Button(secondary_actions, text="Rotate Password", bootstyle=INFO, command=handle_rotate_password).pack(side=LEFT)
         tb.Button(secondary_actions, text="Delete Vault", bootstyle=DANGER, command=handle_delete).pack(side=LEFT, padx=(8, 0))
         tb.Button(secondary_actions, text="Close", bootstyle=SECONDARY, command=top.destroy).pack(side=RIGHT)
@@ -545,6 +614,7 @@ class SettingsManagerView:
                 fill_form(current_state["value"]["vaults"][matching_names.index(session_name)])
 
         top.wait_window()
+        self._active_modal_parent = previous_modal_parent
 
     def show_downtime_codes_dialog(self, current_codes):
         top = tb.Toplevel(title="Downtime Codes")
@@ -783,8 +853,29 @@ class SettingsManagerView:
         top.geometry("900x760")
         top.minsize(780, 640)
 
-        container = tb.Frame(top, padding=20)
-        container.pack(fill=BOTH, expand=True)
+        outer = tb.Frame(top, padding=0)
+        outer.pack(fill=BOTH, expand=True)
+        canvas = tk.Canvas(outer, highlightthickness=0)
+        canvas.pack(side=LEFT, fill=BOTH, expand=True)
+        scrollbar = tb.Scrollbar(outer, orient=VERTICAL, command=canvas.yview)
+        scrollbar.pack(side=RIGHT, fill=Y)
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        container = tb.Frame(canvas, padding=20)
+        container.columnconfigure(0, weight=1)
+        window_id = canvas.create_window((0, 0), window=container, anchor="nw")
+
+        def sync_scroll_region(_event=None):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+
+        def sync_window_width(event):
+            canvas.itemconfigure(window_id, width=event.width)
+
+        container.bind("<Configure>", sync_scroll_region)
+        canvas.bind("<Configure>", sync_window_width)
+        self.dispatcher.bind_mousewheel_to_widget_tree(outer, canvas)
+        self.dispatcher.bind_mousewheel_to_widget_tree(canvas, canvas)
+        self.dispatcher.bind_mousewheel_to_widget_tree(scrollbar, canvas)
 
         tb.Label(container, text="Developer & Admin Tools", font=("-size 14 -weight bold")).pack(anchor=W)
         tb.Label(

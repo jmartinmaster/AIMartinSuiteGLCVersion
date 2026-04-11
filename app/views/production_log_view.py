@@ -29,6 +29,7 @@ from ttkbootstrap.dialogs import Messagebox
 from app import recovery_viewer
 from app.persistence import write_json_with_backup
 from app.models.production_log_model import BALANCE_DOWNTIME_CAUSE, DEFAULT_GHOST_LABEL
+from app.theme_manager import get_theme_tokens
 
 __module_name__ = "Production Log"
 __version__ = "1.2.5"
@@ -54,6 +55,11 @@ class ProductionLogView:
         self.last_export_path = None
         self.has_unsaved_changes = False
         self.last_saved_signature = None
+        self.summary_visible = False
+        self.summary_refresh_after_id = None
+        self.summary_resize_after_id = None
+        self.summary_theme_tokens = {}
+        self.content_stack = None
 
         self.setup_ui()
         self.parent.after(self.auto_save_interval, self.auto_save)
@@ -207,11 +213,14 @@ class ProductionLogView:
             Messagebox.show_error(f"Could not save draft: {exc}", "Draft Save Error")
 
     def setup_ui(self):
+        self.content_stack = tb.Frame(self.parent, style="Martin.Content.TFrame")
+        self.content_stack.pack(fill=X, anchor=N)
         self.build_recovery_section()
         self.build_header_section()
         self.build_production_section()
         self.build_downtime_section()
         self.build_footer_section()
+        self.build_summary_section()
         self.add_production_row()
         self.add_downtime_row()
         self.apply_header_data(self.get_raw_header_data(), mark_dirty=False)
@@ -220,9 +229,15 @@ class ProductionLogView:
         self.update_export_action_state()
         self.mark_clean()
         self.update_recovery_ui()
+        self.parent.bind("<Configure>", self.on_parent_resized, add="+")
+        self.apply_theme()
+        self.parent.update_idletasks()
+        self.refresh_summary_panel()
+        self.reset_shell_scroll_position()
+        self.schedule_summary_refresh()
 
     def build_recovery_section(self):
-        recovery_wrapper = tb.Labelframe(self.parent, text=" Draft Status ", padding=10, style="Martin.Recovery.TLabelframe")
+        recovery_wrapper = tb.Labelframe(self.content_stack, text=" Draft Status ", padding=10, style="Martin.Recovery.TLabelframe")
         recovery_wrapper.pack(fill=X, padx=10, pady=(10, 0))
         self.recovery_status_lbl = tb.Label(recovery_wrapper, text="Checking draft state...", style="Martin.Muted.TLabel")
         self.recovery_status_lbl.pack(side=LEFT, padx=(0, 10))
@@ -245,7 +260,7 @@ class ProductionLogView:
             self.dispatcher.show_toast("Refresh View", "No previous draft found to reload.", INFO)
 
     def build_header_section(self):
-        header_wrapper = tb.Labelframe(self.parent, text=" Form 510-09: Production Logging Center Header ", padding=15, style="Martin.Card.TLabelframe")
+        header_wrapper = tb.Labelframe(self.content_stack, text=" Form 510-09: Production Logging Center Header ", padding=15, style="Martin.Card.TLabelframe")
         header_wrapper.pack(fill=X, padx=10, pady=10)
         try:
             with open(self.config_path, "r", encoding="utf-8") as handle:
@@ -278,7 +293,7 @@ class ProductionLogView:
             tb.Label(header_wrapper, text=f"Layout Error: {exc}", bootstyle=DANGER).pack()
 
     def build_production_section(self):
-        prod_wrapper = tb.Labelframe(self.parent, text=" Production Logging Center Jobs ", padding=10, style="Martin.Card.TLabelframe")
+        prod_wrapper = tb.Labelframe(self.content_stack, text=" Production Logging Center Jobs ", padding=10, style="Martin.Card.TLabelframe")
         prod_wrapper.pack(fill=X, padx=10, pady=5)
         prod_columns = tb.Frame(prod_wrapper, style="Martin.Surface.TFrame")
         prod_columns.pack(fill=X, pady=(0, 4))
@@ -296,27 +311,320 @@ class ProductionLogView:
         self.production_container.pack(fill=X)
 
     def build_downtime_section(self):
-        dt_wrapper = tb.Labelframe(self.parent, text=" Production Logging Center Downtime Issues ", padding=10, style="Martin.Card.TLabelframe")
+        dt_wrapper = tb.Labelframe(self.content_stack, text=" Production Logging Center Downtime Issues ", padding=10, style="Martin.Card.TLabelframe")
         dt_wrapper.pack(fill=X, padx=10, pady=5)
         self.downtime_container = tb.Frame(dt_wrapper, style="Martin.Surface.TFrame")
         self.downtime_container.pack(fill=X)
 
     def build_footer_section(self):
-        footer = tb.Frame(self.parent, padding=20, style="Martin.Content.TFrame")
-        footer.pack(fill=X)
-        self.eff_display_lbl = tb.Label(footer, text="EFF%: 0.00", font=("-size 14 -weight bold"))
+        self.footer = tb.Frame(self.content_stack, padding=20, style="Martin.Content.TFrame")
+        self.footer.pack(fill=X)
+        self.eff_display_lbl = tb.Label(self.footer, text="EFF%: 0.00", font=("-size 14 -weight bold"))
         self.eff_display_lbl.pack(side=LEFT, padx=10)
-        self.ghost_total_lbl = tb.Label(footer, text=DEFAULT_GHOST_LABEL, font=("-size 12 -weight bold"))
+        self.ghost_total_lbl = tb.Label(self.footer, text=DEFAULT_GHOST_LABEL, font=("-size 12 -weight bold"))
         self.ghost_total_lbl.pack(side=LEFT, padx=10)
-        tb.Button(footer, text="Calculate All", command=self.calculate_metrics, bootstyle=INFO).pack(side=RIGHT)
-        tb.Button(footer, text="Save Draft", command=self.save_draft, bootstyle=SECONDARY).pack(side=LEFT, padx=5)
-        tb.Button(footer, text="Save and Open", command=self.export_to_excel, bootstyle=SUCCESS).pack(side=LEFT, padx=5)
-        self.open_export_btn = tb.Button(footer, text="Open Last Export", command=self.open_last_exported_file, bootstyle=INFO)
+        tb.Button(self.footer, text="Calculate All", command=self.calculate_metrics, bootstyle=INFO).pack(side=RIGHT)
+        tb.Button(self.footer, text="Save Draft", command=self.save_draft, bootstyle=SECONDARY).pack(side=LEFT, padx=5)
+        tb.Button(self.footer, text="Save and Open", command=self.export_to_excel, bootstyle=SUCCESS).pack(side=LEFT, padx=5)
+        self.open_export_btn = tb.Button(self.footer, text="Open Last Export", command=self.open_last_exported_file, bootstyle=INFO)
         self.open_export_btn.pack(side=LEFT, padx=5)
-        self.print_export_btn = tb.Button(footer, text="Print Last Export", command=self.print_last_exported_file, bootstyle=WARNING)
+        self.print_export_btn = tb.Button(self.footer, text="Print Last Export", command=self.print_last_exported_file, bootstyle=WARNING)
         self.print_export_btn.pack(side=LEFT, padx=5)
-        tb.Button(footer, text="Balance Downtime", command=self.balance_downtime_to_shift, bootstyle=WARNING).pack(side=LEFT, padx=5)
-        tb.Button(footer, text="Import Excel", command=self.import_from_excel_ui, bootstyle=INFO).pack(side=LEFT, padx=5)
+        tb.Button(self.footer, text="Balance Downtime", command=self.balance_downtime_to_shift, bootstyle=WARNING).pack(side=LEFT, padx=5)
+        tb.Button(self.footer, text="Import Excel", command=self.import_from_excel_ui, bootstyle=INFO).pack(side=LEFT, padx=5)
+
+    def build_summary_section(self):
+        self.summary_shell = tb.Frame(self.parent, padding=(10, 0, 10, 10), style="Martin.Content.TFrame")
+        self.summary_frame = tb.Labelframe(self.summary_shell, text=" Visual Summary ", padding=12, style="Martin.Card.TLabelframe")
+        self.summary_frame.pack(fill=BOTH, expand=True)
+
+        self.summary_header = tb.Frame(self.summary_frame, style="Martin.Surface.TFrame")
+        self.summary_header.pack(fill=X, pady=(0, 10))
+        self.summary_title_lbl = tb.Label(self.summary_header, text="At-a-glance production balance", font=("-size 11 -weight bold"))
+        self.summary_title_lbl.pack(side=LEFT)
+        self.summary_status_lbl = tb.Label(self.summary_header, text="Expand the window to reveal charts.", style="Martin.Muted.TLabel")
+        self.summary_status_lbl.pack(side=RIGHT)
+
+        self.summary_cards = tb.Frame(self.summary_frame, style="Martin.Surface.TFrame")
+        self.summary_cards.pack(fill=BOTH, expand=True)
+        self.summary_cards.columnconfigure(0, weight=1)
+        self.summary_cards.columnconfigure(1, weight=1)
+        self.summary_cards.rowconfigure(0, weight=1)
+
+        self.mold_chart_frame = tb.Labelframe(self.summary_cards, text=" Mold Contribution ", padding=10, style="Martin.Card.TLabelframe")
+        self.mold_chart_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
+        self.mold_chart_canvas = tk.Canvas(self.mold_chart_frame, highlightthickness=0, bd=0, height=240)
+        self.mold_chart_canvas.pack(fill=BOTH, expand=True)
+
+        self.time_chart_frame = tb.Labelframe(self.summary_cards, text=" Production vs Downtime ", padding=10, style="Martin.Card.TLabelframe")
+        self.time_chart_frame.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
+        self.time_chart_canvas = tk.Canvas(self.time_chart_frame, highlightthickness=0, bd=0, height=240)
+        self.time_chart_canvas.pack(fill=BOTH, expand=True)
+
+        self.mold_chart_canvas.bind("<Configure>", self.on_summary_canvas_resized, add="+")
+        self.time_chart_canvas.bind("<Configure>", self.on_summary_canvas_resized, add="+")
+
+    def apply_theme(self):
+        root = self.parent.winfo_toplevel()
+        self.summary_theme_tokens = get_theme_tokens(root=root)
+        content_bg = self.summary_theme_tokens.get("content_bg", "#edf1f4")
+        surface_bg = self.summary_theme_tokens.get("surface_bg", "#ffffff")
+        surface_fg = self.summary_theme_tokens.get("surface_fg", "#152129")
+        muted_fg = self.summary_theme_tokens.get("muted_fg", "#637782")
+        border_color = self.summary_theme_tokens.get("border_color", "#c6d2d8")
+
+        if hasattr(self, "summary_shell"):
+            self.content_stack.configure(style="Martin.Content.TFrame")
+            self.summary_shell.configure(style="Martin.Content.TFrame")
+            self.summary_header.configure(style="Martin.Surface.TFrame")
+            self.summary_cards.configure(style="Martin.Surface.TFrame")
+            self.mold_chart_canvas.configure(background=surface_bg)
+            self.time_chart_canvas.configure(background=surface_bg)
+            self.summary_status_lbl.configure(style="Martin.Muted.TLabel")
+            self.summary_title_lbl.configure(foreground=surface_fg)
+            self.summary_status_lbl.configure(foreground=muted_fg)
+            self.summary_frame.configure(style="Martin.Card.TLabelframe")
+            self.mold_chart_frame.configure(style="Martin.Card.TLabelframe")
+            self.time_chart_frame.configure(style="Martin.Card.TLabelframe")
+
+        try:
+            self.parent.configure(style="Martin.Content.TFrame")
+        except Exception:
+            try:
+                self.parent.configure(bg=content_bg)
+            except Exception:
+                pass
+
+        self.parent.option_add("*Canvas.highlightBackground", border_color)
+        self.parent.option_add("*Canvas.highlightColor", border_color)
+        self.schedule_summary_refresh()
+
+    def on_parent_resized(self, _event=None):
+        if self.summary_resize_after_id is not None:
+            self.parent.after_cancel(self.summary_resize_after_id)
+        self.summary_resize_after_id = self.parent.after(80, self.refresh_summary_panel)
+
+    def on_summary_canvas_resized(self, _event=None):
+        self.schedule_summary_refresh(delay=40)
+
+    def schedule_summary_refresh(self, delay=80):
+        if not hasattr(self, "summary_shell"):
+            return
+        if self.summary_refresh_after_id is not None:
+            self.parent.after_cancel(self.summary_refresh_after_id)
+        self.summary_refresh_after_id = self.parent.after(delay, self.refresh_summary_panel)
+
+    def should_show_summary_panel(self):
+        width = self.parent.winfo_width() or self.parent.winfo_reqwidth()
+        height = self.parent.winfo_height() or self.parent.winfo_reqheight()
+        minimum_width = 980
+        minimum_height = 620
+        if width < minimum_width or height < minimum_height:
+            return False
+
+        occupied_height = 0
+        stack = getattr(self, "content_stack", None)
+        if stack is not None:
+            try:
+                occupied_height = stack.winfo_reqheight()
+            except Exception:
+                occupied_height = 0
+
+        spare_height = height - occupied_height
+        return spare_height >= 120 or width >= 1080
+
+    def refresh_summary_panel(self):
+        self.summary_refresh_after_id = None
+        self.summary_resize_after_id = None
+        if not hasattr(self, "summary_shell"):
+            return
+
+        should_show = self.should_show_summary_panel()
+        visibility_changed = False
+        if should_show and not self.summary_visible:
+            self.summary_shell.pack(fill=X, anchor=N)
+            self.summary_visible = True
+            visibility_changed = True
+        elif not should_show and self.summary_visible:
+            self.summary_shell.pack_forget()
+            self.summary_visible = False
+            visibility_changed = True
+
+        if not should_show:
+            if visibility_changed:
+                self.reset_shell_scroll_position()
+            return
+
+        mold_segments = self.get_mold_contribution_segments()
+        time_segments = self.get_time_breakdown_segments()
+        self.summary_status_lbl.config(text=self.build_summary_status_text(mold_segments, time_segments))
+        self.draw_mold_chart(mold_segments)
+        self.draw_time_chart(time_segments)
+        if visibility_changed:
+            self.reset_shell_scroll_position()
+
+    def reset_shell_scroll_position(self):
+        canvas = getattr(self.dispatcher, "canvas", None)
+        if canvas is None:
+            return
+        try:
+            canvas.yview_moveto(0)
+        except Exception:
+            return
+
+    def build_summary_status_text(self, mold_segments, time_segments):
+        total_jobs = len(mold_segments)
+        total_minutes = sum(segment["value"] for segment in time_segments)
+        if total_jobs == 0 and total_minutes == 0:
+            return "Enter production and downtime data to populate the charts."
+        return f"{total_jobs} contributing job{'s' if total_jobs != 1 else ''} | {total_minutes} tracked min"
+
+    def get_mold_contribution_segments(self):
+        palette = self.get_chart_palette()
+        segments = []
+        for index, row in enumerate(self.production_rows, start=1):
+            try:
+                molds = int(float(row["molds"].get() or 0))
+            except Exception:
+                molds = 0
+            if molds <= 0:
+                continue
+            shop_order = row["shop_order"].get().strip()
+            part_number = row["part_number"].get().strip()
+            label_bits = [bit for bit in (shop_order, part_number) if bit]
+            label = " / ".join(label_bits) if label_bits else f"Job {index}"
+            segments.append({
+                "label": label,
+                "value": molds,
+                "color": palette[(len(segments)) % len(palette)],
+            })
+
+        segments.sort(key=lambda item: item["value"], reverse=True)
+        if len(segments) > 5:
+            top_segments = segments[:5]
+            other_total = sum(item["value"] for item in segments[5:])
+            if other_total > 0:
+                top_segments.append({
+                    "label": "Other",
+                    "value": other_total,
+                    "color": self.summary_theme_tokens.get("muted_fg", "#637782"),
+                })
+            segments = top_segments
+        return segments
+
+    def get_time_breakdown_segments(self):
+        palette = self.get_chart_palette()
+        segments = [
+            {"label": "Production", "value": max(0, self.get_production_total_minutes()), "color": palette[0]},
+            {"label": "Downtime", "value": max(0, self.get_total_downtime_minutes()), "color": palette[1]},
+            {"label": "Ghost", "value": max(0, self.get_ghost_time_minutes()), "color": palette[2]},
+        ]
+        return segments
+
+    def get_chart_palette(self):
+        accent = self.summary_theme_tokens.get("accent", "#0f7c8f")
+        accent_soft = self.summary_theme_tokens.get("accent_soft", "#d6eef2")
+        info_color = tb.Style.get_instance().colors.info if tb.Style.get_instance() else "#3db5dc"
+        warning_color = tb.Style.get_instance().colors.warning if tb.Style.get_instance() else "#ffb84d"
+        success_color = tb.Style.get_instance().colors.success if tb.Style.get_instance() else "#6abf69"
+        muted = self.summary_theme_tokens.get("muted_fg", "#637782")
+        return [accent, warning_color, info_color, success_color, accent_soft, muted]
+
+    def draw_mold_chart(self, segments):
+        canvas = self.mold_chart_canvas
+        self.prepare_chart_canvas(canvas)
+        width = max(canvas.winfo_width(), 1)
+        height = max(canvas.winfo_height(), 1)
+        if width < 120 or height < 120:
+            return
+        if not segments:
+            self.draw_empty_chart_state(canvas, width, height, "No mold data yet")
+            return
+
+        total = sum(segment["value"] for segment in segments)
+        donut_size = max(120, min(int(width * 0.42), int(height * 0.72)))
+        left = 24
+        top = max(20, (height - donut_size) // 2)
+        right = left + donut_size
+        bottom = top + donut_size
+        start = 90.0
+
+        for segment in segments:
+            extent = (segment["value"] / total) * 360 if total else 0
+            canvas.create_arc(left, top, right, bottom, start=start, extent=-extent, fill=segment["color"], outline="")
+            start -= extent
+
+        inner_margin = max(26, donut_size // 5)
+        inner_color = self.summary_theme_tokens.get("surface_bg", "#ffffff")
+        canvas.create_oval(left + inner_margin, top + inner_margin, right - inner_margin, bottom - inner_margin, fill=inner_color, outline="")
+        fg = self.summary_theme_tokens.get("surface_fg", "#152129")
+        muted_fg = self.summary_theme_tokens.get("muted_fg", "#637782")
+        canvas.create_text((left + right) / 2, top + donut_size / 2 - 10, text=str(total), fill=fg, font=("Segoe UI", 22, "bold"))
+        canvas.create_text((left + right) / 2, top + donut_size / 2 + 16, text="Total molds", fill=muted_fg, font=("Segoe UI", 10))
+
+        legend_x = right + 28
+        legend_y = 28
+        for segment in segments:
+            percentage = (segment["value"] / total) * 100 if total else 0
+            canvas.create_rectangle(legend_x, legend_y, legend_x + 14, legend_y + 14, fill=segment["color"], outline="")
+            canvas.create_text(legend_x + 24, legend_y + 7, anchor="w", text=segment["label"], fill=fg, font=("Segoe UI", 10, "bold"))
+            canvas.create_text(width - 18, legend_y + 7, anchor="e", text=f"{segment['value']} ({percentage:.0f}%)", fill=muted_fg, font=("Segoe UI", 10))
+            legend_y += 28
+
+    def draw_time_chart(self, segments):
+        canvas = self.time_chart_canvas
+        self.prepare_chart_canvas(canvas)
+        width = max(canvas.winfo_width(), 1)
+        height = max(canvas.winfo_height(), 1)
+        if width < 120 or height < 120:
+            return
+        total = sum(segment["value"] for segment in segments)
+        if total <= 0:
+            self.draw_empty_chart_state(canvas, width, height, "No tracked time yet")
+            return
+
+        fg = self.summary_theme_tokens.get("surface_fg", "#152129")
+        muted_fg = self.summary_theme_tokens.get("muted_fg", "#637782")
+        accent_soft = self.summary_theme_tokens.get("accent_soft", "#d6eef2")
+        bar_left = 28
+        bar_right = width - 28
+        bar_top = max(44, int(height * 0.26))
+        bar_bottom = bar_top + 46
+        canvas.create_rectangle(bar_left, bar_top, bar_right, bar_bottom, fill=accent_soft, outline="")
+
+        current_left = bar_left
+        for segment in segments:
+            if segment["value"] <= 0:
+                continue
+            span = ((bar_right - bar_left) * segment["value"]) / total
+            next_left = bar_right if segment is segments[-1] else current_left + span
+            canvas.create_rectangle(current_left, bar_top, next_left, bar_bottom, fill=segment["color"], outline="")
+            if next_left - current_left >= 70:
+                canvas.create_text((current_left + next_left) / 2, (bar_top + bar_bottom) / 2, text=f"{segment['label']}\n{segment['value']} min", fill="#ffffff", font=("Segoe UI", 9, "bold"), justify=CENTER)
+            current_left = next_left
+
+        canvas.create_text(bar_left, 22, anchor="w", text=f"Shift accounting: {total} min", fill=fg, font=("Segoe UI", 12, "bold"))
+        canvas.create_text(bar_right, 22, anchor="e", text=self.ghost_total_lbl.cget("text"), fill=muted_fg, font=("Segoe UI", 10))
+
+        legend_y = bar_bottom + 28
+        for segment in segments:
+            percentage = (segment["value"] / total) * 100 if total else 0
+            canvas.create_rectangle(bar_left, legend_y, bar_left + 14, legend_y + 14, fill=segment["color"], outline="")
+            canvas.create_text(bar_left + 24, legend_y + 7, anchor="w", text=segment["label"], fill=fg, font=("Segoe UI", 10, "bold"))
+            canvas.create_text(width - 18, legend_y + 7, anchor="e", text=f"{segment['value']} min ({percentage:.0f}%)", fill=muted_fg, font=("Segoe UI", 10))
+            legend_y += 28
+
+    def prepare_chart_canvas(self, canvas):
+        canvas.delete("all")
+        canvas.configure(background=self.summary_theme_tokens.get("surface_bg", "#ffffff"))
+
+    def draw_empty_chart_state(self, canvas, width, height, message):
+        fg = self.summary_theme_tokens.get("surface_fg", "#152129")
+        muted_fg = self.summary_theme_tokens.get("muted_fg", "#637782")
+        accent_soft = self.summary_theme_tokens.get("accent_soft", "#d6eef2")
+        canvas.create_oval(width / 2 - 42, height / 2 - 56, width / 2 + 42, height / 2 + 28, outline="", fill=accent_soft)
+        canvas.create_text(width / 2, height / 2 - 4, text=message, fill=fg, font=("Segoe UI", 12, "bold"))
+        canvas.create_text(width / 2, height / 2 + 22, text="The chart will update as soon as the form has data.", fill=muted_fg, font=("Segoe UI", 10))
 
     def add_production_row(self):
         row_frame = tb.Frame(self.production_container)
@@ -562,6 +870,7 @@ class ProductionLogView:
             message = DEFAULT_GHOST_LABEL
             bootstyle = SECONDARY
         self.ghost_total_lbl.config(text=message, bootstyle=bootstyle)
+        self.schedule_summary_refresh()
 
     def parse_clock_value(self, value):
         return self.model.parse_clock_value(value)
@@ -778,6 +1087,22 @@ class ProductionLogView:
         if original_state == "readonly":
             entry.config(state="readonly")
 
+    def get_widget_value(self, widget):
+        if widget is None:
+            return ""
+        if hasattr(widget, "get"):
+            try:
+                return widget.get()
+            except Exception:
+                pass
+        if hasattr(widget, "cget"):
+            for option_name in ("text", "value"):
+                try:
+                    return widget.cget(option_name)
+                except Exception:
+                    continue
+        return str(widget)
+
     def clear_dynamic_rows(self):
         for widget in self.production_container.winfo_children():
             widget.destroy()
@@ -785,6 +1110,7 @@ class ProductionLogView:
         for widget in self.downtime_container.winfo_children():
             widget.destroy()
         self.downtime_rows.clear()
+        self.schedule_summary_refresh()
 
     def populate_from_data(self, data, source_path=None, mark_dirty_after_load=False):
         self.apply_header_data(data.get("header", {}), mark_dirty=False)
@@ -826,6 +1152,7 @@ class ProductionLogView:
             self.mark_dirty()
         else:
             self.mark_clean(data)
+        self.schedule_summary_refresh()
 
     def list_pending_drafts(self):
         return self.model.list_pending_drafts()
@@ -929,6 +1256,7 @@ class ProductionLogView:
         self.ensure_open_downtime_row()
         self.update_target_time_display()
         self.update_ghost_total_display()
+        self.schedule_summary_refresh()
 
     def calculate_metrics(self):
         def safe_int(val):
@@ -946,6 +1274,7 @@ class ProductionLogView:
             pass
         self.update_target_time_display()
         self.update_ghost_total_display()
+        self.schedule_summary_refresh()
 
     def export_to_excel(self):
         ghost_minutes = self.get_ghost_time_minutes()
