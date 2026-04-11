@@ -28,6 +28,7 @@ class RateManagerView:
         self.parent = parent
         self.dispatcher = dispatcher
         self.controller = controller
+        self.controller.view = self
         self.model = model
         self.setup_ui()
 

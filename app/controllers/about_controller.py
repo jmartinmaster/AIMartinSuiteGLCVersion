@@ -24,10 +24,14 @@ from app.views.about_view import AboutView
 class AboutController:
     def __init__(self, parent, dispatcher):
         self.dispatcher = dispatcher
+        self.view = None
         self.view = AboutView(parent, dispatcher, self)
 
     def __getattr__(self, attribute_name):
-        return getattr(self.view, attribute_name)
+        view = self.__dict__.get("view")
+        if view is None:
+            raise AttributeError(attribute_name)
+        return getattr(view, attribute_name)
 
     def open_license(self):
         self.dispatcher.open_help_document("docs/legal/LICENSE.txt")

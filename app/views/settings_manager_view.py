@@ -25,7 +25,7 @@ from app.downtime_codes import DEFAULT_DT_CODE_MAP
 from app.theme_manager import DEFAULT_THEME, get_theme_label
 
 __module_name__ = "Settings Manager"
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 
 FORM_LABEL_WIDTH = 22
 FORM_INPUT_WIDTH = 30
@@ -39,6 +39,7 @@ class SettingsManagerView:
         self.parent = parent
         self.dispatcher = dispatcher
         self.controller = controller
+        self.controller.view = self
         self._active_modal_parent = None
         self.entries = {}
         self.module_whitelist_var = tk.StringVar(value="All visible modules")
@@ -715,40 +716,21 @@ class SettingsManagerView:
             for code in sorted(DEFAULT_DT_CODE_MAP, key=sort_key):
                 add_code_row(code, DEFAULT_DT_CODE_MAP[code])
 
-        def add_next_code():
-            numeric_codes = [
-                int(record["code_entry"].get().strip())
+        def collect_code_rows():
+            return [
+                {
+                    "code": record["code_entry"].get().strip(),
+                    "label": record["label_entry"].get().strip(),
+                }
                 for record in code_rows
-                if record["code_entry"].get().strip().isdigit()
             ]
-            add_code_row(str(max(numeric_codes, default=0) + 1), "")
+
+        def add_next_code():
+            add_code_row(self.controller.suggest_next_downtime_code(collect_code_rows()), "")
 
         def save_codes():
-            updated_codes = {}
-            for row_record in code_rows:
-                code = row_record["code_entry"].get().strip()
-                label = row_record["label_entry"].get().strip()
-                if not code and not label:
-                    continue
-                if not code:
-                    self.show_error("Downtime Codes", "Each downtime code row needs a code number.")
-                    return
-                if not code.isdigit():
-                    self.show_error("Downtime Codes", f"Code '{code}' must be numeric.")
-                    return
-                if not label:
-                    self.show_error("Downtime Codes", f"Code {code} cannot be blank.")
-                    return
-                if code in updated_codes:
-                    self.show_error("Downtime Codes", f"Code {code} is duplicated.")
-                    return
-                updated_codes[code] = label
-
-            if not updated_codes:
-                self.show_error("Downtime Codes", "At least one downtime code is required.")
-                return
-            self.controller.save_downtime_codes(updated_codes)
-            top.destroy()
+            if self.controller.save_downtime_code_rows(collect_code_rows()):
+                top.destroy()
 
         tb.Button(actions, text="Reset Defaults", bootstyle=SECONDARY, command=reset_defaults).pack(side=LEFT)
         tb.Button(actions, text="Add Code", bootstyle=INFO, command=add_next_code).pack(side=LEFT, padx=(8, 0))

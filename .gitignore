@@ -20,7 +20,10 @@ data/pending/history/
 
 # Build Artifacts
 build/
-dist/
+dist/data
+dist/ubuntu
+dist/*.json
+
 
 # IDEs
 .vscode/
@@ -28,3 +31,5 @@ dist/
 
 # Local trash mirrors
 .Trash-1000/
+
+.venv-wsl-build/

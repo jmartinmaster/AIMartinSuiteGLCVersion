@@ -31,6 +31,7 @@ class LayoutManagerView:
         self.parent = parent
         self.dispatcher = dispatcher
         self.controller = controller
+        self.controller.view = self
         self.preview_after_id = None
         self.preview_tooltip = None
         self.suppress_modified_event = False

@@ -16,7 +16,7 @@
 from app.controllers.production_log_controller import ProductionLogController
 
 __module_name__ = "Production Log"
-__version__ = "1.2.5"
+__version__ = "1.2.6"
 
 
 def get_ui(parent, dispatcher):

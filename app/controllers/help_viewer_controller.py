@@ -22,10 +22,14 @@ from app.views.help_viewer_view import HelpViewerView
 class HelpViewerController:
     def __init__(self, parent, dispatcher):
         self.dispatcher = dispatcher
+        self.view = None
         self.view = HelpViewerView(parent, dispatcher, self)
 
     def __getattr__(self, attribute_name):
-        return getattr(self.view, attribute_name)
+        view = self.__dict__.get("view")
+        if view is None:
+            raise AttributeError(attribute_name)
+        return getattr(view, attribute_name)
 
     def get_doc_group(self, doc_path):
         for group_name, group in self.view.doc_groups.items():

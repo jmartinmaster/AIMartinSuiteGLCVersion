@@ -14,7 +14,6 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 import importlib
-import json
 import os
 import sys
 import threading
@@ -28,11 +27,11 @@ from ttkbootstrap.constants import BOTH, BOTTOM, DANGER, INFO, LEFT, RIGHT, SUCC
 from ttkbootstrap.widgets import ToastNotification
 
 from app.app_logging import log_exception
-from app.theme_manager import DEFAULT_THEME, apply_readability_overrides, normalize_theme, resolve_base_theme
+from app.theme_manager import apply_readability_overrides, normalize_theme, resolve_base_theme
 from app.utils import external_path, local_or_resource_path, resource_path
 from app.models.app_model import AppModel
 from app.views.app_view import AppShellView
-from app.app_platform import get_obsolete_local_executables, get_work_area_insets
+from app.app_platform import get_work_area_insets
 from app.security_service import SecurityService
 from app.update_state import UpdateCoordinator
 
@@ -68,7 +67,10 @@ MANAGED_MODULE_NAMES = [
 class Dispatcher:
     def __init__(self, root, main_module=None):
         self.root = root
-        self.root.title(f"Production Logging Center - {getattr(main_module, '__version__', '2.0.5')}")
+        self.main_module = main_module or sys.modules.get("main") or sys.modules.get("__main__")
+        self.dispatcher_version = getattr(self.main_module, "__version__", None) or "0.0.0"
+        window_version = self.dispatcher_version if self.dispatcher_version != "0.0.0" else "Unknown"
+        self.root.title(f"Production Logging Center - {window_version}")
         self.root.geometry("1000x600")
         self._update_status_clear_after_id = None
 
@@ -86,7 +88,6 @@ class Dispatcher:
             settings_path=settings_path,
         )
         self.security = SecurityService(PROTECTED_MODULES)
-        self.main_module = main_module or sys.modules.get("main") or sys.modules.get("__main__")
         self.model.loaded_modules = {"main": self.main_module}
         self._configure_module_import_paths()
         self.model.runtime_settings = self.load_runtime_settings()
@@ -213,7 +214,7 @@ class Dispatcher:
         importlib.invalidate_caches()
 
     def ensure_external_modules_package(self):
-        os.makedirs(self.external_modules_path, exist_ok=True)
+        self.model.ensure_external_modules_directory()
         self._configure_module_import_paths()
 
     def import_managed_module(self, module_name, force_fresh=True):
@@ -230,31 +231,16 @@ class Dispatcher:
         return f"app.{module_name}"
 
     def get_external_module_override_path(self, module_name):
-        if module_name not in MANAGED_MODULE_NAMES:
-            return None
-        candidate = os.path.join(self.external_modules_path, f"{module_name}.py")
-        return candidate if os.path.exists(candidate) else None
+        return self.model.get_external_module_override_path(module_name, MANAGED_MODULE_NAMES)
 
     def has_external_modules_directory(self):
-        return os.path.isdir(self.external_modules_path) and os.path.abspath(self.external_modules_path) != os.path.abspath(self.modules_path)
+        return self.model.has_external_modules_directory()
 
     def get_external_module_override_names(self):
-        if not self.has_external_modules_directory():
-            return []
-
-        module_names = []
-        for module_name in MANAGED_MODULE_NAMES:
-            override_path = os.path.join(self.external_modules_path, f"{module_name}.py")
-            if os.path.isfile(override_path) and module_name not in module_names:
-                module_names.append(module_name)
-        return sorted(module_names)
+        return self.model.get_external_module_override_names(MANAGED_MODULE_NAMES)
 
     def get_bundled_module_names(self):
-        return [
-            module_name
-            for module_name in MANAGED_MODULE_NAMES
-            if os.path.isfile(os.path.join(self.modules_path, f"{module_name}.py"))
-        ]
+        return self.model.get_bundled_module_names(MANAGED_MODULE_NAMES)
 
     def has_external_module_overrides(self):
         return bool(self.get_external_module_override_names())
@@ -307,11 +293,7 @@ class Dispatcher:
 
     def install_module_override(self, module_name, module_text):
         self.ensure_external_modules_package()
-        target_path = os.path.join(self.external_modules_path, f"{module_name}.py")
-        temp_path = f"{target_path}.tmp"
-        with open(temp_path, "w", encoding="utf-8", newline="\n") as handle:
-            handle.write(module_text)
-        os.replace(temp_path, target_path)
+        target_path = self.model.write_module_override(module_name, module_text)
         module = self.import_managed_module(module_name, force_fresh=True) if self.is_external_module_override_trust_enabled() else None
         return target_path, module
 
@@ -322,37 +304,11 @@ class Dispatcher:
         self.load_module(current_module_name, use_transition=False)
 
     def remove_external_module_overrides(self, module_names=None, include_bytecode=True):
-        if not self.has_external_modules_directory():
-            return []
-
-        managed_names = module_names or self.get_bundled_module_names()
-        removed_paths = []
-        pycache_dir = os.path.join(self.external_modules_path, "__pycache__")
-
-        for module_name in managed_names:
-            override_path = os.path.join(self.external_modules_path, f"{module_name}.py")
-            if os.path.isfile(override_path):
-                os.remove(override_path)
-                removed_paths.append(override_path)
-
-            if include_bytecode and os.path.isdir(pycache_dir):
-                cache_prefix = f"{module_name}."
-                for cache_name in os.listdir(pycache_dir):
-                    if not cache_name.startswith(cache_prefix):
-                        continue
-                    cache_path = os.path.join(pycache_dir, cache_name)
-                    if os.path.isfile(cache_path):
-                        os.remove(cache_path)
-                        removed_paths.append(cache_path)
-
-        if include_bytecode and os.path.isdir(pycache_dir):
-            try:
-                if not os.listdir(pycache_dir):
-                    os.rmdir(pycache_dir)
-            except OSError:
-                pass
-
-        return removed_paths
+        return self.model.remove_external_module_overrides(
+            MANAGED_MODULE_NAMES,
+            module_names=module_names,
+            include_bytecode=include_bytecode,
+        )
 
     def _setup_menu(self):
         self.view.configure_menu(
@@ -488,34 +444,11 @@ class Dispatcher:
         ]
 
     def normalize_module_whitelist(self, raw_value):
-        if isinstance(raw_value, str):
-            candidates = [part.strip() for part in raw_value.split(",")]
-        elif isinstance(raw_value, (list, tuple, set)):
-            candidates = [str(part).strip() for part in raw_value]
-        else:
-            candidates = []
-
-        valid_modules = set(self.get_user_facing_modules(apply_whitelist=False))
-        normalized = []
-        for module_name in candidates:
-            if module_name and module_name in valid_modules and module_name not in normalized:
-                normalized.append(module_name)
-        return normalized
+        return self.model.normalize_module_names(raw_value, self.get_user_facing_modules(apply_whitelist=False))
 
     def normalize_persistent_modules(self, raw_value):
-        if isinstance(raw_value, str):
-            candidates = [part.strip() for part in raw_value.split(",")]
-        elif isinstance(raw_value, (list, tuple, set)):
-            candidates = [str(part).strip() for part in raw_value]
-        else:
-            candidates = []
-
-        valid_modules = {module_name for _display_name, module_name in self.get_persistable_modules()}
-        normalized = []
-        for module_name in candidates:
-            if module_name and module_name in valid_modules and module_name not in normalized:
-                normalized.append(module_name)
-        return normalized
+        valid_modules = [module_name for _display_name, module_name in self.get_persistable_modules()]
+        return self.model.normalize_module_names(raw_value, valid_modules)
 
     def is_module_persistent(self, module_name):
         if not module_name:
@@ -676,39 +609,9 @@ class Dispatcher:
             messagebox.showerror("Help Document Error", f"Could not open help document: {exc}")
 
     def load_runtime_settings(self):
-        settings = {
-            "theme": DEFAULT_THEME,
-            "enable_screen_transitions": True,
-            "screen_transition_duration_ms": 360,
-            "toast_duration_sec": 5,
-            "enable_module_update_notifications": True,
-            "persistent_modules": [],
-        }
-        loaded = None
-        if os.path.exists(self.model.settings_path):
-            try:
-                with open(self.model.settings_path, "r", encoding="utf-8") as handle:
-                    loaded = json.load(handle)
-                if isinstance(loaded, dict):
-                    settings.update(loaded)
-            except Exception:
-                pass
-
-        try:
-            settings["toast_duration_sec"] = max(1, int(settings.get("toast_duration_sec", 5)))
-        except Exception:
-            settings["toast_duration_sec"] = 5
-        settings["enable_screen_transitions"] = bool(settings.get("enable_screen_transitions", True))
-        settings["enable_module_update_notifications"] = bool(settings.get("enable_module_update_notifications", True))
-        try:
-            settings["screen_transition_duration_ms"] = max(0, min(500, int(settings.get("screen_transition_duration_ms", 360))))
-        except Exception:
-            settings["screen_transition_duration_ms"] = 360
-        settings["theme"] = normalize_theme(settings.get("theme", DEFAULT_THEME))
-        settings["module_whitelist"] = self.normalize_module_whitelist(settings.get("module_whitelist", []))
-        settings["persistent_modules"] = self.normalize_persistent_modules(settings.get("persistent_modules", []))
-        settings["_module_update_notifications_explicit"] = isinstance(loaded, dict) and "enable_module_update_notifications" in loaded
-        return settings
+        valid_navigation_modules = self.get_user_facing_modules(apply_whitelist=False)
+        valid_persistent_modules = [module_name for _display_name, module_name in self.get_persistable_modules()]
+        return self.model.load_runtime_settings(valid_navigation_modules, valid_persistent_modules)
 
     def refresh_runtime_settings(self):
         self.runtime_settings = self.load_runtime_settings()
@@ -897,7 +800,7 @@ class Dispatcher:
             self._update_status_clear_after_id = None
 
     def prompt_old_executable_cleanup(self):
-        obsolete_executables = get_obsolete_local_executables(os.path.abspath(sys.executable), getattr(self.main_module, "__version__", "2.0.5"))
+        obsolete_executables = self.model.get_obsolete_local_executables(os.path.abspath(sys.executable), self.dispatcher_version)
         if not obsolete_executables:
             return
 
@@ -912,14 +815,7 @@ class Dispatcher:
         ):
             return
 
-        removed = []
-        failed = []
-        for entry in obsolete_executables:
-            try:
-                os.remove(entry["path"])
-                removed.append(entry["name"])
-            except OSError:
-                failed.append(entry["name"])
+        removed, failed = self.model.remove_obsolete_local_executables(obsolete_executables)
 
         if removed:
             self.show_toast("Cleanup Complete", f"Removed {len(removed)} older EXE file(s).", SUCCESS)

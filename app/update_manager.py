@@ -13,10 +13,11 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-from app.controllers.update_manager_controller import UpdateManagerController, scan_available_module_payload_updates
+from app.controllers.update_manager_controller import UpdateManagerController
+from app.models.update_manager_model import scan_available_module_payload_updates
 
 __module_name__ = "Update Manager"
-__version__ = "2.1.2"
+__version__ = "2.1.4"
 
 
 def get_ui(parent, dispatcher):

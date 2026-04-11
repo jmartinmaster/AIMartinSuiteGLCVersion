@@ -17,13 +17,14 @@ import ttkbootstrap as tb
 from ttkbootstrap.constants import BOTH, INFO, LEFT, PRIMARY, SECONDARY, SUCCESS, WARNING, W, X
 
 __module_name__ = "Update Manager"
-__version__ = "1.0.0"
+__version__ = "2.1.4"
 
 
 class UpdateManagerView:
     def __init__(self, parent, controller):
         self.parent = parent
         self.controller = controller
+        self.controller.view = self
         self.container = None
         self.setup_ui()
 

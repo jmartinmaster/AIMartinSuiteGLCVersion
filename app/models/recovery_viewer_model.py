@@ -17,6 +17,7 @@ import json
 import os
 from datetime import datetime
 
+from app.persistence import write_json_with_backup
 from app.utils import external_path
 
 
@@ -160,3 +161,23 @@ class RecoveryViewerModel:
                 return json.load(handle)
         except Exception:
             return {}
+
+    def restore_config_backup(self, record):
+        payload = self.load_json(record["path"])
+        write_json_with_backup(
+            record["target_path"],
+            payload,
+            backup_dir=record.get("backup_dir"),
+            keep_count=12,
+        )
+        return record["target_path"]
+
+    def restore_snapshot_as_draft(self, record):
+        payload = self.load_json(record["path"])
+        write_json_with_backup(
+            record["target_path"],
+            payload,
+            backup_dir=external_path("data/pending/history"),
+            keep_count=20,
+        )
+        return record["target_path"]
