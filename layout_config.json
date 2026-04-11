@@ -1,5 +1,5 @@
 {
-    "_license": "The Martin Suite (GLC Edition) - Copyright (C) 2026 Jamie Martin. Licensed under GNU GPLv3.",
+    "_license": "Production Logging Center (GLC Edition) - Copyright (C) 2026 Jamie Martin. Licensed under GNU GPLv3.",
     "template_path": "templates/disamatic_template.xlsx",
     "header_fields": [
         {
@@ -88,6 +88,17 @@
             "col": 4,
             "width": 10,
             "cell": "G3"
+        },
+        {
+            "id": "total_molds",
+            "label": "Total Molds",
+            "row": 2,
+            "col": 0,
+            "width": 10,
+            "readonly": false,
+            "cell": "H27",
+            "export_enabled": true,
+            "import_enabled": false
         },
         {
             "id": "ret_north",

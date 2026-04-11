@@ -4,6 +4,7 @@ Use Production Log to enter the current shift data.
 
 - Header fields capture shift-level information such as date, cast date, shift, hours, goal MPH, and return counts.
 - The header includes a read-only Target Time field derived from shift hours, saved with the draft header data, and routed through the layout config for workbook export/import.
+- The header also includes Total Molds, which updates from the current production rows and is saved with the draft header data for workbook export.
 - Optional workbook-linked header fields can also display imported summary cells such as bond, percentages, and selected top-part values when they are configured in the layout.
 - Production rows capture shop order, part number, the active rate, a per-line override toggle for temporary corrections, and mold count.
 - Production Log automatically keeps one blank production row and one blank downtime row open while you type so you do not need separate add-row buttons during normal entry.

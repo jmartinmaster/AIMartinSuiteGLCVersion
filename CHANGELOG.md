@@ -1,8 +1,57 @@
 # Changelog
 
-This changelog tracks the main branch release line for The Martin Suite (GLC Edition).
+This changelog tracks the main branch release line for Production Logging Center (GLC Edition).
 
-Version headings below are aligned to the current `1.x` release line used by Dispatcher Core. Earlier work has been grouped into practical release milestones so the shipped feature history is easier to follow without rewriting older module version markers.
+Version headings below are aligned to the current `2.x` release line used by Dispatcher Core. Earlier work has been grouped into practical release milestones so the shipped feature history is easier to follow without rewriting older module version markers.
+
+## [2.1.0] - 2026-04-10
+
+### Changed
+
+- Completed a full architectural refactor of the entire application codebase following workspace migration.
+- Separated all modules into a strict MVC layout with dedicated `app/controllers/`, `app/models/`, and `app/views/` subdirectories; each feature area (About, Help Viewer, Layout Manager, Production Log, Rate Manager, Recovery Viewer, Settings Manager, Update Manager) now has its own isolated controller, model, and view file.
+- Extracted data-access logic into a dedicated `DataHandlerService` class (`data_handler_service.py`) with `DataHandler` kept as a thin subclass shim for backwards compatibility.
+- Extracted layout configuration persistence into a standalone `LayoutConfigService` class (`layout_config_service.py`).
+- Extracted security access-control enforcement into a standalone `SecurityService` class (`security_service.py`) so the vault and session logic in `security.py` remains focused on authentication state.
+- Moved security constants, role definitions, access-right maps, and data-class definitions into a dedicated `models/security_model.py` so they are importable without pulling in any Tk or vault logic.
+- Extracted update runtime state into `UpdateCoordinator` (`update_state.py`) and update widget bindings into `UpdateStateBindings` (`update_bindings.py`).
+- Reduced all top-level app-package entry points (`about.py`, `help_viewer.py`, `layout_manager.py`, `production_log.py`, `rate_manager.py`, `recovery_viewer.py`, `settings_manager.py`, `update_manager.py`) to thin controller-delegation wrappers with no business logic.
+- Verified clean import graph across all 54 source files with no circular dependencies and no broken references after the refactor.
+
+## [2.0.4] - 2026-04-10
+
+### Changed
+
+- Promoted Dispatcher Core to stable version `2.0.4` for the external override trust hardening pass and release-polish follow-up.
+- Carried the recent theme refresh into the MVC runtime by restoring the Martin Modern Light preset, Martin shell styling tokens, and non-reloading theme application for the shared app shell.
+- Added the Total Molds Production Log header field to the MVC runtime, keeping it synchronized with production rows for draft persistence and workbook export.
+- Hardened Layout Manager teardown so delayed preview callbacks and page switches do not leave behind stale widget access during unload.
+- Added a separate admin-only external override trust toggle so Python override files can exist beside the app without executing until explicitly trusted.
+- Changed dispatcher module loading so inactive external overrides no longer take precedence over bundled modules.
+- Updated Update Manager payload messaging and local metadata checks so inactive override files are treated as staged artifacts rather than active live module state.
+- Added a release regression checklist artifact and refreshed shipped docs to match the staged-versus-trusted override model.
+- Verified source-mode startup and targeted runtime trust-boundary checks on Linux; packaged Windows EXE validation remains a manual checklist item.
+
+## [2.0.2] - 2026-04-10
+
+### Changed
+
+- Promoted Dispatcher Core to stable version `2.0.2` for the completed security/admin trust-boundary stage.
+- Moved repository controls, advanced packaged dev-update controls, and external module override editing into an admin-only Developer & Admin surface that stays hidden without an authenticated admin session.
+- Added persisted advanced packaged dev-update gating and made Update Manager respect the configured repository URL.
+- Added persisted non-secure mode administration plus startup state warning through the security flow.
+- Hardened vault administration with a destructive reset path that now requires explicit confirmation, typed `RESET`, current-password re-entry, backup creation, non-secure-mode disable, and admin-session invalidation.
+- Updated the Help Center and README so shipped guidance reflects the admin-only security and developer-control model.
+
+## [2.0.0] - 2026-04-10
+
+### Changed
+
+- Promoted Dispatcher Core to stable version `2.0.0` for the newest-main integration finish pass.
+- Moved the global updater banner above the main content viewport so active update state stays visible while scrolling page content.
+- Added dispatcher-owned delayed clearing for successful payload and documentation completion banners so success state clears automatically without hiding warning or error states.
+- Flattened Settings Manager into the shared shell viewport so the module whitelist controls no longer sit inside a nested scrolling region.
+- Completed the low-risk newest-main parity wave with whitelist controls, developer logging, build icon sync, preserved runtime-state scrubbing, and updater UX cleanup in the current MVC runtime.
 
 ## [1.5.6] - 2026-04-05
 
@@ -27,7 +76,7 @@ Version headings below are aligned to the current `1.x` release line used by Dis
 
 ### Notes
 
-- Newer settings files may now include `enable_module_update_notifications` and `module_update_notifications_legacy_checked`. Older builds can ignore these keys safely, but they will not provide the new startup payload check behavior.
+- Newer settings files may now include `enable_module_update_notifications`. Older builds can ignore this key safely, but they will not provide the new startup payload check behavior.
 
 ## [1.5.2] - 2026-04-05
 
@@ -67,7 +116,7 @@ Version headings below are aligned to the current `1.x` release line used by Dis
 - Promoted Dispatcher Core to stable version `1.2.6` for the packaged EXE handoff and module-payload release.
 - Added a dispatcher-owned persistent update coordinator so the Update Manager can retain release-check state and reopen the same live session.
 - Updated packaged releases to preserve side-by-side EXE handoff while keeping Dispatcher Core updates tied to `main.py` and published EXE artifacts.
-- Expanded packaged updates so selectable module payloads from `modules/` can be downloaded and installed without rebuilding the EXE.
+- Expanded packaged updates so selectable module payloads from `the_golden_standard/` can be downloaded and installed without rebuilding the EXE.
 - Prepared `About System v1.0.4` as the first post-EXE module payload target for packaged update verification.
 
 ## [1.2.4] - 2026-04-04
@@ -259,7 +308,7 @@ Version headings below are aligned to the current `1.x` release line used by Dis
 
 ### Added
 
-- Initial release of The Martin Suite (GLC Edition).
+- Initial release of Production Logging Center (GLC Edition).
 - Production Log workflow for shift entry and export handling.
 - Dynamic export organization and settings-driven defaults.
 - Rate Manager and Layout Manager modules.

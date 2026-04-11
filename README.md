@@ -1,6 +1,18 @@
 # AIMartinSuiteGLCVersion
 
-The Martin Suite is a desktop production support application for GLC operators. It is built with Python, Tkinter, and ttkbootstrap and is packaged for Windows with PyInstaller.
+Production Logging Center is a desktop production support application for GLC operators. It is built with Python, Tkinter, and ttkbootstrap and can be packaged as a Windows executable or an Ubuntu Debian package.
+
+## Build Targets
+
+- `build.py` detects the host OS and supports two artifact targets: Windows `.exe` and Ubuntu `.deb`.
+- On Windows, running `python build.py` in an interactive terminal now prompts for `Windows (.exe)` or `Ubuntu (.deb via WSL)`.
+- Non-interactive invocations still default to the host-native target so existing automated rebuild flows keep working.
+- `python build.py --target windows` forces the Windows EXE path.
+- `python build.py --target ubuntu` forces the Ubuntu packaging path.
+- `python build.py --target ubuntu --wsl-distro Ubuntu-24.04` uses a specific WSL distro when launching the Ubuntu build from Windows.
+- Ubuntu packaging expects a Linux Python runtime with `Pillow` and `PyInstaller` available, plus `dpkg-deb` in the selected WSL or Ubuntu environment.
+- When the repository lives on a Windows drive such as `D:\`, the selected WSL distro must also expose that drive under `/mnt/<drive-letter>` or the Ubuntu build will stop with a prerequisite error.
+- Ubuntu artifacts are written under `dist/ubuntu/`.
 
 ## Two Working Modes
 
@@ -15,6 +27,7 @@ These two forms do not have identical behavior. The Python version has access to
 
 - Production Log workflow with draft save and reopen support.
 - Production Log tracks shop orders, part numbers, and molds during shift entry.
+- Production Log keeps a Total Molds header field in sync with the current production rows and includes it in workbook export.
 - Automatic recovery snapshots for overwritten drafts.
 - Excel export and import support for production sheet work.
 - A footer-level Balance Downtime action that fills in missing downtime proportionally across existing downtime rows before export, with a fallback adjustment row when needed.
@@ -26,14 +39,14 @@ These two forms do not have identical behavior. The Python version has access to
 - Shared viewport scrolling keeps wider modules usable in narrower windows instead of clipping the right side of the page.
 - Backup / Recovery viewer for browsing and restoring draft snapshots and configuration backups.
 - Settings management for export paths, theme selection, production defaults, editable downtime code labels, and per-module live-session persistence.
-- Settings Manager includes advanced tools for inspecting and editing external module override files beside the app.
+- Settings Manager now separates general settings from admin-only Developer & Admin tools for repository control, advanced packaged dev updates, external module override trust, and external module override management.
 - Configurable page-transition fades, including the ability to tune the duration or disable them.
 - Configurable toast notifications for non-blocking status messages.
-- Automatic per-file external module overrides when a matching `.py` file exists in the external `modules` folder.
+- Automatic per-file external module overrides when a matching `.py` file exists in the external `the_golden_standard` folder and admin-controlled override trust is enabled.
 - In-app help viewer and About screen.
 - Help Center navigation now includes top-level guide chips, a Hidden Modules reference, and smaller User Guide section chips for module-specific reading.
 - Bundled GPL license access from Help Center and About.
-- Theme support with readability overrides.
+- Theme support with readability overrides, including the Martin Modern Light industrial preset for the shared shell.
 - Rotated backup copies for settings, layout, and rate file saves.
 - Hard-coded application icon assets with documented replacement steps.
 
@@ -69,23 +82,32 @@ These two forms do not have identical behavior. The Python version has access to
 - Packaged builds now use versioned EXE filenames so a newer build can download beside the current one, launch separately, and leave the older copy available until cleanup is confirmed.
 - Local builds now keep the current EXE in `dist/` and archive up to 10 older versioned EXEs in `dist/Old_exe`.
 - The footer update status bar now stays hidden unless an update job is actively running.
+- Protected security administration now includes persisted non-secure mode, admin-only developer tools visibility, and a hardened vault reset flow with explicit confirmation and backup behavior.
+- External Python override files can now be staged beside the app without executing until an admin explicitly enables override trust.
+
+## Installed Ubuntu Package Mode
+
+- The installed Debian package places the application bundle under `/opt/production-logging-center-glc`.
+- User-writable runtime files for the installed Linux app are stored under `$XDG_DATA_HOME/production-logging-center-glc` when `XDG_DATA_HOME` is set.
+- If `XDG_DATA_HOME` is not set, the installed Linux app stores runtime files under `~/.local/share/production-logging-center-glc`.
+- This includes editable JSON files, pending drafts, backups, security data, and external override files used by the installed package.
 
 ## Update Manager Status
 
 - The updater checks only the Dispatcher Core version in `main.py` as the master version.
-- The current stable Dispatcher Core release is `1.5.6`.
+- The current stable Dispatcher Core release is `2.0.4`.
 - Two-part versions such as `1.07` trigger an executable update when greater than the local version.
 - Three-part versions only trigger an executable update when the third number is even, such as `1.07.2`.
 - Odd patch versions such as `1.07.1` are ignored.
 - Update availability now also requires a matching published EXE artifact in `dist/`.
 - In Python/source mode, stable updates download the published EXE into local `dist` and launch it for handoff testing.
 - In packaged EXE mode, stable updates download a versioned EXE beside the current copy, clear stale bundled-module overrides, launch the newer build, and let the newer build offer cleanup of older local EXEs.
-- Packaged EXE mode also supports selected module payload installs from the `modules/` package without rebuilding the EXE.
+- Packaged EXE mode also supports selected module payload installs from the `the_golden_standard/` package without rebuilding the EXE.
 - Downloaded or user-supplied module payloads become active automatically for that module when the matching external override file exists.
 - Update Manager can now check for available module payload restores at startup and show a toast notification when they are available.
 - Update Manager can now install all available module and JSON payload restores in one pass.
 - Packaged EXE mode can also restore tracked JSON files such as `layout_config.json` and `rates.json` from the repository copy with local backups preserved before overwrite.
 - Packaged EXE mode can also restore the bundled Help Center markdown files and `LICENSE.txt` as one grouped documentation update.
 - `main.py` remains the Dispatcher Core boundary and still updates only through the stable EXE release path.
-- `About System v1.0.7` remains the first module payload target for packaged update testing after the `1.5.6` EXE handoff.
+- `About System v1.0.7` remains the first module payload target for packaged update testing after the `2.0.4` EXE handoff.
 - The Help Center now uses a modern single-page layout with top link navigation, a Hidden Modules guide, and section chips for User Guide module pages instead of notebook tabs.
