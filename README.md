@@ -4,6 +4,7 @@ Production Logging Center is a desktop production support application for GLC op
 ## Build Targets
 
 - `build.py` detects the host OS and supports two artifact targets: Windows `.exe` and Ubuntu `.deb`.
+- `python build.py --index-only` refreshes a local Python symbol index without packaging anything.
 - On Windows, running `python build.py` in an interactive terminal now prompts for `Windows (.exe)` or `Ubuntu (.deb via WSL)`.
 - Non-interactive invocations still default to the host-native target so existing automated rebuild flows keep working.
 - `python build.py --target windows` forces the Windows EXE path.
@@ -14,6 +15,16 @@ Production Logging Center is a desktop production support application for GLC op
 - A repeatable WSL setup is `python3 -m venv .venv-linux` followed by `.venv-linux/bin/python -m pip install Pillow PyInstaller openpyxl ttkbootstrap`.
 - When the repository lives on a Windows drive such as `D:\`, the selected WSL distro must also expose that drive under `/mnt/<drive-letter>` or the Ubuntu build will stop with a prerequisite error.
 - Ubuntu artifacts are written under `dist/ubuntu/`.
+
+## Python Symbol Index
+
+- The repository can generate a local symbol index at `build/symbol-index/`.
+- `build/symbol-index/symbol-index.json` is the machine-readable manifest.
+- `build/symbol-index/symbol-index.md` is the human-readable lookup file.
+- Normal `build.py` packaging runs refresh the index before packaging starts.
+- The local VS Code task `Refresh Python Symbol Index` runs the same refresh command without building an EXE or DEB.
+- The indexed symbol scope includes module-level variables/constants, dataclass fields, class attributes, and `self.<name>` instance attributes discovered by static analysis.
+- Local variables inside function bodies are intentionally excluded so the index stays focused enough to search quickly.
 
 ## Two Working Modes
 
@@ -45,7 +56,7 @@ These two forms do not have identical behavior. The Python version has access to
 - Settings Manager now separates general settings from admin-only Developer & Admin tools for repository control, advanced packaged dev updates, external module override trust, and external module override management.
 - Configurable page-transition fades, including the ability to tune the duration or disable them.
 - Configurable toast notifications for non-blocking status messages.
-- Automatic per-file external module overrides when a matching `.py` file exists in the external `the_golden_standard` folder and admin-controlled override trust is enabled.
+- Automatic per-file external module overrides when a matching `.py` file exists in the external override app folder and admin-controlled override trust is enabled.
 - In-app help viewer and About screen.
 - Help Center navigation now includes top-level guide chips, a Hidden Modules reference, and smaller User Guide section chips for module-specific reading.
 - Bundled GPL license access from Help Center and About.
@@ -105,7 +116,7 @@ These two forms do not have identical behavior. The Python version has access to
 ## Update Manager Status
 
 - The updater checks only the Dispatcher Core release version exported from `launcher.py`, while `main.py` remains the runtime entry boundary.
-- The current stable Dispatcher Core release is `2.1.2`.
+- The current stable Dispatcher Core release is `2.1.4`.
 - Two-part versions such as `1.07` trigger an executable update when greater than the local version.
 - Three-part versions only trigger an executable update when the third number is even, such as `1.07.2`.
 - Odd patch versions such as `1.07.1` are ignored.
@@ -113,7 +124,7 @@ These two forms do not have identical behavior. The Python version has access to
 - Update Manager defaults to the main repository URL, and the Security Admin developer tools can override or clear it when needed.
 - In Python/source mode, stable updates download the published EXE into local `dist` and launch it for handoff testing.
 - In packaged EXE mode, stable updates download a versioned EXE beside the current copy, clear stale bundled-module overrides, launch the newer build, and let the newer build offer cleanup of older local EXEs.
-- Packaged EXE mode also supports selected module payload installs from the `the_golden_standard/` package without rebuilding the EXE.
+- Packaged EXE mode also supports selected module payload installs from the managed app payload set without rebuilding the EXE.
 - Downloaded or user-supplied module payloads become active automatically for that module when the matching external override file exists.
 - Update Manager can now check for available module payload restores at startup and show a toast notification when they are available.
 - Update Manager can now install all available module and JSON payload restores in one pass.
@@ -121,5 +132,5 @@ These two forms do not have identical behavior. The Python version has access to
 - Packaged EXE mode can also restore the bundled Help Center markdown files and `LICENSE.txt` as one grouped documentation update.
 - The updater status bar now mounts above the content viewport and successful module payload installs auto-hide after a short delay.
 - Dispatcher Core still updates only through the stable EXE release path.
-- `About System v1.0.0` remains the first module payload target for packaged update testing after the `2.1.2` EXE handoff.
+- Low-risk modules such as About System remain good first payload targets when testing packaged module installs after the `2.1.4` EXE handoff.
 - The Help Center now uses a modern single-page layout with top link navigation, a Hidden Modules guide, and section chips for User Guide module pages instead of notebook tabs.
