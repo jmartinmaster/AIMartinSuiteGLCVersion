@@ -1,8 +1,18 @@
 # Release Regression Checklist
 
-Use this checklist before packaging or publishing the next Dispatcher Core release.
+Use this checklist before packaging or publishing Dispatcher Core `2.1.4` or the next release cut from the same MVC baseline.
 
-## Security And Admin Checks
+## Source Gate
+
+- Run `py_compile` or equivalent syntax validation on touched Python files.
+- Smoke-test startup from source mode with `python main.py`.
+- Smoke-test focused source launch with `python launcher.py --module about`.
+- Confirm the app window title reports the expected Dispatcher Core version.
+- Confirm About loads cleanly and no baseline navigation path raises a module load error banner.
+- Confirm the first round of module switches stays responsive after the background preload cycle completes.
+- Touch a managed source file, reopen the affected module, and confirm the page rebuilds instead of reusing stale UI state.
+
+## Security And Admin Gate
 
 - Confirm general users do not see the Developer & Admin row in Settings Manager.
 - Confirm an authenticated admin does see the Developer & Admin row.
@@ -27,12 +37,14 @@ Use this checklist before packaging or publishing the next Dispatcher Core relea
 - Confirm stable EXE checks still run and surface status correctly.
 - Confirm JSON payload restores still preserve backups before overwrite.
 
-## Runtime And Packaging Checks
+## Packaged Windows Gate
 
-- Run `py_compile` on touched Python files before release.
-- Smoke-test startup from source mode with `python main.py`.
-- Smoke-test focused source launch with `python launcher.py --module about`.
-- Confirm the first round of module switches stays responsive after the background preload cycle completes.
-- Touch a managed source file, reopen the affected module, and confirm the page rebuilds instead of reusing stale UI state.
-- If packaging on Windows, confirm the packaged EXE starts, loads bundled modules by default, and respects override trust after admin changes.
-- If packaging on Windows, confirm side-by-side EXE handoff still works and older EXE cleanup remains available.
+- Complete the full packaged validation flow in [docs/packaged_windows_validation_runbook.md](./packaged_windows_validation_runbook.md).
+- Confirm the built EXE name matches the release version and launches without recovery, updater, or security regressions.
+- Confirm side-by-side EXE handoff and obsolete-EXE cleanup still work as expected.
+
+## Release Hygiene
+
+- Confirm `CHANGELOG.md` reflects the shipped behavior.
+- Confirm README and Help Center guidance still match the current security, updater, and packaging flows.
+- Remove or archive any temporary handoff or comparison notes that no longer carry unique information after validation completes.

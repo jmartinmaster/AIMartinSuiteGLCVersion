@@ -1,20 +1,29 @@
 # Packaged Windows Validation Runbook
 
-Use this runbook on a Windows packaging machine after building the next EXE release. This is the executable version of the regression checklist so results can be recorded step by step.
+Use this runbook on a Windows packaging machine after building the next EXE release. This is the canonical step-by-step packaged validation document; the shorter release checklist should point here instead of repeating the same manual checks.
 
 ## Preparation
 
 1. Open a Windows machine with the project checkout and its packaging dependencies installed.
 2. From the project root, build the EXE with `python build.py`.
-3. Confirm a versioned EXE appears in `dist/` and that older EXEs, if any, were archived to `dist/Old_exe`.
+3. Confirm a versioned EXE for Dispatcher Core `2.1.4` appears in `dist/` and that older EXEs, if any, were archived to `dist/Old_exe`.
 4. Close any previously running copy of the application before starting validation.
 
 ## Baseline Startup
 
 1. Launch the newly built EXE from `dist/`.
 2. Confirm the splash screen appears and the app opens without an error dialog.
-3. Confirm Production Log opens by default.
-4. Confirm the footer update banner is hidden while no update job is active.
+3. Confirm the window title reports Dispatcher Core `2.1.4`.
+4. Confirm Production Log opens by default.
+5. Confirm the footer update banner is hidden while no update job is active.
+
+## Production Log Validation
+
+1. Confirm `Refresh View`, `Resume Latest`, `Pending Drafts`, and `Delete Current Draft` are visible and responsive.
+2. Create a small draft, save it, delete a production row, reload the draft, and confirm the deletion persisted.
+3. Add downtime rows, change the Balance Mix control, run Balance Downtime, and confirm the ghost-time display and summary charts update correctly.
+4. Export a workbook and confirm `Open Last Export` plus `Print Last Export` enable only after the export succeeds.
+5. Confirm the module does not show the earlier blank region above `Draft Status` in the shared shell.
 
 ## Security And Admin Validation
 
@@ -55,12 +64,20 @@ Use this runbook on a Windows packaging machine after building the next EXE rele
 ## Update Manager Validation
 
 1. Open Update Manager.
-2. Confirm repository information resolves correctly.
+2. Confirm repository information resolves correctly and matches the currently configured repository URL.
 3. If a module payload is available, install one while External Override Trust is disabled.
 4. Confirm the install message says the payload is staged but inactive.
 5. Enable External Override Trust and reload the affected module.
 6. Confirm the staged override becomes active.
 7. If documentation or JSON restores are available, confirm they still install successfully and preserve backups.
+
+## Recovery And Settings Validation
+
+1. Open Backup / Recovery and restore a draft snapshot back into Production Log.
+2. Restore a configuration backup and confirm the record list refreshes after restore.
+3. Open Settings and attempt to save invalid downtime-code rows, then confirm validation blocks the save.
+4. Save a valid downtime-code change and confirm it persists after reopening the dialog.
+5. Confirm module whitelist and persistent-module selections still save and reload correctly.
 
 ## EXE Handoff Validation
 
@@ -68,7 +85,7 @@ Use this runbook on a Windows packaging machine after building the next EXE rele
 2. Confirm the newer EXE downloads beside the current one instead of overwriting it in place.
 3. Confirm stale external module overrides are cleaned up before handoff when expected.
 4. Confirm the newer EXE launches successfully.
-5. Confirm the app later offers cleanup of older EXE copies.
+5. Confirm the app later offers cleanup of older EXE copies and ignores the running `2.1.4` build itself.
 
 ## Sign-Off
 

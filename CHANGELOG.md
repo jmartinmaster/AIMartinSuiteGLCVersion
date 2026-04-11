@@ -4,6 +4,23 @@ This changelog tracks the main branch release line for Production Logging Center
 
 Version headings below are aligned to the current `2.x` release line used by Dispatcher Core. Earlier work has been grouped into practical release milestones so the shipped feature history is easier to follow without rewriting older module version markers.
 
+## [2.1.4] - 2026-04-11
+
+### Changed
+
+- Promoted Dispatcher Core to stable version `2.1.4` for the MVC cleanup and release-documentation refresh.
+- Finished the Production Log MVC separation by moving draft persistence, balance state and distribution math, export/open/print actions, and refresh/delete orchestration into controller and model code while keeping the view UI-focused.
+- Moved Recovery Viewer restore operations and Settings Manager normalization, downtime-code validation, backup persistence, and external module editor source loading into model-layer code.
+- Extracted Update Manager repository parsing, payload scanning and install helpers, stable artifact checks, remote downloads, and source-build filesystem helpers into `app/models/update_manager_model.py`.
+- Moved dispatcher shell runtime settings loading, external module override file operations, and obsolete EXE cleanup helpers into `AppModel`.
+- Fixed Update Manager runtime repository refresh so it uses the configured repository URL and correctly manages its runtime-settings listener lifecycle.
+- Updated release handoff, regression checklist, packaged Windows runbook, and feature-sweep notes to match the current `2.1.4` release state.
+
+### Notes
+
+- This even patch release is intended to remain eligible for the packaged EXE update gate.
+- Source diagnostics and byte-compilation passed for the touched Python files; packaged Windows validation remains the final manual release check.
+
 ## [2.1.2] - 2026-04-11
 
 ### Changed

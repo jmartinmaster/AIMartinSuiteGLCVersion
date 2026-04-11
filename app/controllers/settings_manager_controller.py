@@ -1,12 +1,24 @@
+# Production Logging Center (GLC Edition)
+# Copyright (C) 2026 Jamie Martin
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
 from copy import deepcopy
 import os
 
-from app.app_logging import log_exception
 from app.downtime_codes import DEFAULT_DT_CODE_MAP, clear_downtime_code_cache
-from app.persistence import write_json_with_backup
 from app.security import gatekeeper
 from app.theme_manager import DEFAULT_THEME, get_theme_label, get_theme_labels, normalize_theme
-from app.utils import external_path
 from app.models.security_model import ACCESS_RIGHTS, ROLE_DEFAULT_RIGHTS, ROLE_LIMITS, normalize_role, role_requires_password
 from app.models.settings_manager_model import SettingsManagerModel
 from app.views.settings_manager_view import SettingsManagerView
@@ -15,7 +27,9 @@ from app.views.settings_manager_view import SettingsManagerView
 class SettingsManagerController:
     def __init__(self, parent, dispatcher):
         self.dispatcher = dispatcher
-        self.model = SettingsManagerModel(dispatcher)
+        self.model = SettingsManagerModel()
+        self.sync_valid_module_options()
+        self.view = None
         self.view = SettingsManagerView(parent, dispatcher, self)
         self.view.build_form_fields(self.model.get_settings_copy(), self.get_theme_options())
         self.refresh_module_whitelist_summary()
@@ -26,13 +40,21 @@ class SettingsManagerController:
         self.view.set_theme_status(f"Current theme: {get_theme_label(self.model.saved_theme)}")
 
     def __getattr__(self, attribute_name):
-        return getattr(self.view, attribute_name)
+        view = self.__dict__.get("view")
+        if view is None:
+            raise AttributeError(attribute_name)
+        return getattr(view, attribute_name)
 
     def get_theme_options(self):
         return get_theme_labels()
 
+    def sync_valid_module_options(self):
+        navigation_modules = [module_name for _display_name, module_name in self.dispatcher.get_navigation_modules()]
+        persistent_modules = [module_name for _display_name, module_name in self.dispatcher.get_persistable_modules()]
+        self.model.set_valid_modules(navigation_modules, persistent_modules)
+
     def format_persistent_modules_summary(self):
-        selected_modules = self.dispatcher.normalize_persistent_modules(self.model.settings.get("persistent_modules", []))
+        selected_modules = list(self.model.settings.get("persistent_modules", []))
         display_lookup = {module_name: display_name for display_name, module_name in self.dispatcher.get_persistable_modules()}
         selected_labels = [display_lookup[module_name] for module_name in selected_modules if module_name in display_lookup]
         if not selected_labels:
@@ -40,7 +62,7 @@ class SettingsManagerController:
         return ", ".join(selected_labels)
 
     def format_module_whitelist_summary(self):
-        selected_modules = self.dispatcher.normalize_module_whitelist(self.model.settings.get("module_whitelist", []))
+        selected_modules = list(self.model.settings.get("module_whitelist", []))
         display_lookup = {module_name: display_name for display_name, module_name in self.dispatcher.get_navigation_modules()}
         selected_labels = [display_lookup[module_name] for module_name in selected_modules if module_name in display_lookup]
         if not selected_labels:
@@ -48,11 +70,11 @@ class SettingsManagerController:
         return ", ".join(selected_labels)
 
     def refresh_module_whitelist_summary(self):
-        self.model.settings["module_whitelist"] = self.dispatcher.normalize_module_whitelist(self.model.settings.get("module_whitelist", []))
+        self.sync_valid_module_options()
         self.view.set_module_whitelist_summary(self.format_module_whitelist_summary())
 
     def refresh_persistent_modules_summary(self):
-        self.model.settings["persistent_modules"] = self.dispatcher.normalize_persistent_modules(self.model.settings.get("persistent_modules", []))
+        self.sync_valid_module_options()
         self.view.set_persistent_modules_summary(self.format_persistent_modules_summary())
 
     def format_external_modules_status(self):
@@ -112,6 +134,7 @@ class SettingsManagerController:
         session = gatekeeper.get_session()
         return {
             "session_summary": gatekeeper.get_session_summary(),
+            "non_secure_mode": gatekeeper.is_non_secure_mode_enabled(),
             "session_vault_name": session.vault_name if session else None,
             "vaults": [self._serialize_vault(vault) for vault in gatekeeper.list_vaults()],
             "role_defaults": {key: list(value) for key, value in ROLE_DEFAULT_RIGHTS.items()},
@@ -192,6 +215,14 @@ class SettingsManagerController:
         self.view.show_toast("Security", f"Updated password for {vault_name}.")
         return self.get_security_admin_state()
 
+    def set_security_non_secure_mode(self, enabled):
+        gatekeeper.set_non_secure_mode(bool(enabled))
+        self._refresh_security_ui()
+        message = "Non-secure mode is enabled. Protected-module authentication is bypassed." if enabled else "Non-secure mode is disabled. Protected modules are locked again."
+        bootstyle = "warning" if enabled else "success"
+        self.view.show_toast("Security", message, bootstyle)
+        return self.get_security_admin_state()
+
     def open_developer_admin_dialog(self):
         if not gatekeeper.has_admin_session():
             self.view.show_error("Developer Tools", "An admin session is required to open developer tools.")
@@ -207,39 +238,14 @@ class SettingsManagerController:
         )
 
     def get_external_module_editor_state(self, module_name):
-        if not module_name:
-            return {
-                "text": "",
-                "status": "Choose a bundled module to inspect or override.",
-                "source": "None",
-            }
-
         override_path = self.dispatcher.get_external_module_override_path(module_name)
-        if override_path and os.path.exists(override_path):
-            with open(override_path, "r", encoding="utf-8") as handle:
-                status = f"Editing external override: {override_path}"
-                if not self.dispatcher.is_external_module_override_trust_enabled():
-                    status = f"Editing external override: {override_path}. This file is currently inactive until an admin enables override trust."
-                return {
-                    "text": handle.read(),
-                    "status": status,
-                    "source": "External override",
-                }
-
         bundled_path = os.path.join(self.dispatcher.modules_path, f"{module_name}.py")
-        if os.path.exists(bundled_path):
-            with open(bundled_path, "r", encoding="utf-8") as handle:
-                return {
-                    "text": handle.read(),
-                    "status": f"Editing bundled source preview for {module_name}. Saving will create an external override.",
-                    "source": "Bundled module",
-                }
-
-        return {
-            "text": "",
-            "status": f"No bundled module source was found for {module_name}.",
-            "source": "Unavailable",
-        }
+        return self.model.build_external_module_editor_state(
+            module_name,
+            override_path=override_path,
+            bundled_path=bundled_path,
+            trust_enabled=self.dispatcher.is_external_module_override_trust_enabled(),
+        )
 
     def save_developer_admin_settings(self, update_repository_url, enable_advanced_dev_updates, enable_external_override_trust):
         trust_changed = gatekeeper.is_external_module_override_trust_enabled() != bool(enable_external_override_trust)
@@ -283,38 +289,9 @@ class SettingsManagerController:
         self.view.show_info("Developer Tools", f"No external override exists for {module_name}.")
         return False
 
-    def _build_settings_from_form(self):
-        form_values = self.view.collect_form_values()
-        settings = self.model.get_settings_copy()
-        settings.update(form_values)
-
-        numeric_fields = [
-            "auto_save_interval_min",
-            "default_shift_hours",
-            "default_goal_mph",
-            "toast_duration_sec",
-            "screen_transition_duration_ms",
-        ]
-        for key in numeric_fields:
-            value = settings.get(key)
-            try:
-                settings[key] = float(value) if isinstance(value, str) and "." in value else int(value)
-            except Exception as exc:
-                log_exception(f"settings_manager.invalid_numeric.{key}", exc)
-
-        settings["theme"] = normalize_theme(settings.get("theme", DEFAULT_THEME))
-        return self.model.normalize_settings(settings)
-
     def persist_settings(self, toast_title="Settings Saved", toast_message_prefix="Theme changes were applied immediately."):
         clear_downtime_code_cache()
-        backup_info = write_json_with_backup(
-            self.model.settings_path,
-            self.model.settings,
-            backup_dir=external_path("data/backups/settings"),
-            keep_count=12,
-        )
-
-        self.model.commit_theme()
+        backup_info = self.model.save_settings_with_backup()
         applied_theme = self.dispatcher.apply_theme(self.model.saved_theme)
         self.model.preview_theme = applied_theme
         self.view.set_theme_selection(applied_theme)
@@ -335,7 +312,7 @@ class SettingsManagerController:
         self.refresh_persistent_modules_summary()
 
     def save_settings(self):
-        self.model.update_settings(self._build_settings_from_form())
+        self.model.update_settings(self.model.build_settings_from_form(self.view.collect_form_values()))
         self.persist_settings()
 
     def preview_selected_theme(self, _event=None):
@@ -361,6 +338,18 @@ class SettingsManagerController:
         current_codes = self.model.settings.get("downtime_codes", deepcopy(DEFAULT_DT_CODE_MAP))
         self.view.show_downtime_codes_dialog(current_codes)
 
+    def suggest_next_downtime_code(self, rows):
+        return self.model.get_next_downtime_code(rows)
+
+    def save_downtime_code_rows(self, rows):
+        try:
+            updated_codes = self.model.validate_downtime_code_rows(rows)
+        except ValueError as exc:
+            self.view.show_error("Downtime Codes", str(exc))
+            return False
+        self.save_downtime_codes(updated_codes)
+        return True
+
     def save_downtime_codes(self, updated_codes):
         self.model.update_downtime_codes(updated_codes)
         self.persist_settings(
@@ -369,21 +358,29 @@ class SettingsManagerController:
         )
 
     def open_persistent_modules_dialog(self):
+        self.sync_valid_module_options()
         options = self.dispatcher.get_persistable_modules()
-        selected_modules = set(self.dispatcher.normalize_persistent_modules(self.model.settings.get("persistent_modules", [])))
+        selected_modules = set(self.model.settings.get("persistent_modules", []))
         self.view.show_persistent_modules_dialog(options, selected_modules)
 
     def open_module_whitelist_dialog(self):
+        self.sync_valid_module_options()
         options = self.dispatcher.get_navigation_modules()
-        selected_modules = set(self.dispatcher.normalize_module_whitelist(self.model.settings.get("module_whitelist", [])))
+        selected_modules = set(self.model.settings.get("module_whitelist", []))
         self.view.show_module_whitelist_dialog(options, selected_modules)
 
     def save_persistent_modules_selection(self, selected_modules):
-        self.model.settings["persistent_modules"] = self.dispatcher.normalize_persistent_modules(selected_modules)
+        self.model.settings["persistent_modules"] = self.model.normalize_module_names(
+            selected_modules,
+            self.model.valid_persistent_modules or None,
+        )
         self.refresh_persistent_modules_summary()
 
     def save_module_whitelist_selection(self, selected_modules):
-        self.model.settings["module_whitelist"] = self.dispatcher.normalize_module_whitelist(selected_modules)
+        self.model.settings["module_whitelist"] = self.model.normalize_module_names(
+            selected_modules,
+            self.model.valid_navigation_modules or None,
+        )
         self.refresh_module_whitelist_summary()
 
     def on_unload(self):

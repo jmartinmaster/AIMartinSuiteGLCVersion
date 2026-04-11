@@ -27,6 +27,7 @@ import argparse
 from pathlib import Path, PureWindowsPath
 
 from app.app_identity import DEB_PACKAGE_NAME, LEGACY_EXE_NAME, format_versioned_deb_name, format_versioned_exe_name, load_version_from_main, normalize_version, parse_version, parse_versioned_exe_name
+from symbol_index import DEFAULT_OUTPUT_DIR as SYMBOL_INDEX_OUTPUT_DIR, SymbolIndexError, generate_symbol_index
 
 REPO_ROOT = Path(__file__).resolve().parent
 VERSION_SOURCE_PATH = REPO_ROOT / "launcher.py"
@@ -126,6 +127,11 @@ def parse_args():
         description="Build Production Logging Center for Windows (.exe) or Ubuntu (.deb).",
     )
     parser.add_argument(
+        "--index-only",
+        action="store_true",
+        help="Refresh the local Python symbol index without building an artifact.",
+    )
+    parser.add_argument(
         "--target",
         choices=(WINDOWS_TARGET, UBUNTU_TARGET),
         help="Artifact target to build. Defaults to a prompt in interactive shells and the host-native target otherwise.",
@@ -190,6 +196,24 @@ def resolve_target(args, host_platform):
 
 def resolve_wsl_distro(args):
     return args.wsl_distro or os.environ.get(MARTIN_WSL_DISTRO_ENV, "").strip() or None
+
+
+def refresh_symbol_index():
+    try:
+        result = generate_symbol_index(repo_root=REPO_ROOT, output_dir=REPO_ROOT / SYMBOL_INDEX_OUTPUT_DIR)
+    except SymbolIndexError as exc:
+        raise BuildError(f"Symbol index generation failed: {exc}") from exc
+
+    summary = result["summary"]
+    print(
+        "Refreshed symbol index: "
+        f"{summary['files']} files, "
+        f"{summary['classes']} classes, "
+        f"{summary['methods']} methods, "
+        f"{summary['functions']} functions."
+    )
+    print(f"- JSON: {result['json_path']}")
+    print(f"- Markdown: {result['markdown_path']}")
 
 
 def validate_target_for_host(target, host_platform):
@@ -649,6 +673,7 @@ def invoke_ubuntu_build_via_wsl(wsl_distro=None):
 
 
 def run_windows_build():
+    refresh_symbol_index()
     ensure_python_modules(REQUIRED_BUILD_MODULES)
     pyinstaller_main = importlib.import_module("PyInstaller.__main__")
 
@@ -666,6 +691,7 @@ def run_windows_build():
 
 
 def run_ubuntu_build_direct():
+    refresh_symbol_index()
     ensure_command_available("dpkg-deb")
     ensure_python_modules(REQUIRED_BUILD_MODULES)
     ensure_template_exists(UBUNTU_DESKTOP_TEMPLATE_PATH)
@@ -711,6 +737,10 @@ def run_target_build(target, host_platform, args):
 def main():
     ensure_repo_root()
     args = parse_args()
+    if args.index_only:
+        refresh_symbol_index()
+        return
+
     host_platform = detect_host_platform()
     selected_target = resolve_target(args, host_platform)
 

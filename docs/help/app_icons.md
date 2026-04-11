@@ -4,7 +4,7 @@ Production Logging Center uses a fixed icon pipeline so the app window, taskbar 
 
 ## Hard-Coded Icon Files
 
-The runtime icon paths are defined in `main.py`.
+The runtime icon paths are defined in `app/app_platform.py` and applied during launcher startup.
 
 - `icon.ico`
   - Windows EXE and native taskbar icon file.
@@ -25,11 +25,11 @@ The runtime icon paths are defined in `main.py`.
 
 ## Where Packaging Uses Them
 
-The packaged EXE includes the runtime icon assets through `TheMartinSuite_GLC.spec`, and packaged builds now use a versioned EXE name such as `TheMartinSuite_GLC_v1.2.4.exe`.
+The packaged EXE includes the runtime icon assets through `TheMartinSuite_GLC.spec`, and packaged builds use a versioned EXE name derived from the current Dispatcher Core release.
 
 - `datas` bundles `icon.ico` and the size-specific PNG files.
 - `icon=['icon.ico']` sets the Windows executable icon.
-- `main.py` now applies the full PNG size set at runtime and then applies the Windows `.ico` handles for native shell surfaces.
+- `launcher.py` and `main.py` apply the full PNG size set at runtime and then apply the Windows `.ico` handles for native shell surfaces.
 
 ## How To Change The App Icons
 
