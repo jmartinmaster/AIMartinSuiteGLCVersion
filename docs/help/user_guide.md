@@ -1,6 +1,8 @@
+# Production Logging Center User Guide
 
 # Production Logging Center User Guide
 
+Production Logging Center is a floor-focused desktop application for recording Disamatic production, tracking downtime, managing standard production rates, and exporting the finished shift record into the plant Excel template.
 
 Production Logging Center is a floor-focused desktop application for recording Disamatic production, tracking downtime, managing standard production rates, and exporting the finished shift record into the plant Excel template.
 
@@ -22,7 +24,7 @@ The module details now live under the smaller User Guide section chips in the He
 - Production Log: shift entry, downtime balancing, drafts, and Excel import/export behavior.
 - Rate Manager: part-number rate maintenance used by Production Log calculations.
 - Layout Manager: header layout and workbook mapping editing.
-- Settings Manager: defaults, theme behavior, persistence options, and advanced module tools.
+- Settings Manager: defaults, theme behavior, persistence options, security access, and admin-only developer tools.
 - Backup / Recovery: draft recovery, backup restore, and recovery file handling.
 - Update Manager: Dispatcher Core version checks, payload downloads, and build-runtime notes.
 
@@ -92,5 +94,5 @@ Use the other Help tabs for the detailed structure of each JSON file used by the
 
 - The full GNU GPL license text is available from the Help Center.
 - The About screen also provides an Open License button.
-- Module entries shown as `(external)` in About are currently being loaded from the external `modules` folder instead of the bundled copy.
+- Module entries shown as `(external)` in About are currently being loaded from the external `the_golden_standard` folder instead of the bundled copy.
 - Packaged builds include `LICENSE.txt` so the license opens cleanly in Windows.

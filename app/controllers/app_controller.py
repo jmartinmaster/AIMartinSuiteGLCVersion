@@ -1,0 +1,937 @@
+import importlib
+import json
+import os
+import sys
+import threading
+import time
+import tkinter as tk
+import webbrowser
+from tkinter import messagebox
+
+import ttkbootstrap as tb
+from ttkbootstrap.constants import BOTH, BOTTOM, DANGER, INFO, LEFT, RIGHT, SUCCESS, WARNING, X
+from ttkbootstrap.widgets import ToastNotification
+
+from app.app_logging import log_exception
+from app.theme_manager import DEFAULT_THEME, apply_readability_overrides, normalize_theme, resolve_base_theme
+from app.utils import external_path, local_or_resource_path, resource_path
+from app.models.app_model import AppModel
+from app.views.app_view import AppShellView
+from app.app_platform import get_obsolete_local_executables, get_work_area_insets
+from app.security_service import SecurityService
+from app.update_state import UpdateCoordinator
+
+ISSUE_REPORT_URL = "https://github.com/jmartinmaster/AIMartinSuiteGLCVersion/issues/new/choose"
+PROTECTED_MODULES = ["layout_manager", "settings_manager", "rate_manager", "update_manager"]
+MANAGED_MODULE_NAMES = [
+    "about",
+    "app_logging",
+    "app_platform",
+    "data_handler",
+    "data_handler_service",
+    "dev_logging",
+    "downtime_codes",
+    "help_viewer",
+    "layout_config_service",
+    "layout_manager",
+    "persistence",
+    "production_log",
+    "rate_manager",
+    "recovery_viewer",
+    "security",
+    "security_service",
+    "settings_manager",
+    "splash",
+    "theme_manager",
+    "update_bindings",
+    "update_manager",
+    "update_state",
+    "utils",
+]
+
+
+class Dispatcher:
+    def __init__(self, root, main_module=None):
+        self.root = root
+        self.root.title(f"Production Logging Center - {getattr(main_module, '__version__', '2.0.4')}")
+        self.root.geometry("1000x600")
+        self._update_status_clear_after_id = None
+
+        modules_path = resource_path("app")
+        external_modules_path = external_path("app")
+        layout_config = local_or_resource_path("layout_config.json")
+        rate_config = local_or_resource_path("rates.json")
+        settings_path = external_path("settings.json")
+
+        self.model = AppModel(
+            modules_path=modules_path,
+            external_modules_path=external_modules_path,
+            layout_config=layout_config,
+            rate_config=rate_config,
+            settings_path=settings_path,
+        )
+        self.security = SecurityService(PROTECTED_MODULES)
+        self.main_module = main_module or sys.modules.get("main") or sys.modules.get("__main__")
+        self.model.loaded_modules = {"main": self.main_module}
+        self._configure_module_import_paths()
+        self.model.runtime_settings = self.load_runtime_settings()
+        self.model.window_alpha_supported = self._supports_window_alpha()
+        self.update_coordinator = UpdateCoordinator(self.root)
+        self.refresh_animation_settings()
+
+        self.view = AppShellView(self.root, self.update_coordinator)
+        self.view.build()
+        self._sync_view_aliases()
+        self._setup_menu()
+        self.pre_load_manifest()
+        self._load_modules_list()
+        self._bind_mousewheel()
+        self.refresh_update_status_visibility()
+        self.load_module("production_log", use_transition=False)
+        self.root.after(1200, self.notify_non_secure_mode_state)
+        self.root.after(1500, self.notify_external_override_policy_state)
+        self.root.after(900, self.prompt_old_executable_cleanup)
+        self.root.after(1800, self.check_for_available_module_updates)
+
+    def _sync_view_aliases(self):
+        self.main_container = self.view.main_container
+        self.sidebar = self.view.sidebar
+        self.nav_container = self.view.nav_container
+        self.right_container = self.view.right_container
+        self.update_status_frame = self.view.update_status_frame
+        self.update_status_label = self.view.update_status_label
+        self.canvas = self.view.canvas
+        self.scrollbar = self.view.scrollbar
+        self.x_scrollbar = self.view.x_scrollbar
+        self.content_area = self.view.content_area
+        self.canvas_window = self.view.canvas_window
+
+    @property
+    def modules_path(self):
+        return self.model.modules_path
+
+    @property
+    def external_modules_path(self):
+        return self.model.external_modules_path
+
+    @property
+    def layout_config(self):
+        return self.model.layout_config
+
+    @property
+    def rate_config(self):
+        return self.model.rate_config
+
+    @property
+    def shared_data(self):
+        return self.model.shared_data
+
+    @property
+    def loaded_modules(self):
+        return self.model.loaded_modules
+
+    @property
+    def persistent_module_instances(self):
+        return self.model.persistent_module_instances
+
+    @property
+    def active_module_instance(self):
+        return self.model.active_module_instance
+
+    @active_module_instance.setter
+    def active_module_instance(self, value):
+        self.model.active_module_instance = value
+
+    @property
+    def active_module_name(self):
+        return self.model.active_module_name
+
+    @active_module_name.setter
+    def active_module_name(self, value):
+        self.model.active_module_name = value
+
+    @property
+    def active_module_frame(self):
+        return self.model.active_module_frame
+
+    @active_module_frame.setter
+    def active_module_frame(self, value):
+        self.model.active_module_frame = value
+
+    @property
+    def runtime_settings(self):
+        return self.model.runtime_settings
+
+    @runtime_settings.setter
+    def runtime_settings(self, value):
+        self.model.runtime_settings = value
+
+    @property
+    def runtime_settings_listeners(self):
+        return self.model.runtime_settings_listeners
+
+    @property
+    def module_update_check_in_progress(self):
+        return self.model.module_update_check_in_progress
+
+    @module_update_check_in_progress.setter
+    def module_update_check_in_progress(self, value):
+        self.model.module_update_check_in_progress = bool(value)
+
+    @property
+    def last_module_update_notification_signature(self):
+        return self.model.last_module_update_notification_signature
+
+    @last_module_update_notification_signature.setter
+    def last_module_update_notification_signature(self, value):
+        self.model.last_module_update_notification_signature = value
+
+    def _configure_module_import_paths(self):
+        bundled_base_dir = os.path.abspath(os.path.dirname(self.modules_path))
+        external_base_dir = os.path.abspath(os.path.dirname(self.external_modules_path))
+
+        if external_base_dir not in sys.path:
+            sys.path.insert(0, external_base_dir)
+        if bundled_base_dir not in sys.path:
+            sys.path.append(bundled_base_dir)
+
+        importlib.invalidate_caches()
+
+    def ensure_external_modules_package(self):
+        os.makedirs(self.external_modules_path, exist_ok=True)
+        self._configure_module_import_paths()
+
+    def import_managed_module(self, module_name, force_fresh=True):
+        module_path = self._resolve_managed_module_path(module_name)
+        self._configure_module_import_paths()
+        if force_fresh and module_path in sys.modules:
+            del sys.modules[module_path]
+        importlib.invalidate_caches()
+        module = importlib.import_module(module_path)
+        self.loaded_modules[module_name] = module
+        return module
+
+    def _resolve_managed_module_path(self, module_name):
+        return f"app.{module_name}"
+
+    def get_external_module_override_path(self, module_name):
+        if module_name not in MANAGED_MODULE_NAMES:
+            return None
+        candidate = os.path.join(self.external_modules_path, f"{module_name}.py")
+        return candidate if os.path.exists(candidate) else None
+
+    def has_external_modules_directory(self):
+        return os.path.isdir(self.external_modules_path) and os.path.abspath(self.external_modules_path) != os.path.abspath(self.modules_path)
+
+    def get_external_module_override_names(self):
+        if not self.has_external_modules_directory():
+            return []
+
+        module_names = []
+        for module_name in MANAGED_MODULE_NAMES:
+            override_path = os.path.join(self.external_modules_path, f"{module_name}.py")
+            if os.path.isfile(override_path) and module_name not in module_names:
+                module_names.append(module_name)
+        return sorted(module_names)
+
+    def get_bundled_module_names(self):
+        return [
+            module_name
+            for module_name in MANAGED_MODULE_NAMES
+            if os.path.isfile(os.path.join(self.modules_path, f"{module_name}.py"))
+        ]
+
+    def has_external_module_overrides(self):
+        return bool(self.get_external_module_override_names())
+
+    def are_external_module_overrides_enabled(self):
+        return self.has_external_module_overrides() and self.is_external_module_override_trust_enabled()
+
+    def is_external_module_override_trust_enabled(self):
+        return self.security.is_external_module_override_trust_enabled()
+
+    def is_module_loaded_from_external(self, module_name, module_obj=None):
+        if module_name == "main":
+            return False
+        if not self.are_external_module_overrides_enabled():
+            return False
+        candidate_module = module_obj or self.loaded_modules.get(module_name)
+        module_file = getattr(candidate_module, "__file__", "") if candidate_module is not None else ""
+        if not module_file:
+            return False
+        normalized_file = os.path.abspath(module_file)
+        normalized_external_root = os.path.abspath(self.external_modules_path)
+        try:
+            return os.path.commonpath([normalized_file, normalized_external_root]) == normalized_external_root
+        except Exception:
+            return False
+
+    def reset_module_import_state(self, keep_active=True):
+        active_name = self.active_module_name if keep_active else None
+        for module_name, session in list(self.persistent_module_instances.items()):
+            if keep_active and module_name == active_name:
+                continue
+            instance = session.get("instance")
+            frame = session.get("frame")
+            if hasattr(instance, "on_unload"):
+                try:
+                    instance.on_unload()
+                except Exception as exc:
+                    log_exception(f"reset_module_import_state.{module_name}", exc)
+            if frame is not None and frame.winfo_exists():
+                frame.destroy()
+            self.persistent_module_instances.pop(module_name, None)
+
+        for module_name in list(self.loaded_modules):
+            if module_name == "main" or (keep_active and module_name == active_name):
+                continue
+            self.loaded_modules.pop(module_name, None)
+            sys.modules.pop(module_name, None)
+            sys.modules.pop(f"app.{module_name}", None)
+            sys.modules.pop(f"the_golden_standard.{module_name}", None)
+
+    def install_module_override(self, module_name, module_text):
+        self.ensure_external_modules_package()
+        target_path = os.path.join(self.external_modules_path, f"{module_name}.py")
+        temp_path = f"{target_path}.tmp"
+        with open(temp_path, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(module_text)
+        os.replace(temp_path, target_path)
+        module = self.import_managed_module(module_name, force_fresh=True) if self.is_external_module_override_trust_enabled() else None
+        return target_path, module
+
+    def apply_external_override_policy_change(self):
+        current_module_name = self.active_module_name or "settings_manager"
+        self.reset_module_import_state(keep_active=False)
+        self._configure_module_import_paths()
+        self.load_module(current_module_name, use_transition=False)
+
+    def remove_external_module_overrides(self, module_names=None, include_bytecode=True):
+        if not self.has_external_modules_directory():
+            return []
+
+        managed_names = module_names or self.get_bundled_module_names()
+        removed_paths = []
+        pycache_dir = os.path.join(self.external_modules_path, "__pycache__")
+
+        for module_name in managed_names:
+            override_path = os.path.join(self.external_modules_path, f"{module_name}.py")
+            if os.path.isfile(override_path):
+                os.remove(override_path)
+                removed_paths.append(override_path)
+
+            if include_bytecode and os.path.isdir(pycache_dir):
+                cache_prefix = f"{module_name}."
+                for cache_name in os.listdir(pycache_dir):
+                    if not cache_name.startswith(cache_prefix):
+                        continue
+                    cache_path = os.path.join(pycache_dir, cache_name)
+                    if os.path.isfile(cache_path):
+                        os.remove(cache_path)
+                        removed_paths.append(cache_path)
+
+        if include_bytecode and os.path.isdir(pycache_dir):
+            try:
+                if not os.listdir(pycache_dir):
+                    os.rmdir(pycache_dir)
+            except OSError:
+                pass
+
+        return removed_paths
+
+    def _setup_menu(self):
+        self.view.configure_menu(
+            self.menu_open,
+            self.menu_save,
+            self.menu_export,
+            self.menu_import,
+            lambda: self.load_module("help_viewer"),
+            self.open_issue_report_page,
+            lambda: self.load_module("about"),
+            self.root.quit,
+        )
+
+    def open_issue_report_page(self):
+        try:
+            webbrowser.open(ISSUE_REPORT_URL)
+        except Exception as exc:
+            log_exception("open_issue_report_page", exc)
+            messagebox.showerror("Report A Problem", f"Could not open the GitHub issue page:\n\n{exc}")
+
+    def menu_open(self, event=None):
+        self.load_module("production_log")
+        if hasattr(self.active_module_instance, "show_pending"):
+            self.active_module_instance.show_pending()
+
+    def menu_save(self, event=None):
+        if hasattr(self.active_module_instance, "save_draft"):
+            self.active_module_instance.save_draft()
+        else:
+            self.show_toast("Action Unavailable", "Save action is not supported on this page.", WARNING)
+
+    def menu_export(self, event=None):
+        if hasattr(self.active_module_instance, "export_to_excel"):
+            self.active_module_instance.export_to_excel()
+        else:
+            self.show_toast("Action Unavailable", "Export action is not supported on this page.", WARNING)
+
+    def menu_import(self, event=None):
+        self.load_module("production_log")
+        if hasattr(self.active_module_instance, "import_from_excel_ui"):
+            self.active_module_instance.import_from_excel_ui()
+
+    def pre_load_manifest(self):
+        module_list = ["production_log", "layout_manager", "data_handler", "about", "settings_manager", "theme_manager", "help_viewer", "update_manager", "recovery_viewer"]
+        for mod_name in module_list:
+            try:
+                if mod_name not in self.loaded_modules:
+                    self.import_managed_module(mod_name, force_fresh=False)
+            except Exception as exc:
+                log_exception(f"pre_load_manifest.{mod_name}", exc)
+
+    def _load_modules_list(self):
+        self.view.populate_navigation(self.get_navigation_modules(), self.secure_load, self.active_module_name)
+
+    def refresh_navigation(self):
+        self._load_modules_list()
+
+    def secure_load(self, module_name):
+        try:
+            success = self.security.authenticate_module(
+                module_name,
+                parent=self.root,
+                reason=f"Unlock {self.get_module_display_name(module_name)} to continue.",
+            )
+            if success is False:
+                return
+        except Exception as exc:
+            log_exception(f"secure_load.error.{module_name}", exc)
+            messagebox.showerror("Security Error", f"Auth failed: {exc}")
+            return
+
+        self.refresh_navigation()
+        self.load_module(module_name)
+
+    def notify_non_secure_mode_state(self):
+        if self.security.is_non_secure_mode_enabled():
+            self.show_toast("Security", "Non-secure mode is enabled. Protected modules will open without password prompts.", WARNING)
+
+    def notify_external_override_policy_state(self):
+        if self.has_external_module_overrides() and not self.is_external_module_override_trust_enabled():
+            self.show_toast("Security", "External module overrides are present but inactive until an admin enables override trust.", WARNING)
+
+    def get_navigation_modules(self):
+        visible_modules = self.get_user_facing_modules(apply_whitelist=True)
+        return [(self.get_module_display_name(module_name), module_name) for module_name in visible_modules]
+
+    def get_hidden_module_names(self):
+        return {
+            "about",
+            "security",
+            "app_logging",
+            "app_platform",
+            "data_handler",
+            "data_handler_service",
+            "downtime_codes",
+            "help_viewer",
+            "layout_config_service",
+            "persistence",
+            "security_service",
+            "splash",
+            "theme_manager",
+            "update_bindings",
+            "update_state",
+            "utils",
+            "dev_logging",
+        }
+
+    def get_module_display_name(self, module_name):
+        return str(module_name).replace("_", " ").title()
+
+    def get_user_facing_modules(self, apply_whitelist=False):
+        hidden_modules = self.get_hidden_module_names()
+        whitelist = set(self.runtime_settings.get("module_whitelist", [])) if apply_whitelist else set()
+        visible_modules = []
+
+        for module_name in self.get_bundled_module_names():
+            if module_name in hidden_modules:
+                continue
+            if whitelist and module_name not in whitelist:
+                continue
+            if not self.security.is_module_visible(module_name):
+                continue
+            if module_name not in visible_modules:
+                visible_modules.append(module_name)
+
+        return sorted(visible_modules, key=lambda item: self.get_module_display_name(item).lower())
+
+    def get_persistable_modules(self):
+        return [
+            (self.get_module_display_name(module_name), module_name)
+            for module_name in self.get_user_facing_modules(apply_whitelist=False)
+            if module_name != "update_manager"
+        ]
+
+    def normalize_module_whitelist(self, raw_value):
+        if isinstance(raw_value, str):
+            candidates = [part.strip() for part in raw_value.split(",")]
+        elif isinstance(raw_value, (list, tuple, set)):
+            candidates = [str(part).strip() for part in raw_value]
+        else:
+            candidates = []
+
+        valid_modules = set(self.get_user_facing_modules(apply_whitelist=False))
+        normalized = []
+        for module_name in candidates:
+            if module_name and module_name in valid_modules and module_name not in normalized:
+                normalized.append(module_name)
+        return normalized
+
+    def normalize_persistent_modules(self, raw_value):
+        if isinstance(raw_value, str):
+            candidates = [part.strip() for part in raw_value.split(",")]
+        elif isinstance(raw_value, (list, tuple, set)):
+            candidates = [str(part).strip() for part in raw_value]
+        else:
+            candidates = []
+
+        valid_modules = {module_name for _display_name, module_name in self.get_persistable_modules()}
+        normalized = []
+        for module_name in candidates:
+            if module_name and module_name in valid_modules and module_name not in normalized:
+                normalized.append(module_name)
+        return normalized
+
+    def is_module_persistent(self, module_name):
+        if not module_name:
+            return False
+        if module_name == "update_manager":
+            return True
+        return module_name in self.runtime_settings.get("persistent_modules", [])
+
+    def prune_persistent_module_instances(self):
+        allowed_modules = set(self.runtime_settings.get("persistent_modules", [])) | {"update_manager"}
+        for module_name in list(self.persistent_module_instances):
+            if module_name in allowed_modules or module_name == self.active_module_name:
+                continue
+            session = self.persistent_module_instances.pop(module_name, None)
+            if not session:
+                continue
+            instance = session.get("instance")
+            frame = session.get("frame")
+            if hasattr(instance, "on_unload"):
+                try:
+                    instance.on_unload()
+                except Exception as exc:
+                    log_exception(f"persistent_module_unload.{module_name}", exc)
+            if frame is not None and frame.winfo_exists():
+                frame.destroy()
+
+    def _supports_window_alpha(self):
+        try:
+            current_alpha = float(self.root.attributes("-alpha"))
+            self.root.attributes("-alpha", current_alpha)
+            return True
+        except Exception:
+            return False
+
+    def _set_window_alpha(self, alpha_value):
+        if not self.model.window_alpha_supported:
+            return
+        try:
+            self.root.attributes("-alpha", alpha_value)
+        except Exception as exc:
+            self.model.window_alpha_supported = False
+            log_exception("set_window_alpha", exc)
+
+    def _run_window_transition(self, action):
+        if (
+            not self.model.window_alpha_supported
+            or not self.model.transitions_enabled
+            or self.model.transition_duration_ms <= 0
+            or self.model.transition_in_progress
+        ):
+            return action()
+
+        self.model.transition_in_progress = True
+        steps = 6
+        half_duration = max(0.12, self.model.transition_duration_ms / 2000)
+        step_delay = half_duration / steps
+        alpha_values = [1.0 - ((1.0 - self.model.transition_min_alpha) * (index + 1) / steps) for index in range(steps)]
+
+        try:
+            for alpha_value in alpha_values:
+                self._set_window_alpha(alpha_value)
+                self.root.update_idletasks()
+                self.root.update()
+                time.sleep(step_delay)
+
+            result = action()
+
+            for alpha_value in reversed(alpha_values[:-1]):
+                self._set_window_alpha(alpha_value)
+                self.root.update_idletasks()
+                self.root.update()
+                time.sleep(step_delay)
+
+            self._set_window_alpha(1.0)
+            self.root.update_idletasks()
+            return result
+        finally:
+            self._set_window_alpha(1.0)
+            self.model.transition_in_progress = False
+
+    def load_module(self, module_name, use_transition=True):
+        def perform_load():
+            previous_module_name = self.active_module_name
+            previous_module_instance = self.active_module_instance
+            previous_module_frame = self.active_module_frame
+
+            if previous_module_instance is not None:
+                if self.is_module_persistent(previous_module_name):
+                    if hasattr(previous_module_instance, "on_hide"):
+                        previous_module_instance.on_hide()
+                    if previous_module_frame is not None and previous_module_frame.winfo_exists():
+                        previous_module_frame.pack_forget()
+                else:
+                    if hasattr(previous_module_instance, "on_unload"):
+                        previous_module_instance.on_unload()
+                    if previous_module_frame is not None and previous_module_frame.winfo_exists():
+                        previous_module_frame.destroy()
+                    self.persistent_module_instances.pop(previous_module_name, None)
+
+            self.active_module_name = None
+            self.active_module_instance = None
+            self.active_module_frame = None
+            self.canvas.yview_moveto(0)
+
+            if self.is_module_persistent(module_name) and module_name in self.persistent_module_instances:
+                session = self.persistent_module_instances[module_name]
+                cached_frame = session.get("frame")
+                if cached_frame is not None and cached_frame.winfo_exists():
+                    self.active_module_name = module_name
+                    self.active_module_instance = session.get("instance")
+                    self.active_module_frame = cached_frame
+                    cached_frame.pack(fill=BOTH, expand=True)
+                    self.content_area.update_idletasks()
+                    self.view.set_active_navigation_button(module_name)
+                    return
+                self.persistent_module_instances.pop(module_name, None)
+
+            module_frame = tb.Frame(self.content_area, style="Martin.Surface.TFrame")
+            module_frame.pack(fill=BOTH, expand=True)
+
+            module = self.import_managed_module(module_name, force_fresh=True)
+
+            if hasattr(module, "get_ui"):
+                self.active_module_name = module_name
+                self.active_module_instance = module.get_ui(module_frame, self)
+                self.active_module_frame = module_frame
+                if self.is_module_persistent(module_name):
+                    self.persistent_module_instances[module_name] = {
+                        "instance": self.active_module_instance,
+                        "frame": module_frame,
+                    }
+                self.view.set_active_navigation_button(module_name)
+
+        try:
+            if use_transition and self.active_module_name is not None:
+                self._run_window_transition(perform_load)
+            else:
+                perform_load()
+        except Exception as exc:
+            log_exception(f"load_module.{module_name}", exc)
+            tb.Label(self.content_area, text=f"Error loading {module_name}: {exc}", bootstyle=DANGER).pack(pady=20)
+
+    def open_help_document(self, relative_path):
+        try:
+            candidate = local_or_resource_path(relative_path)
+            if os.path.exists(candidate):
+                if hasattr(os, "startfile"):
+                    os.startfile(candidate)
+                else:
+                    webbrowser.open(f"file://{candidate}")
+                return
+            raise FileNotFoundError(relative_path)
+        except Exception as exc:
+            messagebox.showerror("Help Document Error", f"Could not open help document: {exc}")
+
+    def load_runtime_settings(self):
+        settings = {
+            "theme": DEFAULT_THEME,
+            "enable_screen_transitions": True,
+            "screen_transition_duration_ms": 360,
+            "toast_duration_sec": 5,
+            "enable_module_update_notifications": True,
+            "persistent_modules": [],
+        }
+        loaded = None
+        if os.path.exists(self.model.settings_path):
+            try:
+                with open(self.model.settings_path, "r", encoding="utf-8") as handle:
+                    loaded = json.load(handle)
+                if isinstance(loaded, dict):
+                    settings.update(loaded)
+            except Exception:
+                pass
+
+        try:
+            settings["toast_duration_sec"] = max(1, int(settings.get("toast_duration_sec", 5)))
+        except Exception:
+            settings["toast_duration_sec"] = 5
+        settings["enable_screen_transitions"] = bool(settings.get("enable_screen_transitions", True))
+        settings["enable_module_update_notifications"] = bool(settings.get("enable_module_update_notifications", True))
+        try:
+            settings["screen_transition_duration_ms"] = max(0, min(500, int(settings.get("screen_transition_duration_ms", 360))))
+        except Exception:
+            settings["screen_transition_duration_ms"] = 360
+        settings["theme"] = normalize_theme(settings.get("theme", DEFAULT_THEME))
+        settings["module_whitelist"] = self.normalize_module_whitelist(settings.get("module_whitelist", []))
+        settings["persistent_modules"] = self.normalize_persistent_modules(settings.get("persistent_modules", []))
+        settings["_module_update_notifications_explicit"] = isinstance(loaded, dict) and "enable_module_update_notifications" in loaded
+        return settings
+
+    def refresh_runtime_settings(self):
+        self.runtime_settings = self.load_runtime_settings()
+        self._configure_module_import_paths()
+        self.refresh_animation_settings()
+        self.prune_persistent_module_instances()
+        self._load_modules_list()
+        for listener in list(self.runtime_settings_listeners):
+            try:
+                listener(self.runtime_settings)
+            except Exception as exc:
+                log_exception("dispatcher.refresh_runtime_settings.listener", exc)
+        return self.runtime_settings
+
+    def register_runtime_settings_listener(self, listener):
+        if listener not in self.runtime_settings_listeners:
+            self.runtime_settings_listeners.append(listener)
+
+    def unregister_runtime_settings_listener(self, listener):
+        if listener in self.runtime_settings_listeners:
+            self.runtime_settings_listeners.remove(listener)
+
+    def refresh_animation_settings(self):
+        self.model.transitions_enabled = bool(self.runtime_settings.get("enable_screen_transitions", True))
+        try:
+            duration = int(self.runtime_settings.get("screen_transition_duration_ms", 360))
+        except Exception:
+            duration = 360
+        self.model.transition_duration_ms = max(0, min(duration, 500))
+
+    def get_setting(self, key, default=None):
+        return self.runtime_settings.get(key, default)
+
+    def _has_explicit_module_update_notification_setting(self):
+        return bool(self.runtime_settings.get("_module_update_notifications_explicit", False))
+
+    def check_for_available_module_updates(self, force=False):
+        if self.module_update_check_in_progress:
+            return
+        if not force:
+            if self._has_explicit_module_update_notification_setting():
+                if not bool(self.get_setting("enable_module_update_notifications", True)):
+                    return
+            elif not bool(self.get_setting("enable_module_update_notifications", True)):
+                return
+
+        self.module_update_check_in_progress = True
+
+        def worker():
+            try:
+                managed_update_module_path = self._resolve_managed_module_path("update_manager")
+                update_manager_module = self.loaded_modules.get("update_manager") or sys.modules.get(managed_update_module_path)
+                if update_manager_module is None:
+                    update_manager_module = importlib.import_module(managed_update_module_path)
+                scan_result = update_manager_module.scan_available_module_payload_updates(self)
+            except Exception as exc:
+                self.root.after(0, lambda error=exc: self._finish_module_update_check(error=error))
+                return
+
+            self.root.after(0, lambda result=scan_result: self._finish_module_update_check(result=result))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _finish_module_update_check(self, result=None, error=None):
+        self.module_update_check_in_progress = False
+        if error is not None:
+            log_exception("dispatcher.check_for_available_module_updates", error)
+            return
+        if not result:
+            return
+
+        available_results = result.get("available_results", [])
+        if not available_results:
+            return
+
+        signature = tuple(sorted(item["option"].get("relative_path", "") for item in available_results))
+        if signature == self.last_module_update_notification_signature:
+            return
+        self.last_module_update_notification_signature = signature
+
+        available_names = []
+        for item in available_results:
+            label = item.get("module_name") or item["option"].get("module_name") or item["option"].get("fallback_name")
+            if label and label not in available_names:
+                available_names.append(label)
+
+        preview = ", ".join(available_names[:3])
+        if len(available_names) > 3:
+            preview = f"{preview}, and {len(available_names) - 3} more"
+
+        if len(available_results) == 1:
+            message = f"A module payload update is available for {preview}. Open Update Manager to review or install it."
+        else:
+            message = f"{len(available_results)} module payload updates are available: {preview}. Open Update Manager to review or install them all."
+
+        self.show_toast("Update Manager", message, INFO)
+
+    def get_mousewheel_units(self, event):
+        if getattr(event, "num", None) == 4:
+            return -1
+        if getattr(event, "num", None) == 5:
+            return 1
+        if getattr(event, "delta", 0):
+            return int(-1 * (event.delta / 120))
+        return 0
+
+    def bind_mousewheel_to_widget_tree(self, root_widget, scroll_target, axis="y"):
+        def on_mousewheel(event):
+            step = self.get_mousewheel_units(event)
+            if not step:
+                return None
+            if axis == "x":
+                scroll_target.xview_scroll(step, "units")
+            else:
+                scroll_target.yview_scroll(step, "units")
+            return "break"
+
+        def bind_widget(widget):
+            widget.bind("<MouseWheel>", on_mousewheel)
+            widget.bind("<Button-4>", on_mousewheel)
+            widget.bind("<Button-5>", on_mousewheel)
+            for child in widget.winfo_children():
+                bind_widget(child)
+
+        bind_widget(root_widget)
+
+    def show_toast(self, title, message, bootstyle=INFO, duration_ms=None):
+        duration = duration_ms
+        if duration is None:
+            duration = int(self.get_setting("toast_duration_sec", 5)) * 1000
+        right_inset, bottom_inset = get_work_area_insets(self.root)
+        toast = ToastNotification(
+            title=title,
+            message=message,
+            duration=duration,
+            bootstyle=bootstyle,
+            position=(24 + right_inset, 24 + bottom_inset, "se"),
+        )
+        toast.show_toast()
+
+    def refresh_update_status_visibility(self):
+        self.view.refresh_update_status_visibility()
+
+    def _cancel_scheduled_update_status_clear(self):
+        if self._update_status_clear_after_id is None:
+            return
+        try:
+            self.root.after_cancel(self._update_status_clear_after_id)
+        except Exception:
+            pass
+        self._update_status_clear_after_id = None
+
+    def set_update_status(self, message, bootstyle=INFO, active=True, mode=None):
+        self._cancel_scheduled_update_status_clear()
+        self.update_coordinator.set_banner(message, bootstyle=bootstyle, active=active, mode=mode)
+        self.refresh_update_status_visibility()
+
+    def clear_update_status(self):
+        self._cancel_scheduled_update_status_clear()
+        self.update_coordinator.clear_banner()
+        self.refresh_update_status_visibility()
+
+    def clear_update_status_after(self, delay_ms):
+        self._cancel_scheduled_update_status_clear()
+        try:
+            delay_ms = int(delay_ms)
+        except Exception:
+            delay_ms = 0
+        if delay_ms <= 0:
+            self.clear_update_status()
+            return
+
+        def clear_if_alive():
+            self._update_status_clear_after_id = None
+            try:
+                if not self.root.winfo_exists():
+                    return
+            except Exception:
+                return
+            self.update_coordinator.clear_banner()
+            self.refresh_update_status_visibility()
+
+        try:
+            self._update_status_clear_after_id = self.root.after(delay_ms, clear_if_alive)
+        except Exception:
+            self._update_status_clear_after_id = None
+
+    def prompt_old_executable_cleanup(self):
+        obsolete_executables = get_obsolete_local_executables(os.path.abspath(sys.executable), getattr(self.main_module, "__version__", "2.0.4"))
+        if not obsolete_executables:
+            return
+
+        file_list = "\n".join(f"- {entry['name']}" for entry in obsolete_executables)
+        if not messagebox.askyesno(
+            "Remove Older Versions",
+            (
+                "Older local EXE versions were found next to the current build:\n\n"
+                f"{file_list}\n\n"
+                "Remove them now?"
+            ),
+        ):
+            return
+
+        removed = []
+        failed = []
+        for entry in obsolete_executables:
+            try:
+                os.remove(entry["path"])
+                removed.append(entry["name"])
+            except OSError:
+                failed.append(entry["name"])
+
+        if removed:
+            self.show_toast("Cleanup Complete", f"Removed {len(removed)} older EXE file(s).", SUCCESS)
+        if failed:
+            failure_list = "\n".join(f"- {name}" for name in failed)
+            messagebox.showwarning(
+                "Cleanup Incomplete",
+                f"These EXE files could not be removed:\n\n{failure_list}",
+            )
+
+    def apply_theme(self, theme_name, redraw=False):
+        normalized_theme = normalize_theme(theme_name)
+        style = tb.Style.get_instance() or tb.Style()
+        style.theme_use(resolve_base_theme(normalized_theme))
+        apply_readability_overrides(self.root, normalized_theme)
+        self.view.apply_theme()
+        self.root.update_idletasks()
+        return normalized_theme
+
+    def _bind_mousewheel(self):
+        self.canvas.bind_all("<MouseWheel>", self._on_mousewheel)
+        self.canvas.bind_all("<Button-4>", self._on_mousewheel)
+        self.canvas.bind_all("<Button-5>", self._on_mousewheel)
+        self.canvas.bind_all("<Shift-MouseWheel>", self._on_horizontal_mousewheel)
+
+    def _on_mousewheel(self, event):
+        step = self.get_mousewheel_units(event)
+        if step:
+            self.canvas.yview_scroll(step, "units")
+
+    def _on_horizontal_mousewheel(self, event):
+        step = self.get_mousewheel_units(event)
+        if step:
+            self.canvas.xview_scroll(step, "units")

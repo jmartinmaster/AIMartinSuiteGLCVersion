@@ -92,8 +92,19 @@
             "import_enabled": true
         },
         {
-            "id": "start_time",
-            "label": "Start Time",
+            "id": "total_molds",
+            "label": "Total Molds",
+            "row": 2,
+            "col": 0,
+            "width": 10,
+            "readonly": false,
+            "cell": "H27",
+            "export_enabled": true,
+            "import_enabled": false
+        },
+        {
+            "id": "ret_north",
+            "label": "Ret North",
             "row": 3,
             "col": 0,
             "width": 10,
