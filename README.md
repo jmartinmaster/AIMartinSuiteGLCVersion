@@ -9,7 +9,9 @@ Production Logging Center is a desktop production support application for GLC op
 - `python build.py --target windows` forces the Windows EXE path.
 - `python build.py --target ubuntu` forces the Ubuntu packaging path.
 - `python build.py --target ubuntu --wsl-distro Ubuntu-24.04` uses a specific WSL distro when launching the Ubuntu build from Windows.
-- Ubuntu packaging expects a Linux Python runtime with `Pillow` and `PyInstaller` available, plus `dpkg-deb` in the selected WSL or Ubuntu environment.
+- On mixed Windows/WSL setups, Ubuntu packaging prefers a Linux venv at `.venv-linux/bin/python`, then `.venv/bin/python`, then the distro `python3`.
+- Ubuntu packaging expects a Linux Python runtime with `Pillow`, `PyInstaller`, `openpyxl`, `ttkbootstrap`, and `tkinter` available, plus `dpkg-deb` in the selected WSL or Ubuntu environment.
+- A repeatable WSL setup is `python3 -m venv .venv-linux` followed by `.venv-linux/bin/python -m pip install Pillow PyInstaller openpyxl ttkbootstrap`.
 - When the repository lives on a Windows drive such as `D:\`, the selected WSL distro must also expose that drive under `/mnt/<drive-letter>` or the Ubuntu build will stop with a prerequisite error.
 - Ubuntu artifacts are written under `dist/ubuntu/`.
 
@@ -37,6 +39,7 @@ These two forms do not have identical behavior. The Python version has access to
 - Workbook-linked summary header import without overwriting formula cells on export.
 - Layout Manager and Rate Manager tools.
 - Shared viewport scrolling keeps wider modules usable in narrower windows instead of clipping the right side of the page.
+- Source mode now keeps a background module preloader warm so navigation avoids repeated import work, while disk changes still invalidate the cache and load fresh code on the next module activation.
 - Backup / Recovery viewer for browsing and restoring draft snapshots and configuration backups.
 - Settings management for export paths, theme selection, production defaults, editable downtime code labels, and per-module live-session persistence.
 - Settings Manager now separates general settings from admin-only Developer & Admin tools for repository control, advanced packaged dev updates, external module override trust, and external module override management.
@@ -68,6 +71,8 @@ These two forms do not have identical behavior. The Python version has access to
 ## Source / Python Mode
 
 - Runs directly from the repository source files.
+- `python main.py` launches the normal application shell.
+- `python launcher.py --module about` or another supported module name launches the shell focused on that module for debugging without making MVC modules executable scripts.
 - Can use the local project structure, docs, templates, and module files directly.
 - Can be rebuilt locally with `build.py` and PyInstaller.
 - Prefers Logging Center's own local `.venv` for source-build runtime discovery before falling back to environment or system Python.
@@ -99,8 +104,8 @@ These two forms do not have identical behavior. The Python version has access to
 
 ## Update Manager Status
 
-- The updater checks only the Dispatcher Core version in `main.py` as the master version.
-- The current stable Dispatcher Core release is `2.0.4`.
+- The updater checks only the Dispatcher Core release version exported from `launcher.py`, while `main.py` remains the runtime entry boundary.
+- The current stable Dispatcher Core release is `2.1.2`.
 - Two-part versions such as `1.07` trigger an executable update when greater than the local version.
 - Three-part versions only trigger an executable update when the third number is even, such as `1.07.2`.
 - Odd patch versions such as `1.07.1` are ignored.
@@ -115,6 +120,6 @@ These two forms do not have identical behavior. The Python version has access to
 - Packaged EXE mode can also restore tracked JSON files such as `layout_config.json` and `rates.json` from the repository copy with local backups preserved before overwrite.
 - Packaged EXE mode can also restore the bundled Help Center markdown files and `LICENSE.txt` as one grouped documentation update.
 - The updater status bar now mounts above the content viewport and successful module payload installs auto-hide after a short delay.
-- `main.py` remains the Dispatcher Core boundary and still updates only through the stable EXE release path.
-- `About System v1.0.7` remains the first module payload target for packaged update testing after the `2.0.4` EXE handoff.
+- Dispatcher Core still updates only through the stable EXE release path.
+- `About System v1.0.0` remains the first module payload target for packaged update testing after the `2.1.2` EXE handoff.
 - The Help Center now uses a modern single-page layout with top link navigation, a Hidden Modules guide, and section chips for User Guide module pages instead of notebook tabs.

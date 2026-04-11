@@ -1,3 +1,4 @@
+import argparse
 import os
 import json
 
@@ -10,16 +11,26 @@ from app.controllers.app_controller import Dispatcher
 from app.app_platform import SPLASH_LOGO_RELATIVE_PATH, apply_app_icon, apply_windows_app_id, apply_windows_window_icons
 
 __module_name__ = "Dispatcher Core"
-__version__ = "2.0.4"
+__version__ = "2.1.2"
+USER_FACING_MODULE_NAMES = (
+    "about",
+    "help_viewer",
+    "layout_manager",
+    "production_log",
+    "rate_manager",
+    "recovery_viewer",
+    "settings_manager",
+    "update_manager",
+)
 
 
-def run_application(main_module=None):
+def run_application(main_module=None, initial_module_name=None):
     settings_path = external_path("settings.json")
     theme_name = DEFAULT_THEME
     if main_module is None:
         import sys
 
-        main_module = sys.modules.get("main") or sys.modules.get("__main__")
+        main_module = sys.modules.get("main") or sys.modules.get("__main__") or sys.modules.get(__name__)
 
     if os.path.exists(settings_path):
         try:
@@ -37,5 +48,26 @@ def run_application(main_module=None):
     from app.splash import show_splash_screen
 
     show_splash_screen(app_root, duration=5000, logo_path=resource_path(SPLASH_LOGO_RELATIVE_PATH))
-    Dispatcher(app_root, main_module=main_module)
+    Dispatcher(app_root, main_module=main_module, initial_module_name=initial_module_name)
     app_root.mainloop()
+
+
+def build_argument_parser():
+    parser = argparse.ArgumentParser(
+        description="Launch Production Logging Center or open the shell focused on a specific module.",
+    )
+    parser.add_argument(
+        "--module",
+        choices=USER_FACING_MODULE_NAMES,
+        help="Open the application shell focused on the specified module.",
+    )
+    return parser
+
+
+def main(argv=None):
+    args = build_argument_parser().parse_args(argv)
+    run_application(initial_module_name=args.module)
+
+
+if __name__ == "__main__":
+    main()

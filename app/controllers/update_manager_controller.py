@@ -43,7 +43,7 @@ __version__ = "2.1.2"
 GITHUB_REMOTE_PATTERN = re.compile(r"github\.com[:/](?P<owner>[^/]+)/(?P<repo>[^/.]+?)(?:\.git)?$")
 MODULE_NAME_PATTERN = re.compile(r"__module_name__\s*=\s*[\"']([^\"']+)[\"']")
 VERSION_PATTERN = re.compile(r"__version__\s*=\s*[\"']([^\"']+)[\"']")
-MASTER_VERSION_PATH = "main.py"
+MASTER_VERSION_PATH = "launcher.py"
 LEGACY_REMOTE_EXE_PATH = "dist/TheMartinSuite_GLC.exe"
 LEGACY_REMOTE_DEB_PATH = f"dist/ubuntu/{DEB_PACKAGE_NAME}.deb"
 MODULE_PAYLOAD_EXCLUDED_KEYS = {"__init__", "update_manager"}
@@ -643,7 +643,7 @@ class UpdateManagerController:
         self.module_payload_local_version_var = tb.StringVar(value="Unknown")
         self.module_payload_remote_version_var = tb.StringVar(value="Not checked")
         self.module_payload_status_var = tb.StringVar(value="Pending")
-        self.module_payload_note_var = tb.StringVar(value="Select a payload to compare against the repository. Dispatcher Core (main.py) remains an EXE-only update boundary.")
+        self.module_payload_note_var = tb.StringVar(value="Select a payload to compare against the repository. Dispatcher Core remains an EXE-only update boundary.")
         self.module_payload_in_progress = False
         self.documentation_payload_tracked_var = tb.StringVar(value=f"{len(self.documentation_payload_options)} tracked file(s)")
         self.documentation_payload_remote_state_var = tb.StringVar(value="Not checked")
@@ -740,7 +740,7 @@ class UpdateManagerController:
             self.module_payload_local_version_var.set("Unknown")
             self.module_payload_remote_version_var.set("Not available")
             self.module_payload_status_var.set("Unavailable")
-            self.module_payload_note_var.set("No payload-eligible items are available. Dispatcher Core (main.py) remains an EXE-only update boundary.")
+            self.module_payload_note_var.set("No payload-eligible items are available. Dispatcher Core remains an EXE-only update boundary.")
             return
 
         local_metadata = self._get_local_module_payload_metadata(option)
@@ -757,7 +757,7 @@ class UpdateManagerController:
         self.refresh_module_payload_summary(
             remote_version="Not checked",
             status="Pending",
-            note=f"Check the repository to compare the selected {option['module_name']} payload. Dispatcher Core (main.py) still updates through the EXE path above.",
+            note=f"Check the repository to compare the selected {option['module_name']} payload. Dispatcher Core still updates through the EXE path above.",
         )
 
     def _has_recoverable_source_job(self):
@@ -872,7 +872,7 @@ class UpdateManagerController:
             self.refresh_module_payload_summary(
                 remote_version="Not available",
                 status="Unavailable",
-                note="No payload-eligible items are available. Dispatcher Core (main.py) remains an EXE-only update boundary.",
+                note="No payload-eligible items are available. Dispatcher Core remains an EXE-only update boundary.",
             )
             return
 
@@ -1559,7 +1559,7 @@ class UpdateManagerController:
         return log_path
 
     def _resolve_built_executable(self, source_root):
-        staged_version = load_version_from_main(os.path.join(source_root, "main.py"), default="0.0.0")
+        staged_version = load_version_from_main(os.path.join(source_root, MASTER_VERSION_PATH), default="0.0.0")
         expected_name = format_versioned_exe_name(staged_version)
         expected_path = os.path.join(source_root, "dist", expected_name)
         if os.path.exists(expected_path):

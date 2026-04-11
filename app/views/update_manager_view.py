@@ -59,7 +59,7 @@ class UpdateManagerView:
         module_payload.pack(fill=X, pady=(12, 0))
         tb.Label(
             module_payload,
-            text="Choose a single module or tracked config payload to compare and restore without rebuilding the EXE. Dispatcher Core (main.py) stays outside this list and continues to update through the stable EXE path above.",
+            text="Choose a single module or tracked config payload to compare and restore without rebuilding the EXE. Dispatcher Core stays outside this list and continues to update through the stable EXE path above.",
             wraplength=720,
             justify=LEFT,
         ).pack(anchor=W)
