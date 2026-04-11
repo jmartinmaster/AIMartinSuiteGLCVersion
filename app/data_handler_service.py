@@ -10,7 +10,7 @@ from app.downtime_codes import get_code_number, normalize_code_value
 from app.utils import ensure_external_directory, external_path, local_or_resource_path, resource_path
 
 __module_name__ = "Data Handler"
-__version__ = "1.1.2"
+__version__ = "1.1.4"
 
 
 class DataHandlerService:
@@ -109,13 +109,18 @@ class DataHandlerService:
             total_minutes = int(round(float(raw_hours or 0) * 60))
         except Exception:
             return ""
-        return f"{total_minutes} min" if total_minutes > 0 else ""
+        # Get suffix from config if present
+        field_cfg = self.get_header_field_config("target_time")
+        suffix = field_cfg.get("suffix", " min")
+        return f"{total_minutes}{suffix}" if total_minutes > 0 else ""
 
     def normalize_target_time_text(self, value):
         total_minutes = self.parse_total_minutes(value)
         if total_minutes is None or total_minutes <= 0:
             return ""
-        return f"{total_minutes} min"
+        field_cfg = self.get_header_field_config("target_time")
+        suffix = field_cfg.get("suffix", " min")
+        return f"{total_minutes}{suffix}"
 
     def normalize_header_field_value(self, field_id, value, header_data=None):
         header_data = header_data or {}
@@ -370,6 +375,7 @@ class DataHandlerService:
             ws[f"{d_cols['code']}{current_row}"] = short_code
             ws[f"{d_cols['cause']}{current_row}"] = row_data.get("cause")
         wb.save(target_path)
+        wb.close()
         return target_path
 
     def import_from_excel(self, file_path):

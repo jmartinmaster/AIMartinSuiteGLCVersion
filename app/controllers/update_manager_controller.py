@@ -164,6 +164,67 @@ def _build_snapshot_github_url(owner, repo, branch_name):
     return f"https://codeload.github.com/{owner}/{repo}/zip/refs/heads/{branch_name}"
 
 
+def _normalize_update_repository_url(raw_value):
+    return str(raw_value or "").strip()
+
+
+def _load_external_settings_payload():
+    settings_path = external_path(SETTINGS_RELATIVE_PATH)
+    if not os.path.exists(settings_path):
+        return {}
+    try:
+        with open(settings_path, "r", encoding="utf-8") as handle:
+            loaded = json.load(handle)
+        return loaded if isinstance(loaded, dict) else {}
+    except Exception:
+        return {}
+
+
+def _get_configured_update_repository_url(dispatcher=None):
+    if dispatcher is not None:
+        try:
+            configured_value = dispatcher.get_setting("update_repository_url", None)
+        except Exception:
+            configured_value = None
+        if configured_value is not None:
+            return _normalize_update_repository_url(configured_value)
+
+    settings_payload = _load_external_settings_payload()
+    return _normalize_update_repository_url(settings_payload.get("update_repository_url", DEFAULT_UPDATE_REPOSITORY_URL))
+
+
+def _build_remote_info_from_url(remote_url):
+    normalized_url = _normalize_update_repository_url(remote_url)
+    if not normalized_url:
+        return {"owner": None, "repo": None, "url": "", "display": "Updates not configured"}
+
+    match = GITHUB_REMOTE_PATTERN.search(normalized_url)
+    if not match:
+        return {"owner": None, "repo": None, "url": normalized_url, "display": "Unsupported update URL"}
+
+    owner = match.group("owner")
+    repo = match.group("repo")
+    return {
+        "owner": owner,
+        "repo": repo,
+        "url": normalized_url,
+        "display": f"{owner}/{repo}",
+    }
+
+
+def _remote_updates_available(remote_info, branch_name=None):
+    if not isinstance(remote_info, dict):
+        return False
+    return bool(remote_info.get("owner") and remote_info.get("repo") and (branch_name or "").strip())
+
+
+def _update_configuration_note(remote_info=None):
+    normalized_remote_info = remote_info if isinstance(remote_info, dict) else {}
+    if normalized_remote_info.get("display") == "Unsupported update URL":
+        return "The configured Update Repository URL is not a supported GitHub repository address. Open Security Admin with a developer login and enter a standard GitHub repository URL to enable updates."
+    return "No Update Repository URL is configured yet. Open Security Admin and sign in with the developer vault to enable update checks and payload restores."
+
+
 def _is_supported_update_version(version_parts):
     if version_parts is None:
         return False
@@ -506,6 +567,15 @@ def scan_available_module_payload_updates(dispatcher, branch_name=None, remote_i
     configured_url = dispatcher.get_setting("update_repository_url", None) if dispatcher is not None and hasattr(dispatcher, "get_setting") else None
     resolved_remote_info = remote_info or _detect_remote_info(preferred_url=configured_url)
     options = discover_module_payload_options(getattr(dispatcher, "modules_path", None))
+    if not _remote_updates_available(resolved_remote_info, resolved_branch_name):
+        return {
+            "branch_name": resolved_branch_name,
+            "remote_info": resolved_remote_info,
+            "results": [],
+            "available_results": [],
+            "configured": False,
+            "note": _update_configuration_note(resolved_remote_info),
+        }
     results = [
         evaluate_module_payload_option(dispatcher, option, resolved_branch_name, resolved_remote_info)
         for option in options
@@ -522,6 +592,15 @@ def scan_available_documentation_payload_updates(branch_name=None, remote_info=N
     resolved_branch_name = branch_name or _detect_branch_name()
     resolved_remote_info = remote_info or _detect_remote_info()
     options = discover_documentation_payload_options()
+    if not _remote_updates_available(resolved_remote_info, resolved_branch_name):
+        return {
+            "branch_name": resolved_branch_name,
+            "remote_info": resolved_remote_info,
+            "results": [],
+            "available_results": [],
+            "configured": False,
+            "note": _update_configuration_note(resolved_remote_info),
+        }
     results = [evaluate_documentation_payload_option(option, resolved_branch_name, resolved_remote_info) for option in options]
     return {
         "branch_name": resolved_branch_name,
@@ -609,7 +688,25 @@ class UpdateManagerController:
         return None
 
     def on_unload(self):
+        self.dispatcher.unregister_runtime_settings_listener(self._handle_runtime_settings_change)
         return None
+
+    def _handle_runtime_settings_change(self, _settings):
+        self._apply_remote_configuration()
+
+    def _apply_remote_configuration(self):
+        self.branch_name = _detect_branch_name()
+        self.remote_info = _detect_remote_info(self.dispatcher)
+        self.coordinator.branch_name = self.branch_name
+        self.coordinator.remote_info = self.remote_info
+        self.branch_var.set(self.branch_name or "Unknown")
+        self.repo_var.set(self.remote_info.get("display", "Updates not configured"))
+
+    def _updates_configured(self):
+        return _remote_updates_available(self.remote_info, self.branch_name)
+
+    def _update_configuration_note(self):
+        return _update_configuration_note(self.remote_info)
 
     def _discover_payload_options(self):
         return discover_module_payload_options(getattr(self.dispatcher, "modules_path", None))
@@ -650,6 +747,13 @@ class UpdateManagerController:
         option["module_name"] = local_metadata.get("module_name", option["module_name"])
         self.module_payload_name_var.set(option["module_name"])
         self.module_payload_path_var.set(option["relative_path"])
+        if not self._updates_configured():
+            self.refresh_module_payload_summary(
+                remote_version="Not configured",
+                status="Unavailable",
+                note=self._update_configuration_note(),
+            )
+            return
         self.refresh_module_payload_summary(
             remote_version="Not checked",
             status="Pending",
@@ -772,6 +876,15 @@ class UpdateManagerController:
             )
             return
 
+        if not self._updates_configured():
+            self.refresh_module_payload_summary(
+                remote_version="Not configured",
+                status="Unavailable",
+                note=self._update_configuration_note(),
+                option=option,
+            )
+            return
+
         result = self._evaluate_selected_module_payload(option)
         option.update(result.get("option", {}))
         self.refresh_module_payload_summary(
@@ -787,6 +900,14 @@ class UpdateManagerController:
                 remote_state="Unavailable",
                 status="Unavailable",
                 note="No tracked documentation files are available for grouped restore checks.",
+            )
+            return
+
+        if not self._updates_configured():
+            self.refresh_documentation_payload_summary(
+                remote_state="Not configured",
+                status="Unavailable",
+                note=self._update_configuration_note(),
             )
             return
 
@@ -1012,7 +1133,7 @@ class UpdateManagerController:
         return _detect_branch_name()
 
     def _detect_remote_info(self):
-        return _detect_remote_info()
+        return _detect_remote_info(self.dispatcher)
 
     def refresh_local_manifest(self):
         dispatcher_module = self.dispatcher.loaded_modules.get("main") or sys.modules.get("main") or sys.modules.get("__main__")
@@ -1031,6 +1152,10 @@ class UpdateManagerController:
         self.target_name_var.set(f"{entry['module_name']} ({self.stable_artifact_label})")
         self.local_version_var.set(entry.get("local_version", "Unknown"))
         self.remote_version_var.set(row.get("remote_version", "Not checked") if row else "Not checked")
+        if not self._updates_configured():
+            self.result_var.set("Unavailable")
+            self.note_var.set(self._update_configuration_note())
+            return
         self.result_var.set(row.get("status", "Pending") if row else "Pending")
         if row and row.get("update_available"):
             self.note_var.set(f"A newer stable {self._stable_artifact_noun()} target is available from the repository branch.")
@@ -1079,6 +1204,15 @@ class UpdateManagerController:
     def apply_all_module_payload_updates(self):
         if self._payload_job_is_busy():
             self.dispatcher.show_toast("Update Manager", "Another update job is already running in the background.", WARNING)
+            return
+
+        if not self._updates_configured():
+            self.refresh_module_payload_summary(
+                remote_version="Not configured",
+                status="Unavailable",
+                note=self._update_configuration_note(),
+            )
+            self.dispatcher.show_toast("Update Manager", "Open Security Admin with the developer vault to configure the Update Repository URL before checking or installing payload updates.", INFO)
             return
 
         if not self.module_payload_options:
@@ -1783,6 +1917,14 @@ class UpdateManagerController:
         if self.view is not None:
             self.view.setup_ui()
             self.container = self.view.container
+
+        self.handle_module_payload_selection_change()
+        if not self._updates_configured():
+            self.refresh_documentation_payload_summary(
+                remote_state="Not configured",
+                status="Unavailable",
+                note=self._update_configuration_note(),
+            )
 
 
 def get_ui(parent, dispatcher):

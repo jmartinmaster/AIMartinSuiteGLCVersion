@@ -58,7 +58,7 @@ Example:
 
 Import-only workbook summary fields are supported by combining `readonly: true` with `export_enabled: false`. This is useful for cells such as calculated percentages or formula-driven summary rows that you want to display in Production Log without overwriting the workbook formula on export.
 
-Protected core fields currently expected by the suite:
+Protected core fields currently expected by Logging Center:
 
 - `date`
 - `cast_date`

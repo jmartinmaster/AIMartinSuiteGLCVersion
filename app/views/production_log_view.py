@@ -8,6 +8,7 @@ from tkinter import messagebox
 
 import ttkbootstrap as tb
 from ttkbootstrap.constants import *
+import tkinter.ttk as ttk
 from ttkbootstrap.dialogs import Messagebox
 
 from app import recovery_viewer
@@ -153,7 +154,7 @@ class ProductionLogView:
     def build_draft_path(self, header_data):
         return self.model.build_draft_path(header_data)
 
-    def save_draft(self, is_auto=False):
+    def save_draft(self, is_auto=False, suppress_toast=False):
         try:
             data = self.collect_ui_data()
             if is_auto and not self.has_unsaved_changes:
@@ -182,7 +183,7 @@ class ProductionLogView:
             self.current_draft_path = draft_path
             self.mark_clean(data)
 
-            if not is_auto:
+            if not is_auto and not suppress_toast:
                 message = f"Draft saved to {os.path.basename(draft_path)}."
                 if backup_info.get("versioned_backup_path"):
                     message += " A recovery snapshot of the previous draft was stored in data/pending/history."
@@ -213,12 +214,23 @@ class ProductionLogView:
         self.resume_latest_btn = tb.Button(recovery_wrapper, text="Resume Latest", bootstyle=PRIMARY, command=self.resume_latest_draft)
         self.resume_latest_btn.pack(side=LEFT, padx=5)
         tb.Button(recovery_wrapper, text="Pending Drafts", bootstyle=SECONDARY, command=self.show_pending).pack(side=LEFT, padx=5)
-        tb.Button(recovery_wrapper, text="Backup / Recovery", bootstyle=INFO, command=self.open_recovery_viewer).pack(side=LEFT, padx=5)
+        # Add Refresh View button to reload the module and open previous draft
+        tb.Button(recovery_wrapper, text="Refresh View", bootstyle=INFO, command=self.refresh_view).pack(side=LEFT, padx=5)
         self.delete_current_draft_btn = tb.Button(recovery_wrapper, text="Delete Current Draft", bootstyle=DANGER, command=self.delete_current_draft)
         self.delete_current_draft_btn.pack(side=LEFT, padx=5)
 
+    def refresh_view(self):
+        """
+        Reloads the module and opens the previous draft (latest draft).
+        """
+        latest = self.get_latest_pending_draft()
+        if latest:
+            self.load_draft_path(latest["path"])
+        else:
+            self.dispatcher.show_toast("Refresh View", "No previous draft found to reload.", INFO)
+
     def build_header_section(self):
-        header_wrapper = tb.Labelframe(self.parent, text=" Form 510-09: Production Header ", padding=15)
+        header_wrapper = tb.Labelframe(self.parent, text=" Form 510-09: Production Logging Center Header ", padding=15, style="Martin.Card.TLabelframe")
         header_wrapper.pack(fill=X, padx=10, pady=10)
         try:
             with open(self.config_path, "r", encoding="utf-8") as handle:
@@ -251,9 +263,9 @@ class ProductionLogView:
             tb.Label(header_wrapper, text=f"Layout Error: {exc}", bootstyle=DANGER).pack()
 
     def build_production_section(self):
-        prod_wrapper = tb.Labelframe(self.parent, text=" Production Jobs ", padding=10)
+        prod_wrapper = tb.Labelframe(self.parent, text=" Production Logging Center Jobs ", padding=10, style="Martin.Card.TLabelframe")
         prod_wrapper.pack(fill=X, padx=10, pady=5)
-        prod_columns = tb.Frame(prod_wrapper)
+        prod_columns = tb.Frame(prod_wrapper, style="Martin.Surface.TFrame")
         prod_columns.pack(fill=X, pady=(0, 4))
         for text, width, side in (
             ("X", 3, LEFT),
@@ -265,17 +277,17 @@ class ProductionLogView:
             ("Time", 10, RIGHT),
         ):
             tb.Label(prod_columns, text=text, width=width, anchor=W if side == LEFT else E, style="Martin.Muted.TLabel").pack(side=side, padx=5)
-        self.production_container = tb.Frame(prod_wrapper)
+        self.production_container = tb.Frame(prod_wrapper, style="Martin.Surface.TFrame")
         self.production_container.pack(fill=X)
 
     def build_downtime_section(self):
-        dt_wrapper = tb.Labelframe(self.parent, text=" Downtime Issues ", padding=10)
+        dt_wrapper = tb.Labelframe(self.parent, text=" Production Logging Center Downtime Issues ", padding=10, style="Martin.Card.TLabelframe")
         dt_wrapper.pack(fill=X, padx=10, pady=5)
-        self.downtime_container = tb.Frame(dt_wrapper)
+        self.downtime_container = tb.Frame(dt_wrapper, style="Martin.Surface.TFrame")
         self.downtime_container.pack(fill=X)
 
     def build_footer_section(self):
-        footer = tb.Frame(self.parent, padding=20)
+        footer = tb.Frame(self.parent, padding=20, style="Martin.Content.TFrame")
         footer.pack(fill=X)
         self.eff_display_lbl = tb.Label(footer, text="EFF%: 0.00", font=("-size 14 -weight bold"))
         self.eff_display_lbl.pack(side=LEFT, padx=10)
@@ -283,7 +295,7 @@ class ProductionLogView:
         self.ghost_total_lbl.pack(side=LEFT, padx=10)
         tb.Button(footer, text="Calculate All", command=self.calculate_metrics, bootstyle=INFO).pack(side=RIGHT)
         tb.Button(footer, text="Save Draft", command=self.save_draft, bootstyle=SECONDARY).pack(side=LEFT, padx=5)
-        tb.Button(footer, text="Export Excel", command=self.export_to_excel, bootstyle=SUCCESS).pack(side=LEFT, padx=5)
+        tb.Button(footer, text="Save and Open", command=self.export_to_excel, bootstyle=SUCCESS).pack(side=LEFT, padx=5)
         self.open_export_btn = tb.Button(footer, text="Open Last Export", command=self.open_last_exported_file, bootstyle=INFO)
         self.open_export_btn.pack(side=LEFT, padx=5)
         self.print_export_btn = tb.Button(footer, text="Print Last Export", command=self.print_last_exported_file, bootstyle=WARNING)
@@ -335,9 +347,9 @@ class ProductionLogView:
         row_frame = tb.Frame(self.downtime_container)
         row_frame.pack(fill=X, pady=2)
         row = {
-            "start": tb.Entry(row_frame, width=10),
-            "stop": tb.Entry(row_frame, width=10),
-            "code": tb.Combobox(row_frame, values=self.dt_codes, width=25, state="readonly"),
+            "start": tb.Entry(row_frame, width=8),
+            "stop": tb.Entry(row_frame, width=8),
+            "code": tb.Combobox(row_frame, values=self.dt_codes, width=18, state="readonly"),
             "cause": tb.Entry(row_frame),
             "time_calc": tb.Label(row_frame, text="0 min", width=10, foreground="red", font=("", 10, "bold")),
         }
@@ -364,6 +376,61 @@ class ProductionLogView:
         self.bind_dirty_tracking(row["cause"], ("<KeyRelease>",))
         self.downtime_rows.append(row)
         return row
+
+    def delete_production_row_with_save_reload(self, row):
+        # Save draft, delete row from draft file, reload draft (no toast)
+        self.save_draft(suppress_toast=True)
+        if self.current_draft_path and os.path.exists(self.current_draft_path):
+            try:
+                with open(self.current_draft_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                # Find the index of the row to delete by matching unique fields
+                prod_data = data.get('production', [])
+                # Try to match by all fields in the row
+                def row_match(d):
+                    return (
+                        str(d.get('shop_order', '')) == str(self.get_widget_value(row['shop_order'])) and
+                        str(d.get('part_number', '')) == str(self.get_widget_value(row['part_number'])) and
+                        str(d.get('rate_lookup', '')) == str(self.get_widget_value(row['rate_lookup'])) and
+                        str(d.get('molds', '')) == str(self.get_widget_value(row['molds'])) and
+                        str(d.get('time_calc', '')) == str(self.get_widget_value(row['time_calc']))
+                    )
+                idx = next((i for i, d in enumerate(prod_data) if row_match(d)), None)
+                if idx is not None:
+                    del prod_data[idx]
+                    data['production'] = prod_data
+                    with open(self.current_draft_path, 'w', encoding='utf-8') as f:
+                        json.dump(data, f, indent=2)
+            except Exception as e:
+                Messagebox.show_error(f"Could not update draft after row delete: {e}", "Draft Update Error")
+            self.load_draft_path(self.current_draft_path)
+
+
+    def delete_downtime_row_with_save_reload(self, row):
+        # Save draft, delete row from draft file, reload draft (no toast)
+        self.save_draft(suppress_toast=True)
+        if self.current_draft_path and os.path.exists(self.current_draft_path):
+            try:
+                with open(self.current_draft_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                dt_data = data.get('downtime', [])
+                def row_match(d):
+                    return (
+                        str(d.get('start', '')) == str(self.get_widget_value(row['start'])) and
+                        str(d.get('stop', '')) == str(self.get_widget_value(row['stop'])) and
+                        str(d.get('code', '')) == str(self.get_widget_value(row['code'])) and
+                        str(d.get('cause', '')) == str(self.get_widget_value(row['cause'])) and
+                        str(d.get('time_calc', '')) == str(self.get_widget_value(row['time_calc']))
+                    )
+                idx = next((i for i, d in enumerate(dt_data) if row_match(d)), None)
+                if idx is not None:
+                    del dt_data[idx]
+                    data['downtime'] = dt_data
+                    with open(self.current_draft_path, 'w', encoding='utf-8') as f:
+                        json.dump(data, f, indent=2)
+            except Exception as e:
+                Messagebox.show_error(f"Could not update draft after row delete: {e}", "Draft Update Error")
+            self.load_draft_path(self.current_draft_path)
 
     def refresh_downtime_codes(self):
         self.dt_codes = self.model.refresh_downtime_codes()
@@ -451,11 +518,18 @@ class ProductionLogView:
         if target_time_entry is None:
             return
         target_value = self.data_handler.compute_target_time(self.entries.get("hours").get() if self.entries.get("hours") else "")
-        original_state = target_time_entry.cget("state")
+        # Only call .cget('state') if widget supports it
+        original_state = None
+        if hasattr(target_time_entry, 'cget'):
+            try:
+                original_state = target_time_entry.cget("state")
+            except Exception:
+                original_state = None
         if original_state == "readonly":
             target_time_entry.config(state="normal")
-        target_time_entry.delete(0, END)
-        target_time_entry.insert(0, target_value)
+        if hasattr(target_time_entry, 'delete') and hasattr(target_time_entry, 'insert'):
+            target_time_entry.delete(0, END)
+            target_time_entry.insert(0, target_value)
         if original_state == "readonly":
             target_time_entry.config(state="readonly")
 
@@ -487,7 +561,10 @@ class ProductionLogView:
             if stop_minutes < start_minutes:
                 stop_minutes += 24 * 60
             return stop_minutes - start_minutes
-        return self.parse_minutes_label(row["time_calc"].cget("text"))
+        # Robustly get time_calc text
+        tc = row["time_calc"]
+        val = self.get_widget_value(tc)
+        return self.parse_minutes_label(val)
 
     def is_balance_downtime_row(self, row):
         return row["cause"].get().strip() == BALANCE_DOWNTIME_CAUSE
@@ -534,7 +611,12 @@ class ProductionLogView:
             return 0
 
     def get_production_total_minutes(self):
-        return sum(self.parse_minutes_label(row["time_calc"].cget("text")) for row in self.production_rows)
+        total = 0
+        for row in self.production_rows:
+            tc = row["time_calc"]
+            val = self.get_widget_value(tc)
+            total += self.parse_minutes_label(val)
+        return total
 
     def get_total_downtime_minutes(self):
         return sum(self.get_row_duration_minutes(row) for row in self.downtime_rows)
@@ -666,11 +748,18 @@ class ProductionLogView:
         if field_id not in self.entries:
             return
         entry = self.entries[field_id]
-        original_state = entry.cget("state")
+        # Only call .cget('state') if widget supports it
+        original_state = None
+        if hasattr(entry, 'cget'):
+            try:
+                original_state = entry.cget("state")
+            except Exception:
+                original_state = None
         if original_state == "readonly":
             entry.config(state="normal")
-        entry.delete(0, END)
-        entry.insert(0, str(value) if value is not None else "")
+        if hasattr(entry, 'delete') and hasattr(entry, 'insert'):
+            entry.delete(0, END)
+            entry.insert(0, str(value) if value is not None else "")
         if original_state == "readonly":
             entry.config(state="readonly")
 
@@ -827,6 +916,11 @@ class ProductionLogView:
         self.update_ghost_total_display()
 
     def calculate_metrics(self):
+        def safe_int(val):
+            try:
+                return int(val)
+            except Exception:
+                return 0
         try:
             total_molds = self.calculate_total_molds()
             hours = float(self.entries["hours"].get() or 8.0)

@@ -53,12 +53,26 @@ Version headings below are aligned to the current `2.x` release line used by Dis
 - Flattened Settings Manager into the shared shell viewport so the module whitelist controls no longer sit inside a nested scrolling region.
 - Completed the low-risk newest-main parity wave with whitelist controls, developer logging, build icon sync, preserved runtime-state scrubbing, and updater UX cleanup in the current MVC runtime.
 
+## [1.6.0] - 2026-04-07
+
+### Changed
+
+- Promoted Dispatcher Core to stable version `1.6.0` for workbook resource management, build system fix, and version bump.
+- Moved update repository configuration and external module editing out of Settings Manager and into Security Admin as developer-only tools.
+- Added a persisted non-secure mode so normal visible modules can open without vault prompts while developer tools remain protected behind developer login.
+- Restricted developer-vault deletion so only an active developer session can remove a developer vault, including while non-secure mode is enabled.
+- Updated the Security Admin dialog to support responsive scrolling, developer login, and the new non-secure mode toggle.
+- Updated the update-status banner to mount above the content viewport and auto-hide successful module payload completion messages.
+- Refreshed README and Help Center documentation to match the current security and updater workflows.
+- Aligned the icon pipeline so packaged builds regenerate `icon.ico` and the runtime PNG icon set from the repository PNG artwork before packaging, while the app now applies the full PNG icon set plus Windows-native icon handles at startup.
+- Restored the default Update Repository URL to the main GitHub repository so new main-branch settings and updater fallbacks point back to the published release source.
+
 ## [1.5.6] - 2026-04-05
 
 ### Changed
 
 - Promoted Dispatcher Core to stable version `1.5.6` for the grouped documentation restore and Help menu issue-report release.
-- Updated `Data Handler` to version `1.1.2` for export-folder naming cleanup under configured base export directories.
+- Updated `Data Handler` to version `1.1.4` for workbook resource management and version bump.
 - Changed organized exports to use `YYYY/MM MonthName` month folders under the selected base export directory.
 - Added automatic migration so a legacy `YYYY/MM` export folder is renamed in place to `YYYY/MM MonthName` when that export month is used.
 - Added grouped documentation restores in Update Manager so Help Center markdown files and `LICENSE.txt` can be refreshed without rebuilding the EXE or choosing individual doc files.
@@ -98,7 +112,7 @@ Version headings below are aligned to the current `2.x` release line used by Dis
 
 - Promoted Dispatcher Core to stable version `1.5.0` for the runtime-control and module-source selection release.
 - Added settings-controlled module persistence so selected tools can keep their live in-progress state across navigation within the current app session.
-- Changed source-build runtime resolution to prefer the suite's own `.venv` before environment-variable or system Python fallbacks.
+- Changed source-build runtime resolution to prefer Logging Center's own `.venv` before environment-variable or system Python fallbacks.
 - Changed external module loading to automatic per-file fallback so a matching file in the external `modules` folder is used first and bundled modules remain active everywhere else.
 - Updated About so loaded module entries can show `(external)` when the live module came from the external `modules` folder, even when its version matches the bundled copy.
 - Routed Production Log header values through shared normalization so header edits, JSON drafts, and Excel import/export stay formatted consistently, including derived `Target Time`.
@@ -124,7 +138,7 @@ Version headings below are aligned to the current `2.x` release line used by Dis
 ### Changed
 
 - Promoted Dispatcher Core to stable version `1.2.4` for the versioned packaged updater release.
-- Switched packaged builds to versioned EXE names such as `TheMartinSuite_GLC_v1.2.4.exe`.
+- Switched packaged builds to versioned EXE names such as `ProductionLoggingCenter_GLC_v1.2.4.exe`.
 - Updated the build flow so preserved versioned EXEs can coexist in `dist` during side-by-side update testing.
 - Reworked packaged updates so the newer EXE downloads beside the current one, launches separately, and leaves the older copy available for testing until cleanup is confirmed.
 - Extended the updater so source-mode checks now require a published EXE artifact and can download and launch that packaged EXE for handoff testing.
@@ -207,7 +221,7 @@ Version headings below are aligned to the current `2.x` release line used by Dis
 - Added a visible Target Time field in the Production Log header, a derived Ghost Time indicator in the footer, and a dedicated Downtime action row so Balance Downtime stays visible during entry.
 - Routed the Production Log Target Time field through `header_fields` so it now saves in draft JSON and participates in the normal workbook header mapping.
 - Added a Settings option for keeping selected modules live across navigation so returning to a chosen module restores the same in-progress UI state during the current app session.
-- Changed source-build runtime discovery to prefer the suite's own `.venv` before environment-variable or system Python fallbacks.
+- Changed source-build runtime discovery to prefer Logging Center's own `.venv` before environment-variable or system Python fallbacks.
 - Added a Settings-controlled External Module Overrides switch so downloaded or user-supplied files in the external `modules` folder can be activated explicitly instead of always taking precedence.
 - Updated About so modules currently loaded from the external `modules` folder are marked with `(external)` even when the version number matches the bundled copy.
 - Hardened Production Log import so production columns are detected from real workbook headers, which keeps older `F = Molds` logs and newer `G = Molds` logs loading correctly while keeping Ghost internal to the app's balancing workflow.

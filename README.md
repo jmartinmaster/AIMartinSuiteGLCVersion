@@ -1,4 +1,3 @@
-# AIMartinSuiteGLCVersion
 
 Production Logging Center is a desktop production support application for GLC operators. It is built with Python, Tkinter, and ttkbootstrap and can be packaged as a Windows executable or an Ubuntu Debian package.
 
@@ -22,6 +21,7 @@ The project currently operates in two different forms:
 - Packaged EXE mode: the app is run from the built standalone Windows executable.
 
 These two forms do not have identical behavior. The Python version has access to the repository files and build tooling, while the EXE version is a packaged release with a more limited update path.
+
 
 ## Shared Capabilities
 
@@ -50,6 +50,7 @@ These two forms do not have identical behavior. The Python version has access to
 - Rotated backup copies for settings, layout, and rate file saves.
 - Hard-coded application icon assets with documented replacement steps.
 
+
 ## Data Safety And Recovery
 
 - `settings.json`, `layout_config.json`, and `rates.json` now save through an atomic write path instead of direct overwrite-only writes.
@@ -57,19 +58,22 @@ These two forms do not have identical behavior. The Python version has access to
 - Production Log drafts continue to save in `data/pending`, and overwritten drafts now keep recovery snapshots under `data/pending/history`.
 - Backup / Recovery gives operators a single place to restore saved drafts, recovery snapshots, and JSON backup copies without using Windows Explorer.
 
+
 ## Compatibility Notes
 
 - The current `layout_config.json` routes `target_time` through `header_fields`. Older local builds from before the config-driven Target Time change may not present that field correctly if they reuse the newer layout file.
 - The current `settings.json` includes `persistent_modules`. Older builds ignore that key safely, but they do not preserve module state across navigation.
+
 
 ## Source / Python Mode
 
 - Runs directly from the repository source files.
 - Can use the local project structure, docs, templates, and module files directly.
 - Can be rebuilt locally with `build.py` and PyInstaller.
-- Prefers the suite's own local `.venv` for source-build runtime discovery before falling back to environment or system Python.
+- Prefers Logging Center's own local `.venv` for source-build runtime discovery before falling back to environment or system Python.
 - Can be used to develop, test, and package new EXE releases.
 - The Update Manager can now hand off from source mode by downloading the published packaged EXE into local `dist` and launching it.
+
 
 ## Packaged EXE Mode
 
@@ -78,6 +82,7 @@ These two forms do not have identical behavior. The Python version has access to
 - Does not have the same direct access to repository source files or local build tooling that the Python version has.
 - Bundles the help documentation and `LICENSE.txt` for in-app access.
 - Uses the Update Manager for packaged EXE release checks plus selectable module payload installs.
+- Update checks default to the main repository URL and can be overridden or cleared from Security Admin.
 - Uses local editable JSON files and external module override files beside the EXE when they exist.
 - Packaged builds now use versioned EXE filenames so a newer build can download beside the current one, launch separately, and leave the older copy available until cleanup is confirmed.
 - Local builds now keep the current EXE in `dist/` and archive up to 10 older versioned EXEs in `dist/Old_exe`.
@@ -100,6 +105,7 @@ These two forms do not have identical behavior. The Python version has access to
 - Three-part versions only trigger an executable update when the third number is even, such as `1.07.2`.
 - Odd patch versions such as `1.07.1` are ignored.
 - Update availability now also requires a matching published EXE artifact in `dist/`.
+- Update Manager defaults to the main repository URL, and the Security Admin developer tools can override or clear it when needed.
 - In Python/source mode, stable updates download the published EXE into local `dist` and launch it for handoff testing.
 - In packaged EXE mode, stable updates download a versioned EXE beside the current copy, clear stale bundled-module overrides, launch the newer build, and let the newer build offer cleanup of older local EXEs.
 - Packaged EXE mode also supports selected module payload installs from the `the_golden_standard/` package without rebuilding the EXE.
@@ -108,6 +114,7 @@ These two forms do not have identical behavior. The Python version has access to
 - Update Manager can now install all available module and JSON payload restores in one pass.
 - Packaged EXE mode can also restore tracked JSON files such as `layout_config.json` and `rates.json` from the repository copy with local backups preserved before overwrite.
 - Packaged EXE mode can also restore the bundled Help Center markdown files and `LICENSE.txt` as one grouped documentation update.
+- The updater status bar now mounts above the content viewport and successful module payload installs auto-hide after a short delay.
 - `main.py` remains the Dispatcher Core boundary and still updates only through the stable EXE release path.
 - `About System v1.0.7` remains the first module payload target for packaged update testing after the `2.0.4` EXE handoff.
 - The Help Center now uses a modern single-page layout with top link navigation, a Hidden Modules guide, and section chips for User Guide module pages instead of notebook tabs.

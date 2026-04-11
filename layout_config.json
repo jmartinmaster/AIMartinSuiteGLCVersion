@@ -16,7 +16,6 @@
             "row": 0,
             "col": 2,
             "width": 10,
-            "readonly": true,
             "cell": "B2"
         },
         {
@@ -56,11 +55,12 @@
         {
             "id": "target_time",
             "label": "Target Time",
-            "row": 4,
-            "col": 0,
+            "row": 3,
+            "col": 4,
             "width": 12,
-            "readonly": true,
-            "cell": "H4"
+            "cell": "C4",
+            "export_enabled": true,
+            "import_enabled": true
         },
         {
             "id": "mtd_pct",
@@ -84,10 +84,12 @@
         {
             "id": "ret_south",
             "label": "Ret South",
-            "row": 2,
-            "col": 4,
+            "row": 3,
+            "col": 6,
             "width": 10,
-            "cell": "G3"
+            "cell": "G3",
+            "export_enabled": true,
+            "import_enabled": true
         },
         {
             "id": "total_molds",
@@ -104,9 +106,30 @@
             "id": "ret_north",
             "label": "Ret North",
             "row": 3,
-            "col": 4,
+            "col": 0,
             "width": 10,
-            "cell": "G4"
+            "cell": ""
+        },
+        {
+            "id": "end_time",
+            "label": "End Time",
+            "row": 3,
+            "col": 2,
+            "width": 10,
+            "cell": "A4",
+            "export_enabled": true,
+            "import_enabled": true
+        },
+        {
+            "id": "total_molds",
+            "label": "Total Molds",
+            "row": 2,
+            "col": 0,
+            "width": 10,
+            "readonly": false,
+            "cell": "H27",
+            "export_enabled": true,
+            "import_enabled": false
         }
     ],
     "production_mapping": {
