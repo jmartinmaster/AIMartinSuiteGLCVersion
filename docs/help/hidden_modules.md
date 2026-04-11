@@ -34,6 +34,11 @@ These modules are bundled with Logging Center but intentionally do not appear in
 - Writes JSON files with rotating backup copies.
 - Used by draft saves, settings saves, layout saves, rate saves, and updater restores.
 
+## Security Blanket
+
+- Owns master-password authentication, persisted non-secure-mode state, and vault reset safeguards.
+- Supports the Settings Manager security flow without acting as a standalone navigation page.
+
 ## Splash
 
 - Handles startup presentation behavior for the application launch sequence.

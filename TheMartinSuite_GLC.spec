@@ -17,13 +17,14 @@
 
 from PyInstaller.utils.hooks import collect_submodules
 
-from app_identity import format_versioned_exe_stem, load_version_from_main
+from app.app_identity import format_versioned_exe_stem, load_version_from_main
 
 hiddenimports = ['openpyxl', 'openpyxl.cell.cell', 'PyInstaller', 'tkinter.messagebox', 'tkinter.filedialog']
 hiddenimports += collect_submodules('openpyxl')
 hiddenimports += collect_submodules('PyInstaller')
+hiddenimports += collect_submodules('app')
 
-datas = [('modules', 'modules'), ('docs', 'docs'), ('templates', 'templates'), ('layout_config.json', '.'), ('rates.json', '.'), ('LICENSE.txt', '.'), ('icon.ico', '.'), ('icon-16.png', '.'), ('icon-24.png', '.'), ('icon-32.png', '.'), ('icon-48.png', '.'), ('icon-64.png', '.'), ('icon.png', '.'), ('icon.jpg', '.'), ('splash-logo.png', '.')]
+datas = [('app', 'app'), ('assets', 'assets'), ('docs', 'docs'), ('templates', 'templates'), ('layout_config.json', '.'), ('rates.json', '.')]
 app_build_name = format_versioned_exe_stem(load_version_from_main())
 
 
@@ -61,5 +62,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=['icon.ico'],
+    icon=['assets/icons/icon.ico'],
 )

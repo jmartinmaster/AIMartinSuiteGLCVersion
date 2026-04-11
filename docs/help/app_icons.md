@@ -1,6 +1,6 @@
 # App Icon Reference
 
-Logging Center now treats the repository PNG artwork as the source of truth so the app window, taskbar icon, and packaged EXE stay aligned.
+Production Logging Center uses a fixed icon pipeline so the app window, taskbar icon, and packaged EXE all stay aligned.
 
 ## Hard-Coded Icon Files
 

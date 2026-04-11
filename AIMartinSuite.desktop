@@ -1,7 +1,7 @@
 [Desktop Entry]
 Type=Application
-Name=ProductionLoggingCenter
-Exec=/home/jamie/Documents/AI-Martin/AIMartinSuiteGLCVersion/launch.sh
-Icon=/home/jamie/Documents/AI-Martin/AIMartinSuiteGLCVersion/icon.png
+Name=AIMartinSuite
+Exec=/home/jamie/Documents/AI-Martin/Security\ version/launch.sh
+Icon=/home/jamie/Documents/AI-Martin/Security version/assets/icons/icon.png
 Terminal=false
 Categories=Utility;Application;
