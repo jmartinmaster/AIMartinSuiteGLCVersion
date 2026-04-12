@@ -23,14 +23,19 @@ from app.models.security_model import ACCESS_RIGHTS, ROLE_DEFAULT_RIGHTS, ROLE_L
 from app.models.settings_manager_model import SettingsManagerModel
 from app.views.settings_manager_view import SettingsManagerView
 
+__module_name__ = "Settings Manager"
+__version__ = "1.0.2"
+
 
 class SettingsManagerController:
-    def __init__(self, parent, dispatcher):
+    def __init__(self, parent, dispatcher, section_mode="full"):
         self.dispatcher = dispatcher
+        self.section_mode = str(section_mode or "full")
         self.model = SettingsManagerModel()
         self.sync_valid_module_options()
         self.view = None
-        self.view = SettingsManagerView(parent, dispatcher, self)
+        self.view = SettingsManagerView(parent, dispatcher, self, section_mode=self.section_mode)
+        self.dispatcher.add_security_session_listener(self.on_security_session_changed)
         self.view.build_form_fields(self.model.get_settings_copy(), self.get_theme_options())
         self.refresh_module_whitelist_summary()
         self.refresh_persistent_modules_summary()
@@ -38,12 +43,19 @@ class SettingsManagerController:
         self.refresh_security_status()
         self.refresh_developer_admin_status()
         self.view.set_theme_status(f"Current theme: {get_theme_label(self.model.saved_theme)}")
+        self.view.apply_section_mode()
 
     def __getattr__(self, attribute_name):
         view = self.__dict__.get("view")
         if view is None:
             raise AttributeError(attribute_name)
         return getattr(view, attribute_name)
+
+    def on_security_session_changed(self, _event_name=None):
+        self.sync_valid_module_options()
+        self.refresh_module_whitelist_summary()
+        self.refresh_persistent_modules_summary()
+        self.refresh_session_state()
 
     def get_theme_options(self):
         return get_theme_labels()
@@ -90,6 +102,11 @@ class SettingsManagerController:
     def refresh_external_modules_status(self):
         self.view.set_external_modules_status(self.format_external_modules_status())
 
+    def refresh_session_state(self):
+        self.refresh_security_status()
+        self.refresh_developer_admin_status()
+        self.refresh_external_modules_status()
+
     def format_developer_admin_status(self):
         override_count = len(self.dispatcher.get_external_module_override_names()) if self.dispatcher.has_external_modules_directory() else 0
         repo_url = self.model.settings.get("update_repository_url", "")
@@ -105,16 +122,20 @@ class SettingsManagerController:
         self.view.set_developer_admin_visible(is_visible)
         if is_visible:
             self.view.set_developer_admin_status(self.format_developer_admin_status())
+            self.view.configure_developer_admin_tools(self.get_developer_admin_settings_state())
 
     def refresh_security_status(self):
         if hasattr(gatekeeper, "get_session_summary"):
             self.view.set_security_status(gatekeeper.get_session_summary())
         else:
             self.view.set_security_status("Unlocked for this session" if getattr(gatekeeper, "_authenticated", False) else "Locked")
+        is_visible = gatekeeper.has_admin_session()
+        self.view.set_security_admin_visible(is_visible)
+        if is_visible:
+            self.view.configure_security_admin_panel(self.get_security_admin_state())
 
     def _refresh_security_ui(self):
-        self.refresh_security_status()
-        self.refresh_developer_admin_status()
+        self.refresh_session_state()
         if hasattr(self.dispatcher, "refresh_navigation"):
             self.dispatcher.refresh_navigation()
 
@@ -158,10 +179,84 @@ class SettingsManagerController:
             ):
                 return
             self._refresh_security_ui()
-            self.view.show_security_admin_dialog(self.get_security_admin_state())
-            self._refresh_security_ui()
         except Exception as exc:
             self.view.show_error("Security", f"Could not open security administration: {exc}")
+
+    def load_selected_security_vault(self, _event=None):
+        self.view.set_security_vault_form(self.view.get_selected_security_vault_record())
+
+    def start_new_security_vault(self):
+        self.view.clear_security_vault_selection()
+        self.view.set_security_vault_form(None)
+
+    def on_security_role_selected(self, _event=None):
+        self.view.update_security_role_note()
+
+    def apply_selected_security_role_defaults(self):
+        self.view.apply_security_role_defaults()
+
+    def save_current_security_vault(self, reset_password=False):
+        payload = self.view.get_security_vault_payload(reset_password=reset_password)
+        try:
+            new_state = self.save_security_vault(payload)
+        except Exception as exc:
+            self.view.show_error("Security", str(exc))
+            return
+        if new_state is None:
+            return
+        preferred_name = payload.get("vault_name") or payload.get("existing_name")
+        self.view.configure_security_admin_panel(new_state, preferred_name=preferred_name)
+
+    def delete_selected_security_vault(self):
+        vault_name = self.view.get_selected_security_vault_name()
+        if not vault_name:
+            self.view.show_error("Security", "Select an existing vault before deleting it.")
+            return
+        try:
+            new_state = self.delete_security_vault(vault_name)
+        except Exception as exc:
+            self.view.show_error("Security", str(exc))
+            return
+        if new_state is None:
+            return
+        self.view.configure_security_admin_panel(new_state)
+
+    def rotate_selected_security_vault_password(self):
+        vault_name = self.view.get_selected_security_vault_name()
+        if not vault_name:
+            self.view.show_error("Security", "Select an existing vault before rotating its password.")
+            return
+        if self.view.security_admin_role_var.get().strip().lower() == "general":
+            self.view.show_error("Security", "General vaults do not require passwords in this implementation.")
+            return
+        try:
+            new_state = self.rotate_security_vault_password(vault_name)
+        except Exception as exc:
+            self.view.show_error("Security", str(exc))
+            return
+        if new_state is None:
+            return
+        self.view.configure_security_admin_panel(new_state, preferred_name=vault_name)
+
+    def save_current_security_mode(self):
+        desired_state = self.view.get_security_non_secure_mode()
+        current_state = gatekeeper.is_non_secure_mode_enabled()
+        if desired_state == current_state:
+            return
+        action_text = "enable" if desired_state else "disable"
+        if not self.view.ask_yes_no(
+            "Confirm Security Change",
+            f"Are you sure you want to {action_text} persisted non-secure mode?",
+        ):
+            self.view.configure_security_admin_panel(self.get_security_admin_state(), preferred_name=self.view.get_selected_security_vault_name())
+            return
+        try:
+            new_state = self.set_security_non_secure_mode(desired_state)
+        except Exception as exc:
+            self.view.show_error("Security", str(exc))
+            self.view.configure_security_admin_panel(self.get_security_admin_state(), preferred_name=self.view.get_selected_security_vault_name())
+            return
+        self.view.configure_security_admin_panel(new_state, preferred_name=self.view.get_selected_security_vault_name())
 
     def save_security_vault(self, payload):
         existing_name = str(payload.get("existing_name") or "").strip() or None
@@ -223,29 +318,13 @@ class SettingsManagerController:
         self.view.show_toast("Security", message, bootstyle)
         return self.get_security_admin_state()
 
-    def open_developer_admin_dialog(self):
-        if not gatekeeper.has_admin_session():
-            self.view.show_error("Developer Tools", "An admin session is required to open developer tools.")
-            return
-
-        self.view.show_developer_admin_dialog(
-            {
-                "update_repository_url": self.model.settings.get("update_repository_url", ""),
-                "enable_advanced_dev_updates": bool(self.model.settings.get("enable_advanced_dev_updates", False)),
-                "enable_external_override_trust": gatekeeper.is_external_module_override_trust_enabled(),
-            },
-            self.dispatcher.get_bundled_module_names(),
-        )
-
-    def get_external_module_editor_state(self, module_name):
-        override_path = self.dispatcher.get_external_module_override_path(module_name)
-        bundled_path = os.path.join(self.dispatcher.modules_path, f"{module_name}.py")
-        return self.model.build_external_module_editor_state(
-            module_name,
-            override_path=override_path,
-            bundled_path=bundled_path,
-            trust_enabled=self.dispatcher.is_external_module_override_trust_enabled(),
-        )
+    def get_developer_admin_settings_state(self):
+        return {
+            "update_repository_url": self.model.settings.get("update_repository_url", ""),
+            "enable_advanced_dev_updates": bool(self.model.settings.get("enable_advanced_dev_updates", False)),
+            "enable_external_override_trust": gatekeeper.is_external_module_override_trust_enabled(),
+            "external_modules_status": self.format_external_modules_status(),
+        }
 
     def save_developer_admin_settings(self, update_repository_url, enable_advanced_dev_updates, enable_external_override_trust):
         trust_changed = gatekeeper.is_external_module_override_trust_enabled() != bool(enable_external_override_trust)
@@ -263,31 +342,13 @@ class SettingsManagerController:
             self.view.show_toast("Developer Tools", trust_message)
         self.refresh_developer_admin_status()
 
-    def save_external_module_override(self, module_name, module_text):
-        if not module_name:
-            self.view.show_error("Developer Tools", "Choose a module before saving an override.")
-            return False
-        self.dispatcher.install_module_override(module_name, module_text)
-        self.refresh_external_modules_status()
-        self.refresh_developer_admin_status()
-        if self.dispatcher.is_external_module_override_trust_enabled():
-            self.view.show_toast("Developer Tools", f"Saved external override for {module_name}. It is eligible to load on module reload.")
-        else:
-            self.view.show_toast("Developer Tools", f"Saved external override for {module_name}. It will stay inactive until override trust is enabled.")
-        return True
-
-    def remove_external_module_override(self, module_name):
-        if not module_name:
-            self.view.show_error("Developer Tools", "Choose a module before removing an override.")
-            return False
-        removed_paths = self.dispatcher.remove_external_module_overrides([module_name])
-        self.refresh_external_modules_status()
-        self.refresh_developer_admin_status()
-        if removed_paths:
-            self.view.show_toast("Developer Tools", f"Removed external override for {module_name}.")
-            return True
-        self.view.show_info("Developer Tools", f"No external override exists for {module_name}.")
-        return False
+    def save_current_developer_admin_settings(self):
+        values = self.view.get_developer_admin_settings_values()
+        self.save_developer_admin_settings(
+            values["update_repository_url"],
+            values["enable_advanced_dev_updates"],
+            values["enable_external_override_trust"],
+        )
 
     def persist_settings(self, toast_title="Settings Saved", toast_message_prefix="Theme changes were applied immediately."):
         clear_downtime_code_cache()
@@ -306,9 +367,7 @@ class SettingsManagerController:
             backup_note = " A recovery copy was stored in data/backups/settings."
         self.view.show_toast(toast_title, f"{toast_message_prefix}{backup_note}")
         self.refresh_module_whitelist_summary()
-        self.refresh_external_modules_status()
-        self.refresh_security_status()
-        self.refresh_developer_admin_status()
+        self.refresh_session_state()
         self.refresh_persistent_modules_summary()
 
     def save_settings(self):
@@ -335,8 +394,12 @@ class SettingsManagerController:
             self.view.set_export_directory(directory_path)
 
     def open_downtime_codes_dialog(self):
+        if self.view.is_downtime_editor_visible():
+            self.view.set_downtime_editor_visible(False)
+            return
         current_codes = self.model.settings.get("downtime_codes", deepcopy(DEFAULT_DT_CODE_MAP))
-        self.view.show_downtime_codes_dialog(current_codes)
+        self.view.configure_downtime_codes_editor(current_codes)
+        self.view.set_downtime_editor_visible(True)
 
     def suggest_next_downtime_code(self, rows):
         return self.model.get_next_downtime_code(rows)
@@ -350,6 +413,12 @@ class SettingsManagerController:
         self.save_downtime_codes(updated_codes)
         return True
 
+    def add_next_downtime_code_editor_row(self):
+        self.view.add_downtime_code_row(self.suggest_next_downtime_code(self.view.get_downtime_code_rows()), "")
+
+    def save_current_downtime_codes(self):
+        self.save_downtime_code_rows(self.view.get_downtime_code_rows())
+
     def save_downtime_codes(self, updated_codes):
         self.model.update_downtime_codes(updated_codes)
         self.persist_settings(
@@ -358,25 +427,43 @@ class SettingsManagerController:
         )
 
     def open_persistent_modules_dialog(self):
+        if self.view.is_persistent_modules_editor_visible():
+            self.view.set_persistent_modules_editor_visible(False)
+            return
         self.sync_valid_module_options()
         options = self.dispatcher.get_persistable_modules()
+        if not options:
+            self.view.show_info("Persistent Modules", "No persistable modules are available.")
+            return
         selected_modules = set(self.model.settings.get("persistent_modules", []))
-        self.view.show_persistent_modules_dialog(options, selected_modules)
+        self.view.configure_persistent_modules_editor(options, selected_modules)
+        self.view.set_persistent_modules_editor_visible(True)
 
     def open_module_whitelist_dialog(self):
+        if self.view.is_module_whitelist_editor_visible():
+            self.view.set_module_whitelist_editor_visible(False)
+            return
         self.sync_valid_module_options()
         options = self.dispatcher.get_navigation_modules()
+        if not options:
+            self.view.show_info("Sidebar Module Whitelist", "No visible modules are available.")
+            return
         selected_modules = set(self.model.settings.get("module_whitelist", []))
-        self.view.show_module_whitelist_dialog(options, selected_modules)
+        self.view.configure_module_whitelist_editor(options, selected_modules)
+        self.view.set_module_whitelist_editor_visible(True)
 
-    def save_persistent_modules_selection(self, selected_modules):
+    def save_persistent_modules_selection(self, selected_modules=None):
+        if selected_modules is None:
+            selected_modules = self.view.get_persistent_modules_editor_selection()
         self.model.settings["persistent_modules"] = self.model.normalize_module_names(
             selected_modules,
             self.model.valid_persistent_modules or None,
         )
         self.refresh_persistent_modules_summary()
 
-    def save_module_whitelist_selection(self, selected_modules):
+    def save_module_whitelist_selection(self, selected_modules=None):
+        if selected_modules is None:
+            selected_modules = self.view.get_module_whitelist_editor_selection()
         self.model.settings["module_whitelist"] = self.model.normalize_module_names(
             selected_modules,
             self.model.valid_navigation_modules or None,
@@ -384,5 +471,6 @@ class SettingsManagerController:
         self.refresh_module_whitelist_summary()
 
     def on_unload(self):
+        self.dispatcher.remove_security_session_listener(self.on_security_session_changed)
         if self.model.preview_theme != self.model.saved_theme:
             self.dispatcher.apply_theme(self.model.saved_theme)

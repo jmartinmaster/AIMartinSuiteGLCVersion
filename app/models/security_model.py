@@ -15,6 +15,9 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 from dataclasses import dataclass, field
 
+__module_name__ = "Security Model"
+__version__ = "2.0.1"
+
 
 GENERAL_USER_LIMIT = 9
 ADMIN_USER_LIMIT = 3
@@ -29,12 +32,16 @@ ROLE_LIMITS = {
 
 MODULE_ACCESS_RIGHTS = {
     "production_log": "module:production_log",
+    "production_log_calculations": "developer:production_log_calculations",
     "layout_manager": "module:layout_manager",
     "rate_manager": "module:rate_manager",
     "settings_manager": "module:settings_manager",
+    "security_admin": "security:manage_vaults",
+    "developer_admin": "developer:update_configuration",
     "update_manager": "module:update_manager",
     "recovery_viewer": "module:recovery_viewer",
     "help_viewer": "module:help_viewer",
+    "internal_code_editor": "module:internal_code_editor",
     "about": "module:about",
 }
 
@@ -48,12 +55,14 @@ class AccessRight:
 
 ACCESS_RIGHTS = (
     AccessRight("module:production_log", "Production Log", "Open and use Production Log."),
+    AccessRight("developer:production_log_calculations", "Production Log Calculations", "Change developer-only Production Log calculation behavior."),
     AccessRight("module:layout_manager", "Layout Manager", "Open and use Layout Manager."),
     AccessRight("module:rate_manager", "Rate Manager", "Open and use Rate Manager."),
     AccessRight("module:settings_manager", "Settings Manager", "Open and use Settings Manager."),
     AccessRight("module:update_manager", "Update Manager", "Open and use Update Manager."),
     AccessRight("module:recovery_viewer", "Recovery Viewer", "Open and use Recovery Viewer."),
     AccessRight("module:help_viewer", "Help Center", "Open the Help Center."),
+    AccessRight("module:internal_code_editor", "Internal Code Editor", "Open and use the Internal Code Editor."),
     AccessRight("module:about", "About", "Open the About screen."),
     AccessRight("security:manage_vaults", "Security Admin", "Manage vaults, passwords, and security mode."),
     AccessRight("developer:update_configuration", "Update Configuration", "Change privileged update repository settings."),

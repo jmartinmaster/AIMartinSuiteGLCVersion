@@ -9,13 +9,18 @@
   "export_directory": "exports",
   "organize_exports_by_date": true,
   "default_export_prefix": "Disamatic Production Sheet",
-  "theme": "journal",
+  "update_repository_url": "https://github.com/jmartinmaster/AIMartinSuiteGLCVersion.git",
+  "enable_advanced_dev_updates": false,
+  "theme": "martin_modern_light",
   "enable_screen_transitions": true,
+  "enable_module_update_notifications": true,
   "screen_transition_duration_ms": 360,
   "toast_duration_sec": 5,
   "auto_save_interval_min": 5,
   "default_shift_hours": 8.0,
   "default_goal_mph": 240,
+  "module_whitelist": [],
+  "persistent_modules": [],
   "downtime_codes": {
     "1": "Misc Reason",
     "2": "Machine Repairs",
@@ -47,6 +52,15 @@
   - Type: string
   - Purpose: Prefix used when naming exported files.
 
+- `update_repository_url`
+  - Type: string
+  - Purpose: Repository URL used by Update Manager when checking the configured release source.
+
+- `enable_advanced_dev_updates`
+  - Type: boolean
+  - Purpose: Enables the privileged packaged Windows advanced dev update path.
+  - Notes: This setting is managed from Developer & Admin tools in Settings Manager.
+
 - `theme`
   - Type: string
   - Purpose: One of the curated readable theme names supported by Logging Center.
@@ -54,6 +68,10 @@
 - `enable_screen_transitions`
   - Type: boolean
   - Purpose: Enables or disables the short fade used when switching between major pages in the application.
+
+- `enable_module_update_notifications`
+  - Type: boolean
+  - Purpose: Controls whether the app checks for module-update notifications during startup.
 
 - `screen_transition_duration_ms`
   - Type: integer
@@ -77,6 +95,15 @@
   - Type: number
   - Purpose: Default goal molds per hour loaded into Production Log.
 
+- `module_whitelist`
+  - Type: array of strings
+  - Purpose: Optional list of visible sidebar modules to show.
+  - Notes: An empty list means all visible modules remain available.
+
+- `persistent_modules`
+  - Type: array of strings
+  - Purpose: Modules that stay live while the app remains open so their in-progress state is preserved when you navigate away and back.
+
 - `downtime_codes`
   - Type: object
   - Purpose: Optional label overrides for downtime code numbers used by Production Log and Excel import/export. Extra numeric codes can be added here in addition to the defaults.
@@ -84,3 +111,7 @@
 ## Recommended Editing Path
 
 Use Settings Manager for normal changes so values stay inside the supported range of the app.
+
+## Related Security Setting
+
+External override trust is not stored in `settings.json`. It is persisted separately by the security system and is managed from the privileged Developer & Admin tools.

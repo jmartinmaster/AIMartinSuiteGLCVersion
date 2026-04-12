@@ -493,3 +493,57 @@ When starting a new coding session on this repository, confirm:
 4. ✅ `get_theme_tokens(root=self.root)` is the correct way to read color tokens in a view.
 5. ✅ `write_json_with_backup()` is the correct way to persist JSON configuration files.
 6. ✅ New modules must be registered in `MANAGED_MODULE_NAMES` and `get_ui()` must be the public entry point.
+
+---
+
+## 15. Local AI Parallel Smoke-Test Rule
+
+When a local AI delegate is available, use it by default for launch and smoke-test reporting while continuing the next implementation step.
+
+### 15.1 Availability Check
+
+Treat local AI delegation as available when all of the following are true:
+
+- `scripts/local_ai_smoke_test.sh` exists.
+- `scripts/qwen_delegate.sh` exists and is executable.
+- `ollama` is installed and the requested model is present locally.
+
+If any of those conditions fail, state the limitation briefly and fall back to direct local validation.
+
+### 15.2 Required Workflow
+
+For substantive application changes, do this in order:
+
+1. Start `bash scripts/local_ai_smoke_test.sh` in the background with a concrete task label, the launch command, and any immediately useful smoke commands.
+2. Continue the main implementation task while the background smoke test runs.
+3. When the smoke-test report completes, read the generated transcript and delegated review.
+4. Add each concrete failure or regression risk to the todo list as a separate item.
+5. Fix the highest-value items first.
+6. Rerun `scripts/local_ai_smoke_test.sh` after fixes and update the todo list based on the retest result.
+
+### 15.3 Standard Commands
+
+Default launch command:
+
+```bash
+/home/jamie/Documents/AI-Martin/AIMartinSuiteGLCVersion/.venv/bin/python main.py
+```
+
+Preferred smoke-test helper pattern:
+
+```bash
+bash scripts/local_ai_smoke_test.sh \
+   --task "short change summary" \
+   --launch "/home/jamie/Documents/AI-Martin/AIMartinSuiteGLCVersion/.venv/bin/python main.py" \
+   --smoke "/home/jamie/Documents/AI-Martin/AIMartinSuiteGLCVersion/.venv/bin/python -m py_compile <touched files>" \
+   --context docs/ai-delegation/<context-file>.md
+```
+
+Run it in a background terminal whenever you can keep working productively in parallel.
+
+### 15.4 Reporting Requirements
+
+- Surface the delegated report path in the response when it materially informed the result.
+- Distinguish between raw command failures and local-AI interpretation.
+- Do not close related todo items until the retest passes or the remaining issue is explicitly accepted as a known limitation.
+- If the delegated smoke test fails to run, note that separately instead of pretending the app was smoke-tested.

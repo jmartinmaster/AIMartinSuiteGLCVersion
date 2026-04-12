@@ -17,7 +17,7 @@ import ttkbootstrap as tb
 from ttkbootstrap.constants import BOTH, BOTTOM, CENTER, HORIZONTAL, INFO, LEFT, RIGHT, SECONDARY, WARNING, X
 
 __module_name__ = "About System"
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 
 
 class AboutView:

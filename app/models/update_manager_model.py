@@ -30,6 +30,9 @@ from app.app_platform import is_ubuntu_runtime
 from app.persistence import write_json_with_backup, write_text_with_backup
 from app.utils import ensure_external_directory, external_path, local_or_resource_path, resolve_local_venv_python
 
+__module_name__ = "Update Manager"
+__version__ = "2.1.5"
+
 
 GITHUB_REMOTE_PATTERN = re.compile(r"github\.com[:/](?P<owner>[^/]+)/(?P<repo>[^/.]+?)(?:\.git)?$")
 MODULE_NAME_PATTERN = re.compile(r"__module_name__\s*=\s*[\"']([^\"']+)[\"']")
@@ -56,10 +59,25 @@ JSON_PAYLOAD_OPTIONS = [
 DOCUMENTATION_PAYLOAD_RELATIVE_ROOT = os.path.join("docs", "help")
 DOCUMENTATION_PAYLOAD_BACKUP_ROOT = os.path.join("data", "backups", "docs")
 DOCUMENTATION_STANDALONE_FILES = ["docs/legal/LICENSE.txt"]
+MODULE_PAYLOAD_MVC_PATH_SPECS = [
+    ("controllers", "{module_key}_controller.py"),
+    ("models", "{module_key}_model.py"),
+    ("views", "{module_key}_view.py"),
+]
 
 
 def _default_module_payload_name(module_key):
     return module_key.replace("_", " ").title()
+
+
+def _build_module_payload_paths(modules_path, module_key, file_name):
+    payload_paths = [f"app/{file_name}"]
+    for subdirectory, file_template in MODULE_PAYLOAD_MVC_PATH_SPECS:
+        related_file_name = file_template.format(module_key=module_key)
+        related_absolute_path = os.path.join(modules_path, subdirectory, related_file_name)
+        if os.path.isfile(related_absolute_path):
+            payload_paths.append(f"app/{subdirectory}/{related_file_name}")
+    return payload_paths
 
 
 def _parse_json_payload_metadata(file_text, fallback_name):
@@ -273,6 +291,7 @@ def discover_module_payload_options(modules_path):
                 "key": module_key,
                 "file_name": file_name,
                 "relative_path": relative_path,
+                "payload_paths": _build_module_payload_paths(modules_path, module_key, file_name),
                 "fallback_name": fallback_name,
                 "module_name": module_name,
                 "display": f"{module_name} ({file_name})",
@@ -647,7 +666,9 @@ def install_module_payload_option(option, payload_text, install_module_override)
         )
         return target_path, remote_metadata.get("version", "Unknown")
 
-    remote_metadata = _parse_module_metadata(payload_text, option["fallback_name"])
+    primary_relative_path = option.get("relative_path")
+    primary_payload_text = payload_text.get(primary_relative_path, "") if isinstance(payload_text, dict) else payload_text
+    remote_metadata = _parse_module_metadata(primary_payload_text, option["fallback_name"])
     option["module_name"] = remote_metadata.get("module_name", option["module_name"])
     installed_result = install_module_override(option["key"], payload_text)
     installed_path = installed_result[0] if isinstance(installed_result, tuple) else installed_result

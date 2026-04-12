@@ -36,7 +36,7 @@ These modules are bundled with Logging Center but intentionally do not appear in
 
 ## Security Blanket
 
-- Owns master-password authentication, persisted non-secure-mode state, and vault reset safeguards.
+- Owns vault authentication, persisted non-secure-mode state, external override trust state, and security-reset safeguards.
 - Supports the Settings Manager security flow without acting as a standalone navigation page.
 
 ## Splash

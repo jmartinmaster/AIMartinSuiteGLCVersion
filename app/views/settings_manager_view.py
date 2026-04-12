@@ -25,7 +25,7 @@ from app.downtime_codes import DEFAULT_DT_CODE_MAP
 from app.theme_manager import DEFAULT_THEME, get_theme_label
 
 __module_name__ = "Settings Manager"
-__version__ = "1.0.1"
+__version__ = "1.0.2"
 
 FORM_LABEL_WIDTH = 22
 FORM_INPUT_WIDTH = 30
@@ -35,10 +35,11 @@ FORM_LABEL_WRAP = 320
 
 
 class SettingsManagerView:
-    def __init__(self, parent, dispatcher, controller):
+    def __init__(self, parent, dispatcher, controller, section_mode="full"):
         self.parent = parent
         self.dispatcher = dispatcher
         self.controller = controller
+        self.section_mode = str(section_mode or "full")
         self.controller.view = self
         self._active_modal_parent = None
         self.entries = {}
@@ -46,15 +47,31 @@ class SettingsManagerView:
         self.persistent_modules_var = tk.StringVar(value="Disabled")
         self.external_modules_status_var = tk.StringVar(value="External module overrides are unavailable.")
         self.security_status_var = tk.StringVar(value="Locked")
-        self.developer_admin_status_var = tk.StringVar(value="Admin session required")
+        self.security_admin_session_var = tk.StringVar(value="Locked")
+        self.security_admin_note_var = tk.StringVar(value="Configured vaults: 0")
+        self.security_admin_name_var = tk.StringVar(value="")
+        self.security_admin_role_var = tk.StringVar(value="general")
+        self.security_admin_enabled_var = tk.BooleanVar(value=True)
+        self.security_admin_non_secure_var = tk.BooleanVar(value=False)
+        self.security_admin_password_note_var = tk.StringVar(value="General vaults can remain passwordless.")
+        self.developer_admin_status_var = tk.StringVar(value="Admin or developer session required")
         self.theme_status_var = tk.StringVar(value="Current theme")
+        self.developer_admin_repo_var = tk.StringVar(value="")
+        self.developer_admin_advanced_var = tk.BooleanVar(value=False)
+        self.developer_admin_override_trust_var = tk.BooleanVar(value=False)
+        self._security_admin_state = {}
+        self.security_admin_right_vars = {}
+        self.module_whitelist_option_vars = {}
+        self.persistent_module_option_vars = {}
+        self.downtime_code_rows = []
         self.setup_ui()
 
     def setup_ui(self):
         self.content_frame = tb.Frame(self.parent, padding=20)
         self.content_frame.pack(fill=BOTH, expand=True)
 
-        tb.Label(self.content_frame, text="Application Settings", font=("-size 16 -weight bold")).pack(anchor=W, pady=(0, 20))
+        self.page_title_label = tb.Label(self.content_frame, text="Application Settings", font=("-size 16 -weight bold"))
+        self.page_title_label.pack(anchor=W, pady=(0, 20))
 
         self.form_frame = tb.Frame(self.content_frame)
         self.form_frame.pack(fill=X)
@@ -81,13 +98,30 @@ class SettingsManagerView:
         tb.Entry(self.whitelist_frame, textvariable=self.module_whitelist_var, state="readonly", width=FORM_INPUT_WIDTH).grid(row=0, column=1, sticky=EW)
         tb.Button(self.whitelist_frame, text="Edit Whitelist", bootstyle=INFO, command=self.controller.open_module_whitelist_dialog).grid(row=0, column=2, sticky=W, padx=(8, 0))
 
-        tb.Label(
+        self.whitelist_help_label = tb.Label(
             self.content_frame,
             text="When the whitelist is empty, the sidebar shows all visible modules. If you choose modules here, only listed modules that are actually present will be shown.",
             bootstyle=SECONDARY,
             justify=LEFT,
             wraplength=680,
-        ).pack(anchor=W, pady=(0, 8))
+        )
+        self.whitelist_help_label.pack(anchor=W, pady=(0, 8))
+
+        self.whitelist_editor_frame = tb.Labelframe(self.content_frame, text=" Sidebar Whitelist Editor ", padding=12)
+        tb.Label(
+            self.whitelist_editor_frame,
+            text="Edit the sidebar whitelist inline. Leave everything unchecked to allow all visible modules. Use Save Settings afterward to persist the change.",
+            bootstyle=SECONDARY,
+            justify=LEFT,
+            wraplength=760,
+        ).pack(anchor=W, pady=(0, 10))
+        self.whitelist_editor_list_frame = tb.Frame(self.whitelist_editor_frame)
+        self.whitelist_editor_list_frame.pack(fill=X)
+        whitelist_actions = tb.Frame(self.whitelist_editor_frame)
+        whitelist_actions.pack(fill=X, pady=(12, 0))
+        tb.Button(whitelist_actions, text="Clear Whitelist", bootstyle=SECONDARY, command=self.clear_module_whitelist_editor_selection).pack(side=LEFT)
+        tb.Button(whitelist_actions, text="Apply Selection", bootstyle=SUCCESS, command=self.controller.save_module_whitelist_selection).pack(side=LEFT, padx=(8, 0))
+        tb.Button(whitelist_actions, text="Hide Editor", bootstyle=SECONDARY, command=self.controller.open_module_whitelist_dialog).pack(side=RIGHT)
 
         tb.Label(
             self.persistent_frame,
@@ -101,45 +135,85 @@ class SettingsManagerView:
         tb.Entry(self.persistent_frame, textvariable=self.persistent_modules_var, state="readonly", width=FORM_INPUT_WIDTH).grid(row=0, column=1, sticky=EW)
         tb.Button(self.persistent_frame, text="Choose", bootstyle=INFO, command=self.controller.open_persistent_modules_dialog).grid(row=0, column=2, sticky=W, padx=(8, 0))
 
-        tb.Label(
+        self.persistent_help_label = tb.Label(
             self.content_frame,
             text="Modules selected here stay live while the app is open, so returning to them keeps the same in-progress screen state.",
             bootstyle=SECONDARY,
             justify=LEFT,
             wraplength=680,
-        ).pack(anchor=W, pady=(0, 8))
+        )
+        self.persistent_help_label.pack(anchor=W, pady=(0, 8))
 
-        theme_controls = tb.Frame(self.content_frame)
-        theme_controls.pack(fill=X, pady=(5, 10))
-        tb.Button(theme_controls, text="Revert Theme Preview", bootstyle=SECONDARY, command=self.controller.revert_theme_preview).pack(side=LEFT)
-        tb.Label(theme_controls, textvariable=self.theme_status_var, bootstyle=SECONDARY).pack(side=LEFT, padx=10)
-
+        self.persistent_modules_editor_frame = tb.Labelframe(self.content_frame, text=" Persistent Modules Editor ", padding=12)
         tb.Label(
+            self.persistent_modules_editor_frame,
+            text="Choose which modules stay live inline. Update Manager remains persistent automatically. Use Save Settings afterward to persist the change.",
+            bootstyle=SECONDARY,
+            justify=LEFT,
+            wraplength=760,
+        ).pack(anchor=W, pady=(0, 10))
+        self.persistent_modules_editor_list_frame = tb.Frame(self.persistent_modules_editor_frame)
+        self.persistent_modules_editor_list_frame.pack(fill=X)
+        persistent_actions = tb.Frame(self.persistent_modules_editor_frame)
+        persistent_actions.pack(fill=X, pady=(12, 0))
+        tb.Button(persistent_actions, text="Select None", bootstyle=SECONDARY, command=self.clear_persistent_modules_editor_selection).pack(side=LEFT)
+        tb.Button(persistent_actions, text="Apply Selection", bootstyle=SUCCESS, command=self.controller.save_persistent_modules_selection).pack(side=LEFT, padx=(8, 0))
+        tb.Button(persistent_actions, text="Hide Editor", bootstyle=SECONDARY, command=self.controller.open_persistent_modules_dialog).pack(side=RIGHT)
+
+        self.theme_controls = tb.Frame(self.content_frame)
+        self.theme_controls.pack(fill=X, pady=(5, 10))
+        tb.Button(self.theme_controls, text="Revert Theme Preview", bootstyle=SECONDARY, command=self.controller.revert_theme_preview).pack(side=LEFT)
+        tb.Label(self.theme_controls, textvariable=self.theme_status_var, bootstyle=SECONDARY).pack(side=LEFT, padx=10)
+
+        self.theme_help_label = tb.Label(
             self.content_frame,
             text="The modern refresh uses appearance presets and content-area motion. Start with Martin Modern Light for the new industrial look.",
             bootstyle=SECONDARY,
             justify=LEFT,
             wraplength=760,
-        ).pack(anchor=W, pady=(0, 10))
+        )
+        self.theme_help_label.pack(anchor=W, pady=(0, 10))
 
-        tb.Label(
+        self.transition_help_label = tb.Label(
             self.content_frame,
             text="Screen transitions can be disabled or tuned from 0 to 500 ms. Around 180 to 280 ms is a good range for the current subtle slide animation.",
             bootstyle=SECONDARY,
             justify=LEFT,
             wraplength=760,
-        ).pack(anchor=W, pady=(0, 10))
+        )
+        self.transition_help_label.pack(anchor=W, pady=(0, 10))
 
-        extras = tb.Frame(self.content_frame)
-        extras.pack(fill=X, pady=(5, 10))
-        tb.Button(extras, text="Edit Downtime Codes", bootstyle=INFO, command=self.controller.open_downtime_codes_dialog).pack(side=LEFT)
+        self.extras_frame = tb.Frame(self.content_frame)
+        self.extras_frame.pack(fill=X, pady=(5, 10))
+        tb.Button(self.extras_frame, text="Edit Downtime Codes", bootstyle=INFO, command=self.controller.open_downtime_codes_dialog).pack(side=LEFT)
 
-        security_frame = tb.Frame(self.content_frame)
-        security_frame.pack(fill=X, pady=(5, 10))
-        security_frame.columnconfigure(0, minsize=FORM_LABEL_COLUMN_MIN)
-        security_frame.columnconfigure(1, weight=1)
+        self.downtime_editor_frame = tb.Labelframe(self.content_frame, text=" Downtime Codes Editor ", padding=12)
         tb.Label(
-            security_frame,
+            self.downtime_editor_frame,
+            text="Edit numeric downtime codes inline. Imports and exports use these code numbers. Use Save Settings afterward to persist the change.",
+            bootstyle=SECONDARY,
+            justify=LEFT,
+            wraplength=760,
+        ).pack(anchor=W, pady=(0, 10))
+        downtime_header = tb.Frame(self.downtime_editor_frame)
+        downtime_header.pack(fill=X, pady=(0, 6))
+        tb.Label(downtime_header, text="Code", width=8, bootstyle=INFO).pack(side=LEFT)
+        tb.Label(downtime_header, text="Label", bootstyle=INFO).pack(side=LEFT)
+        self.downtime_editor_rows_frame = tb.Frame(self.downtime_editor_frame)
+        self.downtime_editor_rows_frame.pack(fill=X)
+        downtime_actions = tb.Frame(self.downtime_editor_frame)
+        downtime_actions.pack(fill=X, pady=(12, 0))
+        tb.Button(downtime_actions, text="Reset Defaults", bootstyle=SECONDARY, command=self.reset_downtime_codes_editor_defaults).pack(side=LEFT)
+        tb.Button(downtime_actions, text="Add Code", bootstyle=INFO, command=self.controller.add_next_downtime_code_editor_row).pack(side=LEFT, padx=(8, 0))
+        tb.Button(downtime_actions, text="Apply Codes", bootstyle=SUCCESS, command=self.controller.save_current_downtime_codes).pack(side=LEFT, padx=(8, 0))
+        tb.Button(downtime_actions, text="Hide Editor", bootstyle=SECONDARY, command=self.controller.open_downtime_codes_dialog).pack(side=RIGHT)
+
+        self.security_frame = tb.Frame(self.content_frame)
+        self.security_frame.pack(fill=X, pady=(5, 10))
+        self.security_frame.columnconfigure(0, minsize=FORM_LABEL_COLUMN_MIN)
+        self.security_frame.columnconfigure(1, weight=1)
+        tb.Label(
+            self.security_frame,
             text="Security Session",
             width=FORM_LABEL_WIDTH,
             anchor=W,
@@ -147,16 +221,128 @@ class SettingsManagerView:
             wraplength=FORM_LABEL_WRAP,
             font=("Segoe UI", 9),
         ).grid(row=0, column=0, sticky=W, padx=(0, 12))
-        tb.Entry(security_frame, textvariable=self.security_status_var, state="readonly", width=FORM_INPUT_WIDTH).grid(row=0, column=1, sticky=EW)
-        tb.Button(security_frame, text="Manage Security", bootstyle="warning", command=self.controller.open_security_admin_dialog).grid(row=0, column=2, sticky=W, padx=(8, 0))
+        tb.Entry(self.security_frame, textvariable=self.security_status_var, state="readonly", width=FORM_INPUT_WIDTH).grid(row=0, column=1, sticky=EW)
+        self.open_security_tools_button = tb.Button(self.security_frame, text="Open Security Tools", bootstyle="warning", command=self.controller.open_security_admin_dialog)
+        self.open_security_tools_button.grid(row=0, column=2, sticky=W, padx=(8, 0))
 
-        tb.Label(
+        self.security_help_label = tb.Label(
             self.content_frame,
-            text="Security administration manages vault accounts, role rights, passwords, and the current session state for protected screens.",
+            text="Security administration now stays in the main Settings page. Only password and confirmation prompts remain modal for sensitive actions.",
             bootstyle=SECONDARY,
             justify=LEFT,
             wraplength=760,
-        ).pack(anchor=W, pady=(0, 10))
+        )
+        self.security_help_label.pack(anchor=W, pady=(0, 10))
+
+        self.security_admin_tools_frame = tb.Labelframe(self.content_frame, text=" Security Administration ", padding=14)
+        self.security_admin_tools_frame.columnconfigure(0, weight=0)
+        self.security_admin_tools_frame.columnconfigure(1, weight=1)
+
+        tb.Label(
+            self.security_admin_tools_frame,
+            text="Current Session",
+            bootstyle=SECONDARY,
+        ).grid(row=0, column=0, sticky=W, padx=(0, 12), pady=(0, 6))
+        tb.Label(
+            self.security_admin_tools_frame,
+            textvariable=self.security_admin_session_var,
+            justify=LEFT,
+            wraplength=640,
+        ).grid(row=0, column=1, sticky=W, pady=(0, 6))
+
+        tb.Label(
+            self.security_admin_tools_frame,
+            text="Manage vault accounts, rights, passwords, and persisted non-secure mode here without leaving the Settings page.",
+            bootstyle=SECONDARY,
+            justify=LEFT,
+            wraplength=760,
+        ).grid(row=1, column=0, columnspan=2, sticky=W, pady=(0, 12))
+
+        security_body = tb.Frame(self.security_admin_tools_frame)
+        security_body.grid(row=2, column=0, columnspan=2, sticky="nsew")
+        security_body.columnconfigure(0, weight=0)
+        security_body.columnconfigure(1, weight=1)
+        self.security_admin_tools_frame.rowconfigure(2, weight=1)
+
+        left_frame = tb.Labelframe(security_body, text=" Vaults ", padding=14)
+        left_frame.grid(row=0, column=0, sticky="nsw", padx=(0, 14))
+        right_frame = tb.Labelframe(security_body, text=" Vault Details ", padding=14)
+        right_frame.grid(row=0, column=1, sticky="nsew")
+        right_frame.columnconfigure(1, weight=1)
+
+        self.security_admin_vault_listbox = tk.Listbox(left_frame, height=14, exportselection=False)
+        self.security_admin_vault_listbox.pack(fill=BOTH, expand=True)
+        self.security_admin_vault_listbox.bind("<<ListboxSelect>>", self.controller.load_selected_security_vault)
+        tb.Label(
+            left_frame,
+            textvariable=self.security_admin_note_var,
+            bootstyle=SECONDARY,
+            justify=LEFT,
+            wraplength=220,
+        ).pack(anchor=W, pady=(10, 0))
+
+        form_row = 0
+        tb.Label(right_frame, text="Vault Name", bootstyle=SECONDARY).grid(row=form_row, column=0, sticky=W, padx=(0, 12), pady=4)
+        tb.Entry(right_frame, textvariable=self.security_admin_name_var).grid(row=form_row, column=1, sticky=EW, pady=4)
+        form_row += 1
+        tb.Label(right_frame, text="Role", bootstyle=SECONDARY).grid(row=form_row, column=0, sticky=W, padx=(0, 12), pady=4)
+        self.security_admin_role_combo = tb.Combobox(
+            right_frame,
+            textvariable=self.security_admin_role_var,
+            values=["general", "admin", "developer"],
+            state="readonly",
+            width=24,
+        )
+        self.security_admin_role_combo.grid(row=form_row, column=1, sticky=W, pady=4)
+        self.security_admin_role_combo.bind("<<ComboboxSelected>>", self.controller.on_security_role_selected)
+        form_row += 1
+        tb.Label(right_frame, text="Enabled", bootstyle=SECONDARY).grid(row=form_row, column=0, sticky=W, padx=(0, 12), pady=4)
+        tb.Checkbutton(right_frame, variable=self.security_admin_enabled_var, bootstyle="round-toggle").grid(row=form_row, column=1, sticky=W, pady=4)
+        form_row += 1
+        tb.Label(right_frame, text="Password Rule", bootstyle=SECONDARY).grid(row=form_row, column=0, sticky=W, padx=(0, 12), pady=4)
+        tb.Label(
+            right_frame,
+            textvariable=self.security_admin_password_note_var,
+            justify=LEFT,
+            wraplength=520,
+        ).grid(row=form_row, column=1, sticky=W, pady=4)
+        form_row += 1
+
+        self.security_admin_rights_frame = tb.Labelframe(right_frame, text=" Access Rights ", padding=12)
+        self.security_admin_rights_frame.grid(row=form_row, column=0, columnspan=2, sticky=EW, pady=(12, 0))
+        self.security_admin_rights_frame.columnconfigure(0, weight=1)
+        form_row += 1
+
+        security_mode_frame = tb.Labelframe(right_frame, text=" Security Mode ", padding=12)
+        security_mode_frame.grid(row=form_row, column=0, columnspan=2, sticky=EW, pady=(14, 0))
+        tb.Checkbutton(
+            security_mode_frame,
+            text="Persistently bypass protected-module authentication",
+            variable=self.security_admin_non_secure_var,
+            bootstyle="round-toggle",
+        ).pack(anchor=W)
+        tb.Label(
+            security_mode_frame,
+            text="This is a global persisted setting intended for controlled admin use only.",
+            bootstyle=SECONDARY,
+            justify=LEFT,
+            wraplength=540,
+        ).pack(anchor=W, pady=(6, 0))
+        form_row += 1
+
+        action_row = tb.Frame(right_frame)
+        action_row.grid(row=form_row, column=0, columnspan=2, sticky=EW, pady=(14, 0))
+        tb.Button(action_row, text="New Vault", bootstyle=SECONDARY, command=self.controller.start_new_security_vault).pack(side=LEFT)
+        tb.Button(action_row, text="Role Defaults", bootstyle=INFO, command=self.controller.apply_selected_security_role_defaults).pack(side=LEFT, padx=(8, 0))
+        tb.Button(action_row, text="Save Vault", bootstyle=SUCCESS, command=self.controller.save_current_security_vault).pack(side=LEFT, padx=(8, 0))
+        tb.Button(action_row, text="Save + Reset Password", bootstyle=INFO, command=lambda: self.controller.save_current_security_vault(reset_password=True)).pack(side=LEFT, padx=(8, 0))
+        tb.Button(action_row, text="Save Security Mode", bootstyle="warning", command=self.controller.save_current_security_mode).pack(side=LEFT, padx=(8, 0))
+        form_row += 1
+
+        secondary_actions = tb.Frame(right_frame)
+        secondary_actions.grid(row=form_row, column=0, columnspan=2, sticky=EW, pady=(10, 0))
+        tb.Button(secondary_actions, text="Rotate Password", bootstyle=INFO, command=self.controller.rotate_selected_security_vault_password).pack(side=LEFT)
+        tb.Button(secondary_actions, text="Delete Vault", bootstyle=DANGER, command=self.controller.delete_selected_security_vault).pack(side=LEFT, padx=(8, 0))
 
         self.developer_admin_frame = tb.Frame(self.content_frame)
         self.developer_admin_frame.columnconfigure(0, minsize=FORM_LABEL_COLUMN_MIN)
@@ -171,18 +357,116 @@ class SettingsManagerView:
             font=("Segoe UI", 9),
         ).grid(row=0, column=0, sticky=W, padx=(0, 12))
         tb.Entry(self.developer_admin_frame, textvariable=self.developer_admin_status_var, state="readonly", width=FORM_INPUT_WIDTH).grid(row=0, column=1, sticky=EW)
-        tb.Button(self.developer_admin_frame, text="Open Tools", bootstyle=INFO, command=self.controller.open_developer_admin_dialog).grid(row=0, column=2, sticky=W, padx=(8, 0))
+        tb.Button(self.developer_admin_frame, text="Open Internal Code Editor", bootstyle=INFO, command=lambda: self.dispatcher.secure_load("internal_code_editor")).grid(row=0, column=2, sticky=W, padx=(8, 0))
 
         self.developer_admin_note = tb.Label(
             self.content_frame,
-            text="Developer tools include repository controls, advanced dev update settings, and external module override management.",
+            text="Sign in from the File menu or Security tools to reveal privileged pages in the main navigation, including Internal Code Editor.",
             bootstyle=SECONDARY,
             justify=LEFT,
             wraplength=760,
         )
 
-        tb.Button(self.content_frame, text="Save Settings", bootstyle=SUCCESS, command=self.controller.save_settings).pack(pady=20)
+        self.developer_admin_tools_frame = tb.Labelframe(self.content_frame, text=" Developer & Admin Tools ", padding=14)
+        self.developer_admin_tools_frame.columnconfigure(1, weight=1)
+
+        tb.Label(self.developer_admin_tools_frame, text="Update Repository URL", bootstyle=SECONDARY).grid(row=0, column=0, sticky=W, padx=(0, 12), pady=2)
+        tb.Entry(self.developer_admin_tools_frame, textvariable=self.developer_admin_repo_var).grid(row=0, column=1, sticky=EW, pady=2)
+        tb.Label(self.developer_admin_tools_frame, text="Advanced Dev Updates", bootstyle=SECONDARY).grid(row=1, column=0, sticky=W, padx=(0, 12), pady=2)
+        tb.Checkbutton(self.developer_admin_tools_frame, variable=self.developer_admin_advanced_var, bootstyle="round-toggle").grid(row=1, column=1, sticky=W, pady=2)
+        tb.Label(self.developer_admin_tools_frame, text="External Override Trust", bootstyle=SECONDARY).grid(row=2, column=0, sticky=W, padx=(0, 12), pady=2)
+        tb.Checkbutton(self.developer_admin_tools_frame, variable=self.developer_admin_override_trust_var, bootstyle="round-toggle").grid(row=2, column=1, sticky=W, pady=2)
+        tb.Label(
+            self.developer_admin_tools_frame,
+            text="Override files can exist beside the app without executing. Enable trust only when you intentionally want the app to load those external Python files.",
+            bootstyle=SECONDARY,
+            justify=LEFT,
+            wraplength=620,
+        ).grid(row=3, column=0, columnspan=2, sticky=W, pady=(8, 10))
+
+        tb.Label(self.developer_admin_tools_frame, text="Override Files", bootstyle=SECONDARY).grid(row=4, column=0, sticky=W, padx=(0, 12), pady=(4, 0))
+        tb.Label(
+            self.developer_admin_tools_frame,
+            textvariable=self.external_modules_status_var,
+            bootstyle=SECONDARY,
+            justify=LEFT,
+            wraplength=620,
+        ).grid(row=4, column=1, sticky=W, pady=(4, 0))
+
+        developer_actions = tb.Frame(self.developer_admin_tools_frame)
+        developer_actions.grid(row=5, column=0, columnspan=2, sticky=EW, pady=(14, 0))
+        tb.Button(developer_actions, text="Save Privileged Settings", bootstyle=INFO, command=self.controller.save_current_developer_admin_settings).pack(side=LEFT, padx=(8, 0))
+
+        self.save_settings_button = tb.Button(self.content_frame, text="Save Settings", bootstyle=SUCCESS, command=self.controller.save_settings)
+        self.save_settings_button.pack(pady=20)
+        self.set_module_whitelist_editor_visible(False)
+        self.set_persistent_modules_editor_visible(False)
+        self.set_downtime_editor_visible(False)
+        self.set_security_admin_visible(False)
         self.set_developer_admin_visible(False)
+
+    def apply_section_mode(self):
+        if self.section_mode == "full":
+            self._hide_privileged_settings_sections()
+            return
+        if self.section_mode == "security_admin":
+            self.page_title_label.configure(text="Security Administration")
+            self._hide_settings_sections()
+            self.security_help_label.configure(text="Manage vault accounts, access rights, passwords, and persisted non-secure mode from this dedicated page.")
+            self.open_security_tools_button.configure(text="Unlock Security Admin")
+            self.open_security_tools_button.grid()
+            self.security_frame.pack(fill=X, pady=(5, 10))
+            self.security_help_label.pack(anchor=W, pady=(0, 10))
+            self.set_security_admin_visible(True)
+            return
+        if self.section_mode == "developer_admin":
+            self.page_title_label.configure(text="Developer Tools")
+            self._hide_settings_sections()
+            self.security_frame.pack(fill=X, pady=(5, 10))
+            self.developer_admin_note.configure(text="Privileged update and override settings now live on this dedicated page. Internal Code Editor remains a separate sidebar module.")
+            self.set_developer_admin_visible(True)
+            return
+
+    def _hide_privileged_settings_sections(self):
+        for widget in (
+            self.security_frame,
+            self.security_help_label,
+            self.security_admin_tools_frame,
+            self.developer_admin_frame,
+            self.developer_admin_note,
+            self.developer_admin_tools_frame,
+        ):
+            if widget.winfo_manager():
+                widget.pack_forget()
+
+    def _hide_settings_sections(self):
+        for widget in (
+            self.form_frame,
+            self.persistent_frame,
+            self.whitelist_frame,
+            self.whitelist_help_label,
+            self.whitelist_editor_frame,
+            self.persistent_help_label,
+            self.persistent_modules_editor_frame,
+            self.theme_controls,
+            self.theme_help_label,
+            self.transition_help_label,
+            self.extras_frame,
+            self.downtime_editor_frame,
+            self.save_settings_button,
+        ):
+            if widget.winfo_manager():
+                widget.pack_forget()
+
+        if self.section_mode == "security_admin":
+            for widget in (self.developer_admin_frame, self.developer_admin_note, self.developer_admin_tools_frame):
+                if widget.winfo_manager():
+                    widget.pack_forget()
+
+        if self.section_mode == "developer_admin":
+            for widget in (self.security_help_label, self.security_admin_tools_frame):
+                if widget.winfo_manager():
+                    widget.pack_forget()
 
     def build_form_fields(self, settings, theme_options):
         for child in self.form_frame.winfo_children():
@@ -265,6 +549,243 @@ class SettingsManagerView:
     def set_security_status(self, value):
         self.security_status_var.set(value)
 
+    def set_module_whitelist_editor_visible(self, visible):
+        if visible:
+            if not self.whitelist_editor_frame.winfo_manager():
+                self.whitelist_editor_frame.pack(fill=X, pady=(0, 12))
+            return
+        if self.whitelist_editor_frame.winfo_manager():
+            self.whitelist_editor_frame.pack_forget()
+
+    def is_module_whitelist_editor_visible(self):
+        return bool(self.whitelist_editor_frame.winfo_manager())
+
+    def configure_module_whitelist_editor(self, options, selected_modules):
+        self.module_whitelist_option_vars = {}
+        for child in self.whitelist_editor_list_frame.winfo_children():
+            child.destroy()
+        for display_name, module_name in options:
+            variable = tk.BooleanVar(value=module_name in selected_modules)
+            self.module_whitelist_option_vars[module_name] = variable
+            tb.Checkbutton(self.whitelist_editor_list_frame, text=display_name, variable=variable, bootstyle="round-toggle").pack(anchor=W, pady=4)
+
+    def clear_module_whitelist_editor_selection(self):
+        for variable in self.module_whitelist_option_vars.values():
+            variable.set(False)
+
+    def get_module_whitelist_editor_selection(self):
+        return [module_name for module_name, variable in self.module_whitelist_option_vars.items() if variable.get()]
+
+    def set_persistent_modules_editor_visible(self, visible):
+        if visible:
+            if not self.persistent_modules_editor_frame.winfo_manager():
+                self.persistent_modules_editor_frame.pack(fill=X, pady=(0, 12))
+            return
+        if self.persistent_modules_editor_frame.winfo_manager():
+            self.persistent_modules_editor_frame.pack_forget()
+
+    def is_persistent_modules_editor_visible(self):
+        return bool(self.persistent_modules_editor_frame.winfo_manager())
+
+    def configure_persistent_modules_editor(self, options, selected_modules):
+        self.persistent_module_option_vars = {}
+        for child in self.persistent_modules_editor_list_frame.winfo_children():
+            child.destroy()
+        for display_name, module_name in options:
+            variable = tk.BooleanVar(value=module_name in selected_modules)
+            self.persistent_module_option_vars[module_name] = variable
+            tb.Checkbutton(self.persistent_modules_editor_list_frame, text=display_name, variable=variable, bootstyle="round-toggle").pack(anchor=W, pady=4)
+
+    def clear_persistent_modules_editor_selection(self):
+        for variable in self.persistent_module_option_vars.values():
+            variable.set(False)
+
+    def get_persistent_modules_editor_selection(self):
+        return [module_name for module_name, variable in self.persistent_module_option_vars.items() if variable.get()]
+
+    def set_downtime_editor_visible(self, visible):
+        if visible:
+            if not self.downtime_editor_frame.winfo_manager():
+                self.downtime_editor_frame.pack(fill=X, pady=(0, 12))
+            return
+        if self.downtime_editor_frame.winfo_manager():
+            self.downtime_editor_frame.pack_forget()
+
+    def is_downtime_editor_visible(self):
+        return bool(self.downtime_editor_frame.winfo_manager())
+
+    def _sort_downtime_code_value(self, code_text):
+        return (int(code_text) if str(code_text).isdigit() else 10 ** 9, str(code_text))
+
+    def add_downtime_code_row(self, code_value="", label_value=""):
+        row = tb.Frame(self.downtime_editor_rows_frame)
+        row.pack(fill=X, pady=4)
+
+        code_entry = tb.Entry(row, width=8)
+        code_entry.insert(0, str(code_value))
+        code_entry.pack(side=LEFT)
+
+        label_entry = tb.Entry(row)
+        label_entry.insert(0, str(label_value))
+        label_entry.pack(side=LEFT, fill=X, expand=True, padx=(8, 0))
+
+        remove_button = tb.Button(row, text="Remove", bootstyle=DANGER, width=8)
+        remove_button.pack(side=RIGHT, padx=(8, 0))
+
+        row_record = {
+            "frame": row,
+            "code_entry": code_entry,
+            "label_entry": label_entry,
+        }
+
+        def remove_row():
+            if len(self.downtime_code_rows) <= 1:
+                code_entry.delete(0, END)
+                label_entry.delete(0, END)
+                return
+            row.destroy()
+            self.downtime_code_rows.remove(row_record)
+
+        remove_button.configure(command=remove_row)
+        self.downtime_code_rows.append(row_record)
+
+    def configure_downtime_codes_editor(self, current_codes):
+        for row_record in list(self.downtime_code_rows):
+            row_record["frame"].destroy()
+            self.downtime_code_rows.remove(row_record)
+        for code in sorted(current_codes, key=self._sort_downtime_code_value):
+            self.add_downtime_code_row(code, current_codes[code])
+        if not self.downtime_code_rows:
+            self.add_downtime_code_row()
+
+    def reset_downtime_codes_editor_defaults(self):
+        self.configure_downtime_codes_editor(DEFAULT_DT_CODE_MAP)
+
+    def get_downtime_code_rows(self):
+        return [
+            {
+                "code": record["code_entry"].get().strip(),
+                "label": record["label_entry"].get().strip(),
+            }
+            for record in self.downtime_code_rows
+        ]
+
+    def set_security_admin_visible(self, visible):
+        if visible:
+            if not self.security_admin_tools_frame.winfo_manager():
+                self.security_admin_tools_frame.pack(fill=BOTH, expand=True, pady=(0, 12))
+            return
+        if self.security_admin_tools_frame.winfo_manager():
+            self.security_admin_tools_frame.pack_forget()
+
+    def _build_security_right_controls(self, right_rows):
+        for child in self.security_admin_rights_frame.winfo_children():
+            child.destroy()
+        self.security_admin_right_vars = {}
+        for index, right_entry in enumerate(right_rows):
+            variable = tk.BooleanVar(value=False)
+            self.security_admin_right_vars[right_entry["key"]] = variable
+            row = tb.Frame(self.security_admin_rights_frame)
+            row.grid(row=index, column=0, sticky=EW, pady=3)
+            tb.Checkbutton(row, text=right_entry["label"], variable=variable, bootstyle="round-toggle").pack(anchor=W)
+            tb.Label(
+                row,
+                text=right_entry["description"],
+                bootstyle=SECONDARY,
+                justify=LEFT,
+                wraplength=540,
+            ).pack(anchor=W, padx=(26, 0))
+
+    def update_security_role_note(self):
+        current_role = self.security_admin_role_var.get().strip().lower() or "general"
+        limit = self._security_admin_state.get("role_limits", {}).get(current_role)
+        if current_role in {"admin", "developer"}:
+            self.security_admin_password_note_var.set(f"{current_role.title()} vaults require a password. Limit: {limit}.")
+            return
+        self.security_admin_password_note_var.set(f"General vaults can remain passwordless. Limit: {limit}.")
+
+    def apply_security_role_defaults(self):
+        current_role = self.security_admin_role_var.get().strip().lower() or "general"
+        defaults = set(self._security_admin_state.get("role_defaults", {}).get(current_role, []))
+        for key, variable in self.security_admin_right_vars.items():
+            variable.set(key in defaults)
+        self.update_security_role_note()
+
+    def populate_security_vault_list(self, vaults, preferred_name=None):
+        self.security_admin_vault_listbox.delete(0, tk.END)
+        target_index = None
+        session_name = self._security_admin_state.get("session_vault_name")
+        active_name = preferred_name or session_name
+        for index, vault_record in enumerate(vaults):
+            enabled_text = "enabled" if vault_record.get("enabled", True) else "disabled"
+            display_text = f"{vault_record['vault_name']} | {vault_record['role']} | {enabled_text}"
+            if vault_record.get("vault_name") == session_name:
+                display_text = f"{display_text} | active"
+            self.security_admin_vault_listbox.insert(tk.END, display_text)
+            if vault_record.get("vault_name") == active_name:
+                target_index = index
+        self.security_admin_note_var.set(f"Configured vaults: {len(vaults)}")
+        self.security_admin_vault_listbox.selection_clear(0, tk.END)
+        if target_index is None and vaults:
+            target_index = 0
+        if target_index is not None:
+            self.security_admin_vault_listbox.selection_set(target_index)
+
+    def get_selected_security_vault_name(self):
+        selection = self.security_admin_vault_listbox.curselection()
+        if not selection:
+            return ""
+        index = selection[0]
+        vaults = self._security_admin_state.get("vaults", [])
+        if index >= len(vaults):
+            return ""
+        return str(vaults[index].get("vault_name", ""))
+
+    def get_selected_security_vault_record(self):
+        selection = self.security_admin_vault_listbox.curselection()
+        if not selection:
+            return None
+        index = selection[0]
+        vaults = self._security_admin_state.get("vaults", [])
+        if index >= len(vaults):
+            return None
+        return vaults[index]
+
+    def clear_security_vault_selection(self):
+        self.security_admin_vault_listbox.selection_clear(0, tk.END)
+
+    def set_security_vault_form(self, vault_record=None):
+        self.security_admin_name_var.set(vault_record.get("vault_name", "") if vault_record else "")
+        self.security_admin_role_var.set(vault_record.get("role", "general") if vault_record else "general")
+        self.security_admin_enabled_var.set(bool(vault_record.get("enabled", True)) if vault_record else True)
+        rights_to_apply = set(vault_record.get("rights", [])) if vault_record else set(self._security_admin_state.get("role_defaults", {}).get("general", []))
+        for key, variable in self.security_admin_right_vars.items():
+            variable.set(key in rights_to_apply)
+        self.update_security_role_note()
+
+    def configure_security_admin_panel(self, state, preferred_name=None):
+        self._security_admin_state = state or {}
+        self.security_admin_session_var.set(self._security_admin_state.get("session_summary", "Locked"))
+        self.security_admin_non_secure_var.set(bool(self._security_admin_state.get("non_secure_mode", False)))
+        self._build_security_right_controls(self._security_admin_state.get("access_rights", []))
+        vaults = self._security_admin_state.get("vaults", [])
+        self.populate_security_vault_list(vaults, preferred_name=preferred_name)
+        self.set_security_vault_form(self.get_selected_security_vault_record())
+
+    def get_security_vault_payload(self, reset_password=False):
+        selected_rights = [key for key, variable in self.security_admin_right_vars.items() if variable.get()]
+        return {
+            "existing_name": self.get_selected_security_vault_name() or None,
+            "vault_name": self.security_admin_name_var.get().strip(),
+            "role": self.security_admin_role_var.get().strip().lower(),
+            "enabled": bool(self.security_admin_enabled_var.get()),
+            "rights": selected_rights,
+            "reset_password": bool(reset_password),
+        }
+
+    def get_security_non_secure_mode(self):
+        return bool(self.security_admin_non_secure_var.get())
+
     def set_developer_admin_status(self, value):
         self.developer_admin_status_var.set(value)
 
@@ -274,11 +795,28 @@ class SettingsManagerView:
                 self.developer_admin_frame.pack(fill=X, pady=(5, 10))
             if not self.developer_admin_note.winfo_manager():
                 self.developer_admin_note.pack(anchor=W, pady=(0, 10))
+            if not self.developer_admin_tools_frame.winfo_manager():
+                self.developer_admin_tools_frame.pack(fill=BOTH, expand=True, pady=(0, 12))
             return
         if self.developer_admin_frame.winfo_manager():
             self.developer_admin_frame.pack_forget()
         if self.developer_admin_note.winfo_manager():
             self.developer_admin_note.pack_forget()
+        if self.developer_admin_tools_frame.winfo_manager():
+            self.developer_admin_tools_frame.pack_forget()
+
+    def configure_developer_admin_tools(self, current_settings):
+        self.developer_admin_repo_var.set(current_settings.get("update_repository_url", ""))
+        self.developer_admin_advanced_var.set(bool(current_settings.get("enable_advanced_dev_updates", False)))
+        self.developer_admin_override_trust_var.set(bool(current_settings.get("enable_external_override_trust", False)))
+        self.external_modules_status_var.set(current_settings.get("external_modules_status", ""))
+
+    def get_developer_admin_settings_values(self):
+        return {
+            "update_repository_url": self.developer_admin_repo_var.get(),
+            "enable_advanced_dev_updates": bool(self.developer_admin_advanced_var.get()),
+            "enable_external_override_trust": bool(self.developer_admin_override_trust_var.get()),
+        }
 
     def set_theme_status(self, value):
         self.theme_status_var.set(value)
@@ -831,124 +1369,10 @@ class SettingsManagerView:
         tb.Button(actions, text="Apply Selection", bootstyle=SUCCESS, command=save_selection).pack(side=RIGHT, padx=(0, 8))
 
     def show_developer_admin_dialog(self, current_settings, module_names):
-        top = tb.Toplevel(title="Developer & Admin Tools")
-        top.geometry("900x760")
-        top.minsize(780, 640)
-
-        outer = tb.Frame(top, padding=0)
-        outer.pack(fill=BOTH, expand=True)
-        canvas = tk.Canvas(outer, highlightthickness=0)
-        canvas.pack(side=LEFT, fill=BOTH, expand=True)
-        scrollbar = tb.Scrollbar(outer, orient=VERTICAL, command=canvas.yview)
-        scrollbar.pack(side=RIGHT, fill=Y)
-        canvas.configure(yscrollcommand=scrollbar.set)
-
-        container = tb.Frame(canvas, padding=20)
-        container.columnconfigure(0, weight=1)
-        window_id = canvas.create_window((0, 0), window=container, anchor="nw")
-
-        def sync_scroll_region(_event=None):
-            canvas.configure(scrollregion=canvas.bbox("all"))
-
-        def sync_window_width(event):
-            canvas.itemconfigure(window_id, width=event.width)
-
-        container.bind("<Configure>", sync_scroll_region)
-        canvas.bind("<Configure>", sync_window_width)
-        self.dispatcher.bind_mousewheel_to_widget_tree(outer, canvas)
-        self.dispatcher.bind_mousewheel_to_widget_tree(canvas, canvas)
-        self.dispatcher.bind_mousewheel_to_widget_tree(scrollbar, canvas)
-
-        tb.Label(container, text="Developer & Admin Tools", font=("-size 14 -weight bold")).pack(anchor=W)
-        tb.Label(
-            container,
-            text="These controls are privileged. Repository configuration, advanced packaged dev updates, and external module overrides are managed here instead of the general settings form.",
-            bootstyle=SECONDARY,
-            justify=LEFT,
-            wraplength=820,
-        ).pack(anchor=W, pady=(4, 16))
-
-        settings_frame = tb.Labelframe(container, text=" Privileged Update Settings ", padding=14)
-        settings_frame.pack(fill=X, pady=(0, 12))
-        settings_frame.columnconfigure(1, weight=1)
-
-        repo_var = tk.StringVar(value=current_settings.get("update_repository_url", ""))
-        advanced_var = tk.BooleanVar(value=bool(current_settings.get("enable_advanced_dev_updates", False)))
-        override_trust_var = tk.BooleanVar(value=bool(current_settings.get("enable_external_override_trust", False)))
-        editor_source_var = tk.StringVar(value="")
-        editor_status_var = tk.StringVar(value="Choose a module to inspect or override.")
-
-        tb.Label(settings_frame, text="Update Repository URL", bootstyle=SECONDARY).grid(row=0, column=0, sticky=W, padx=(0, 12), pady=2)
-        tb.Entry(settings_frame, textvariable=repo_var).grid(row=0, column=1, sticky=EW, pady=2)
-        tb.Label(settings_frame, text="Advanced Dev Updates", bootstyle=SECONDARY).grid(row=1, column=0, sticky=W, padx=(0, 12), pady=2)
-        tb.Checkbutton(settings_frame, variable=advanced_var, bootstyle="round-toggle").grid(row=1, column=1, sticky=W, pady=2)
-        tb.Label(settings_frame, text="External Override Trust", bootstyle=SECONDARY).grid(row=2, column=0, sticky=W, padx=(0, 12), pady=2)
-        tb.Checkbutton(settings_frame, variable=override_trust_var, bootstyle="round-toggle").grid(row=2, column=1, sticky=W, pady=2)
-        tb.Label(
-            settings_frame,
-            text="Override files can exist beside the app without executing. Enable trust only when you intentionally want the app to load those external Python files.",
-            bootstyle=SECONDARY,
-            justify=LEFT,
-            wraplength=620,
-        ).grid(row=3, column=0, columnspan=2, sticky=W, pady=(8, 0))
-
-        editor_frame = tb.Labelframe(container, text=" External Module Overrides ", padding=14)
-        editor_frame.pack(fill=BOTH, expand=True)
-        editor_frame.columnconfigure(1, weight=1)
-        editor_frame.rowconfigure(2, weight=1)
-
-        module_var = tk.StringVar(value=module_names[0] if module_names else "")
-        tb.Label(editor_frame, text="Module", bootstyle=SECONDARY).grid(row=0, column=0, sticky=W, padx=(0, 12), pady=2)
-        selector = tb.Combobox(editor_frame, textvariable=module_var, values=module_names, state="readonly" if module_names else "disabled", width=36)
-        selector.grid(row=0, column=1, sticky=EW, pady=2)
-        tb.Label(editor_frame, text="Source", bootstyle=SECONDARY).grid(row=1, column=0, sticky=W, padx=(0, 12), pady=2)
-        tb.Label(editor_frame, textvariable=editor_source_var).grid(row=1, column=1, sticky=W, pady=2)
-
-        text_outer = tb.Frame(editor_frame)
-        text_outer.grid(row=2, column=0, columnspan=2, sticky="nsew", pady=(10, 0))
-        text_outer.rowconfigure(0, weight=1)
-        text_outer.columnconfigure(0, weight=1)
-        text_widget = tk.Text(text_outer, wrap="none", undo=True)
-        y_scroll = tb.Scrollbar(text_outer, orient=VERTICAL, command=text_widget.yview)
-        x_scroll = tb.Scrollbar(text_outer, orient="horizontal", command=text_widget.xview)
-        text_widget.configure(yscrollcommand=y_scroll.set, xscrollcommand=x_scroll.set)
-        text_widget.grid(row=0, column=0, sticky="nsew")
-        y_scroll.grid(row=0, column=1, sticky="ns")
-        x_scroll.grid(row=1, column=0, sticky="ew")
-
-        tb.Label(editor_frame, textvariable=editor_status_var, bootstyle=SECONDARY, justify=LEFT, wraplength=780).grid(row=3, column=0, columnspan=2, sticky=W, pady=(10, 0))
-
-        def load_selected_module(_event=None):
-            module_name = module_var.get().strip()
-            state = self.controller.get_external_module_editor_state(module_name)
-            editor_source_var.set(state.get("source", ""))
-            editor_status_var.set(state.get("status", ""))
-            text_widget.delete("1.0", END)
-            text_widget.insert("1.0", state.get("text", ""))
-
-        selector.bind("<<ComboboxSelected>>", load_selected_module)
-        load_selected_module()
-
-        action_row = tb.Frame(container)
-        action_row.pack(fill=X, pady=(14, 0))
-
-        def save_override():
-            module_name = module_var.get().strip()
-            if self.controller.save_external_module_override(module_name, text_widget.get("1.0", "end-1c")):
-                load_selected_module()
-
-        def remove_override():
-            module_name = module_var.get().strip()
-            if self.controller.remove_external_module_override(module_name):
-                load_selected_module()
-
-        def save_privileged_settings():
-            self.controller.save_developer_admin_settings(repo_var.get(), advanced_var.get(), override_trust_var.get())
-
-        tb.Button(action_row, text="Save Override", bootstyle=SUCCESS, command=save_override).pack(side=LEFT)
-        tb.Button(action_row, text="Remove Override", bootstyle="danger", command=remove_override).pack(side=LEFT, padx=(8, 0))
-        tb.Button(action_row, text="Save Privileged Settings", bootstyle=INFO, command=save_privileged_settings).pack(side=LEFT, padx=(8, 0))
-        tb.Button(action_row, text="Close", bootstyle=SECONDARY, command=top.destroy).pack(side=RIGHT)
+        self.show_info(
+            "Developer & Admin Tools",
+            "The legacy Settings-based override editor was removed. Sign in and use the Internal Code Editor from the main navigation instead.",
+        )
 
     def on_hide(self):
         return None

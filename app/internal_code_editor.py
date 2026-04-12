@@ -13,11 +13,11 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-from app.controllers.about_controller import AboutController
+from app.controllers.internal_code_editor_controller import InternalCodeEditorController
 
-__module_name__ = "About System"
-__version__ = "1.0.1"
+__module_name__ = "Internal Code Editor"
+__version__ = "0.1.0"
 
 
 def get_ui(parent, dispatcher):
-    return AboutController(parent, dispatcher)
+    return InternalCodeEditorController(parent, dispatcher)

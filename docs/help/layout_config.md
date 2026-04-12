@@ -16,6 +16,13 @@
 }
 ```
 
+Required top-level keys:
+
+- `template_path`
+- `header_fields`
+- `production_mapping`
+- `downtime_mapping`
+
 ## template_path
 
 - Type: string
@@ -65,13 +72,25 @@ Protected core fields currently expected by Logging Center:
 - `shift`
 - `hours`
 - `goal_mph`
+- `total_molds`
 
-`cast_date` is special. It stays readonly and is normally derived from the entered date.
+`cast_date` is special. It stays readonly, does not keep a default value, and is normally derived from the entered date.
 
 ## production_mapping
 
 - Type: object
 - Purpose: Maps production row fields into Excel.
+
+Required keys:
+
+- `start_row`
+- `columns`
+
+Required columns:
+
+- `shop_order`
+- `part_number`
+- `molds`
 
 Structure:
 
@@ -90,6 +109,18 @@ Structure:
 
 - Type: object
 - Purpose: Maps downtime row fields into Excel.
+
+Required keys:
+
+- `start_row`
+- `columns`
+
+Required columns:
+
+- `start`
+- `stop`
+- `code`
+- `cause`
 
 Structure:
 

@@ -67,7 +67,7 @@ from app.models.update_manager_model import (
 from app.views.update_manager_view import UpdateManagerView
 
 __module_name__ = "Update Manager"
-__version__ = "2.1.4"
+__version__ = "2.1.5"
 
 
 class UpdateManagerController:
@@ -188,6 +188,14 @@ class UpdateManagerController:
                 return option
         return self.module_payload_options[0] if self.module_payload_options else None
 
+    def _describe_module_payload_path(self, option):
+        if not option:
+            return "Payload updates are not available."
+        payload_paths = option.get("payload_paths") or [option.get("relative_path")]
+        if option.get("kind") == "module" and len(payload_paths) > 1:
+            return f"{option['relative_path']} + {len(payload_paths) - 1} related MVC file(s)"
+        return option["relative_path"]
+
     def _get_local_module_payload_metadata(self, option):
         override_path = None
         if option and option.get("kind") == "module" and self.dispatcher.are_external_module_overrides_enabled():
@@ -226,7 +234,7 @@ class UpdateManagerController:
         local_metadata = self._get_local_module_payload_metadata(option)
         option["module_name"] = local_metadata.get("module_name", option["module_name"])
         self.module_payload_name_var.set(option["module_name"])
-        self.module_payload_path_var.set(option["relative_path"])
+        self.module_payload_path_var.set(self._describe_module_payload_path(option))
         if not self._updates_configured():
             self.refresh_module_payload_summary(
                 remote_version="Not configured",
@@ -317,7 +325,7 @@ class UpdateManagerController:
         if option is not None:
             option["module_name"] = local_metadata.get("module_name", option["module_name"])
             self.module_payload_name_var.set(option["module_name"])
-            self.module_payload_path_var.set(option["relative_path"])
+            self.module_payload_path_var.set(self._describe_module_payload_path(option))
         self.module_payload_local_version_var.set(local_metadata.get("version", "Unknown"))
         if remote_version is not None:
             self.module_payload_remote_version_var.set(remote_version)
@@ -418,10 +426,10 @@ class UpdateManagerController:
             option["module_name"] = installed_metadata.get("module_name", option["module_name"])
         if option.get("kind") == "module":
             if self.dispatcher.is_external_module_override_trust_enabled():
-                install_note = "Reload that part of the app to verify the change. The app will now prefer this external module file automatically whenever trusted external overrides are enabled."
+                install_note = "Reload that part of the app to verify the change. The app will now prefer this external module payload automatically whenever trusted external overrides are enabled."
                 toast_message = f"Installed the {option['module_name']} payload. It will be used automatically when that module is reloaded."
             else:
-                install_note = "The override file was saved, but it will stay inactive until an admin enables external override trust in Developer & Admin tools."
+                install_note = "The override payload was saved, but it will stay inactive until an admin enables external override trust in Developer & Admin tools."
                 toast_message = f"Installed the {option['module_name']} payload, but it remains inactive until override trust is enabled."
         else:
             install_note = "The previous local file was backed up before restore."
@@ -494,7 +502,16 @@ class UpdateManagerController:
         return install_documentation_payload_option(option, payload_text)
 
     def _install_module_payload_option(self, option, remote_text=None):
-        payload_text = remote_text if remote_text is not None else self._fetch_remote_file(option["relative_path"])
+        payload_paths = option.get("payload_paths") or [option["relative_path"]]
+        if option.get("kind") == "module" and len(payload_paths) > 1:
+            payload_text = {}
+            for relative_path in payload_paths:
+                if relative_path == option["relative_path"] and remote_text is not None:
+                    payload_text[relative_path] = remote_text
+                else:
+                    payload_text[relative_path] = self._fetch_remote_file(relative_path)
+        else:
+            payload_text = remote_text if remote_text is not None else self._fetch_remote_file(option["relative_path"])
         return install_module_payload_option(option, payload_text, self.dispatcher.install_module_override)
 
     def apply_module_payload_update(self):

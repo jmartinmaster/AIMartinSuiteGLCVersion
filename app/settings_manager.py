@@ -16,7 +16,7 @@
 from app.controllers.settings_manager_controller import SettingsManagerController
 
 __module_name__ = "Settings Manager"
-__version__ = "1.0.1"
+__version__ = "1.0.2"
 
 
 def get_ui(parent, dispatcher):

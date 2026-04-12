@@ -1,9 +1,5 @@
 # Production Logging Center User Guide
 
-# Production Logging Center User Guide
-
-Production Logging Center is a floor-focused desktop application for recording Disamatic production, tracking downtime, managing standard production rates, and exporting the finished shift record into the plant Excel template.
-
 Production Logging Center is a floor-focused desktop application for recording Disamatic production, tracking downtime, managing standard production rates, and exporting the finished shift record into the plant Excel template.
 
 
@@ -50,13 +46,11 @@ The draft status area at the top of Production Log helps prevent lost work witho
 - Backup / Recovery provides the full restore workspace for recovery snapshots and JSON backups.
 - Delete Current Draft removes the active saved draft file.
 - The status line shows the latest draft name, current draft name, dirty/saved state, pending count, and recovery count.
-- Draft saves, imports, and exports now use toast notifications for routine success messages.
-
+- Draft saves, imports, and exports use toast notifications for routine success messages.
 
 If you load a draft or import Excel while unsaved changes exist, Logging Center asks for confirmation before replacing the current session.
 
 ## Excel Import And Export Notes
-
 
 - Export uses the template path stored in `layout_config.json`.
 - Export writes into the configured base export folder and, when date organization is enabled, uses `YYYY/MM MonthName` subfolders.

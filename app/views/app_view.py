@@ -16,7 +16,10 @@
 import tkinter as tk
 
 import ttkbootstrap as tb
-from ttkbootstrap.constants import BOTH, BOTTOM, HORIZONTAL, LEFT, RIGHT, SECONDARY, TOP, VERTICAL, W, X, Y
+from ttkbootstrap.constants import BOTH, BOTTOM, HORIZONTAL, LEFT, RIGHT, TOP, VERTICAL, W, X, Y
+
+__module_name__ = "Application Shell"
+__version__ = "2.1.5"
 
 
 class AppShellView:
@@ -26,6 +29,9 @@ class AppShellView:
         self.main_container = None
         self.sidebar = None
         self.nav_container = None
+        self.nav_top_container = None
+        self.nav_middle_container = None
+        self.nav_bottom_container = None
         self.right_container = None
         self.update_status_frame = None
         self.update_status_label = None
@@ -36,26 +42,43 @@ class AppShellView:
         self.canvas_window = None
         self.sidebar_title = None
         self.nav_buttons = {}
+        self.nav_button_labels = {}
+        self.sidebar_toggle_button = None
+        self.sidebar_collapsed = False
+        self.sidebar_expanded_width = 184
+        self.sidebar_collapsed_width = 60
 
     def build(self):
         self.main_container = tb.Frame(self.root, style="Martin.App.TFrame")
         self.main_container.pack(fill=BOTH, expand=True)
 
-        self.sidebar = tb.Frame(self.main_container, style="Martin.Sidebar.TFrame", width=184, padding=(8, 14, 8, 12))
+        self.sidebar = tb.Frame(self.main_container, style="Martin.Sidebar.TFrame", width=self.sidebar_expanded_width, padding=(8, 14, 8, 12))
         self.sidebar.pack(side=LEFT, fill=Y)
         self.sidebar.pack_propagate(False)
 
+        header_frame = tb.Frame(self.sidebar, style="Martin.Sidebar.TFrame")
+        header_frame.pack(fill=X)
+
         self.sidebar_title = tb.Label(
-            self.sidebar,
+            header_frame,
             text="LOGGING CENTER",
             style="Martin.SidebarTitle.TLabel",
             anchor=W,
             justify=LEFT,
         )
-        self.sidebar_title.pack(fill=X, pady=(6, 14), padx=(2, 2))
+        self.sidebar_title.pack(side=LEFT, fill=X, expand=True, pady=(6, 14), padx=(2, 2))
+
+        self.sidebar_toggle_button = tb.Button(header_frame, text="<", bootstyle="secondary-link", width=2, command=self.toggle_sidebar)
+        self.sidebar_toggle_button.pack(side=RIGHT, pady=(2, 10))
 
         self.nav_container = tb.Frame(self.sidebar, style="Martin.Sidebar.TFrame")
         self.nav_container.pack(fill=BOTH, expand=True)
+        self.nav_top_container = tb.Frame(self.nav_container, style="Martin.Sidebar.TFrame")
+        self.nav_top_container.pack(fill=X)
+        self.nav_middle_container = tb.Frame(self.nav_container, style="Martin.Sidebar.TFrame")
+        self.nav_middle_container.pack(fill=BOTH, expand=True, pady=(10, 10))
+        self.nav_bottom_container = tb.Frame(self.nav_container, style="Martin.Sidebar.TFrame")
+        self.nav_bottom_container.pack(side=BOTTOM, fill=X)
 
         self.right_container = tb.Frame(self.main_container, style="Martin.Content.TFrame", padding=(10, 10, 10, 10))
         self.right_container.pack(side=RIGHT, fill=BOTH, expand=True)
@@ -86,21 +109,55 @@ class AppShellView:
         self.apply_theme()
 
     def populate_navigation(self, items, load_callback, active_module_name=None):
-        for child in self.nav_container.winfo_children():
-            child.destroy()
+        for container in (self.nav_top_container, self.nav_middle_container, self.nav_bottom_container):
+            for child in container.winfo_children():
+                child.destroy()
         self.nav_buttons = {}
+        self.nav_button_labels = {}
 
-        for display_name, module_name in items:
-            button = tb.Button(
-                self.nav_container,
-                text=display_name,
-                style="Martin.Nav.TButton",
-                command=lambda current_module=module_name: load_callback(current_module),
-            )
-            button.pack(fill=X, pady=3)
-            self.nav_buttons[module_name] = button
+        if isinstance(items, dict):
+            grouped_items = items
+        else:
+            grouped_items = {"top": [], "middle": list(items), "bottom": []}
+
+        for group_name, container in (
+            ("top", self.nav_top_container),
+            ("middle", self.nav_middle_container),
+            ("bottom", self.nav_bottom_container),
+        ):
+            for display_name, module_name in grouped_items.get(group_name, []):
+                collapsed_label = self._collapse_label(display_name)
+                button = tb.Button(
+                    container,
+                    text=collapsed_label if self.sidebar_collapsed else display_name,
+                    style="Martin.Nav.TButton",
+                    command=lambda current_module=module_name: load_callback(current_module),
+                )
+                button.pack(fill=X, pady=3)
+                self.nav_buttons[module_name] = button
+                self.nav_button_labels[module_name] = (display_name, collapsed_label)
 
         self.set_active_navigation_button(active_module_name)
+
+    def toggle_sidebar(self):
+        self.set_sidebar_collapsed(not self.sidebar_collapsed)
+
+    def set_sidebar_collapsed(self, collapsed):
+        self.sidebar_collapsed = bool(collapsed)
+        self.sidebar.configure(width=self.sidebar_collapsed_width if self.sidebar_collapsed else self.sidebar_expanded_width)
+        if self.sidebar_title is not None:
+            self.sidebar_title.configure(text="LC" if self.sidebar_collapsed else "LOGGING CENTER", anchor="center" if self.sidebar_collapsed else W)
+        if self.sidebar_toggle_button is not None:
+            self.sidebar_toggle_button.configure(text=">" if self.sidebar_collapsed else "<")
+        for module_name, button in self.nav_buttons.items():
+            expanded_label, collapsed_label = self.nav_button_labels.get(module_name, (button.cget("text"), button.cget("text")))
+            button.configure(text=collapsed_label if self.sidebar_collapsed else expanded_label)
+
+    def _collapse_label(self, display_name):
+        words = [word for word in str(display_name).replace("/", " ").split() if word]
+        if not words:
+            return "?"
+        return "".join(word[0].upper() for word in words[:3]) or str(display_name)[:2].upper()
 
     def apply_theme(self):
         tokens = getattr(self.root, "_martin_theme_tokens", None) or {}
@@ -116,13 +173,14 @@ class AppShellView:
         if tokens:
             self.canvas.configure(background=tokens.get("canvas_bg", tokens.get("content_bg", self.root.cget("bg"))))
             self.root.configure(bg=tokens.get("app_bg", self.root.cget("bg")))
+        self.set_sidebar_collapsed(self.sidebar_collapsed)
         self.set_active_navigation_button()
 
     def set_active_navigation_button(self, module_name=None):
         for button_module_name, button in self.nav_buttons.items():
             button.configure(style="Martin.NavActive.TButton" if button_module_name == module_name else "Martin.Nav.TButton")
 
-    def configure_menu(self, open_callback, save_callback, export_callback, import_callback, help_callback, report_problem_callback, about_callback, exit_callback):
+    def configure_menu(self, open_callback, save_callback, export_callback, import_callback, login_callback, change_login_callback, logout_callback, help_callback, report_problem_callback, about_callback, exit_callback):
         menubar = tk.Menu(self.root)
         self.root.config(menu=menubar)
 
@@ -134,6 +192,12 @@ class AppShellView:
         file_menu.add_separator()
         file_menu.add_command(label="Exit", command=exit_callback)
         menubar.add_cascade(label="File", menu=file_menu)
+
+        security_menu = tk.Menu(menubar, tearoff=0)
+        security_menu.add_command(label="Sign In", command=login_callback)
+        security_menu.add_command(label="Change Login", command=change_login_callback)
+        security_menu.add_command(label="Sign Out", command=logout_callback)
+        menubar.add_cascade(label="Security", menu=security_menu)
 
         self.root.bind("<Control-o>", open_callback)
         self.root.bind("<Control-s>", save_callback)

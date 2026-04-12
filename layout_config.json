@@ -82,16 +82,6 @@
             "default": "240"
         },
         {
-            "id": "ret_south",
-            "label": "Ret South",
-            "row": 3,
-            "col": 6,
-            "width": 10,
-            "cell": "G3",
-            "export_enabled": true,
-            "import_enabled": true
-        },
-        {
             "id": "total_molds",
             "label": "Total Molds",
             "row": 2,
@@ -105,10 +95,21 @@
         {
             "id": "ret_north",
             "label": "Ret North",
+            "row": 2,
+            "col": 2,
+            "width": 10,
+            "cell": ""
+        },
+        {
+            "id": "start_time",
+            "label": "Start Time",
             "row": 3,
             "col": 0,
             "width": 10,
-            "cell": ""
+            "readonly": false,
+            "cell": "B4",
+            "export_enabled": true,
+            "import_enabled": true
         },
         {
             "id": "end_time",
@@ -116,20 +117,20 @@
             "row": 3,
             "col": 2,
             "width": 10,
+            "readonly": false,
             "cell": "A4",
             "export_enabled": true,
             "import_enabled": true
         },
         {
-            "id": "total_molds",
-            "label": "Total Molds",
-            "row": 2,
-            "col": 0,
+            "id": "ret_south",
+            "label": "Ret South",
+            "row": 3,
+            "col": 6,
             "width": 10,
-            "readonly": false,
-            "cell": "H27",
+            "cell": "G3",
             "export_enabled": true,
-            "import_enabled": false
+            "import_enabled": true
         }
     ],
     "production_mapping": {

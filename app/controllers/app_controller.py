@@ -27,6 +27,7 @@ from ttkbootstrap.constants import BOTH, BOTTOM, DANGER, INFO, LEFT, RIGHT, SUCC
 from ttkbootstrap.widgets import ToastNotification
 
 from app.app_logging import log_exception
+from app.security import gatekeeper
 from app.theme_manager import apply_readability_overrides, normalize_theme, resolve_base_theme
 from app.utils import external_path, local_or_resource_path, resource_path
 from app.models.app_model import AppModel
@@ -35,8 +36,20 @@ from app.app_platform import get_work_area_insets
 from app.security_service import SecurityService
 from app.update_state import UpdateCoordinator
 
+__module_name__ = "Dispatcher Core"
+__version__ = "2.1.5"
+
 ISSUE_REPORT_URL = "https://github.com/jmartinmaster/AIMartinSuiteGLCVersion/issues/new/choose"
-PROTECTED_MODULES = ["layout_manager", "settings_manager", "rate_manager", "update_manager"]
+PROTECTED_MODULES = ["layout_manager", "settings_manager", "rate_manager", "update_manager", "internal_code_editor", "security_admin", "developer_admin", "production_log_calculations"]
+HIDDEN_MODULES = ["internal_code_editor", "security_admin", "developer_admin", "production_log_calculations"]
+MODULE_ALLOWED_ROLES = {
+    "internal_code_editor": {"developer"},
+    "security_admin": {"admin", "developer"},
+    "developer_admin": {"developer"},
+    "production_log_calculations": {"developer"},
+}
+TOP_NAV_MODULE_NAMES = ["production_log", "layout_manager", "rate_manager", "recovery_viewer", "update_manager"]
+BOTTOM_NAV_MODULE_NAMES = ["help_viewer", "settings_manager", "about"]
 MODULE_PRELOAD_POLL_SECONDS = 1.0
 MANAGED_MODULE_NAMES = [
     "about",
@@ -44,15 +57,19 @@ MANAGED_MODULE_NAMES = [
     "app_platform",
     "data_handler",
     "data_handler_service",
+    "developer_admin",
     "dev_logging",
     "downtime_codes",
     "help_viewer",
+    "internal_code_editor",
     "layout_config_service",
     "layout_manager",
     "persistence",
     "production_log",
+    "production_log_calculations",
     "rate_manager",
     "recovery_viewer",
+    "security_admin",
     "security",
     "security_service",
     "settings_manager",
@@ -74,6 +91,7 @@ class Dispatcher:
         self.root.title(f"Production Logging Center - {window_version}")
         self.root.geometry("1000x600")
         self._update_status_clear_after_id = None
+        self.security_session_listeners = []
 
         modules_path = resource_path("app")
         external_modules_path = external_path("app")
@@ -88,7 +106,11 @@ class Dispatcher:
             rate_config=rate_config,
             settings_path=settings_path,
         )
-        self.security = SecurityService(PROTECTED_MODULES)
+        self.security = SecurityService(
+            PROTECTED_MODULES,
+            module_allowed_roles=MODULE_ALLOWED_ROLES,
+            hidden_modules=HIDDEN_MODULES,
+        )
         self.model.loaded_modules = {"main": self.main_module}
         self._configure_module_import_paths()
         self.model.runtime_settings = self.load_runtime_settings()
@@ -101,6 +123,7 @@ class Dispatcher:
         self.view = AppShellView(self.root, self.update_coordinator)
         self.view.build()
         self._sync_view_aliases()
+        gatekeeper.add_session_listener(self._handle_gatekeeper_session_change)
         self._setup_menu()
         self.pre_load_manifest()
         self._load_modules_list()
@@ -214,6 +237,56 @@ class Dispatcher:
         if bundled_base_dir not in sys.path:
             sys.path.append(bundled_base_dir)
 
+        importlib.invalidate_caches()
+
+        try:
+            app_package = importlib.import_module("app")
+            self._configure_package_search_path(app_package, self.external_modules_path, self.modules_path)
+            package_specs = [
+                ("app.controllers", os.path.join(self.external_modules_path, "controllers"), os.path.join(self.modules_path, "controllers")),
+                ("app.models", os.path.join(self.external_modules_path, "models"), os.path.join(self.modules_path, "models")),
+                ("app.views", os.path.join(self.external_modules_path, "views"), os.path.join(self.modules_path, "views")),
+            ]
+            for package_name, external_dir, bundled_dir in package_specs:
+                package_module = importlib.import_module(package_name)
+                self._configure_package_search_path(package_module, external_dir, bundled_dir)
+        except Exception:
+            pass
+
+    def _configure_package_search_path(self, package_module, external_dir, bundled_dir):
+        package_path = getattr(package_module, "__path__", None)
+        if package_path is None:
+            return
+
+        normalized_paths = []
+        for candidate in (external_dir, bundled_dir):
+            if not candidate or not os.path.isdir(candidate):
+                continue
+            normalized_candidate = os.path.abspath(candidate)
+            if normalized_candidate not in normalized_paths:
+                normalized_paths.append(normalized_candidate)
+
+        for existing_path in list(package_path):
+            normalized_existing_path = os.path.abspath(existing_path)
+            if normalized_existing_path not in normalized_paths:
+                normalized_paths.append(normalized_existing_path)
+
+        package_path[:] = normalized_paths
+
+    def _relative_python_path_to_module_name(self, relative_path):
+        normalized_relative_path = str(relative_path or "").replace("\\", "/").lstrip("/")
+        if not normalized_relative_path.endswith(".py"):
+            return None
+        return normalized_relative_path[:-3].replace("/", ".")
+
+    def _evict_imported_module_paths(self, relative_paths):
+        for relative_path in relative_paths:
+            module_path = self._relative_python_path_to_module_name(relative_path)
+            if not module_path:
+                continue
+            self.loaded_modules.pop(module_path.removeprefix("app."), None)
+            if module_path in sys.modules:
+                del sys.modules[module_path]
         importlib.invalidate_caches()
 
     def ensure_external_modules_package(self):
@@ -346,7 +419,11 @@ class Dispatcher:
         self.model.module_preload_thread = None
 
     def shutdown(self):
+        if self.active_module_instance is not None and hasattr(self.active_module_instance, "can_navigate_away"):
+            if not self.active_module_instance.can_navigate_away():
+                return
         self.stop_module_preloader()
+        gatekeeper.remove_session_listener(self._handle_gatekeeper_session_change)
         try:
             self.root.destroy()
         except Exception:
@@ -409,7 +486,15 @@ class Dispatcher:
 
     def install_module_override(self, module_name, module_text):
         self.ensure_external_modules_package()
-        target_path = self.model.write_module_override(module_name, module_text)
+        if isinstance(module_text, dict):
+            target_path, _written_paths = self.model.write_module_override_files(
+                module_text,
+                primary_relative_path=f"app/{module_name}.py",
+            )
+            self._evict_imported_module_paths(module_text.keys())
+        else:
+            target_path = self.model.write_module_override(module_name, module_text)
+            self._evict_imported_module_paths([f"app/{module_name}.py"])
         module = self.import_managed_module(module_name, force_fresh=True) if self.is_external_module_override_trust_enabled() else None
         return target_path, module
 
@@ -432,6 +517,9 @@ class Dispatcher:
             self.menu_save,
             self.menu_export,
             self.menu_import,
+            self.menu_login,
+            self.menu_change_login,
+            self.menu_logout,
             lambda: self.load_module("help_viewer"),
             self.open_issue_report_page,
             lambda: self.load_module("about"),
@@ -453,6 +541,8 @@ class Dispatcher:
     def menu_save(self, event=None):
         if hasattr(self.active_module_instance, "save_draft"):
             self.active_module_instance.save_draft()
+        elif hasattr(self.active_module_instance, "save_current_file"):
+            self.active_module_instance.save_current_file()
         else:
             self.show_toast("Action Unavailable", "Save action is not supported on this page.", WARNING)
 
@@ -467,12 +557,128 @@ class Dispatcher:
         if hasattr(self.active_module_instance, "import_from_excel_ui"):
             self.active_module_instance.import_from_excel_ui()
 
+    def menu_login(self):
+        try:
+            if not gatekeeper.authenticate(
+                required_right="security:manage_vaults",
+                parent=self.root,
+                reason="Sign in to reveal protected pages and tools.",
+                allowed_roles={"admin", "developer"},
+            ):
+                return
+        except Exception as exc:
+            log_exception("menu_login.error", exc)
+            messagebox.showerror("Security Error", f"Sign in failed: {exc}")
+            return
+
+        self.refresh_navigation()
+        self.refresh_active_module_access_state()
+        self.show_toast("Security", f"Signed in: {self.security.get_session_summary()}", SUCCESS)
+
+    def menu_change_login(self):
+        try:
+            if not gatekeeper.authenticate(
+                required_right="security:manage_vaults",
+                parent=self.root,
+                reason="Change the active admin or developer session.",
+                force_reauth=True,
+                allowed_roles={"admin", "developer"},
+            ):
+                return
+        except Exception as exc:
+            log_exception("menu_change_login.error", exc)
+            messagebox.showerror("Security Error", f"Change login failed: {exc}")
+            return
+
+        self.refresh_navigation()
+        self.refresh_active_module_access_state()
+        self._enforce_active_module_access()
+        self.show_toast("Security", f"Active login: {self.security.get_session_summary()}", SUCCESS)
+
+    def menu_logout(self):
+        previous_summary = self.security.get_session_summary()
+        gatekeeper.logout()
+        self.refresh_navigation()
+        self.refresh_active_module_access_state()
+        self._enforce_active_module_access()
+        self.show_toast("Security", f"Signed out: {previous_summary}", WARNING)
+
+    def add_security_session_listener(self, listener):
+        if callable(listener) and listener not in self.security_session_listeners:
+            self.security_session_listeners.append(listener)
+
+    def remove_security_session_listener(self, listener):
+        if listener in self.security_session_listeners:
+            self.security_session_listeners.remove(listener)
+
+    def _handle_gatekeeper_session_change(self, event_name):
+        try:
+            if not self.root.winfo_exists():
+                return
+        except Exception:
+            return
+        self.root.after(0, lambda: self._broadcast_security_session_change(event_name))
+
+    def _broadcast_security_session_change(self, event_name):
+        self.refresh_navigation()
+        self.refresh_active_module_access_state()
+        self._enforce_active_module_access()
+        for listener in list(self.security_session_listeners):
+            try:
+                listener(event_name)
+            except Exception as exc:
+                log_exception("dispatcher.security_session_listener", exc)
+
+    def _enforce_active_module_access(self):
+        active_module_name = self.active_module_name
+        if not active_module_name:
+            return
+        if not self.security.requires_authentication(active_module_name):
+            return
+        if self.security.can_access_module(active_module_name):
+            return
+        self.load_module("production_log", use_transition=False, ensure_authorized=False)
+
+    def _refresh_module_access_state_for_instance(self, module_instance):
+        if module_instance is None:
+            return
+        refresh_method = getattr(module_instance, "refresh_session_state", None)
+        if callable(refresh_method):
+            try:
+                refresh_method()
+            except Exception as exc:
+                log_exception("refresh_active_module_access_state.refresh_session_state", exc)
+            return
+        for method_name in ("refresh_security_status", "refresh_developer_admin_status", "refresh_external_modules_status"):
+            refresh_method = getattr(module_instance, method_name, None)
+            if callable(refresh_method):
+                try:
+                    refresh_method()
+                except Exception as exc:
+                    log_exception(f"refresh_active_module_access_state.{method_name}", exc)
+
+    def refresh_active_module_access_state(self):
+        seen_instances = set()
+
+        active_module = self.active_module_instance
+        if active_module is not None:
+            seen_instances.add(id(active_module))
+            self._refresh_module_access_state_for_instance(active_module)
+
+        for session in self.persistent_module_instances.values():
+            module_instance = session.get("instance")
+            if module_instance is None or id(module_instance) in seen_instances:
+                continue
+            seen_instances.add(id(module_instance))
+            self._refresh_module_access_state_for_instance(module_instance)
+
     def pre_load_manifest(self):
         self._sync_managed_source_signature(force=True)
         self.start_module_preloader()
 
     def _load_modules_list(self):
-        self.view.populate_navigation(self.get_navigation_modules(), self.secure_load, self.active_module_name)
+        navigation_groups = self.get_navigation_groups()
+        self.view.populate_navigation(navigation_groups, self.secure_load, self.active_module_name)
 
     def refresh_navigation(self):
         self._load_modules_list()
@@ -492,7 +698,7 @@ class Dispatcher:
             return
 
         self.refresh_navigation()
-        self.load_module(module_name)
+        self.load_module(module_name, ensure_authorized=False)
 
     def notify_non_secure_mode_state(self):
         if self.security.is_non_secure_mode_enabled():
@@ -505,6 +711,19 @@ class Dispatcher:
     def get_navigation_modules(self):
         visible_modules = self.get_user_facing_modules(apply_whitelist=True)
         return [(self.get_module_display_name(module_name), module_name) for module_name in visible_modules]
+
+    def get_navigation_groups(self):
+        grouped_items = {"top": [], "middle": [], "bottom": []}
+        visible_modules = self.get_user_facing_modules(apply_whitelist=True)
+        for module_name in visible_modules:
+            entry = (self.get_module_display_name(module_name), module_name)
+            if module_name in TOP_NAV_MODULE_NAMES:
+                grouped_items["top"].append(entry)
+            elif module_name in BOTTOM_NAV_MODULE_NAMES:
+                grouped_items["bottom"].append(entry)
+            else:
+                grouped_items["middle"].append(entry)
+        return grouped_items
 
     def get_hidden_module_names(self):
         return {
@@ -528,7 +747,37 @@ class Dispatcher:
         }
 
     def get_module_display_name(self, module_name):
+        custom_names = {
+            "security_admin": "Security Admin",
+            "developer_admin": "Developer Tools",
+            "production_log_calculations": "Production Log Calculations",
+        }
+        if module_name in custom_names:
+            return custom_names[module_name]
         return str(module_name).replace("_", " ").title()
+
+    def notify_production_log_calculation_settings_changed(self):
+        seen_instances = set()
+
+        active_module = self.active_module_instance
+        if active_module is not None and hasattr(active_module, "on_calculation_settings_changed"):
+            seen_instances.add(id(active_module))
+            try:
+                active_module.on_calculation_settings_changed()
+            except Exception as exc:
+                log_exception("notify_production_log_calculation_settings_changed.active", exc)
+
+        for session in self.persistent_module_instances.values():
+            module_instance = session.get("instance")
+            if module_instance is None or id(module_instance) in seen_instances:
+                continue
+            if not hasattr(module_instance, "on_calculation_settings_changed"):
+                continue
+            seen_instances.add(id(module_instance))
+            try:
+                module_instance.on_calculation_settings_changed()
+            except Exception as exc:
+                log_exception("notify_production_log_calculation_settings_changed.persistent", exc)
 
     def get_user_facing_modules(self, apply_whitelist=False):
         hidden_modules = self.get_hidden_module_names()
@@ -538,10 +787,11 @@ class Dispatcher:
         for module_name in self.get_bundled_module_names():
             if module_name in hidden_modules:
                 continue
-            if whitelist and module_name not in whitelist:
-                continue
             if not self.security.is_module_visible(module_name):
                 continue
+            if whitelist and module_name not in whitelist:
+                if not self.security.can_access_module(module_name):
+                    continue
             if module_name not in visible_modules:
                 visible_modules.append(module_name)
 
@@ -640,12 +890,32 @@ class Dispatcher:
             self._set_window_alpha(1.0)
             self.model.transition_in_progress = False
 
-    def load_module(self, module_name, use_transition=True):
+    def load_module(self, module_name, use_transition=True, ensure_authorized=True):
+        if ensure_authorized and self.security.requires_authentication(module_name):
+            try:
+                success = self.security.authenticate_module(
+                    module_name,
+                    parent=self.root,
+                    reason=f"Unlock {self.get_module_display_name(module_name)} to continue.",
+                )
+                if success is False:
+                    self.refresh_navigation()
+                    return
+                self.refresh_navigation()
+            except Exception as exc:
+                log_exception(f"load_module.auth.{module_name}", exc)
+                messagebox.showerror("Security Error", f"Auth failed: {exc}")
+                return
+
         def perform_load():
             self._sync_managed_source_signature(force=False)
             previous_module_name = self.active_module_name
             previous_module_instance = self.active_module_instance
             previous_module_frame = self.active_module_frame
+
+            if previous_module_instance is not None and hasattr(previous_module_instance, "can_navigate_away"):
+                if not previous_module_instance.can_navigate_away():
+                    return
 
             if previous_module_instance is not None:
                 if self.is_module_persistent(previous_module_name):

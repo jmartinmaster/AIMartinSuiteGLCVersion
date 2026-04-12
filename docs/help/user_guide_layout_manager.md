@@ -2,6 +2,8 @@
 
 Use Layout Manager to control how the Production Log header and Excel mapping behave.
 
+Layout Manager has two editor tabs: Block View and JSON Editor.
+
 - Block View is the safer editor for moving fields and updating mapping values.
 - JSON Editor is the advanced editor for full-file changes.
 - Reload Current reloads the editable local layout file.
@@ -10,6 +12,9 @@ Use Layout Manager to control how the Production Log header and Excel mapping be
 - Validate JSON checks the current layout before you save it.
 - Update Preview refreshes the live grid preview of the current header layout.
 - Save to File writes the working layout to the local `layout_config.json`.
+- Saving also keeps recovery copies under `data/backups/layouts`.
+- Protected header field ids are `date`, `cast_date`, `shift`, `hours`, `goal_mph`, and `total_molds`.
+- `Ctrl+S` triggers save.
 
 Changes made here affect both the Production Log form layout and the Excel import/export mapping.
 

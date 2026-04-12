@@ -4,6 +4,22 @@ This changelog tracks the main branch release line for Production Logging Center
 
 Version headings below are aligned to the current `2.x` release line used by Dispatcher Core. Earlier work has been grouped into practical release milestones so the shipped feature history is easier to follow without rewriting older module version markers.
 
+## [2.1.5] - 2026-04-12
+
+### Changed
+
+- Promoted Dispatcher Core to `2.1.5` as the current source-side development checkpoint for the privileged-navigation, Production Log refresh, and grouped module-payload pass.
+- Added dedicated protected sidebar pages for `Security Admin`, `Developer Tools`, `Internal Code Editor`, and `Production Log Calculations`, with File-menu sign-in and gatekeeper session propagation through the dispatcher shell.
+- Updated Settings Manager to keep general application settings in the standard page while exposing security and developer administration through dedicated privileged surfaces.
+- Refined Production Log pending-draft behavior so delete confirmation stays parented above the selector window, refresh can redraw header-derived values, and Start Time / End Time remain exportable computed header fields driven by Shift and Hours.
+- Expanded Update Manager and external override handling so module payload installs can stage grouped MVC file sets while still presenting as a single module payload.
+- Refreshed Help Center documentation and module version markers to match the current shell, security, updater, and Production Log behavior.
+
+### Notes
+
+- `2.1.5` is an odd patch development checkpoint and is not intended to be treated as a packaged stable-update target.
+- Known follow-up from packaged Ubuntu validation: `production_log_calculations` currently fails to load because `app.models.production_log_calculations_model` imports `DEFAULT_CALCULATION_SETTINGS` from `app.models.production_log_model`, but that constant is not present in the current module.
+
 ## [2.1.4] - 2026-04-11
 
 ### Changed

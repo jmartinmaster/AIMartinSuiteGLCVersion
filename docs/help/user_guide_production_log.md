@@ -18,10 +18,10 @@ Use Production Log to enter the current shift data.
 - Calculate All updates efficiency for the current shift.
 - Save Draft stores the current work in `data/pending`.
 - Overwriting an existing draft keeps a recovery snapshot in `data/pending/history`.
-- The draft status strip keeps quick actions for resuming the latest draft, opening the pending-draft list, and launching the full Backup / Recovery viewer.
-- Export Excel writes the current session into the configured production template and can immediately open the workbook in the default application for review.
+- The draft status strip keeps quick actions for resuming the latest draft, opening the pending-draft list, refreshing from the latest saved draft, and deleting the current saved draft.
+- Save and Open writes the current session into the configured production template and can immediately open the workbook in the default application for review.
 - Open Last Export reopens the most recent exported workbook so it can be checked again before printing.
-- Print Last Export sends the reviewed workbook to the default application print action when you are ready to print it.
+- Print Last Export sends the reviewed workbook to the default application print action on Windows. On non-Windows systems it opens the workbook for manual printing in the default application.
 - Import Excel loads an existing workbook back into the form.
 
 ## Draft Recovery Notes
