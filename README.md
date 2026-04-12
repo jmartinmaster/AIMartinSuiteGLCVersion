@@ -1,136 +1,403 @@
+# Production Logging Center — GLC Edition
 
-Production Logging Center is a desktop production support application for GLC operators. It is built with Python, Tkinter, and ttkbootstrap and can be packaged as a Windows executable or an Ubuntu Debian package.
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
+[![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
+
+**Production Logging Center (GLC Edition)** is a desktop production support application for GLC operators. Built with Python, Tkinter, and `ttkbootstrap`, it provides a modern, high-DPI–aware interface for tracking production logs, managing rates, and handling shift transitions with robust data-safety features. It can be run directly from source, distributed as a standalone Windows `.exe`, or installed as an Ubuntu Debian package.
+
+---
+
+## Table of Contents
+
+1. [Overview](#overview)
+2. [Key Features and Modules](#key-features-and-modules)
+3. [Working Modes](#working-modes)
+4. [Quick Start](#quick-start)
+5. [Build Targets](#build-targets)
+6. [Configuration, Data Files, and Safety](#configuration-data-files-and-safety)
+7. [Update Manager and Versioning](#update-manager-and-versioning)
+8. [Troubleshooting](#troubleshooting)
+9. [Repository Structure](#repository-structure)
+10. [Contributing and Development Notes](#contributing-and-development-notes)
+11. [License](#license)
+
+---
+
+## Overview
+
+Production Logging Center tracks shop orders, part numbers, molds, and downtime across shifts. Operators enter production data, balance downtime, and export workbooks for review. Developers and administrators can manage layout configuration, rate standards, security settings, and application updates from within the application shell.
+
+The application shell is built around a dispatcher core (`launcher.py`) that hosts independent modules. Entry point: `main.py` calls `run_application` from `launcher.py`.
+
+---
+
+## Key Features and Modules
+
+### Core Modules
+
+| Module | Description |
+|---|---|
+| **Production Log** | Track shop orders, part numbers, and molds per shift. Includes draft auto-save, recovery snapshots, Excel export/import, and a live Ghost Time footer indicator. |
+| **Rate Manager** | Manage production rate standards used for performance tracking. |
+| **Layout Manager** | Configure UI field mappings dynamically via `layout_config.json`. |
+| **Recovery Viewer** | Browse and restore draft snapshots and configuration backups without using the file explorer. |
+| **Settings Manager** | Manage themes, export paths, production defaults, downtime-code labels, and per-module persistence. Separates general settings from admin-only Developer & Admin tools. |
+| **Update Manager** | Check for new releases, download versioned EXEs, and install selected module payload updates without rebuilding the full executable. |
+| **Help Viewer** | In-app Help Center with top-level guide chips, Hidden Modules reference, and module-specific User Guide sections. |
+| **About** | Application version information and bundled GPL license access. |
+
+### Notable Capabilities
+
+- **Ghost Time Indicator** — live color-coded footer: red for missing time, green for extra time.
+- **Balance Downtime** — fills missing downtime proportionally across existing rows before export; adds a fallback adjustment row when needed.
+- **Atomic Writes** — `settings.json`, `layout_config.json`, and `rates.json` write through an atomic save path to prevent data corruption.
+- **Rotated Backups** — each config file keeps a `.bak` copy and a rotated history under `data/backups/`.
+- **Theme Support** — includes the Martin Modern Light industrial preset with readability overrides.
+- **Module Preloader** — background warm-up in source mode so page navigation avoids repeated import work; disk changes invalidate the cache automatically.
+- **External Module Overrides** — per-file `.py` overrides beside the EXE activate automatically when admin-controlled override trust is enabled.
+
+---
+
+## Working Modes
+
+### Source / Python Mode
+
+Runs directly from the repository. Intended for developers, testers, and local rebuild workflows.
+
+- Full access to repository source, docs, templates, and build tooling.
+- Can rebuild with `build.py` and PyInstaller.
+- Update Manager can hand off to a downloaded packaged EXE for testing.
+
+### Packaged EXE Mode
+
+Runs as a standalone Windows executable built by PyInstaller. Intended for normal operator use outside a Python environment.
+
+- Bundles help documentation and `LICENSE.txt` for in-app access.
+- Uses the Update Manager for release checks and module payload installs.
+- Versioned EXE filenames allow a newer build to download beside the current one and launch separately.
+- Archives up to 10 older versioned EXEs under `dist/Old_exe/`.
+- External Python override files can be staged beside the EXE and only activate when an admin enables override trust.
+
+### Installed Ubuntu Package Mode
+
+Runs from a Debian package installed on Ubuntu (or via WSL). Intended for Linux deployments.
+
+- Application bundle placed under `/opt/production-logging-center-glc`.
+- User-writable runtime files stored under `$XDG_DATA_HOME/production-logging-center-glc` (defaults to `~/.local/share/production-logging-center-glc` when `XDG_DATA_HOME` is not set).
+- Runtime files include editable JSON files, pending drafts, backups, security data, and external override files.
+
+---
+
+## Quick Start
+
+### For Operators — Windows (Packaged EXE)
+
+1. Download the latest versioned `.exe` from the `dist/` folder in the repository (e.g., `Production Logging Center_GLC_v2.1.4.exe`).
+2. Place it in a dedicated folder alongside any existing `settings.json`, `layout_config.json`, and `rates.json` files if you have them.
+3. Double-click the `.exe` to launch. The application will create `settings.json` on first run if it does not exist.
+4. Use **Settings Manager → Export Path** to configure where workbooks are saved.
+5. Use **Update Manager** to check for and apply available updates.
+
+### For Operators — Ubuntu (Debian Package)
+
+1. Obtain the `.deb` package (e.g., `production-logging-center-glc_2.1.4_amd64.deb`) from `dist/ubuntu/`.
+2. Install it:
+   ```bash
+   sudo dpkg -i production-logging-center-glc_2.1.4_amd64.deb
+   sudo apt-get install -f   # resolve any missing dependencies
+   ```
+3. Launch from the application menu or run:
+   ```bash
+   production-logging-center-glc
+   ```
+
+### For Developers — Running from Source
+
+**Prerequisites:** Python 3.10+, `ttkbootstrap`, `Pillow`, `openpyxl`.
+
+```bash
+# Create and activate a virtual environment
+python -m venv .venv
+# Windows
+.venv\Scripts\activate
+# Linux / macOS
+source .venv/bin/activate
+
+# Install dependencies
+pip install ttkbootstrap Pillow openpyxl
+
+# Run the application
+python main.py
+
+# Open a specific module directly (useful for debugging)
+python launcher.py --module production_log
+```
+
+Supported `--module` values: `about`, `help_viewer`, `layout_manager`, `production_log`, `rate_manager`, `recovery_viewer`, `settings_manager`, `update_manager`.
+
+---
 
 ## Build Targets
 
-- `build.py` detects the host OS and supports two artifact targets: Windows `.exe` and Ubuntu `.deb`.
-- `python build.py --index-only` refreshes a local Python symbol index without packaging anything.
-- On Windows, running `python build.py` in an interactive terminal now prompts for `Windows (.exe)` or `Ubuntu (.deb via WSL)`.
-- Non-interactive invocations still default to the host-native target so existing automated rebuild flows keep working.
-- `python build.py --target windows` forces the Windows EXE path.
-- `python build.py --target ubuntu` forces the Ubuntu packaging path.
-- `python build.py --target ubuntu --wsl-distro Ubuntu-24.04` uses a specific WSL distro when launching the Ubuntu build from Windows.
-- On mixed Windows/WSL setups, Ubuntu packaging prefers a Linux venv at `.venv-linux/bin/python`, then `.venv/bin/python`, then the distro `python3`.
-- Ubuntu packaging expects a Linux Python runtime with `Pillow`, `PyInstaller`, `openpyxl`, `ttkbootstrap`, and `tkinter` available, plus `dpkg-deb` in the selected WSL or Ubuntu environment.
-- A repeatable WSL setup is `python3 -m venv .venv-linux` followed by `.venv-linux/bin/python -m pip install Pillow PyInstaller openpyxl ttkbootstrap`.
-- When the repository lives on a Windows drive such as `D:\`, the selected WSL distro must also expose that drive under `/mnt/<drive-letter>` or the Ubuntu build will stop with a prerequisite error.
-- Ubuntu artifacts are written under `dist/ubuntu/`.
+The project uses `build.py` for all packaging. Running `build.py` in an interactive terminal on Windows prompts you to choose a target; non-interactive runs default to the host-native target.
 
-## Python Symbol Index
+### Windows — Standalone EXE
 
-- The repository can generate a local symbol index at `build/symbol-index/`.
-- `build/symbol-index/symbol-index.json` is the machine-readable manifest.
-- `build/symbol-index/symbol-index.md` is the human-readable lookup file.
-- Normal `build.py` packaging runs refresh the index before packaging starts.
-- The local VS Code task `Refresh Python Symbol Index` runs the same refresh command without building an EXE or DEB.
-- The indexed symbol scope includes module-level variables/constants, dataclass fields, class attributes, and `self.<name>` instance attributes discovered by static analysis.
-- Local variables inside function bodies are intentionally excluded so the index stays focused enough to search quickly.
+```bash
+python build.py --target windows
+```
 
-## Two Working Modes
+Produces a versioned `.exe` in `dist/` (e.g., `Production Logging Center_GLC_v2.1.4.exe`). The current EXE is kept in `dist/` and older copies are archived to `dist/Old_exe/` (up to 10 kept).
 
-The project currently operates in two different forms:
+### Ubuntu — Debian Package
 
-- Source / Python mode: the app is run from the Python files in the repository.
-- Packaged EXE mode: the app is run from the built standalone Windows executable.
+**From a Linux host (or inside WSL directly):**
 
-These two forms do not have identical behavior. The Python version has access to the repository files and build tooling, while the EXE version is a packaged release with a more limited update path.
+```bash
+python build.py --target ubuntu
+```
 
+**From Windows using a specific WSL distro:**
 
-## Shared Capabilities
+```bash
+python build.py --target ubuntu --wsl-distro Ubuntu-24.04
+```
 
-- Production Log workflow with draft save and reopen support.
-- Production Log tracks shop orders, part numbers, and molds during shift entry.
-- Production Log keeps a Total Molds header field in sync with the current production rows and includes it in workbook export.
-- Automatic recovery snapshots for overwritten drafts.
-- Excel export and import support for production sheet work.
-- A footer-level Balance Downtime action that fills in missing downtime proportionally across existing downtime rows before export, with a fallback adjustment row when needed.
-- Production and downtime sections keep one blank row open automatically while you enter the current shift.
-- Exported workbooks can be opened in the default application for review, and the latest export can then be printed from the app once it has been checked.
-- A derived target-time field in the header plus a live color-coded Ghost Time indicator in the footer so operators can see missing time in red and extra time in green while entering the sheet.
-- Workbook-linked summary header import without overwriting formula cells on export.
-- Layout Manager and Rate Manager tools.
-- Shared viewport scrolling keeps wider modules usable in narrower windows instead of clipping the right side of the page.
-- Source mode now keeps a background module preloader warm so navigation avoids repeated import work, while disk changes still invalidate the cache and load fresh code on the next module activation.
-- Backup / Recovery viewer for browsing and restoring draft snapshots and configuration backups.
-- Settings management for export paths, theme selection, production defaults, editable downtime code labels, and per-module live-session persistence.
-- Settings Manager now separates general settings from admin-only Developer & Admin tools for repository control, advanced packaged dev updates, external module override trust, and external module override management.
-- Configurable page-transition fades, including the ability to tune the duration or disable them.
-- Configurable toast notifications for non-blocking status messages.
-- Automatic per-file external module overrides when a matching `.py` file exists in the external override app folder and admin-controlled override trust is enabled.
-- In-app help viewer and About screen.
-- Help Center navigation now includes top-level guide chips, a Hidden Modules reference, and smaller User Guide section chips for module-specific reading.
-- Bundled GPL license access from Help Center and About.
-- Theme support with readability overrides, including the Martin Modern Light industrial preset for the shared shell.
-- Rotated backup copies for settings, layout, and rate file saves.
-- Hard-coded application icon assets with documented replacement steps.
+Artifacts are written to `dist/ubuntu/`.
 
+**WSL prerequisites:**
 
-## Data Safety And Recovery
+```bash
+# Inside the WSL distro, set up a Linux venv
+python3 -m venv .venv-linux
+.venv-linux/bin/python -m pip install Pillow PyInstaller openpyxl ttkbootstrap
+# Also ensure dpkg-deb is available (standard on Ubuntu)
+```
 
-- `settings.json`, `layout_config.json`, and `rates.json` now save through an atomic write path instead of direct overwrite-only writes.
-- Each of those files keeps a local `.bak` recovery copy plus rotated recovery history under `data/backups`.
-- Production Log drafts continue to save in `data/pending`, and overwritten drafts now keep recovery snapshots under `data/pending/history`.
-- Backup / Recovery gives operators a single place to restore saved drafts, recovery snapshots, and JSON backup copies without using Windows Explorer.
+> **Note:** If the repository lives on a Windows drive (e.g., `D:\`), the WSL distro must expose that drive under `/mnt/<drive-letter>` (e.g., `/mnt/d`), or the Ubuntu build will fail with a prerequisite error.
 
+Ubuntu packaging prefers the Linux venv in this order: `.venv-linux/bin/python` → `.venv/bin/python` → distro `python3`.
 
-## Compatibility Notes
+### Symbol Index Only
 
-- The current `layout_config.json` routes `target_time` through `header_fields`. Older local builds from before the config-driven Target Time change may not present that field correctly if they reuse the newer layout file.
-- The current `settings.json` includes `persistent_modules`. Older builds ignore that key safely, but they do not preserve module state across navigation.
+Refresh the local Python symbol index without building any artifact:
 
+```bash
+python build.py --index-only
+```
 
-## Source / Python Mode
+Outputs:
+- `build/symbol-index/symbol-index.json` — machine-readable manifest.
+- `build/symbol-index/symbol-index.md` — human-readable lookup.
 
-- Runs directly from the repository source files.
-- `python main.py` launches the normal application shell.
-- `python launcher.py --module about` or another supported module name launches the shell focused on that module for debugging without making MVC modules executable scripts.
-- Can use the local project structure, docs, templates, and module files directly.
-- Can be rebuilt locally with `build.py` and PyInstaller.
-- Prefers Logging Center's own local `.venv` for source-build runtime discovery before falling back to environment or system Python.
-- Can be used to develop, test, and package new EXE releases.
-- The Update Manager can now hand off from source mode by downloading the published packaged EXE into local `dist` and launching it.
+Normal packaging runs also refresh the index before building. The VS Code task **Refresh Python Symbol Index** runs the same command.
 
+### Environment Variables
 
-## Packaged EXE Mode
+| Variable | Default | Description |
+|---|---|---|
+| `MARTIN_BUILD_TARGET` | *(none)* | Override the build target (`windows` or `ubuntu`) without passing `--target`. |
+| `MARTIN_WSL_DISTRO` | *(none)* | Override the WSL distro name without passing `--wsl-distro`. |
+| `MARTIN_BUILD_PYTHON` | *(none)* | Override the Python interpreter used inside the WSL/Linux build. |
+| `MARTIN_KEEP_DIST` | `1` | Set to `0` to clear `dist/` before each build. |
+| `MARTIN_SKIP_TASKKILL` | `0` | Set to `1` to skip killing running EXE instances before a Windows build. |
 
-- Runs as a standalone Windows executable built by PyInstaller.
-- Intended for normal operator use outside the Python development environment.
-- Does not have the same direct access to repository source files or local build tooling that the Python version has.
-- Bundles the help documentation and `LICENSE.txt` for in-app access.
-- Uses the Update Manager for packaged EXE release checks plus selectable module payload installs.
-- Update checks default to the main repository URL and can be overridden or cleared from Security Admin.
-- Uses local editable JSON files and external module override files beside the EXE when they exist.
-- Packaged builds now use versioned EXE filenames so a newer build can download beside the current one, launch separately, and leave the older copy available until cleanup is confirmed.
-- Local builds now keep the current EXE in `dist/` and archive up to 10 older versioned EXEs in `dist/Old_exe`.
-- The footer update status bar now stays hidden unless an update job is actively running.
-- Protected security administration now includes persisted non-secure mode, admin-only developer tools visibility, and a hardened vault reset flow with explicit confirmation and backup behavior.
-- External Python override files can now be staged beside the app without executing until an admin explicitly enables override trust.
+---
 
-## Installed Ubuntu Package Mode
+## Configuration, Data Files, and Safety
 
-- The installed Debian package places the application bundle under `/opt/production-logging-center-glc`.
-- User-writable runtime files for the installed Linux app are stored under `$XDG_DATA_HOME/production-logging-center-glc` when `XDG_DATA_HOME` is set.
-- If `XDG_DATA_HOME` is not set, the installed Linux app stores runtime files under `~/.local/share/production-logging-center-glc`.
-- This includes editable JSON files, pending drafts, backups, security data, and external override files used by the installed package.
+### Configuration Files
 
-## Update Manager Status
+| File | Location | Description |
+|---|---|---|
+| `settings.json` | Beside the EXE / repo root | Theme, export path, production defaults, downtime labels, module persistence. Created on first run. |
+| `layout_config.json` | Beside the EXE / repo root | Field mappings and header layout for the Production Log UI. |
+| `rates.json` | Beside the EXE / repo root | Production rate standards used by Rate Manager. |
 
-- The updater checks only the Dispatcher Core release version exported from `launcher.py`, while `main.py` remains the runtime entry boundary.
-- The current stable Dispatcher Core release is `2.1.4`.
-- Two-part versions such as `1.07` trigger an executable update when greater than the local version.
-- Three-part versions only trigger an executable update when the third number is even, such as `1.07.2`.
-- Odd patch versions such as `1.07.1` are ignored.
-- Update availability now also requires a matching published EXE artifact in `dist/`.
-- Update Manager defaults to the main repository URL, and the Security Admin developer tools can override or clear it when needed.
-- In Python/source mode, stable updates download the published EXE into local `dist` and launch it for handoff testing.
-- In packaged EXE mode, stable updates download a versioned EXE beside the current copy, clear stale bundled-module overrides, launch the newer build, and let the newer build offer cleanup of older local EXEs.
-- Packaged EXE mode also supports selected module payload installs from the managed app payload set without rebuilding the EXE.
-- Downloaded or user-supplied module payloads become active automatically for that module when the matching external override file exists.
-- Update Manager can now check for available module payload restores at startup and show a toast notification when they are available.
-- Update Manager can now install all available module and JSON payload restores in one pass.
-- Packaged EXE mode can also restore tracked JSON files such as `layout_config.json` and `rates.json` from the repository copy with local backups preserved before overwrite.
-- Packaged EXE mode can also restore the bundled Help Center markdown files and `LICENSE.txt` as one grouped documentation update.
-- The updater status bar now mounts above the content viewport and successful module payload installs auto-hide after a short delay.
-- Dispatcher Core still updates only through the stable EXE release path.
-- Low-risk modules such as About System remain good first payload targets when testing packaged module installs after the `2.1.4` EXE handoff.
-- The Help Center now uses a modern single-page layout with top link navigation, a Hidden Modules guide, and section chips for User Guide module pages instead of notebook tabs.
+All three files write through an **atomic path** (write to a temp file, then replace) to prevent corruption if the application is interrupted mid-save.
+
+### Backups and Recovery
+
+| Path | Contents |
+|---|---|
+| `data/backups/` | Rotated recovery history for `settings.json`, `layout_config.json`, and `rates.json`. Each save also keeps a `.bak` copy beside the live file. |
+| `data/pending/` | Active Production Log drafts. |
+| `data/pending/history/` | Recovery snapshots for overwritten Production Log drafts. |
+
+The **Recovery Viewer** module lets operators browse and restore drafts, recovery snapshots, and JSON backup copies without using the file explorer.
+
+### Installed Ubuntu Package — Runtime File Locations
+
+For the installed `.deb` package, user-writable runtime files (JSON configs, drafts, backups, security data) are stored at:
+
+- `$XDG_DATA_HOME/production-logging-center-glc/` if `XDG_DATA_HOME` is set.
+- `~/.local/share/production-logging-center-glc/` otherwise.
+
+### Compatibility Notes
+
+- `layout_config.json` routes `target_time` through `header_fields`. Older local builds from before the config-driven Target Time change may not present that field correctly if they reuse the newer layout file.
+- `settings.json` includes a `persistent_modules` key. Older builds ignore it safely but do not preserve module state across navigation.
+
+---
+
+## Update Manager and Versioning
+
+The Update Manager checks the Dispatcher Core version exported from `launcher.py` (`__version__ = "2.1.4"`). `main.py` remains the runtime entry boundary.
+
+### Versioning Rules
+
+| Version format | Update triggered when… |
+|---|---|
+| Two-part (e.g., `1.07`) | Remote version is greater than the local version. |
+| Three-part, even patch (e.g., `1.07.2`) | Remote version is greater and the patch number is even. |
+| Three-part, odd patch (e.g., `1.07.1`) | **Never** — odd patch versions are ignored by the auto-updater. |
+
+Even patch releases are stable and eligible for the auto-update gate. Odd patch releases are development builds.
+
+### Update Behavior by Mode
+
+**Source / Python mode:**
+- Stable updates download the published versioned EXE into local `dist/` and launch it for handoff testing.
+
+**Packaged EXE mode:**
+- Stable updates download a versioned EXE beside the current copy, clear stale bundled-module overrides, and launch the newer build.
+- The newer build offers cleanup of older local EXEs after launch.
+- Module payload installs update individual modules without rebuilding the EXE.
+- JSON payload restores (`layout_config.json`, `rates.json`) preserve local backups before overwriting.
+- Documentation payload restores (Help Center markdown files, `LICENSE.txt`) are available as a grouped update.
+
+Update availability also requires a matching published EXE artifact in `dist/`. The default repository URL can be overridden or cleared from Security Admin developer tools.
+
+---
+
+## Troubleshooting
+
+**Application does not start (source mode)**
+- Confirm Python 3.10+ is active: `python --version`
+- Confirm `ttkbootstrap`, `Pillow`, and `openpyxl` are installed in the active environment.
+- Check `logs/` for exception details.
+
+**Windows build fails with "process in use" error**
+- Ensure the EXE is not running before building.
+- Set `MARTIN_SKIP_TASKKILL=1` only if you have confirmed no EXE instance is running.
+
+**Ubuntu/WSL build fails with "drive not mounted" error**
+- The repository is on a Windows drive (e.g., `D:\`) that the WSL distro does not expose under `/mnt/d`.
+- In WSL, run `ls /mnt/` to confirm available mounts. Enable `automount` in `/etc/wsl.conf` if the drive is missing.
+
+**Ubuntu build fails with "dpkg-deb not found"**
+- Install it inside the WSL distro: `sudo apt-get install dpkg`.
+
+**Ghost Time shows wrong values**
+- Confirm `layout_config.json` includes `target_time` under `header_fields`. If you upgraded from a pre–config-driven build, copy the current `layout_config.json` from the repository.
+
+**Settings or layout lost after update**
+- Use **Recovery Viewer** to restore a backup from `data/backups/`.
+- Alternatively, restore from the `.bak` file beside the live JSON file.
+
+**Update Manager does not detect a newer version**
+- Verify the repository URL in Security Admin developer tools is set correctly.
+- Confirm the remote `dist/` folder contains a published versioned EXE artifact.
+- Check that the remote version uses an even patch number (odd patches are intentionally ignored).
+
+---
+
+## Repository Structure
+
+```
+AIMartinSuiteGLCVersion/
+├── main.py                    # Runtime entry point — calls run_application from launcher.py
+├── launcher.py                # Dispatcher Core: __version__, USER_FACING_MODULE_NAMES, run_application
+├── build.py                   # Build script for Windows EXE and Ubuntu DEB targets
+├── symbol_index.py            # Python symbol index generator
+├── layout_config.json         # UI layout and field mapping configuration
+├── rates.json                 # Production rate standards
+├── app/                       # Application source (MVC structure)
+│   ├── controllers/           # Module controllers (Dispatcher, per-feature controllers)
+│   ├── models/                # Data/business logic models
+│   ├── views/                 # UI view classes
+│   ├── about.py               # About module entry
+│   ├── production_log.py      # Production Log module entry
+│   ├── rate_manager.py        # Rate Manager module entry
+│   ├── layout_manager.py      # Layout Manager module entry
+│   ├── recovery_viewer.py     # Recovery Viewer module entry
+│   ├── settings_manager.py    # Settings Manager module entry
+│   ├── update_manager.py      # Update Manager module entry
+│   ├── help_viewer.py         # Help Viewer module entry
+│   ├── app_identity.py        # Version parsing, EXE/DEB name formatting
+│   ├── app_platform.py        # Platform helpers (icons, app ID, window management)
+│   ├── theme_manager.py       # Theme resolution and readability overrides
+│   ├── security.py            # Vault and session authentication
+│   └── utils.py               # Path helpers (resource_path, external_path)
+├── assets/                    # Icons and image assets
+├── docs/                      # Bundled help documentation (Markdown)
+├── templates/                 # Workbook export templates
+├── packaging/
+│   ├── ubuntu/                # Ubuntu-specific .desktop and launcher.sh templates
+│   └── specs/                 # PyInstaller spec files
+├── dist/                      # Build output (Windows EXE; dist/ubuntu/ for DEB)
+├── build/                     # Intermediate build artifacts and symbol index
+├── data/                      # Runtime data (created at runtime, not committed)
+│   ├── backups/               # Rotated JSON config backups
+│   └── pending/               # Production Log drafts and history snapshots
+├── logs/                      # Application log files (created at runtime)
+├── CHANGELOG.md               # Release history
+└── LICENSE                    # GNU General Public License v3.0
+```
+
+---
+
+## Contributing and Development Notes
+
+### Architecture
+
+The application follows a strict MVC layout under `app/`:
+
+- **Controllers** (`app/controllers/`) — handle user actions, delegate to models, update views.
+- **Models** (`app/models/`) — contain business logic, data access, and persistence; no Tk imports.
+- **Views** (`app/views/`) — define UI widgets; no business logic.
+
+Module entry points (`app/about.py`, `app/production_log.py`, etc.) are thin controller-delegation wrappers.
+
+### Adding or Modifying a Module
+
+1. Add or modify the model in `app/models/`.
+2. Add or modify the view in `app/views/`.
+3. Add or modify the controller in `app/controllers/`.
+4. Keep the entry-point wrapper (`app/<module_name>.py`) as a thin delegate.
+5. If the module should be user-facing, add its name to `USER_FACING_MODULE_NAMES` in `launcher.py`.
+
+### Development Workflow
+
+```bash
+# Run from source
+python main.py
+
+# Launch a specific module focused (no need to navigate through the shell)
+python launcher.py --module <module_name>
+
+# Refresh the symbol index after significant changes
+python build.py --index-only
+
+# Build for distribution
+python build.py --target windows     # Windows EXE
+python build.py --target ubuntu      # Ubuntu DEB (Linux host or WSL)
+```
+
+### Version Bump
+
+1. Update `__version__` in `launcher.py`.
+2. Use an even patch number for a stable (auto-update eligible) release; use an odd patch number for a development build.
+3. Update `CHANGELOG.md` with the new version entry.
+
+### External Module Overrides
+
+Place a `.py` file matching a module name in the external override `app/` folder beside the EXE to override that module at runtime. Override trust must be explicitly enabled by an admin through Security Admin. This mechanism is intended for targeted fixes between full EXE releases.
+
+---
+
+## License
+
+This project is licensed under the **GNU General Public License v3.0**. See the [LICENSE](LICENSE) file for the full text.
+
+© 2026 Jamie Martin
