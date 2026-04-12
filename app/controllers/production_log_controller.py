@@ -24,6 +24,9 @@ from app import recovery_viewer
 from app.models.production_log_model import ProductionLogModel
 from app.views.production_log_view import ProductionLogView, __version__ as PRODUCTION_LOG_VERSION
 
+__module_name__ = "Production Log"
+__version__ = "1.2.7"
+
 
 class ProductionLogController:
     def __init__(self, parent, dispatcher):

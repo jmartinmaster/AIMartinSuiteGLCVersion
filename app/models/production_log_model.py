@@ -23,6 +23,9 @@ from app.persistence import write_json_with_backup
 from app.utils import external_path, local_or_resource_path
 from app.data_handler_service import DataHandlerService
 
+__module_name__ = "Production Log"
+__version__ = "1.2.7"
+
 BALANCE_DOWNTIME_CAUSE = "Time Balance Adjustment"
 DEFAULT_GHOST_LABEL = "Ghost Time: 0 min"
 

@@ -7,15 +7,15 @@
 The file is a single JSON object where:
 
 - each key is a part number string
-- each value is a numeric molds-per-hour target
+- each value is the stored molds-per-hour target text for that part number
 
 Example:
 
 ```json
 {
-  "010023112D": 200,
-  "012586R": 246,
-  "0201400C": 200
+  "010023112D": "200",
+  "012586R": "246",
+  "0201400C": "200"
 }
 ```
 
@@ -29,8 +29,9 @@ Example:
 ## Good Practices
 
 - Keep part numbers exactly as operators enter them.
-- Keep values numeric.
+- Keep values as clean numeric text so Production Log can convert them safely.
 - Avoid duplicate keys written in slightly different formats.
+- Avoid units or extra text such as `mph` in the stored value.
 
 ## Recommended Editing Path
 

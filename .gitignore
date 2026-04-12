@@ -22,9 +22,15 @@ data/pending/history/
 # Build Artifacts
 build/
 dist/data
-dist/ubuntu
+dist/ubuntu/app
+dist/ubuntu/package-root
 dist/*.json
 
+#docs
+ai-delegation
+
+#scripts
+scripts
 
 # IDEs
 .vscode/
@@ -34,3 +40,4 @@ dist/*.json
 .Trash-1000/
 
 .venv-wsl-build/
+

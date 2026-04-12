@@ -26,7 +26,7 @@ from app.models.production_log_model import BALANCE_DOWNTIME_CAUSE, DEFAULT_GHOS
 from app.theme_manager import get_theme_tokens
 
 __module_name__ = "Production Log"
-__version__ = "1.2.6"
+__version__ = "1.2.7"
 
 
 class ProductionLogView:
@@ -1023,7 +1023,44 @@ class ProductionLogView:
     def confirm_discard_unsaved_changes(self):
         if not self.has_unsaved_changes:
             return True
-        return messagebox.askyesno("Unsaved Changes", "You have unsaved changes in the current session. Continue and discard them?")
+        return self.ask_yes_no("Unsaved Changes", "You have unsaved changes in the current session. Continue and discard them?")
+
+    def _resolve_modal_parent(self, parent=None):
+        if parent is not None:
+            try:
+                if parent.winfo_exists():
+                    return parent
+            except Exception:
+                pass
+        try:
+            owner = self.parent.winfo_toplevel()
+            if owner is not None and owner.winfo_exists():
+                return owner
+        except Exception:
+            pass
+        return None
+
+    def _show_modal_yes_no(self, title, message, parent=None):
+        modal_parent = self._resolve_modal_parent(parent)
+        restore_topmost = False
+        if modal_parent is not None:
+            try:
+                modal_parent.lift()
+                modal_parent.focus_force()
+                restore_topmost = not bool(modal_parent.attributes("-topmost"))
+                if restore_topmost:
+                    modal_parent.attributes("-topmost", True)
+                    modal_parent.update_idletasks()
+            except Exception:
+                restore_topmost = False
+        try:
+            return bool(messagebox.askyesno(title, message, parent=modal_parent))
+        finally:
+            if modal_parent is not None and restore_topmost:
+                try:
+                    modal_parent.attributes("-topmost", False)
+                except Exception:
+                    pass
 
     def resume_latest_draft(self):
         return self.controller.resume_latest_draft()
@@ -1062,8 +1099,17 @@ class ProductionLogView:
         return self.controller.print_last_exported_file()
 
     def show_pending(self):
-        top = tb.Toplevel(title="Pending Drafts")
+        owner = self._resolve_modal_parent()
+        top = tb.Toplevel(owner)
+        top.title("Pending Drafts")
         top.geometry("560x420")
+        if owner is not None:
+            try:
+                top.transient(owner)
+            except Exception:
+                pass
+        top.lift()
+        top.focus_force()
         drafts = self.list_pending_drafts()
         if not drafts:
             tb.Label(top, text="No pending drafts found.").pack(pady=20)
@@ -1103,7 +1149,7 @@ class ProductionLogView:
         tb.Button(actions, text="Delete", bootstyle=DANGER, command=lambda path=draft_record["path"], win=window: self.delete_pending_from_window(path, win)).pack(side=LEFT)
 
     def delete_pending_from_window(self, draft_path, window):
-        if not messagebox.askyesno("Delete Draft", f"Delete {os.path.basename(draft_path)}?"):
+        if not self._show_modal_yes_no("Delete Draft", f"Delete {os.path.basename(draft_path)}?", parent=window):
             return
         self.delete_draft_file(draft_path)
         window.destroy()
@@ -1122,8 +1168,8 @@ class ProductionLogView:
     def show_toast(self, title, message, bootstyle=SUCCESS):
         self.dispatcher.show_toast(title, message, bootstyle)
 
-    def ask_yes_no(self, title, message):
-        return messagebox.askyesno(title, message)
+    def ask_yes_no(self, title, message, parent=None):
+        return self._show_modal_yes_no(title, message, parent=parent)
 
     def ask_import_file_path(self):
         return filedialog.askopenfilename(

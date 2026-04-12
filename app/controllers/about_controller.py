@@ -20,6 +20,9 @@ from tkinter import messagebox
 
 from app.views.about_view import AboutView
 
+__module_name__ = "About System"
+__version__ = "1.0.1"
+
 
 class AboutController:
     def __init__(self, parent, dispatcher):
@@ -36,12 +39,45 @@ class AboutController:
     def open_license(self):
         self.dispatcher.open_help_document("docs/legal/LICENSE.txt")
 
+    def _iter_manifest_modules(self):
+        loaded_modules = getattr(self.dispatcher, "loaded_modules", {}) or {}
+        yielded_keys = set()
+
+        main_module = loaded_modules.get("main")
+        if main_module is not None:
+            yielded_keys.add("main")
+            yield "main", main_module
+
+        preloaded_module_names = getattr(getattr(self.dispatcher, "model", None), "preloaded_module_names", set()) or set()
+        ordered_module_names = []
+        try:
+            ordered_module_names.extend(self.dispatcher.get_user_facing_modules(apply_whitelist=False))
+        except Exception:
+            ordered_module_names.extend(sorted(preloaded_module_names))
+
+        for module_name in ordered_module_names:
+            if module_name in yielded_keys:
+                continue
+            module_obj = loaded_modules.get(module_name)
+            if module_obj is None and module_name in preloaded_module_names:
+                module_obj = sys.modules.get(f"app.{module_name}")
+            if module_obj is None:
+                continue
+            yielded_keys.add(module_name)
+            yield module_name, module_obj
+
+        for module_name, module_obj in loaded_modules.items():
+            if module_name in yielded_keys:
+                continue
+            yielded_keys.add(module_name)
+            yield module_name, module_obj
+
     def render_module_manifest(self, parent):
-        loaded = getattr(self.dispatcher, "loaded_modules", {})
-        if not loaded:
+        module_entries = list(self._iter_manifest_modules())
+        if not module_entries:
             self.view.render_empty_manifest(parent)
             return
-        for mod_key, mod_obj in loaded.items():
+        for mod_key, mod_obj in module_entries:
             display_name = getattr(mod_obj, "__module_name__", mod_key)
             version = getattr(mod_obj, "__version__", "Unknown")
             source_suffix = " (external)" if self.dispatcher.is_module_loaded_from_external(mod_key, mod_obj) else ""

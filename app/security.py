@@ -37,7 +37,7 @@ from app.models.security_model import (
 from app.utils import ensure_external_directory, external_path
 
 __module_name__ = "Security Blanket"
-__version__ = "2.0.0"
+__version__ = "2.0.1"
 
 
 class Gatekeeper:
@@ -51,6 +51,7 @@ class Gatekeeper:
             cls._instance._session = None
             cls._instance._authenticated = False
             cls._instance._session_role = "general"
+            cls._instance._session_listeners = []
         return cls._instance
 
     def _vault_directory(self):
@@ -305,9 +306,7 @@ class Gatekeeper:
         return bool(self.list_vaults() or self._load_legacy_password_hash())
 
     def logout(self):
-        self._session = None
-        self._authenticated = False
-        self._session_role = "general"
+        self._set_session(None)
 
     def _clear_admin_session(self):
         self.logout()
@@ -316,6 +315,29 @@ class Gatekeeper:
         self._session = session
         self._authenticated = session is not None
         self._session_role = normalize_role(session.role if session else "general")
+        self._notify_session_listeners("session-changed")
+
+    def add_session_listener(self, listener):
+        if callable(listener) and listener not in self._session_listeners:
+            self._session_listeners.append(listener)
+
+    def remove_session_listener(self, listener):
+        if listener in self._session_listeners:
+            self._session_listeners.remove(listener)
+
+    def _notify_session_listeners(self, event_name):
+        for listener in list(self._session_listeners):
+            try:
+                listener(event_name)
+            except Exception as exc:
+                log_exception("gatekeeper.session_listener", exc)
+
+    def _merge_role_default_rights(self, role, rights):
+        merged_rights = list(rights or [])
+        for right_key in ROLE_DEFAULT_RIGHTS.get(normalize_role(role), []):
+            if right_key not in merged_rights:
+                merged_rights.append(right_key)
+        return normalize_rights(merged_rights, role=role)
 
     def _set_session_from_vault(self, vault_record):
         self._set_session(
@@ -323,7 +345,7 @@ class Gatekeeper:
                 vault_name=vault_record.vault_name,
                 display_name=vault_record.display_name,
                 role=vault_record.role,
-                rights=list(vault_record.rights),
+                rights=self._merge_role_default_rights(vault_record.role, vault_record.rights),
                 authenticated_at=self._utc_timestamp(),
             )
         )
@@ -519,6 +541,7 @@ class Gatekeeper:
         settings = self._load_security_settings()
         settings["non_secure_mode"] = bool(enabled)
         self._save_security_settings(settings)
+        self._notify_session_listeners("session-changed")
         return settings["non_secure_mode"]
 
     def is_external_module_override_trust_enabled(self):
@@ -528,6 +551,7 @@ class Gatekeeper:
         settings = self._load_security_settings()
         settings["external_module_override_trust"] = bool(enabled)
         self._save_security_settings(settings)
+        self._notify_session_listeners("session-changed")
         return settings["external_module_override_trust"]
 
     def authenticate(self, required_right=None, parent=None, reason=None, force_reauth=False, allowed_roles=None):
@@ -597,6 +621,9 @@ class Gatekeeper:
         vault_status_var = tk.StringVar(value="")
         vault_lookup = {vault.vault_name: vault for vault in available_vaults}
 
+        def get_effective_rights(vault_record):
+            return self._merge_role_default_rights(vault_record.role, vault_record.rights)
+
         vault_row = tk.Frame(container)
         vault_row.pack(fill=tk.X, pady=4)
         tk.Label(vault_row, text="Vault", width=16, anchor="w").pack(side=tk.LEFT)
@@ -617,9 +644,10 @@ class Gatekeeper:
             if selected_vault is None:
                 vault_status_var.set("")
                 return
+            effective_rights = get_effective_rights(selected_vault)
             rights_text = ", ".join(
                 ACCESS_RIGHTS_BY_KEY[right_key].label
-                for right_key in selected_vault.rights
+                for right_key in effective_rights
                 if right_key in ACCESS_RIGHTS_BY_KEY
             ) or "No rights assigned"
             password_text = "Password required" if selected_vault.password_required else "No password required"
@@ -636,7 +664,8 @@ class Gatekeeper:
             if selected_vault is None:
                 status_var.set("Choose a vault.")
                 return
-            if required_right and required_right not in selected_vault.rights:
+            effective_rights = get_effective_rights(selected_vault)
+            if required_right and required_right not in effective_rights:
                 status_var.set("That vault does not have the required access right.")
                 return
             if selected_vault.password_required:

@@ -16,11 +16,19 @@
 from app.models.security_model import MODULE_ACCESS_RIGHTS
 from app.security import gatekeeper
 
+__module_name__ = "Security Service"
+__version__ = "2.0.1"
+
 
 class SecurityService:
-    def __init__(self, protected_modules=None, module_access_rights=None):
+    def __init__(self, protected_modules=None, module_access_rights=None, module_allowed_roles=None, hidden_modules=None):
         self.protected_modules = set(protected_modules or [])
         self.module_access_rights = dict(MODULE_ACCESS_RIGHTS)
+        self.module_allowed_roles = {
+            module_name: {str(role).strip().lower() for role in roles}
+            for module_name, roles in dict(module_allowed_roles or {}).items()
+        }
+        self.hidden_modules = set(hidden_modules or [])
         if module_access_rights:
             self.module_access_rights.update(module_access_rights)
 
@@ -33,6 +41,9 @@ class SecurityService:
     def get_module_access_right(self, module_name):
         return self.module_access_rights.get(module_name)
 
+    def get_module_allowed_roles(self, module_name):
+        return set(self.module_allowed_roles.get(module_name, set()))
+
     def requires_authentication(self, module_name):
         return module_name in self.protected_modules
 
@@ -42,16 +53,25 @@ class SecurityService:
     def can_access_module(self, module_name):
         if not self.requires_authentication(module_name):
             return True
-        if self.is_non_secure_mode_enabled():
+        allowed_roles = self.get_module_allowed_roles(module_name)
+        if self.is_non_secure_mode_enabled() and not allowed_roles:
             return True
         required_right = self.get_module_access_right(module_name)
+        session = self.get_session()
+        if session is None:
+            return False
+        if allowed_roles and str(session.role).strip().lower() not in allowed_roles:
+            return False
         return gatekeeper.has_right(required_right)
 
     def is_module_visible(self, module_name):
         if not self.requires_authentication(module_name):
             return True
-        if self.is_non_secure_mode_enabled():
+        allowed_roles = self.get_module_allowed_roles(module_name)
+        if self.is_non_secure_mode_enabled() and not allowed_roles:
             return True
+        if module_name in self.hidden_modules:
+            return self.can_access_module(module_name)
         if self.get_session() is None:
             return True
         return self.can_access_module(module_name)
@@ -68,7 +88,8 @@ class SecurityService:
     def authenticate_module(self, module_name, parent=None, reason=None, force_reauth=False):
         if not self.requires_authentication(module_name):
             return True
-        if self.is_non_secure_mode_enabled():
+        allowed_roles = self.get_module_allowed_roles(module_name)
+        if self.is_non_secure_mode_enabled() and not allowed_roles:
             return True
         required_right = self.get_module_access_right(module_name)
         prompt_reason = reason or f"Unlock {str(module_name).replace('_', ' ').title()} to continue."
@@ -77,4 +98,5 @@ class SecurityService:
             parent=parent,
             reason=prompt_reason,
             force_reauth=force_reauth,
+            allowed_roles=allowed_roles,
         )

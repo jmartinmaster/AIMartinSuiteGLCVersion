@@ -13,11 +13,11 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-from app.controllers.about_controller import AboutController
+from app.controllers.production_log_calculations_controller import ProductionLogCalculationsController
 
-__module_name__ = "About System"
-__version__ = "1.0.1"
+__module_name__ = "Production Log Calculations"
+__version__ = "1.0.0"
 
 
 def get_ui(parent, dispatcher):
-    return AboutController(parent, dispatcher)
+    return ProductionLogCalculationsController(parent, dispatcher)

@@ -2,8 +2,11 @@
 
 Use Settings Manager to configure application defaults.
 
+- Sidebar Module Whitelist lets you limit the visible sidebar modules. Leaving it empty keeps all visible modules available.
 - Theme controls the UI theme.
+- Revert Theme Preview switches back to the last saved theme after a preview.
 - Enable Screen Transitions turns the page-switch fade on or off.
+- Check Module Updates On Startup controls whether Logging Center looks for update notices during startup.
 - Transition Duration controls how long the page-switch fade runs, from `0` to `500` milliseconds.
 - Auto Save Interval controls how often draft autosave runs.
 - Toast Duration controls how long non-blocking status notifications stay visible.
@@ -12,16 +15,16 @@ Use Settings Manager to configure application defaults.
 - Export settings control where generated Excel files are written.
 - Persistent Modules lets you choose which main modules keep their live in-progress state when you navigate away and then return during the same app session.
 - Edit Downtime Codes opens a scrollable dialog for renaming existing downtime code numbers and adding extra numeric codes used by the form and Excel import/export.
-- Manage Security opens the admin authentication flow for protected security tasks.
+- Manage Security opens the authenticated security-administration flow for vault and session tasks.
 - The Developer & Admin tools row appears only during an active admin session.
 - Saving settings also keeps recovery copies under `data/backups/settings`.
-- When a matching `.py` file exists in the external `the_golden_standard` folder beside the app, that module is used first automatically; otherwise the bundled module stays in use.
+- External override files can exist beside the app without loading immediately. Bundled modules stay in use until an admin enables override trust.
 
 ## Security Notes
 
-- Security administration lets an authenticated admin rotate the master password and enable or disable persisted non-secure mode.
+- Security administration lets an authenticated admin manage vaults, rotate vault passwords, and enable or disable persisted non-secure mode.
 - Non-secure mode is a global persisted setting intended only for controlled admin use because it bypasses protected-module authentication.
-- Reset Vault is destructive and now requires explicit confirmation, typed `RESET`, and current-password re-entry before the stored master-password vault is removed.
+- Reset Security Storage is destructive and requires explicit confirmation, typed `RESET`, and current-password re-entry before the stored vault data is removed.
 
 ## Developer And Admin Tools
 
