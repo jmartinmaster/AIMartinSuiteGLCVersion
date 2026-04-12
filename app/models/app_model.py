@@ -21,6 +21,9 @@ from dataclasses import dataclass, field
 from app.app_platform import get_obsolete_local_executables
 from app.theme_manager import DEFAULT_THEME, normalize_theme
 
+__module_name__ = "Application Shell"
+__version__ = "2.1.5"
+
 
 @dataclass
 class AppModel:
@@ -55,6 +58,22 @@ class AppModel:
     def ensure_external_modules_directory(self):
         os.makedirs(self.external_modules_path, exist_ok=True)
 
+    def _write_text_file(self, target_path, file_text):
+        os.makedirs(os.path.dirname(target_path), exist_ok=True)
+        temp_path = f"{target_path}.tmp"
+        with open(temp_path, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(file_text)
+        os.replace(temp_path, target_path)
+        return target_path
+
+    def _iter_module_override_relative_paths(self, module_name):
+        return [
+            f"{module_name}.py",
+            os.path.join("controllers", f"{module_name}_controller.py"),
+            os.path.join("models", f"{module_name}_model.py"),
+            os.path.join("views", f"{module_name}_view.py"),
+        ]
+
     def get_external_module_override_path(self, module_name, managed_module_names):
         if module_name not in managed_module_names:
             return None
@@ -85,11 +104,28 @@ class AppModel:
     def write_module_override(self, module_name, module_text):
         self.ensure_external_modules_directory()
         target_path = os.path.join(self.external_modules_path, f"{module_name}.py")
-        temp_path = f"{target_path}.tmp"
-        with open(temp_path, "w", encoding="utf-8", newline="\n") as handle:
-            handle.write(module_text)
-        os.replace(temp_path, target_path)
+        self._write_text_file(target_path, module_text)
         return target_path
+
+    def write_module_override_files(self, file_payloads, primary_relative_path=None):
+        self.ensure_external_modules_directory()
+        written_paths = []
+        primary_path = None
+        resolved_primary_relative_path = str(primary_relative_path or "").replace("\\", "/").lstrip("/")
+
+        for relative_path, file_text in file_payloads.items():
+            normalized_relative_path = str(relative_path).replace("\\", "/").lstrip("/")
+            if normalized_relative_path.startswith("app/"):
+                normalized_relative_path = normalized_relative_path[4:]
+            target_path = os.path.join(self.external_modules_path, normalized_relative_path.replace("/", os.sep))
+            self._write_text_file(target_path, file_text)
+            written_paths.append(target_path)
+            if normalized_relative_path == resolved_primary_relative_path.removeprefix("app/"):
+                primary_path = target_path
+
+        if primary_path is None and written_paths:
+            primary_path = written_paths[0]
+        return primary_path, written_paths
 
     def remove_external_module_overrides(self, managed_module_names, module_names=None, include_bytecode=True):
         if not self.has_external_modules_directory():
@@ -97,30 +133,34 @@ class AppModel:
 
         selected_names = module_names or self.get_bundled_module_names(managed_module_names)
         removed_paths = []
-        pycache_dir = os.path.join(self.external_modules_path, "__pycache__")
 
         for module_name in selected_names:
-            override_path = os.path.join(self.external_modules_path, f"{module_name}.py")
-            if os.path.isfile(override_path):
-                os.remove(override_path)
-                removed_paths.append(override_path)
+            for relative_path in self._iter_module_override_relative_paths(module_name):
+                normalized_relative_path = relative_path.replace("/", os.sep)
+                override_path = os.path.join(self.external_modules_path, normalized_relative_path)
+                if os.path.isfile(override_path):
+                    os.remove(override_path)
+                    removed_paths.append(override_path)
 
-            if include_bytecode and os.path.isdir(pycache_dir):
-                cache_prefix = f"{module_name}."
-                for cache_name in os.listdir(pycache_dir):
-                    if not cache_name.startswith(cache_prefix):
-                        continue
-                    cache_path = os.path.join(pycache_dir, cache_name)
-                    if os.path.isfile(cache_path):
-                        os.remove(cache_path)
-                        removed_paths.append(cache_path)
+                if not include_bytecode:
+                    continue
 
-        if include_bytecode and os.path.isdir(pycache_dir):
-            try:
-                if not os.listdir(pycache_dir):
-                    os.rmdir(pycache_dir)
-            except OSError:
-                pass
+                parent_directory = os.path.dirname(override_path)
+                pycache_dir = os.path.join(parent_directory, "__pycache__")
+                cache_prefix = f"{os.path.splitext(os.path.basename(relative_path))[0]}."
+                if os.path.isdir(pycache_dir):
+                    for cache_name in os.listdir(pycache_dir):
+                        if not cache_name.startswith(cache_prefix):
+                            continue
+                        cache_path = os.path.join(pycache_dir, cache_name)
+                        if os.path.isfile(cache_path):
+                            os.remove(cache_path)
+                            removed_paths.append(cache_path)
+                    try:
+                        if not os.listdir(pycache_dir):
+                            os.rmdir(pycache_dir)
+                    except OSError:
+                        pass
 
         return removed_paths
 

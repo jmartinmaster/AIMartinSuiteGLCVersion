@@ -17,7 +17,7 @@ from app.controllers.update_manager_controller import UpdateManagerController
 from app.models.update_manager_model import scan_available_module_payload_updates
 
 __module_name__ = "Update Manager"
-__version__ = "2.1.4"
+__version__ = "2.1.5"
 
 
 def get_ui(parent, dispatcher):

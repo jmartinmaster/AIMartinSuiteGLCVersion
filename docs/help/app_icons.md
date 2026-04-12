@@ -27,9 +27,9 @@ The runtime icon paths are defined in `app/app_platform.py` and applied during l
 
 The packaged EXE includes the runtime icon assets through `TheMartinSuite_GLC.spec`, and packaged builds use a versioned EXE name derived from the current Dispatcher Core release.
 
-- `datas` bundles `icon.ico` and the size-specific PNG files.
-- `icon=['icon.ico']` sets the Windows executable icon.
-- `launcher.py` and `main.py` apply the full PNG size set at runtime and then apply the Windows `.ico` handles for native shell surfaces.
+- `datas` bundles the `assets` directory, which includes the icon files.
+- `icon=['assets/icons/icon.ico']` sets the Windows executable icon.
+- `launcher.py` applies the Tk window icon from the source PNG artwork and then applies the Windows `.ico` handles for native shell surfaces.
 
 ## How To Change The App Icons
 
@@ -46,6 +46,6 @@ The packaged EXE includes the runtime icon assets through `TheMartinSuite_GLC.sp
 
 ## Notes
 
-- Keep the filenames unchanged unless you also update the icon constants in `main.py` and the `datas` plus `icon=` entries in `TheMartinSuite_GLC.spec`.
+- Keep the filenames unchanged unless you also update the icon constants in `app/app_platform.py` and the `datas` plus `icon=` entries in `TheMartinSuite_GLC.spec`.
 - The build now keeps the runtime PNG set and the Windows `.ico` in sync automatically.
 - If icon branding changes, update `icon.png` first and rebuild instead of editing derivative icon files by hand.

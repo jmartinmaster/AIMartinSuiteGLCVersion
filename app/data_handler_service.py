@@ -14,6 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 import json
+import math
 import os
 import re
 import shutil
@@ -25,7 +26,17 @@ from app.downtime_codes import get_code_number, normalize_code_value
 from app.utils import ensure_external_directory, external_path, local_or_resource_path, resource_path
 
 __module_name__ = "Data Handler"
-__version__ = "1.1.4"
+__version__ = "1.1.5"
+
+DEFAULT_SHIFT_TIME_SETTINGS = {
+    "shift_total_rounding": "nearest",
+    "shift_1_anchor_mode": "start",
+    "shift_1_reference_time": "0600",
+    "shift_2_anchor_mode": "midpoint",
+    "shift_2_reference_time": "1800",
+    "shift_3_anchor_mode": "end",
+    "shift_3_reference_time": "0600",
+}
 
 
 class DataHandlerService:
@@ -125,12 +136,91 @@ class DataHandlerService:
             return text
         return parsed.strftime("%m/%d/%Y")
 
-    def compute_target_time(self, raw_hours):
+    def _normalize_calculation_settings(self, calculation_settings=None):
+        settings = dict(DEFAULT_SHIFT_TIME_SETTINGS)
+        if isinstance(calculation_settings, dict):
+            settings.update(calculation_settings)
+        return settings
+
+    def _round_minutes_value(self, value, rounding_mode):
         try:
-            total_minutes = int(round(float(raw_hours or 0) * 60))
+            normalized_value = float(value)
+        except Exception:
+            return 0
+        if normalized_value <= 0:
+            return 0
+        normalized_mode = str(rounding_mode or "nearest").strip().lower()
+        if normalized_mode == "ceil":
+            return int(math.ceil(normalized_value))
+        if normalized_mode == "floor":
+            return int(math.floor(normalized_value))
+        return int(round(normalized_value))
+
+    def _parse_compact_time(self, value):
+        digits = "".join(ch for ch in str(value or "").strip() if ch.isdigit())
+        if not digits:
+            return None
+        digits = digits.zfill(4)[-4:]
+        hours = int(digits[:2])
+        minutes = int(digits[2:])
+        if hours > 23 or minutes > 59:
+            return None
+        return (hours * 60) + minutes
+
+    def _format_compact_time(self, total_minutes):
+        normalized_minutes = int(total_minutes) % (24 * 60)
+        hours, minutes = divmod(normalized_minutes, 60)
+        return f"{hours:02d}{minutes:02d}"
+
+    def _normalize_shift_key(self, shift_value):
+        normalized = str(shift_value or "").strip()
+        return normalized if normalized in {"1", "2", "3"} else ""
+
+    def compute_shift_window(self, shift_value, raw_hours, calculation_settings=None):
+        settings = self._normalize_calculation_settings(calculation_settings)
+        shift_key = self._normalize_shift_key(shift_value)
+        if not shift_key:
+            return {"start_time": "", "end_time": "", "target_time": ""}
+
+        try:
+            hours_value = float(raw_hours or 0)
+        except Exception:
+            return {"start_time": "", "end_time": "", "target_time": ""}
+
+        total_minutes = self._round_minutes_value(hours_value * 60, settings.get("shift_total_rounding", "nearest"))
+        if total_minutes <= 0:
+            return {"start_time": "", "end_time": "", "target_time": ""}
+
+        anchor_mode = str(settings.get(f"shift_{shift_key}_anchor_mode", "start") or "start").strip().lower()
+        anchor_minutes = self._parse_compact_time(settings.get(f"shift_{shift_key}_reference_time", ""))
+        if anchor_minutes is None:
+            return {"start_time": "", "end_time": "", "target_time": ""}
+
+        if anchor_mode == "end":
+            end_minutes = anchor_minutes
+            start_minutes = end_minutes - total_minutes
+        elif anchor_mode == "midpoint":
+            midpoint_offset = total_minutes / 2.0
+            start_minutes = int(round(anchor_minutes - midpoint_offset))
+            end_minutes = start_minutes + total_minutes
+        else:
+            start_minutes = anchor_minutes
+            end_minutes = start_minutes + total_minutes
+
+        field_cfg = self.get_header_field_config("target_time")
+        suffix = field_cfg.get("suffix", " min")
+        return {
+            "start_time": self._format_compact_time(start_minutes),
+            "end_time": self._format_compact_time(end_minutes),
+            "target_time": f"{total_minutes}{suffix}",
+        }
+
+    def compute_target_time(self, raw_hours, calculation_settings=None):
+        settings = self._normalize_calculation_settings(calculation_settings)
+        try:
+            total_minutes = self._round_minutes_value(float(raw_hours or 0) * 60, settings.get("shift_total_rounding", "nearest"))
         except Exception:
             return ""
-        # Get suffix from config if present
         field_cfg = self.get_header_field_config("target_time")
         suffix = field_cfg.get("suffix", " min")
         return f"{total_minutes}{suffix}" if total_minutes > 0 else ""
@@ -143,7 +233,7 @@ class DataHandlerService:
         suffix = field_cfg.get("suffix", " min")
         return f"{total_minutes}{suffix}"
 
-    def normalize_header_field_value(self, field_id, value, header_data=None):
+    def normalize_header_field_value(self, field_id, value, header_data=None, calculation_settings=None):
         header_data = header_data or {}
         text = str(value or "").strip()
         if field_id == "date":
@@ -155,22 +245,46 @@ class DataHandlerService:
         if field_id == "cast_date":
             computed = self.compute_cast_date(header_data.get("date"))
             return computed or self.format_header_value(field_id, text)
+        if field_id in {"start_time", "end_time"}:
+            shift_window = self.compute_shift_window(
+                header_data.get("shift"),
+                header_data.get("hours"),
+                calculation_settings=calculation_settings,
+            )
+            return shift_window.get(field_id, "")
         if field_id == "target_time":
-            computed = self.compute_target_time(header_data.get("hours"))
+            computed = self.compute_target_time(header_data.get("hours"), calculation_settings=calculation_settings)
             return computed or self.normalize_target_time_text(text)
         return text
 
-    def normalize_header_data(self, header_data):
+    def normalize_header_data(self, header_data, calculation_settings=None):
         normalized = {}
         raw_header = {field_id: str(header_data.get(field_id, "") or "").strip() for field_id in self.get_header_field_ids()}
         for field_id in self.get_header_field_ids():
-            if field_id in {"cast_date", "target_time"}:
+            if field_id in {"cast_date", "start_time", "end_time", "target_time"}:
                 continue
-            normalized[field_id] = self.normalize_header_field_value(field_id, raw_header.get(field_id, ""), {**raw_header, **normalized})
+            normalized[field_id] = self.normalize_header_field_value(
+                field_id,
+                raw_header.get(field_id, ""),
+                {**raw_header, **normalized},
+                calculation_settings=calculation_settings,
+            )
         if "cast_date" in raw_header:
-            normalized["cast_date"] = self.normalize_header_field_value("cast_date", raw_header.get("cast_date", ""), {**raw_header, **normalized})
-        if "target_time" in raw_header:
-            normalized["target_time"] = self.normalize_header_field_value("target_time", raw_header.get("target_time", ""), {**raw_header, **normalized})
+            normalized["cast_date"] = self.normalize_header_field_value(
+                "cast_date",
+                raw_header.get("cast_date", ""),
+                {**raw_header, **normalized},
+                calculation_settings=calculation_settings,
+            )
+        for derived_field_id in ("start_time", "end_time", "target_time"):
+            if derived_field_id not in raw_header:
+                continue
+            normalized[derived_field_id] = self.normalize_header_field_value(
+                derived_field_id,
+                raw_header.get(derived_field_id, ""),
+                {**raw_header, **normalized},
+                calculation_settings=calculation_settings,
+            )
         return normalized
 
     def compute_cast_date(self, raw_date):
