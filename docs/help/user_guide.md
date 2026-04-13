@@ -43,7 +43,7 @@ The draft status area at the top of Production Log helps prevent lost work witho
 
 - Resume Latest loads the newest draft in `data/pending`.
 - Pending Drafts opens a focused list of active draft files.
-- Backup / Recovery provides the full restore workspace for recovery snapshots and JSON backups.
+- Backup / Recovery provides the full restore workspace for recovery snapshots, form-aware layout backups, and JSON backups.
 - Delete Current Draft removes the active saved draft file.
 - The status line shows the latest draft name, current draft name, dirty/saved state, pending count, and recovery count.
 - Draft saves, imports, and exports use toast notifications for routine success messages.
@@ -69,7 +69,7 @@ If you load a draft or import Excel while unsaved changes exist, Logging Center 
 - `settings.json`: use Settings Manager when possible.
 - `rates.json`: use Rate Manager when possible.
 - Draft files in `data/pending`: normally created and managed by Production Log.
-- Recovery copies are stored under `data/backups` and `data/pending/history`.
+- Recovery copies are stored under `data/backups`, per-form layout backup folders, and `data/pending/history`.
 
 When you save settings, layout, or rates through the built-in tools, the suite now keeps extra restore copies automatically.
 

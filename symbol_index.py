@@ -378,27 +378,29 @@ def _file_area(relative_path):
 
 
 def _load_managed_module_names(repo_root):
-    app_controller_path = repo_root / "app" / "controllers" / "app_controller.py"
-    if not app_controller_path.exists():
+    registry_path = repo_root / "app" / "module_registry.json"
+    if not registry_path.exists():
         return []
 
     try:
-        tree = ast.parse(app_controller_path.read_text(encoding="utf-8"), filename=str(app_controller_path))
-    except SyntaxError as exc:
-        raise SymbolIndexError(f"Unable to parse managed module names from {app_controller_path}: {exc}") from exc
+        payload = json.loads(registry_path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise SymbolIndexError(f"Unable to read managed module registry from {registry_path}: {exc}") from exc
+    except json.JSONDecodeError as exc:
+        raise SymbolIndexError(f"Unable to parse managed module registry from {registry_path}: {exc}") from exc
 
-    for node in tree.body:
-        if not isinstance(node, ast.Assign):
+    modules = payload.get("modules", []) if isinstance(payload, dict) else []
+    if not isinstance(modules, list):
+        raise SymbolIndexError(f"Managed module registry at {registry_path} must define a 'modules' list.")
+
+    managed_module_names = []
+    for module_entry in modules:
+        if not isinstance(module_entry, dict):
             continue
-        for target in node.targets:
-            if isinstance(target, ast.Name) and target.id == "MANAGED_MODULE_NAMES" and isinstance(node.value, (ast.List, ast.Tuple)):
-                values = []
-                for element in node.value.elts:
-                    literal_value = _literal_value(element)
-                    if isinstance(literal_value, str):
-                        values.append(literal_value)
-                return values
-    return []
+        module_name = str(module_entry.get("name") or "").strip()
+        if module_name:
+            managed_module_names.append(module_name)
+    return managed_module_names
 
 
 def _iter_python_files(repo_root):

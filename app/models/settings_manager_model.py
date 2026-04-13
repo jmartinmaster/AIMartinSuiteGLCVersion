@@ -14,19 +14,17 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 from copy import deepcopy
-import json
-import os
 
 from app.app_identity import DEFAULT_UPDATE_REPOSITORY_URL
 from app.downtime_codes import DEFAULT_DT_CODE_MAP
-from app.persistence import write_json_with_backup
+from app.external_data_registry import ExternalDataRegistry
 from app.theme_manager import DEFAULT_THEME, normalize_theme
-from app.utils import external_path
 
 
 class SettingsManagerModel:
     def __init__(self):
-        self.settings_path = external_path("settings.json")
+        self.data_registry = ExternalDataRegistry()
+        self.settings_path = self.data_registry.resolve_write_path("settings")
         self.settings = {}
         self.valid_navigation_modules = []
         self.valid_persistent_modules = []
@@ -82,15 +80,9 @@ class SettingsManagerModel:
         }
 
     def load_settings(self):
-        loaded = self.build_default_settings()
-        if os.path.exists(self.settings_path):
-            try:
-                with open(self.settings_path, "r", encoding="utf-8") as handle:
-                    payload = json.load(handle)
-                if isinstance(payload, dict):
-                    loaded.update(payload)
-            except Exception:
-                pass
+        loaded = self.data_registry.load_json("settings", default_factory=self.build_default_settings)
+        if not isinstance(loaded, dict):
+            loaded = self.build_default_settings()
         self.settings = self.normalize_settings(loaded)
         self.saved_theme = self.settings["theme"]
         self.preview_theme = self.saved_theme
@@ -208,12 +200,7 @@ class SettingsManagerModel:
         return self.saved_theme
 
     def save_settings_with_backup(self):
-        backup_info = write_json_with_backup(
-            self.settings_path,
-            self.settings,
-            backup_dir=external_path("data/backups/settings"),
-            keep_count=12,
-        )
+        backup_info = self.data_registry.save_json("settings", self.settings, keep_count=12)
         self.commit_theme()
         return backup_info
 

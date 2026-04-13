@@ -19,8 +19,10 @@ import re
 
 
 APP_NAME = "Production Logging Center_GLC"
+APP_MAINTAINER = "Jamie Martin"
 LEGACY_EXE_NAME = f"{APP_NAME}.exe"
 DEB_PACKAGE_NAME = "production-logging-center-glc"
+LEGACY_DEB_NAME = f"{DEB_PACKAGE_NAME}.deb"
 MAIN_FILE_NAME = "main.py"
 DEFAULT_UPDATE_REPOSITORY_URL = "https://github.com/jmartinmaster/AIMartinSuiteGLCVersion.git"
 VERSION_PATTERN = re.compile(r"__version__\s*=\s*[\"']([^\"']+)[\"']")

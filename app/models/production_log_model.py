@@ -16,55 +16,486 @@
 import json
 import os
 import re
+from copy import deepcopy
 from datetime import datetime
 
 from app.downtime_codes import get_code_options
+from app.form_definition_registry import DEFAULT_FORM_ID, FormDefinitionRegistry
 from app.persistence import write_json_with_backup
+from app.production_log_roles import HEADER_BLANK_IGNORE_ROLES, HEADER_DERIVED_ROLES, resolve_header_field_role, resolve_row_field_role, normalize_role_name
 from app.utils import external_path, local_or_resource_path
-from app.data_handler_service import DataHandlerService
+from app.data_handler_service import DEFAULT_SHIFT_TIME_SETTINGS, DataHandlerService
 
 __module_name__ = "Production Log"
-__version__ = "1.2.7"
+__version__ = "1.2.8"
 
 BALANCE_DOWNTIME_CAUSE = "Time Balance Adjustment"
 DEFAULT_GHOST_LABEL = "Ghost Time: 0 min"
+DEFAULT_CALCULATION_FORMULAS = {
+    "production_minutes": "round_minutes((molds / rate) * 60, production_minutes_rounding)",
+    "shift_total_minutes": "round_minutes(hours * 60, shift_total_rounding)",
+    "shift_start_time": "format_clock(default_start_minutes)",
+    "shift_end_time": "format_clock(default_end_minutes)",
+    "downtime_minutes": "if_value(stop_minutes < start_minutes, if_value(allow_overnight_downtime, (stop_minutes + day_minutes) - start_minutes, invalid_value), stop_minutes - start_minutes)",
+    "downtime_stop_clock": "format_clock(default_stop_minutes)",
+    "ghost_minutes": "shift_total_minutes - production_total_minutes - downtime_total_minutes",
+    "efficiency_pct": "if_value((hours <= 0) or (goal_rate <= 0), 0, (total_molds / (hours * goal_rate)) * 100)",
+}
+DEFAULT_CALCULATION_SETTINGS = {
+    **DEFAULT_SHIFT_TIME_SETTINGS,
+    "production_minutes_rounding": "floor",
+    "missing_rate_fallback_mode": "header_goal",
+    "missing_rate_fallback_value": 240.0,
+    "allow_overnight_downtime": True,
+    "negative_ghost_mode": "allow_negative",
+    "default_balance_mix_pct": 100.0,
+    "formulas": deepcopy(DEFAULT_CALCULATION_FORMULAS),
+}
+DEFAULT_PRODUCTION_ROW_FIELDS = [
+    {
+        "id": "shop_order",
+        "role": "job_order",
+        "label": "Shop Order",
+        "widget": "entry",
+        "width": 15,
+        "open_row_trigger": True,
+        "user_input": True,
+    },
+    {
+        "id": "part_number",
+        "role": "part_number",
+        "label": "Part Number",
+        "widget": "entry",
+        "width": 15,
+        "open_row_trigger": True,
+        "user_input": True,
+    },
+    {
+        "id": "rate_lookup",
+        "role": "rate_value",
+        "label": "Rate",
+        "widget": "entry",
+        "width": 12,
+        "readonly": True,
+        "derived": True,
+    },
+    {
+        "id": "rate_override_enabled",
+        "role": "rate_override_toggle",
+        "label": "Override",
+        "widget": "checkbutton",
+        "default": False,
+    },
+    {
+        "id": "molds",
+        "role": "mold_count",
+        "label": "Molds",
+        "widget": "entry",
+        "width": 10,
+        "open_row_trigger": True,
+        "user_input": True,
+    },
+    {
+        "id": "time_calc",
+        "role": "duration_minutes",
+        "label": "Time",
+        "widget": "display",
+        "width": 10,
+        "default": "0 min",
+        "sticky": "e",
+        "bold": True,
+        "derived": True,
+    },
+]
+DEFAULT_DOWNTIME_ROW_FIELDS = [
+    {
+        "id": "start",
+        "role": "start_clock",
+        "label": "Start",
+        "widget": "entry",
+        "width": 8,
+        "open_row_trigger": True,
+        "user_input": True,
+    },
+    {
+        "id": "stop",
+        "role": "stop_clock",
+        "label": "Stop",
+        "widget": "entry",
+        "width": 8,
+        "open_row_trigger": True,
+        "user_input": True,
+    },
+    {
+        "id": "code",
+        "role": "downtime_code",
+        "label": "Code",
+        "widget": "combobox",
+        "width": 18,
+        "state": "readonly",
+        "options_source": "downtime_codes",
+        "open_row_trigger": True,
+        "user_input": True,
+    },
+    {
+        "id": "cause",
+        "role": "cause_text",
+        "label": "Cause",
+        "widget": "entry",
+        "width": 24,
+        "expand": True,
+        "sticky": "ew",
+        "open_row_trigger": True,
+        "user_input": True,
+    },
+    {
+        "id": "time_calc",
+        "role": "duration_minutes",
+        "label": "Time",
+        "widget": "display",
+        "width": 10,
+        "default": "0 min",
+        "sticky": "e",
+        "bold": True,
+        "bootstyle": "danger",
+        "derived": True,
+    },
+]
 
 
 class ProductionLogModel:
     def __init__(self):
-        self.config_path = local_or_resource_path("layout_config.json")
+        self.form_registry = FormDefinitionRegistry()
+        self.active_form_info = self.form_registry.get_active_form()
+        self.form_id = self.active_form_info.get("id", DEFAULT_FORM_ID)
+        self.form_name = self.active_form_info.get("name", "Production Logging Center")
+        self.config_path = self.active_form_info["load_path"]
         self.dt_codes = get_code_options()
-        self.data_handler = DataHandlerService()
+        self.data_handler = DataHandlerService(form_id=self.form_id)
         self.settings = self.load_settings()
+        self.calculation_settings = self.load_calculation_settings()
         self.default_hours = self._format_number(self.settings.get("default_shift_hours", 8.0))
         self.default_goal = self._format_number(self.settings.get("default_goal_mph", 240.0))
         self.auto_save_interval = self._coerce_positive_int(self.settings.get("auto_save_interval_min", 5), 5) * 60000
 
+    def get_active_form_info(self):
+        return dict(self.active_form_info)
+
+    def get_active_form_name(self):
+        return str(self.active_form_info.get("name") or self.form_name or "Production Logging Center")
+
+    def get_form_section_title(self, suffix_text):
+        suffix = str(suffix_text or "").strip()
+        if not suffix:
+            return self.get_active_form_name()
+        return f"{self.get_active_form_name()} {suffix}".strip()
+
+    def load_layout_config_for_form(self, form_id=None):
+        try:
+            form_info = self.form_registry.get_form(form_id)
+            with open(form_info["load_path"], "r", encoding="utf-8") as handle:
+                return self._normalize_layout_config(json.load(handle))
+        except Exception:
+            return self.load_layout_config()
+
+    def get_form_name_for_id(self, form_id=None):
+        try:
+            form_info = self.form_registry.get_form(form_id)
+            return str(form_info.get("name") or form_info.get("id") or "Form")
+        except Exception:
+            return self.get_active_form_name()
+
+    def resolve_draft_form_id(self, meta):
+        raw_form_id = ""
+        if isinstance(meta, dict):
+            raw_form_id = str(meta.get("form_id") or "").strip()
+        return self.form_registry.normalize_form_id(raw_form_id or DEFAULT_FORM_ID)
+
     def load_layout_config(self):
         with open(self.config_path, "r", encoding="utf-8") as handle:
-            return json.load(handle)
+            return self._normalize_layout_config(json.load(handle))
+
+    def _normalize_layout_config(self, config):
+        normalized = dict(config) if isinstance(config, dict) else {}
+        normalized["header_fields"] = self._normalize_header_field_configs(normalized.get("header_fields"))
+        normalized["production_row_fields"] = self._merge_row_field_configs(
+            normalized.get("production_row_fields"),
+            DEFAULT_PRODUCTION_ROW_FIELDS,
+            "production",
+        )
+        normalized["downtime_row_fields"] = self._merge_row_field_configs(
+            normalized.get("downtime_row_fields"),
+            DEFAULT_DOWNTIME_ROW_FIELDS,
+            "downtime",
+        )
+        return normalized
+
+    def _normalize_header_field_configs(self, configured_fields):
+        if not isinstance(configured_fields, list):
+            return []
+
+        normalized_fields = []
+        seen_ids = set()
+        for field in configured_fields:
+            if not isinstance(field, dict):
+                continue
+            field_id = str(field.get("id", "")).strip()
+            if not field_id or field_id in seen_ids:
+                continue
+            normalized_field = dict(field)
+            role_name = resolve_header_field_role(field_id, normalized_field.get("role"))
+            if role_name:
+                normalized_field["role"] = role_name
+            else:
+                normalized_field.pop("role", None)
+            normalized_fields.append(normalized_field)
+            seen_ids.add(field_id)
+        return normalized_fields
+
+    def _merge_row_field_configs(self, configured_fields, default_fields, section_name):
+        if not isinstance(configured_fields, list):
+            return deepcopy(default_fields)
+
+        default_map = {field["id"]: field for field in default_fields}
+        merged_fields = []
+        seen_ids = set()
+        for field in configured_fields:
+            if not isinstance(field, dict):
+                continue
+            field_id = str(field.get("id", "")).strip()
+            if not field_id or field_id in seen_ids:
+                continue
+            merged_field = dict(default_map.get(field_id, {}))
+            merged_field.update(field)
+            role_name = resolve_row_field_role(section_name, field_id, merged_field.get("role"))
+            if role_name:
+                merged_field["role"] = role_name
+            else:
+                merged_field.pop("role", None)
+            merged_fields.append(merged_field)
+            seen_ids.add(field_id)
+
+        for default_field in default_fields:
+            field_id = default_field["id"]
+            if field_id not in seen_ids:
+                merged_fields.append(deepcopy(default_field))
+
+        return merged_fields
+
+    def get_section_field_configs(self, section_name, config=None):
+        config_data = config or self.load_layout_config()
+        key_map = {
+            "header": "header_fields",
+            "production": "production_row_fields",
+            "downtime": "downtime_row_fields",
+        }
+        config_key = key_map.get(section_name)
+        if not config_key:
+            return []
+        field_configs = config_data.get(config_key, [])
+        return [dict(field) for field in field_configs if isinstance(field, dict) and field.get("id")]
+
+    def _resolve_field_role(self, section_name, field_config):
+        field_id = str(field_config.get("id", "")).strip()
+        if section_name == "header":
+            return resolve_header_field_role(field_id, field_config.get("role"))
+        return resolve_row_field_role(section_name, field_id, field_config.get("role"))
+
+    def get_header_field_id_by_role(self, role_name, config=None, fallback_id=None):
+        normalized_role = normalize_role_name(role_name)
+        for field in self.get_section_field_configs("header", config=config):
+            if self._resolve_field_role("header", field) == normalized_role:
+                return field["id"]
+        return fallback_id
+
+    def get_section_field_id_by_role(self, section_name, role_name, config=None, fallback_id=None):
+        normalized_role = normalize_role_name(role_name)
+        for field in self.get_section_field_configs(section_name, config=config):
+            if self._resolve_field_role(section_name, field) == normalized_role:
+                return field["id"]
+        return fallback_id
+
+    def get_section_field_config_by_role(self, section_name, role_name, config=None):
+        field_id = self.get_section_field_id_by_role(section_name, role_name, config=config)
+        if not field_id:
+            return {}
+        for field in self.get_section_field_configs(section_name, config=config):
+            if field.get("id") == field_id:
+                return field
+        return {}
+
+    def get_header_field_role(self, field_id, config=None):
+        for field in self.get_section_field_configs("header", config=config):
+            if field.get("id") == field_id:
+                return self._resolve_field_role("header", field)
+        return resolve_header_field_role(field_id)
+
+    def get_section_field_role(self, section_name, field_id, config=None):
+        for field in self.get_section_field_configs(section_name, config=config):
+            if field.get("id") == field_id:
+                return self._resolve_field_role(section_name, field)
+        return resolve_row_field_role(section_name, field_id)
+
+    def get_header_value_by_role(self, header_data, role_name, config=None, fallback_id=None, default=""):
+        if not isinstance(header_data, dict):
+            return default
+        field_id = self.get_header_field_id_by_role(role_name, config=config, fallback_id=fallback_id)
+        if field_id and field_id in header_data:
+            return header_data.get(field_id, default)
+        if fallback_id and fallback_id in header_data:
+            return header_data.get(fallback_id, default)
+        return default
+
+    def get_section_field_ids(self, section_name, config=None):
+        return [field["id"] for field in self.get_section_field_configs(section_name, config=config)]
+
+    def get_open_row_field_ids(self, section_name, config=None):
+        return [
+            field["id"]
+            for field in self.get_section_field_configs(section_name, config=config)
+            if field.get("open_row_trigger")
+        ]
 
     def normalize_header_data(self, header_data):
-        return self.data_handler.normalize_header_data(header_data)
+        return self.data_handler.normalize_header_data(
+            header_data,
+            calculation_settings=self.calculation_settings,
+        )
 
     def compute_target_time(self, raw_hours):
-        return self.data_handler.compute_target_time(raw_hours)
+        return self.data_handler.compute_target_time(
+            raw_hours,
+            calculation_settings=self.calculation_settings,
+        )
+
+    def get_default_calculation_settings(self):
+        return deepcopy(DEFAULT_CALCULATION_SETTINGS)
+
+    def get_default_calculation_formulas(self):
+        return deepcopy(DEFAULT_CALCULATION_FORMULAS)
+
+    def load_calculation_settings(self):
+        settings_source_path = local_or_resource_path("production_log_calculations.json")
+        payload = {}
+        if os.path.exists(settings_source_path):
+            try:
+                with open(settings_source_path, "r", encoding="utf-8") as handle:
+                    loaded = json.load(handle)
+                if isinstance(loaded, dict):
+                    payload = loaded
+            except Exception:
+                payload = {}
+        return self.normalize_calculation_settings(payload)
+
+    def get_calculation_settings_copy(self):
+        return deepcopy(self.calculation_settings)
+
+    def refresh_calculation_settings(self):
+        self.calculation_settings = self.load_calculation_settings()
+        return self.get_calculation_settings_copy()
+
+    def normalize_calculation_settings(self, payload=None):
+        raw_settings = payload if isinstance(payload, dict) else {}
+        defaults = self.get_default_calculation_settings()
+        normalized_settings = dict(defaults)
+
+        normalized_settings["production_minutes_rounding"] = self._normalize_choice(
+            raw_settings.get("production_minutes_rounding"),
+            {"floor", "nearest", "ceil"},
+            defaults["production_minutes_rounding"],
+        )
+        normalized_settings["shift_total_rounding"] = self._normalize_choice(
+            raw_settings.get("shift_total_rounding"),
+            {"floor", "nearest", "ceil"},
+            defaults["shift_total_rounding"],
+        )
+        normalized_settings["missing_rate_fallback_mode"] = self._normalize_choice(
+            raw_settings.get("missing_rate_fallback_mode"),
+            {"header_goal", "fixed_value", "no_fallback"},
+            defaults["missing_rate_fallback_mode"],
+        )
+        normalized_settings["missing_rate_fallback_value"] = self._coerce_float(
+            raw_settings.get("missing_rate_fallback_value", defaults["missing_rate_fallback_value"]),
+            defaults["missing_rate_fallback_value"],
+        )
+        for shift_index in (1, 2, 3):
+            anchor_key = f"shift_{shift_index}_anchor_mode"
+            time_key = f"shift_{shift_index}_reference_time"
+            normalized_settings[anchor_key] = self._normalize_choice(
+                raw_settings.get(anchor_key),
+                {"start", "midpoint", "end"},
+                defaults[anchor_key],
+            )
+            normalized_settings[time_key] = self._normalize_compact_time_value(
+                raw_settings.get(time_key),
+                defaults[time_key],
+            )
+        normalized_settings["allow_overnight_downtime"] = self._coerce_bool(
+            raw_settings.get("allow_overnight_downtime", defaults["allow_overnight_downtime"]),
+            defaults["allow_overnight_downtime"],
+        )
+        normalized_settings["negative_ghost_mode"] = self._normalize_choice(
+            raw_settings.get("negative_ghost_mode"),
+            {"allow_negative", "clamp_zero"},
+            defaults["negative_ghost_mode"],
+        )
+        normalized_settings["default_balance_mix_pct"] = max(
+            0.0,
+            min(
+                100.0,
+                self._coerce_float(
+                    raw_settings.get("default_balance_mix_pct", defaults["default_balance_mix_pct"]),
+                    defaults["default_balance_mix_pct"],
+                ),
+            ),
+        )
+        raw_formulas = raw_settings.get("formulas") if isinstance(raw_settings.get("formulas"), dict) else {}
+        normalized_formulas = self.get_default_calculation_formulas()
+        for formula_name, default_formula in normalized_formulas.items():
+            formula_text = str(raw_formulas.get(formula_name, default_formula) or "").strip()
+            normalized_formulas[formula_name] = formula_text or default_formula
+        normalized_settings["formulas"] = normalized_formulas
+        return normalized_settings
+
+    def get_calculation_formula(self, formula_name):
+        formulas = self.calculation_settings.get("formulas", {}) if isinstance(self.calculation_settings, dict) else {}
+        return str(formulas.get(formula_name, DEFAULT_CALCULATION_FORMULAS.get(formula_name, "")) or "").strip()
+
+    def evaluate_runtime_formula(self, formula_name, context=None, default=None):
+        formula_text = self.get_calculation_formula(formula_name)
+        formula_context = {
+            key: value
+            for key, value in self.calculation_settings.items()
+            if key != "formulas"
+        }
+        formula_context.update(
+            {
+                "day_minutes": 24 * 60,
+                "invalid_value": -1,
+            }
+        )
+        if isinstance(context, dict):
+            formula_context.update(context)
+        return self.data_handler.evaluate_expression_formula(formula_text, formula_context, default=default)
 
     def serialize_ui_data(self, data):
         return json.dumps(data, sort_keys=True, default=str)
 
     def is_form_blank(self, data):
         header = data.get("header", {})
+        layout_config = self.load_layout_config()
         significant_header_values = [
             value for key, value in header.items()
-            if key not in {"hours", "goal_mph", "cast_date", "target_time", "total_molds"} and str(value).strip()
+            if self.get_header_field_role(key, config=layout_config) not in HEADER_BLANK_IGNORE_ROLES and str(value).strip()
         ]
+        production_fields = self.get_open_row_field_ids("production")
+        downtime_fields = self.get_open_row_field_ids("downtime")
         production_has_data = any(
-            any(str(row.get(key, "")).strip() for key in ("shop_order", "part_number", "molds"))
+            any(str(row.get(key, "")).strip() for key in production_fields)
             for row in data.get("production", [])
         )
         downtime_has_data = any(
-            any(str(row.get(key, "")).strip() for key in ("start", "stop", "code", "cause"))
+            any(str(row.get(key, "")).strip() for key in downtime_fields)
             for row in data.get("downtime", [])
         )
         return not significant_header_values and not production_has_data and not downtime_has_data
@@ -102,6 +533,36 @@ class ProductionLogModel:
         except Exception:
             return default
 
+    def _coerce_bool(self, value, default=False):
+        if isinstance(value, bool):
+            return value
+        text = str(value or "").strip().lower()
+        if text in {"1", "true", "yes", "on"}:
+            return True
+        if text in {"0", "false", "no", "off"}:
+            return False
+        return bool(default)
+
+    def _normalize_choice(self, value, allowed_values, default):
+        normalized_value = str(value or "").strip().lower()
+        if normalized_value in allowed_values:
+            return normalized_value
+        return default
+
+    def _normalize_compact_time_value(self, value, default):
+        digits = "".join(ch for ch in str(value or "").strip() if ch.isdigit())
+        if not digits:
+            return default
+        digits = digits.zfill(4)[-4:]
+        try:
+            hours = int(digits[:2])
+            minutes = int(digits[2:])
+        except Exception:
+            return default
+        if hours > 23 or minutes > 59:
+            return default
+        return digits
+
     def _format_number(self, value):
         try:
             numeric_value = float(value)
@@ -126,9 +587,10 @@ class ProductionLogModel:
         return history_dir
 
     def build_draft_path(self, header_data):
-        raw_date = str(header_data.get("date", "unsaved") or "unsaved").replace("/", "-")
-        shift_str = str(header_data.get("shift", "0") or "0")
-        filename = f"draft_{raw_date}_shift{shift_str}.json"
+        layout_config = self.load_layout_config()
+        raw_date = str(self.get_header_value_by_role(header_data, "log_date", config=layout_config, fallback_id="date", default="unsaved") or "unsaved").replace("/", "-")
+        shift_str = str(self.get_header_value_by_role(header_data, "shift_number", config=layout_config, fallback_id="shift", default="0") or "0")
+        filename = f"draft_{self.form_id}_{raw_date}_shift{shift_str}.json"
         return os.path.join(self.get_pending_dir(), filename)
 
     def build_draft_payload(self, data, version, draft_path, is_auto=False):
@@ -138,6 +600,8 @@ class ProductionLogModel:
                 "auto_save": is_auto,
                 "version": version,
                 "draft_name": os.path.basename(draft_path),
+                "form_id": self.form_id,
+                "form_name": self.get_active_form_name(),
             },
             **data,
         }
@@ -200,20 +664,26 @@ class ProductionLogModel:
                 with open(path, "r", encoding="utf-8") as handle:
                     data = json.load(handle)
                 meta = data.get("meta", {})
+                form_id = self.resolve_draft_form_id(meta)
+                layout_config = self.load_layout_config_for_form(form_id)
                 saved_at = meta.get("saved_at") or datetime.fromtimestamp(os.path.getmtime(path)).isoformat(timespec="seconds")
                 header = data.get("header", {})
                 drafts.append({
                     "path": path,
                     "filename": filename,
                     "saved_at": saved_at,
-                    "date": header.get("date", ""),
-                    "shift": header.get("shift", ""),
+                    "form_id": form_id,
+                    "form_name": meta.get("form_name") or self.get_form_name_for_id(form_id),
+                    "date": self.get_header_value_by_role(header, "log_date", config=layout_config, fallback_id="date", default=""),
+                    "shift": self.get_header_value_by_role(header, "shift_number", config=layout_config, fallback_id="shift", default=""),
                 })
             except Exception:
                 drafts.append({
                     "path": path,
                     "filename": filename,
                     "saved_at": datetime.fromtimestamp(os.path.getmtime(path)).isoformat(timespec="seconds"),
+                    "form_id": DEFAULT_FORM_ID,
+                    "form_name": self.get_form_name_for_id(DEFAULT_FORM_ID),
                     "date": "",
                     "shift": "",
                 })
@@ -231,14 +701,18 @@ class ProductionLogModel:
                 with open(path, "r", encoding="utf-8") as handle:
                     data = json.load(handle)
                 meta = data.get("meta", {})
+                form_id = self.resolve_draft_form_id(meta)
+                layout_config = self.load_layout_config_for_form(form_id)
                 saved_at = meta.get("saved_at") or datetime.fromtimestamp(os.path.getmtime(path)).isoformat(timespec="seconds")
                 header = data.get("header", {})
                 snapshots.append({
                     "path": path,
                     "filename": filename,
                     "saved_at": saved_at,
-                    "date": header.get("date", ""),
-                    "shift": header.get("shift", ""),
+                    "form_id": form_id,
+                    "form_name": meta.get("form_name") or self.get_form_name_for_id(form_id),
+                    "date": self.get_header_value_by_role(header, "log_date", config=layout_config, fallback_id="date", default=""),
+                    "shift": self.get_header_value_by_role(header, "shift_number", config=layout_config, fallback_id="shift", default=""),
                     "source": "Recovery Snapshot",
                 })
             except Exception:
@@ -246,6 +720,8 @@ class ProductionLogModel:
                     "path": path,
                     "filename": filename,
                     "saved_at": datetime.fromtimestamp(os.path.getmtime(path)).isoformat(timespec="seconds"),
+                    "form_id": DEFAULT_FORM_ID,
+                    "form_name": self.get_form_name_for_id(DEFAULT_FORM_ID),
                     "date": "",
                     "shift": "",
                     "source": "Recovery Snapshot",
@@ -255,7 +731,10 @@ class ProductionLogModel:
 
     def get_latest_pending_draft(self):
         drafts = self.list_pending_drafts()
-        return drafts[0] if drafts else None
+        for draft in drafts:
+            if draft.get("form_id") == self.form_id:
+                return draft
+        return None
 
     def load_rates_data(self):
         rates_data = {}
@@ -301,13 +780,31 @@ class ProductionLogModel:
             return 0
         if rate is None or rate <= 0:
             return 0
-        return max(0, int((molds / rate) * 60))
+        result = self.evaluate_runtime_formula(
+            "production_minutes",
+            {
+                "molds": molds,
+                "rate": float(rate),
+            },
+            default=0,
+        )
+        return max(0, self.coerce_minutes_value(result, 0))
 
     def calculate_shift_total_minutes(self, hours_value):
-        try:
-            return int(round(float(hours_value or 0) * 60))
-        except Exception:
-            return 0
+        result = self.evaluate_runtime_formula(
+            "shift_total_minutes",
+            {
+                "hours": self._coerce_float(hours_value, 0.0),
+            },
+            default=0,
+        )
+        return max(0, self.coerce_minutes_value(result, 0))
+
+    def get_default_balance_mix_pct(self):
+        return self._coerce_float(
+            self.calculation_settings.get("default_balance_mix_pct", DEFAULT_CALCULATION_SETTINGS["default_balance_mix_pct"]),
+            DEFAULT_CALCULATION_SETTINGS["default_balance_mix_pct"],
+        )
 
     def calculate_efficiency(self, total_molds, hours_value, goal_value):
         try:
@@ -315,9 +812,16 @@ class ProductionLogModel:
             goal = float(goal_value or 240.0)
         except Exception:
             return 0.0
-        if not hours or not goal:
-            return 0.0
-        return (float(total_molds) / (hours * goal)) * 100
+        result = self.evaluate_runtime_formula(
+            "efficiency_pct",
+            {
+                "total_molds": float(total_molds or 0),
+                "hours": hours,
+                "goal_rate": goal,
+            },
+            default=0.0,
+        )
+        return max(0.0, self._coerce_float(result, 0.0))
 
     def format_rate_value(self, value):
         try:
@@ -360,7 +864,13 @@ class ProductionLogModel:
                 raw_rate = rates_data[part_key]
                 break
         if raw_rate is None:
-            raw_rate = global_goal
+            fallback_mode = self.calculation_settings.get("missing_rate_fallback_mode", "header_goal")
+            if fallback_mode == "no_fallback":
+                return None
+            if fallback_mode == "fixed_value":
+                raw_rate = self.calculation_settings.get("missing_rate_fallback_value", 240.0)
+            else:
+                raw_rate = global_goal
         try:
             return float(raw_rate)
         except Exception:
@@ -395,9 +905,16 @@ class ProductionLogModel:
         stop_minutes = self.parse_clock_value(stop_value)
         if start_minutes is None or stop_minutes is None:
             return None
-        if stop_minutes < start_minutes:
-            stop_minutes += 24 * 60
-        return stop_minutes - start_minutes
+        result = self.evaluate_runtime_formula(
+            "downtime_minutes",
+            {
+                "start_minutes": start_minutes,
+                "stop_minutes": stop_minutes,
+            },
+            default=-1,
+        )
+        duration = self.coerce_minutes_value(result, -1)
+        return None if duration < 0 else duration
 
     def calculate_downtime_minutes(self, start_value, stop_value, fallback_label=None):
         duration = self.calculate_clock_duration_minutes(start_value, stop_value)
@@ -410,7 +927,21 @@ class ProductionLogModel:
     def calculate_ghost_minutes(self, shift_total_minutes, production_total_minutes, downtime_total_minutes):
         if shift_total_minutes <= 0:
             return 0
-        return shift_total_minutes - production_total_minutes - downtime_total_minutes
+        ghost_minutes = self.coerce_minutes_value(
+            self.evaluate_runtime_formula(
+                "ghost_minutes",
+                {
+                    "shift_total_minutes": shift_total_minutes,
+                    "production_total_minutes": production_total_minutes,
+                    "downtime_total_minutes": downtime_total_minutes,
+                },
+                default=0,
+            ),
+            0,
+        )
+        if self.calculation_settings.get("negative_ghost_mode") == "clamp_zero":
+            return max(0, ghost_minutes)
+        return ghost_minutes
 
     def normalize_balance_mix_ratio(self, value):
         try:

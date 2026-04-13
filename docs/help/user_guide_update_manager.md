@@ -19,6 +19,6 @@ Use Update Manager to compare the local Dispatcher Core version with the reposit
 
 - Module payload installs target the external `the_golden_standard` folder.
 - Installed module payloads stay inactive until override trust is enabled; this lets admins stage override files without executing them immediately.
-- JSON payload restores can replace tracked local configuration files while keeping backups first.
+- JSON payload restores can replace tracked local configuration files while keeping backups first. The tracked set now includes the built-in default form layout, the form definitions registry, and other shared JSON config files.
 - Documentation restores refresh the bundled Help Center markdown files and `LICENSE.txt` as one grouped update instead of individual per-document choices.
 - Dispatcher Core EXE updates still follow the packaged release path.

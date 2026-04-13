@@ -1,0 +1,328 @@
+{
+    "schema_version": 1,
+    "modules": [
+        {
+            "name": "about",
+            "module_path": "app.about",
+            "display_name": "About",
+            "navigation_visible": true,
+            "navigation_group": "bottom",
+            "launcher_visible": true,
+            "persistable": true,
+            "preload_enabled": true
+        },
+        {
+            "name": "app_identity",
+            "module_path": "app.app_identity",
+            "display_name": "App Identity",
+            "navigation_visible": false,
+            "persistable": false,
+            "preload_enabled": false
+        },
+        {
+            "name": "app_logging",
+            "module_path": "app.app_logging",
+            "display_name": "App Logging",
+            "navigation_visible": false,
+            "persistable": false,
+            "preload_enabled": false
+        },
+        {
+            "name": "app_platform",
+            "module_path": "app.app_platform",
+            "display_name": "App Platform",
+            "navigation_visible": false,
+            "persistable": false,
+            "preload_enabled": false
+        },
+        {
+            "name": "data_handler",
+            "module_path": "app.data_handler",
+            "display_name": "Data Handler",
+            "navigation_visible": false,
+            "persistable": false,
+            "preload_enabled": false
+        },
+        {
+            "name": "data_request_worker",
+            "module_path": "app.data_request_worker",
+            "display_name": "Data Request Worker",
+            "navigation_visible": false,
+            "persistable": false,
+            "preload_enabled": false
+        },
+        {
+            "name": "data_handler_service",
+            "module_path": "app.data_handler_service",
+            "display_name": "Data Handler Service",
+            "navigation_visible": false,
+            "persistable": false,
+            "preload_enabled": false
+        },
+        {
+            "name": "developer_admin",
+            "module_path": "app.developer_admin",
+            "display_name": "Developer Tools",
+            "navigation_visible": true,
+            "navigation_group": "middle",
+            "launcher_visible": false,
+            "persistable": true,
+            "protected": true,
+            "hidden_until_authorized": true,
+            "allowed_roles": [
+                "developer"
+            ],
+            "preload_enabled": true
+        },
+        {
+            "name": "dev_logging",
+            "module_path": "app.dev_logging",
+            "display_name": "Dev Logging",
+            "navigation_visible": false,
+            "persistable": false,
+            "preload_enabled": false
+        },
+        {
+            "name": "downtime_codes",
+            "module_path": "app.downtime_codes",
+            "display_name": "Downtime Codes",
+            "navigation_visible": false,
+            "persistable": false,
+            "preload_enabled": false
+        },
+        {
+            "name": "external_data_registry",
+            "module_path": "app.external_data_registry",
+            "display_name": "External Data Registry",
+            "navigation_visible": false,
+            "persistable": false,
+            "preload_enabled": false
+        },
+        {
+            "name": "form_definition_registry",
+            "module_path": "app.form_definition_registry",
+            "display_name": "Form Definition Registry",
+            "navigation_visible": false,
+            "persistable": false,
+            "preload_enabled": false
+        },
+        {
+            "name": "help_viewer",
+            "module_path": "app.help_viewer",
+            "display_name": "Help Viewer",
+            "navigation_visible": true,
+            "navigation_group": "bottom",
+            "launcher_visible": true,
+            "persistable": true,
+            "preload_enabled": true
+        },
+        {
+            "name": "internal_code_editor",
+            "module_path": "app.internal_code_editor",
+            "display_name": "Internal Code Editor",
+            "navigation_visible": true,
+            "navigation_group": "middle",
+            "launcher_visible": false,
+            "persistable": true,
+            "protected": true,
+            "hidden_until_authorized": true,
+            "allowed_roles": [
+                "developer"
+            ],
+            "preload_enabled": true
+        },
+        {
+            "name": "layout_config_service",
+            "module_path": "app.layout_config_service",
+            "display_name": "Layout Config Service",
+            "navigation_visible": false,
+            "persistable": false,
+            "preload_enabled": false
+        },
+        {
+            "name": "layout_manager",
+            "module_path": "app.layout_manager",
+            "display_name": "Layout Manager",
+            "navigation_visible": true,
+            "navigation_group": "top",
+            "launcher_visible": true,
+            "persistable": true,
+            "protected": true,
+            "preload_enabled": true
+        },
+        {
+            "name": "module_registry",
+            "module_path": "app.module_registry",
+            "display_name": "Module Registry",
+            "navigation_visible": false,
+            "persistable": false,
+            "preload_enabled": false
+        },
+        {
+            "name": "persistence",
+            "module_path": "app.persistence",
+            "display_name": "Persistence",
+            "navigation_visible": false,
+            "persistable": false,
+            "preload_enabled": false
+        },
+        {
+            "name": "production_log",
+            "module_path": "app.production_log",
+            "display_name": "Production Log",
+            "navigation_visible": true,
+            "navigation_group": "top",
+            "launcher_visible": true,
+            "persistable": true,
+            "preload_enabled": true,
+            "default_initial": true
+        },
+        {
+            "name": "production_log_calculations",
+            "module_path": "app.production_log_calculations",
+            "display_name": "Production Log Calculations",
+            "navigation_visible": true,
+            "navigation_group": "middle",
+            "launcher_visible": false,
+            "persistable": true,
+            "protected": true,
+            "hidden_until_authorized": true,
+            "allowed_roles": [
+                "developer"
+            ],
+            "preload_enabled": true
+        },
+        {
+            "name": "production_log_roles",
+            "module_path": "app.production_log_roles",
+            "display_name": "Production Log Roles",
+            "navigation_visible": false,
+            "persistable": false,
+            "preload_enabled": false
+        },
+        {
+            "name": "rate_manager",
+            "module_path": "app.rate_manager",
+            "display_name": "Rate Manager",
+            "navigation_visible": true,
+            "navigation_group": "top",
+            "launcher_visible": true,
+            "persistable": true,
+            "protected": true,
+            "preload_enabled": true
+        },
+        {
+            "name": "recovery_viewer",
+            "module_path": "app.recovery_viewer",
+            "display_name": "Recovery Viewer",
+            "navigation_visible": true,
+            "navigation_group": "top",
+            "launcher_visible": true,
+            "persistable": true,
+            "preload_enabled": true
+        },
+        {
+            "name": "safe_expression",
+            "module_path": "app.safe_expression",
+            "display_name": "Safe Expression",
+            "navigation_visible": false,
+            "persistable": false,
+            "preload_enabled": false
+        },
+        {
+            "name": "security",
+            "module_path": "app.security",
+            "display_name": "Security",
+            "navigation_visible": false,
+            "persistable": false,
+            "preload_enabled": false
+        },
+        {
+            "name": "security_admin",
+            "module_path": "app.security_admin",
+            "display_name": "Security Admin",
+            "navigation_visible": true,
+            "navigation_group": "middle",
+            "launcher_visible": false,
+            "persistable": true,
+            "protected": true,
+            "hidden_until_authorized": true,
+            "allowed_roles": [
+                "admin",
+                "developer"
+            ],
+            "preload_enabled": true
+        },
+        {
+            "name": "security_service",
+            "module_path": "app.security_service",
+            "display_name": "Security Service",
+            "navigation_visible": false,
+            "persistable": false,
+            "preload_enabled": false
+        },
+        {
+            "name": "settings_manager",
+            "module_path": "app.settings_manager",
+            "display_name": "Settings Manager",
+            "navigation_visible": true,
+            "navigation_group": "bottom",
+            "launcher_visible": true,
+            "persistable": true,
+            "protected": true,
+            "preload_enabled": true
+        },
+        {
+            "name": "splash",
+            "module_path": "app.splash",
+            "display_name": "Splash",
+            "navigation_visible": false,
+            "persistable": false,
+            "preload_enabled": false
+        },
+        {
+            "name": "theme_manager",
+            "module_path": "app.theme_manager",
+            "display_name": "Theme Manager",
+            "navigation_visible": false,
+            "persistable": false,
+            "preload_enabled": false
+        },
+        {
+            "name": "update_bindings",
+            "module_path": "app.update_bindings",
+            "display_name": "Update Bindings",
+            "navigation_visible": false,
+            "persistable": false,
+            "preload_enabled": false
+        },
+        {
+            "name": "update_manager",
+            "module_path": "app.update_manager",
+            "display_name": "Update Manager",
+            "navigation_visible": true,
+            "navigation_group": "top",
+            "launcher_visible": true,
+            "persistable": false,
+            "always_persistent": true,
+            "protected": true,
+            "preload_enabled": true
+        },
+        {
+            "name": "update_state",
+            "module_path": "app.update_state",
+            "display_name": "Update State",
+            "navigation_visible": false,
+            "persistable": false,
+            "preload_enabled": false
+        },
+        {
+            "name": "utils",
+            "module_path": "app.utils",
+            "display_name": "Utils",
+            "navigation_visible": false,
+            "persistable": false,
+            "preload_enabled": false
+        }
+    ]
+}

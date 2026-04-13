@@ -31,6 +31,9 @@ class ProductionLogCalculationsController:
         self.view = ProductionLogCalculationsView(parent, dispatcher, self)
         self.load_into_view()
 
+    def get_editor_sections(self):
+        return self.model.get_editor_sections()
+
     def __getattr__(self, attribute_name):
         view = self.__dict__.get("view")
         if view is None:
@@ -39,20 +42,20 @@ class ProductionLogCalculationsController:
 
     def load_into_view(self):
         settings = self.model.reload_settings()
-        self.view.set_form_values(settings)
+        self.view.set_form_values(self.model.flatten_settings_for_form(settings))
         self.view.set_status("Loaded the active developer calculation profile.", INFO)
         self.view.set_preview_lines(self.build_preview_lines(settings))
 
     def reload_from_disk(self):
         settings = self.model.load_settings_file()
-        self.view.set_form_values(settings)
+        self.view.set_form_values(self.model.flatten_settings_for_form(settings))
         self.view.set_preview_lines(self.build_preview_lines(settings))
         self.view.set_status("Reloaded the saved calculation profile from disk.", INFO)
 
     def save_settings(self):
         settings = self.model.update_settings(self.view.get_form_values())
         self.model.save_settings_with_backup()
-        self.view.set_form_values(settings)
+        self.view.set_form_values(self.model.flatten_settings_for_form(settings))
         self.view.set_preview_lines(self.build_preview_lines(settings))
         self.dispatcher.notify_production_log_calculation_settings_changed()
         self.view.set_status("Saved the developer calculation profile and refreshed open Production Log pages.", SUCCESS)
@@ -64,7 +67,7 @@ class ProductionLogCalculationsController:
 
     def reset_defaults(self):
         defaults = self.model.get_default_settings()
-        self.view.set_form_values(defaults)
+        self.view.set_form_values(self.model.flatten_settings_for_form(defaults))
         self.view.set_preview_lines(self.build_preview_lines(defaults))
         self.view.set_status("Restored the default values in the editor. Save to make them active.", INFO)
 
@@ -85,6 +88,7 @@ class ProductionLogCalculationsController:
 
         overnight_label = "Allow overnight rollover when downtime stop time is earlier than start time" if settings.get("allow_overnight_downtime", True) else "Treat earlier downtime stop times as invalid instead of rolling overnight"
         ghost_label = "Keep negative ghost time to surface shift overruns" if settings.get("negative_ghost_mode") == "allow_negative" else "Clamp ghost time to 0 when production and downtime exceed shift minutes"
+        formulas = settings.get("formulas", {}) if isinstance(settings, dict) else {}
 
         return [
             f"Production minutes: round ((molds / rate) * 60) using {settings.get('production_minutes_rounding', 'floor')}",
@@ -96,6 +100,14 @@ class ProductionLogCalculationsController:
             f"Shift 1 timing: {settings.get('shift_1_anchor_mode', 'start')} anchor at {settings.get('shift_1_reference_time', '0600')}",
             f"Shift 2 timing: {settings.get('shift_2_anchor_mode', 'midpoint')} anchor at {settings.get('shift_2_reference_time', '1800')}",
             f"Shift 3 timing: {settings.get('shift_3_anchor_mode', 'end')} anchor at {settings.get('shift_3_reference_time', '0600')}",
+            f"Formula production_minutes = {formulas.get('production_minutes', '')}",
+            f"Formula shift_total_minutes = {formulas.get('shift_total_minutes', '')}",
+            f"Formula shift_start_time = {formulas.get('shift_start_time', '')}",
+            f"Formula shift_end_time = {formulas.get('shift_end_time', '')}",
+            f"Formula downtime_minutes = {formulas.get('downtime_minutes', '')}",
+            f"Formula downtime_stop_clock = {formulas.get('downtime_stop_clock', '')}",
+            f"Formula ghost_minutes = {formulas.get('ghost_minutes', '')}",
+            f"Formula efficiency_pct = {formulas.get('efficiency_pct', '')}",
         ]
 
     def _format_number(self, value):

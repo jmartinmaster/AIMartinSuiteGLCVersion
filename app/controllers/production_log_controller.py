@@ -25,7 +25,7 @@ from app.models.production_log_model import ProductionLogModel
 from app.views.production_log_view import ProductionLogView, __version__ as PRODUCTION_LOG_VERSION
 
 __module_name__ = "Production Log"
-__version__ = "1.2.7"
+__version__ = "1.2.8"
 
 
 class ProductionLogController:
@@ -42,6 +42,41 @@ class ProductionLogController:
         if view is None:
             raise AttributeError(attribute_name)
         return getattr(view, attribute_name)
+
+    def reload_active_form(self, data=None, draft_path=None, mark_dirty_after_load=False):
+        if self.view is not None and hasattr(self.view, "on_unload"):
+            try:
+                self.view.on_unload()
+            except Exception:
+                pass
+
+        for child in list(self.parent.winfo_children()):
+            try:
+                child.destroy()
+            except Exception:
+                pass
+
+        self.model = ProductionLogModel()
+        self.view = ProductionLogView(self.parent, self.dispatcher, self, self.model)
+        self.update_export_action_state()
+        if data is not None:
+            self.view.populate_from_data(data, source_path=draft_path, mark_dirty_after_load=mark_dirty_after_load)
+
+    def on_active_form_changed(self):
+        try:
+            if self.view is not None and self.view.has_unsaved_changes:
+                data = self.view.collect_ui_data()
+                if not self.model.is_form_blank(data):
+                    self.save_draft(is_auto=True, suppress_toast=True)
+        except Exception:
+            pass
+        self.reload_active_form()
+
+    def on_calculation_settings_changed(self):
+        self.model.refresh_calculation_settings()
+        self.view.apply_calculation_settings(mark_dirty=False)
+        self.update_row_math()
+        self.calculate_metrics()
 
     def auto_save(self):
         if self.view.has_unsaved_changes:
@@ -99,7 +134,7 @@ class ProductionLogController:
     def refresh_downtime_codes(self):
         self.view.dt_codes = self.model.refresh_downtime_codes()
         for row in self.view.downtime_rows:
-            code_widget = row.get("code")
+            code_widget = self.view.get_row_widget(row, "downtime", "downtime_code", fallback_id="code")
             if code_widget is None:
                 continue
             current_value = code_widget.get().strip()
@@ -118,9 +153,27 @@ class ProductionLogController:
     def on_header_field_focus_out(self, _event=None):
         self.view.apply_header_data(self.view.get_raw_header_data(), mark_dirty=False)
 
+    def get_header_entry_by_role(self, role_name, fallback_id=None):
+        field_id = self.model.get_header_field_id_by_role(role_name, config=self.view.layout_config, fallback_id=fallback_id)
+        return self.view.entries.get(field_id)
+
+    def get_header_value_by_role(self, header_data, role_name, fallback_id=None, default=""):
+        return self.model.get_header_value_by_role(
+            header_data,
+            role_name,
+            config=self.view.layout_config,
+            fallback_id=fallback_id,
+            default=default,
+        )
+
     def collect_header_data(self):
         header_data = self.model.normalize_header_data(self.view.get_raw_header_data())
-        header_data["total_molds"] = str(self.calculate_total_molds())
+        total_molds_field_id = self.model.get_header_field_id_by_role(
+            "total_molds",
+            config=self.view.layout_config,
+            fallback_id="total_molds",
+        )
+        header_data[total_molds_field_id] = str(self.calculate_total_molds())
         return header_data
 
     def apply_header_data(self, header_data, mark_dirty=False):
@@ -132,28 +185,38 @@ class ProductionLogController:
         return normalized_header
 
     def get_target_time_value(self):
-        hours_entry = self.view.entries.get("hours")
+        hours_entry = self.get_header_entry_by_role("shift_hours", fallback_id="hours")
         hours_value = hours_entry.get() if hours_entry is not None else ""
         return self.model.compute_target_time(hours_value)
 
     def get_global_goal_rate(self):
-        goal_entry = self.view.entries.get("goal_mph")
+        goal_entry = self.get_header_entry_by_role("goal_rate", fallback_id="goal_mph")
         goal_value = goal_entry.get() if goal_entry is not None else None
         return self.model.get_global_goal_rate(goal_value)
 
     def calculate_total_molds(self):
-        return self.model.calculate_total_molds(row["molds"].get() for row in self.view.production_rows)
+        return self.model.calculate_total_molds(
+            self.view.get_row_value_by_role(row, "production", "mold_count", fallback_id="molds")
+            for row in self.view.production_rows
+        )
 
     def get_row_rate(self, row, rates_data, global_goal):
-        if bool(row["rate_override_enabled_var"].get()):
+        override_var = self.view.get_row_variable(row, "production", "rate_override_toggle", fallback_id="rate_override_enabled")
+        if override_var is not None and bool(override_var.get()):
             try:
-                return float(row["rate_lookup"].get().strip())
+                return float(self.view.get_row_value_by_role(row, "production", "rate_value", fallback_id="rate_lookup").strip())
             except Exception:
                 return None
-        return self.model.resolve_lookup_rate(row["part_number"].get(), rates_data, global_goal)
+        return self.model.resolve_lookup_rate(
+            self.view.get_row_value_by_role(row, "production", "part_number", fallback_id="part_number"),
+            rates_data,
+            global_goal,
+        )
 
     def is_balance_downtime_row(self, row):
-        return self.model.is_balance_downtime_cause(row["cause"].get())
+        return self.model.is_balance_downtime_cause(
+            self.view.get_row_value_by_role(row, "downtime", "cause_text", fallback_id="cause")
+        )
 
     def find_balance_downtime_row(self):
         for row in self.view.downtime_rows:
@@ -163,20 +226,22 @@ class ProductionLogController:
 
     def get_row_duration_minutes(self, row):
         return self.model.calculate_downtime_minutes(
-            row["start"].get(),
-            row["stop"].get(),
-            fallback_label=self.view.get_widget_value(row["time_calc"]),
+            self.view.get_row_value_by_role(row, "downtime", "start_clock", fallback_id="start"),
+            self.view.get_row_value_by_role(row, "downtime", "stop_clock", fallback_id="stop"),
+            fallback_label=self.view.get_row_value_by_role(row, "downtime", "duration_minutes", fallback_id="time_calc"),
         )
 
     def get_shift_total_minutes(self):
-        hours_entry = self.view.entries.get("hours")
+        hours_entry = self.get_header_entry_by_role("shift_hours", fallback_id="hours")
         hours_value = hours_entry.get() if hours_entry is not None else ""
         return self.model.calculate_shift_total_minutes(hours_value)
 
     def get_production_total_minutes(self):
         total_minutes = 0
         for row in self.view.production_rows:
-            total_minutes += self.model.parse_minutes_label(self.view.get_widget_value(row["time_calc"]))
+            total_minutes += self.model.parse_minutes_label(
+                self.view.get_row_value_by_role(row, "production", "duration_minutes", fallback_id="time_calc")
+            )
         return total_minutes
 
     def get_total_downtime_minutes(self):
@@ -286,12 +351,14 @@ class ProductionLogController:
         self.capture_balance_reference(weighted_rows)
         balance_row = self.find_balance_downtime_row()
         if balance_row is not None:
-            balance_row["start"].master.destroy()
+            row_frame = balance_row.get("__frame")
+            if row_frame is not None:
+                row_frame.destroy()
             if balance_row in self.view.downtime_rows:
                 self.view.downtime_rows.remove(balance_row)
 
         applied_minutes = self.model.calculate_spillover_allocations(
-            [row["start"].get() for row, _duration in weighted_rows],
+            [self.view.get_row_value_by_role(row, "downtime", "start_clock", fallback_id="start") for row, _duration in weighted_rows],
             [duration for _row, duration in weighted_rows],
             target_total_minutes,
             self.view.get_balance_mix_ratio(),
@@ -304,23 +371,26 @@ class ProductionLogController:
         return True
 
     def on_rate_override_toggled(self, row):
-        override_enabled = bool(row["rate_override_enabled_var"].get())
+        override_var = self.view.get_row_variable(row, "production", "rate_override_toggle", fallback_id="rate_override_enabled")
+        override_enabled = bool(override_var.get()) if override_var is not None else False
+        rate_widget = self.view.get_row_widget(row, "production", "rate_value", fallback_id="rate_lookup")
         if override_enabled:
             lookup_rate = self.view.resolve_lookup_rate(
-                row["part_number"].get(),
+                self.view.get_row_value_by_role(row, "production", "part_number", fallback_id="part_number"),
                 self.view.load_rates_data(),
                 self.get_global_goal_rate(),
             )
-            current_value = row["rate_lookup"].get().strip() or self.view.format_rate_value(lookup_rate)
+            current_value = self.view.get_widget_value(rate_widget).strip() or self.view.format_rate_value(lookup_rate)
             self.view.set_rate_lookup_value(row, current_value, editable=True)
-            row["rate_lookup"].focus_set()
-            row["rate_lookup"].selection_range(0, "end")
+            if rate_widget is not None:
+                rate_widget.focus_set()
+                rate_widget.selection_range(0, "end")
         else:
             self.view.set_rate_lookup_value(
                 row,
                 self.view.format_rate_value(
                     self.view.resolve_lookup_rate(
-                        row["part_number"].get(),
+                        self.view.get_row_value_by_role(row, "production", "part_number", fallback_id="part_number"),
                         self.view.load_rates_data(),
                         self.get_global_goal_rate(),
                     )
@@ -331,14 +401,18 @@ class ProductionLogController:
         self.update_row_math()
 
     def remove_production_row(self, row):
-        row["shop_order"].master.destroy()
+        row_frame = row.get("__frame")
+        if row_frame is not None:
+            row_frame.destroy()
         if row in self.view.production_rows:
             self.view.production_rows.remove(row)
         self.view.mark_dirty()
         self.update_row_math()
 
     def remove_downtime_row(self, row):
-        row["start"].master.destroy()
+        row_frame = row.get("__frame")
+        if row_frame is not None:
+            row_frame.destroy()
         if row in self.view.downtime_rows:
             self.view.downtime_rows.remove(row)
         self.invalidate_balance_reference(reset_mode=True)
@@ -352,13 +426,7 @@ class ProductionLogController:
                 self.model.delete_matching_draft_row(
                     self.view.current_draft_path,
                     "production",
-                    {
-                        "shop_order": self.view.get_widget_value(row["shop_order"]),
-                        "part_number": self.view.get_widget_value(row["part_number"]),
-                        "rate_lookup": self.view.get_widget_value(row["rate_lookup"]),
-                        "molds": self.view.get_widget_value(row["molds"]),
-                        "time_calc": self.view.get_widget_value(row["time_calc"]),
-                    },
+                    self.view.collect_row_data("production", row, include_derived=False),
                 )
             except Exception as exc:
                 self.view.show_error("Draft Update Error", f"Could not update draft after row delete: {exc}")
@@ -371,13 +439,7 @@ class ProductionLogController:
                 self.model.delete_matching_draft_row(
                     self.view.current_draft_path,
                     "downtime",
-                    {
-                        "start": self.view.get_widget_value(row["start"]),
-                        "stop": self.view.get_widget_value(row["stop"]),
-                        "code": self.view.get_widget_value(row["code"]),
-                        "cause": self.view.get_widget_value(row["cause"]),
-                        "time_calc": self.view.get_widget_value(row["time_calc"]),
-                    },
+                    self.view.collect_row_data("downtime", row, include_derived=False),
                 )
             except Exception as exc:
                 self.view.show_error("Draft Update Error", f"Could not update draft after row delete: {exc}")
@@ -388,24 +450,47 @@ class ProductionLogController:
         global_goal = self.get_global_goal_rate()
         total_molds = 0
         for row in self.view.production_rows:
-            if not bool(row["rate_override_enabled_var"].get()):
-                lookup_rate = self.view.resolve_lookup_rate(row["part_number"].get(), rates_data, global_goal)
+            override_var = self.view.get_row_variable(row, "production", "rate_override_toggle", fallback_id="rate_override_enabled")
+            if override_var is None or not bool(override_var.get()):
+                lookup_rate = self.view.resolve_lookup_rate(
+                    self.view.get_row_value_by_role(row, "production", "part_number", fallback_id="part_number"),
+                    rates_data,
+                    global_goal,
+                )
                 self.view.set_rate_lookup_value(row, self.view.format_rate_value(lookup_rate), editable=False)
-            row_molds = self.model.calculate_total_molds([row["molds"].get()])
+            row_molds = self.model.calculate_total_molds([
+                self.view.get_row_value_by_role(row, "production", "mold_count", fallback_id="molds")
+            ])
             total_molds += row_molds
             rate = self.get_row_rate(row, rates_data, global_goal)
-            minutes = self.model.calculate_production_minutes(row["molds"].get(), rate)
-            row["time_calc"].config(text=f"{minutes} min")
+            minutes = self.model.calculate_production_minutes(
+                self.view.get_row_value_by_role(row, "production", "mold_count", fallback_id="molds"),
+                rate,
+            )
+            duration_widget = self.view.get_row_widget(row, "production", "duration_minutes", fallback_id="time_calc")
+            if duration_widget is not None:
+                duration_widget.config(text=f"{minutes} min")
 
-        if "total_molds" in self.view.entries:
-            self.view.set_entry_value("total_molds", str(total_molds))
+        total_molds_field_id = self.model.get_header_field_id_by_role(
+            "total_molds",
+            config=self.view.layout_config,
+            fallback_id="total_molds",
+        )
+        if total_molds_field_id in self.view.entries:
+            self.view.set_entry_value(total_molds_field_id, str(total_molds))
 
         for row in self.view.downtime_rows:
-            difference = self.model.calculate_clock_duration_minutes(row["start"].get(), row["stop"].get())
+            difference = self.model.calculate_clock_duration_minutes(
+                self.view.get_row_value_by_role(row, "downtime", "start_clock", fallback_id="start"),
+                self.view.get_row_value_by_role(row, "downtime", "stop_clock", fallback_id="stop"),
+            )
+            duration_widget = self.view.get_row_widget(row, "downtime", "duration_minutes", fallback_id="time_calc")
+            if duration_widget is None:
+                continue
             if difference is None:
-                row["time_calc"].config(text="--")
+                duration_widget.config(text="--")
             else:
-                row["time_calc"].config(text=f"{difference} min")
+                duration_widget.config(text=f"{difference} min")
 
         self.view.ensure_open_production_row()
         self.view.ensure_open_downtime_row()
@@ -415,8 +500,8 @@ class ProductionLogController:
 
     def calculate_metrics(self):
         total_molds = self.calculate_total_molds()
-        hours_entry = self.view.entries.get("hours")
-        goal_entry = self.view.entries.get("goal_mph")
+        hours_entry = self.get_header_entry_by_role("shift_hours", fallback_id="hours")
+        goal_entry = self.get_header_entry_by_role("goal_rate", fallback_id="goal_mph")
         efficiency = self.model.calculate_efficiency(
             total_molds,
             hours_entry.get() if hours_entry is not None else 8.0,
@@ -513,9 +598,14 @@ class ProductionLogController:
             self.balance_downtime_to_shift()
         try:
             ui_data = self.view.collect_ui_data()
-            shift = ui_data["header"].get("shift", "0")
-            date = ui_data["header"].get("date", "00-00-00").replace("/", "")
-            target_path = self.model.data_handler.export_to_template(ui_data, shift, date)
+            shift = str(self.get_header_value_by_role(ui_data["header"], "shift_number", fallback_id="shift", default="0"))
+            date = str(self.get_header_value_by_role(ui_data["header"], "log_date", fallback_id="date", default="00-00-00")).replace("/", "")
+            target_path = self.model.data_handler.export_to_template(
+                ui_data,
+                shift,
+                date,
+                calculation_settings=self.model.get_calculation_settings_copy(),
+            )
             self.view.last_export_path = target_path
             self.update_export_action_state()
             self.view.show_toast("Export Complete", f"Excel export completed successfully: {os.path.basename(target_path)}", SUCCESS)
@@ -599,7 +689,14 @@ class ProductionLogController:
             return
         try:
             data = self.model.load_json(draft_path)
-            self.view.populate_from_data(data, source_path=draft_path, mark_dirty_after_load=False)
+            draft_form_id = self.model.resolve_draft_form_id(data.get("meta", {}))
+            if draft_form_id != self.model.form_id:
+                self.model.form_registry.activate_form(draft_form_id)
+                if hasattr(self.dispatcher, "notify_active_form_changed"):
+                    self.dispatcher.notify_active_form_changed(source_instance=self)
+                self.reload_active_form(data=data, draft_path=draft_path, mark_dirty_after_load=False)
+            else:
+                self.view.populate_from_data(data, source_path=draft_path, mark_dirty_after_load=False)
         except Exception as exc:
             self.view.show_error("Draft Load Error", f"Error loading draft: {exc}")
         if window is not None:
@@ -615,7 +712,10 @@ class ProductionLogController:
         if not self.view.confirm_discard_unsaved_changes():
             return
         try:
-            data = self.model.data_handler.import_from_excel(file_path)
+            data = self.model.data_handler.import_from_excel(
+                file_path,
+                calculation_settings=self.model.get_calculation_settings_copy(),
+            )
             self.view.populate_from_data(data, source_path=None, mark_dirty_after_load=True)
             self.view.show_toast("Import Complete", "Excel import completed successfully.", SUCCESS)
         except Exception as exc:

@@ -23,10 +23,13 @@ from datetime import date, datetime
 import openpyxl
 
 from app.downtime_codes import get_code_number, normalize_code_value
-from app.utils import ensure_external_directory, external_path, local_or_resource_path, resource_path
+from app.form_definition_registry import FormDefinitionRegistry
+from app.production_log_roles import HEADER_DERIVED_ROLES, PRODUCTION_IMPORT_LABEL_ROLES, get_default_row_field_id, normalize_role_name, resolve_header_field_role, resolve_row_field_role
+from app.safe_expression import SafeExpressionEvaluator
+from app.utils import ensure_external_directory, external_path, resource_path
 
 __module_name__ = "Data Handler"
-__version__ = "1.1.5"
+__version__ = "1.1.6"
 
 DEFAULT_SHIFT_TIME_SETTINGS = {
     "shift_total_rounding": "nearest",
@@ -37,15 +40,82 @@ DEFAULT_SHIFT_TIME_SETTINGS = {
     "shift_3_anchor_mode": "end",
     "shift_3_reference_time": "0600",
 }
+ROW_SECTION_CONFIG = {
+    "production": {
+        "field_key": "production_row_fields",
+        "mapping_key": "production_mapping",
+        "default_max_rows": 50,
+    },
+    "downtime": {
+        "field_key": "downtime_row_fields",
+        "mapping_key": "downtime_mapping",
+        "default_max_rows": 25,
+    },
+}
+SAFE_EXPRESSION_EVALUATOR = SafeExpressionEvaluator()
 
 
 class DataHandlerService:
-    def __init__(self, config_name="layout_config.json"):
-        self.config_path = local_or_resource_path(config_name)
+    def __init__(self, form_id=None):
+        self.form_registry = FormDefinitionRegistry()
+        self.form_info = self.form_registry.get_form(form_id)
+        self.config_path = self.form_info["load_path"]
         with open(self.config_path, "r", encoding="utf-8") as handle:
-            self.config = json.load(handle)
+            self.config = self._normalize_layout_config(json.load(handle))
         self.settings = self.load_settings()
         self.pending_dir = ensure_external_directory("data/pending")
+
+    def _normalize_layout_config(self, config):
+        normalized = dict(config) if isinstance(config, dict) else {}
+        normalized["header_fields"] = self._normalize_header_field_configs(normalized.get("header_fields"))
+        for section_name, section_config in ROW_SECTION_CONFIG.items():
+            field_key = section_config.get("field_key")
+            normalized[field_key] = self._normalize_row_field_configs(normalized.get(field_key), section_name)
+        return normalized
+
+    def _normalize_header_field_configs(self, configured_fields):
+        if not isinstance(configured_fields, list):
+            return []
+
+        normalized_fields = []
+        seen_ids = set()
+        for field in configured_fields:
+            if not isinstance(field, dict):
+                continue
+            field_id = str(field.get("id", "")).strip()
+            if not field_id or field_id in seen_ids:
+                continue
+            normalized_field = dict(field)
+            role_name = resolve_header_field_role(field_id, normalized_field.get("role"))
+            if role_name:
+                normalized_field["role"] = role_name
+            else:
+                normalized_field.pop("role", None)
+            normalized_fields.append(normalized_field)
+            seen_ids.add(field_id)
+        return normalized_fields
+
+    def _normalize_row_field_configs(self, configured_fields, section_name):
+        if not isinstance(configured_fields, list):
+            return []
+
+        normalized_fields = []
+        seen_ids = set()
+        for field in configured_fields:
+            if not isinstance(field, dict):
+                continue
+            field_id = str(field.get("id", "")).strip()
+            if not field_id or field_id in seen_ids:
+                continue
+            normalized_field = dict(field)
+            role_name = resolve_row_field_role(section_name, field_id, normalized_field.get("role"))
+            if role_name:
+                normalized_field["role"] = role_name
+            else:
+                normalized_field.pop("role", None)
+            normalized_fields.append(normalized_field)
+            seen_ids.add(field_id)
+        return normalized_fields
 
     def load_settings(self):
         settings_path = external_path("settings.json")
@@ -92,7 +162,7 @@ class DataHandlerService:
         formatted = self.format_cell_value(value)
         if isinstance(value, (int, float)) and number_format and "%" in str(number_format):
             return f"{value * 100:.0f}%"
-        if field_id == "cast_date":
+        if self.get_header_field_role(field_id) == "cast_date":
             text = str(formatted or "").strip()
             if not text:
                 return ""
@@ -110,8 +180,69 @@ class DataHandlerService:
                 return field
         return {}
 
+    def get_header_field_role(self, field_id):
+        field_config = self.get_header_field_config(field_id)
+        return resolve_header_field_role(field_id, field_config.get("role"))
+
+    def get_header_field_id_by_role(self, role_name, fallback_id=None):
+        normalized_role = normalize_role_name(role_name)
+        for field in self.get_header_fields():
+            if resolve_header_field_role(field.get("id"), field.get("role")) == normalized_role:
+                return field.get("id")
+        return fallback_id
+
+    def get_header_value_by_role(self, header_data, role_name, fallback_id=None, default=""):
+        if not isinstance(header_data, dict):
+            return default
+        field_id = self.get_header_field_id_by_role(role_name, fallback_id=fallback_id)
+        if field_id and field_id in header_data:
+            return header_data.get(field_id, default)
+        if fallback_id and fallback_id in header_data:
+            return header_data.get(fallback_id, default)
+        return default
+
     def get_header_field_ids(self):
         return [field.get("id") for field in self.get_header_fields() if field.get("id")]
+
+    def get_section_field_configs(self, section_name):
+        section_config = ROW_SECTION_CONFIG.get(section_name, {})
+        field_key = section_config.get("field_key")
+        if not field_key:
+            return []
+        fields = self.config.get(field_key, [])
+        return [dict(field) for field in fields if isinstance(field, dict) and field.get("id")]
+
+    def get_section_field_role(self, section_name, field_id):
+        for field in self.get_section_field_configs(section_name):
+            if field.get("id") == field_id:
+                return resolve_row_field_role(section_name, field_id, field.get("role"))
+        return resolve_row_field_role(section_name, field_id)
+
+    def get_section_field_id_by_role(self, section_name, role_name, fallback_id=None):
+        normalized_role = normalize_role_name(role_name)
+        for field in self.get_section_field_configs(section_name):
+            if resolve_row_field_role(section_name, field.get("id"), field.get("role")) == normalized_role:
+                return field.get("id")
+        return fallback_id
+
+    def get_row_value_by_role(self, section_name, row_data, role_name, fallback_id=None, default=None):
+        if not isinstance(row_data, dict):
+            return default
+        field_id = self.get_section_field_id_by_role(section_name, role_name, fallback_id=fallback_id)
+        if field_id and field_id in row_data:
+            return row_data.get(field_id, default)
+        if fallback_id and fallback_id in row_data:
+            return row_data.get(fallback_id, default)
+        return default
+
+    def get_section_field_config(self, section_name, field_id):
+        for field in self.get_section_field_configs(section_name):
+            if field.get("id") == field_id:
+                return field
+        return {}
+
+    def get_open_row_field_ids(self, section_name):
+        return [field.get("id") for field in self.get_section_field_configs(section_name) if field.get("open_row_trigger")]
 
     def format_numeric_text(self, value, allow_decimal=False):
         text = str(value or "").strip()
@@ -172,6 +303,16 @@ class DataHandlerService:
         hours, minutes = divmod(normalized_minutes, 60)
         return f"{hours:02d}{minutes:02d}"
 
+    def _normalize_clock_formula_result(self, value):
+        if value in (None, ""):
+            return ""
+        if isinstance(value, (int, float)):
+            return self._format_compact_time(int(value))
+        parsed = self._parse_compact_time(value)
+        if parsed is not None:
+            return self._format_compact_time(parsed)
+        return str(value).strip()
+
     def _normalize_shift_key(self, shift_value):
         normalized = str(shift_value or "").strip()
         return normalized if normalized in {"1", "2", "3"} else ""
@@ -182,12 +323,7 @@ class DataHandlerService:
         if not shift_key:
             return {"start_time": "", "end_time": "", "target_time": ""}
 
-        try:
-            hours_value = float(raw_hours or 0)
-        except Exception:
-            return {"start_time": "", "end_time": "", "target_time": ""}
-
-        total_minutes = self._round_minutes_value(hours_value * 60, settings.get("shift_total_rounding", "nearest"))
+        total_minutes = self.calculate_shift_total_minutes(raw_hours, calculation_settings=calculation_settings)
         if total_minutes <= 0:
             return {"start_time": "", "end_time": "", "target_time": ""}
 
@@ -207,53 +343,99 @@ class DataHandlerService:
             start_minutes = anchor_minutes
             end_minutes = start_minutes + total_minutes
 
-        field_cfg = self.get_header_field_config("target_time")
+        formulas = settings.get("formulas", {}) if isinstance(settings, dict) else {}
+        formula_context = {
+            "shift_anchor_mode": anchor_mode,
+            "anchor_minutes": anchor_minutes,
+            "shift_total_minutes": total_minutes,
+            "default_start_minutes": start_minutes,
+            "default_end_minutes": end_minutes,
+            "day_minutes": 24 * 60,
+        }
+        start_formula = str(formulas.get("shift_start_time") or "").strip()
+        end_formula = str(formulas.get("shift_end_time") or "").strip()
+        start_time = self._normalize_clock_formula_result(
+            self.evaluate_expression_formula(start_formula, formula_context, default=self._format_compact_time(start_minutes))
+        )
+        end_time = self._normalize_clock_formula_result(
+            self.evaluate_expression_formula(end_formula, formula_context, default=self._format_compact_time(end_minutes))
+        )
+
+        target_time_field_id = self.get_header_field_id_by_role("target_time", fallback_id="target_time")
+        field_cfg = self.get_header_field_config(target_time_field_id)
         suffix = field_cfg.get("suffix", " min")
         return {
-            "start_time": self._format_compact_time(start_minutes),
-            "end_time": self._format_compact_time(end_minutes),
+            "start_time": start_time,
+            "end_time": end_time,
             "target_time": f"{total_minutes}{suffix}",
         }
 
     def compute_target_time(self, raw_hours, calculation_settings=None):
-        settings = self._normalize_calculation_settings(calculation_settings)
-        try:
-            total_minutes = self._round_minutes_value(float(raw_hours or 0) * 60, settings.get("shift_total_rounding", "nearest"))
-        except Exception:
-            return ""
-        field_cfg = self.get_header_field_config("target_time")
+        total_minutes = self.calculate_shift_total_minutes(raw_hours, calculation_settings=calculation_settings)
+        target_time_field_id = self.get_header_field_id_by_role("target_time", fallback_id="target_time")
+        field_cfg = self.get_header_field_config(target_time_field_id)
         suffix = field_cfg.get("suffix", " min")
         return f"{total_minutes}{suffix}" if total_minutes > 0 else ""
+
+    def calculate_shift_total_minutes(self, raw_hours, calculation_settings=None):
+        settings = self._normalize_calculation_settings(calculation_settings)
+        try:
+            hours_value = float(raw_hours or 0)
+        except Exception:
+            return 0
+
+        formulas = settings.get("formulas", {}) if isinstance(settings, dict) else {}
+        formula_text = str(formulas.get("shift_total_minutes") or "").strip()
+        if formula_text:
+            result = self.evaluate_expression_formula(
+                formula_text,
+                {
+                    "hours": hours_value,
+                    "shift_total_rounding": settings.get("shift_total_rounding", "nearest"),
+                },
+                default=0,
+            )
+            try:
+                return max(0, int(float(result or 0)))
+            except Exception:
+                return 0
+        return self._round_minutes_value(hours_value * 60, settings.get("shift_total_rounding", "nearest"))
 
     def normalize_target_time_text(self, value):
         total_minutes = self.parse_total_minutes(value)
         if total_minutes is None or total_minutes <= 0:
             return ""
-        field_cfg = self.get_header_field_config("target_time")
+        target_time_field_id = self.get_header_field_id_by_role("target_time", fallback_id="target_time")
+        field_cfg = self.get_header_field_config(target_time_field_id)
         suffix = field_cfg.get("suffix", " min")
         return f"{total_minutes}{suffix}"
 
     def normalize_header_field_value(self, field_id, value, header_data=None, calculation_settings=None):
         header_data = header_data or {}
         text = str(value or "").strip()
-        if field_id == "date":
+        field_role = self.get_header_field_role(field_id)
+        date_field_id = self.get_header_field_id_by_role("log_date", fallback_id="date")
+        shift_field_id = self.get_header_field_id_by_role("shift_number", fallback_id="shift")
+        hours_field_id = self.get_header_field_id_by_role("shift_hours", fallback_id="hours")
+        if field_role == "log_date":
             return self.normalize_date_text(text)
-        if field_id == "hours":
+        if field_role == "shift_hours":
             return self.format_numeric_text(text, allow_decimal=True)
-        if field_id in {"shift", "goal_mph", "ret_south", "ret_north", "total_molds"}:
+        if field_role in {"shift_number", "goal_rate", "ret_south", "ret_north", "total_molds"}:
             return self.format_numeric_text(text, allow_decimal=False)
-        if field_id == "cast_date":
-            computed = self.compute_cast_date(header_data.get("date"))
+        if field_role == "cast_date":
+            computed = self.compute_cast_date(header_data.get(date_field_id))
             return computed or self.format_header_value(field_id, text)
-        if field_id in {"start_time", "end_time"}:
+        if field_role in {"shift_start_time", "shift_end_time"}:
             shift_window = self.compute_shift_window(
-                header_data.get("shift"),
-                header_data.get("hours"),
+                header_data.get(shift_field_id),
+                header_data.get(hours_field_id),
                 calculation_settings=calculation_settings,
             )
-            return shift_window.get(field_id, "")
-        if field_id == "target_time":
-            computed = self.compute_target_time(header_data.get("hours"), calculation_settings=calculation_settings)
+            result_key = "start_time" if field_role == "shift_start_time" else "end_time"
+            return shift_window.get(result_key, "")
+        if field_role == "target_time":
+            computed = self.compute_target_time(header_data.get(hours_field_id), calculation_settings=calculation_settings)
             return computed or self.normalize_target_time_text(text)
         return text
 
@@ -261,7 +443,7 @@ class DataHandlerService:
         normalized = {}
         raw_header = {field_id: str(header_data.get(field_id, "") or "").strip() for field_id in self.get_header_field_ids()}
         for field_id in self.get_header_field_ids():
-            if field_id in {"cast_date", "start_time", "end_time", "target_time"}:
+            if self.get_header_field_role(field_id) in HEADER_DERIVED_ROLES:
                 continue
             normalized[field_id] = self.normalize_header_field_value(
                 field_id,
@@ -269,14 +451,16 @@ class DataHandlerService:
                 {**raw_header, **normalized},
                 calculation_settings=calculation_settings,
             )
-        if "cast_date" in raw_header:
-            normalized["cast_date"] = self.normalize_header_field_value(
-                "cast_date",
-                raw_header.get("cast_date", ""),
+        cast_date_field_id = self.get_header_field_id_by_role("cast_date", fallback_id="cast_date")
+        if cast_date_field_id in raw_header:
+            normalized[cast_date_field_id] = self.normalize_header_field_value(
+                cast_date_field_id,
+                raw_header.get(cast_date_field_id, ""),
                 {**raw_header, **normalized},
                 calculation_settings=calculation_settings,
             )
-        for derived_field_id in ("start_time", "end_time", "target_time"):
+        for derived_role in ("shift_start_time", "shift_end_time", "target_time"):
+            derived_field_id = self.get_header_field_id_by_role(derived_role)
             if derived_field_id not in raw_header:
                 continue
             normalized[derived_field_id] = self.normalize_header_field_value(
@@ -360,10 +544,7 @@ class DataHandlerService:
             return str(value)
 
         expression = ref_pattern.sub(replace_ref, expression)
-        try:
-            result = eval(expression, {"__builtins__": None}, {})
-        except Exception:
-            result = None
+        result = self._evaluate_safe_expression(expression, default=None)
         cache[cache_key] = result
         return result
 
@@ -399,7 +580,7 @@ class DataHandlerService:
             return None
         return max(0, int(digits))
 
-    def calculate_duration_minutes(self, start_value, stop_value):
+    def calculate_duration_minutes(self, start_value, stop_value, allow_overnight=True):
         start_text = self.normalize_time_value(start_value)
         stop_text = self.normalize_time_value(stop_value)
         if len(start_text) != 4 or len(stop_text) != 4:
@@ -407,17 +588,77 @@ class DataHandlerService:
         start_minutes = int(start_text[:2]) * 60 + int(start_text[2:])
         stop_minutes = int(stop_text[:2]) * 60 + int(stop_text[2:])
         if stop_minutes < start_minutes:
+            if not allow_overnight:
+                return None
             stop_minutes += 24 * 60
         return stop_minutes - start_minutes
 
-    def calculate_stop_time(self, start_value, total_minutes_value):
+    def calculate_runtime_downtime_minutes(self, start_value, stop_value, calculation_settings=None, fallback_label=None):
+        settings = self._normalize_calculation_settings(calculation_settings)
+        start_text = self.normalize_time_value(start_value)
+        stop_text = self.normalize_time_value(stop_value)
+        if len(start_text) != 4 or len(stop_text) != 4:
+            if fallback_label is not None:
+                return self.parse_total_minutes(fallback_label)
+            return None
+
+        start_minutes = int(start_text[:2]) * 60 + int(start_text[2:])
+        stop_minutes = int(stop_text[:2]) * 60 + int(stop_text[2:])
+        formulas = settings.get("formulas", {}) if isinstance(settings, dict) else {}
+        formula_text = str(formulas.get("downtime_minutes") or "").strip()
+        if formula_text:
+            result = self.evaluate_expression_formula(
+                formula_text,
+                {
+                    "start_minutes": start_minutes,
+                    "stop_minutes": stop_minutes,
+                    "allow_overnight_downtime": bool(settings.get("allow_overnight_downtime", True)),
+                    "day_minutes": 24 * 60,
+                    "invalid_value": -1,
+                },
+                default=-1,
+            )
+            try:
+                normalized = int(float(result))
+            except Exception:
+                normalized = -1
+            if normalized >= 0:
+                return normalized
+            if fallback_label is not None:
+                return self.parse_total_minutes(fallback_label)
+            return None
+
+        return self.calculate_duration_minutes(
+            start_value,
+            stop_value,
+            allow_overnight=bool(settings.get("allow_overnight_downtime", True)),
+        )
+
+    def calculate_stop_time(self, start_value, total_minutes_value, calculation_settings=None):
+        settings = self._normalize_calculation_settings(calculation_settings)
         start_text = self.normalize_time_value(start_value)
         total_minutes = self.parse_total_minutes(total_minutes_value)
         if len(start_text) != 4 or total_minutes is None:
             return ""
         start_minutes = int(start_text[:2]) * 60 + int(start_text[2:])
         stop_minutes = (start_minutes + total_minutes) % (24 * 60)
-        return f"{stop_minutes // 60:02}{stop_minutes % 60:02}"
+
+        formulas = settings.get("formulas", {}) if isinstance(settings, dict) else {}
+        formula_text = str(formulas.get("downtime_stop_clock") or "").strip()
+        if formula_text:
+            result = self.evaluate_expression_formula(
+                formula_text,
+                {
+                    "start_minutes": start_minutes,
+                    "duration_minutes": total_minutes,
+                    "default_stop_minutes": stop_minutes,
+                    "day_minutes": 24 * 60,
+                },
+                default=self._format_compact_time(stop_minutes),
+            )
+            return self._normalize_clock_formula_result(result)
+
+        return self._format_compact_time(stop_minutes)
 
     def get_export_directory(self, raw_date):
         base_dir = str(self.settings.get("export_directory", "exports") or "exports").strip() or "exports"
@@ -435,16 +676,65 @@ class DataHandlerService:
         os.makedirs(target_dir, exist_ok=True)
         return target_dir
 
-    def calculate_formula(self, formula_str, data_context):
+    def _evaluate_safe_expression(self, expression, names=None, functions=None, default=None):
         try:
-            for key, value in data_context.items():
-                placeholder = "{" + key + "}"
-                if placeholder in formula_str:
-                    val = value if value and str(value).strip() else "0"
-                    formula_str = formula_str.replace(placeholder, str(val))
-            return eval(formula_str, {"__builtins__": None}, {})
+            return SAFE_EXPRESSION_EVALUATOR.evaluate(expression, names=names, functions=functions)
         except Exception:
-            return 0
+            return default
+
+    def _build_formula_functions(self):
+        def if_value(condition, true_value, false_value):
+            return true_value if condition else false_value
+
+        def float_value(value, fallback=0.0):
+            try:
+                return float(value)
+            except Exception:
+                return fallback
+
+        def int_value(value, fallback=0):
+            try:
+                return int(float(value))
+            except Exception:
+                return fallback
+
+        def format_clock(value, fallback=""):
+            normalized = self._normalize_clock_formula_result(value)
+            if normalized:
+                return normalized
+            return self._normalize_clock_formula_result(fallback)
+
+        return {
+            "if_value": if_value,
+            "round_minutes": self._round_minutes_value,
+            "max_value": max,
+            "min_value": min,
+            "abs_value": abs,
+            "float_value": float_value,
+            "int_value": int_value,
+            "format_clock": format_clock,
+        }
+
+    def calculate_formula(self, formula_str, data_context):
+        expression = str(formula_str or "")
+        for key, value in (data_context or {}).items():
+            placeholder = "{" + key + "}"
+            if placeholder in expression:
+                normalized_value = value if value not in (None, "") else "0"
+                expression = expression.replace(placeholder, str(normalized_value))
+        return self._evaluate_safe_expression(expression, default=0)
+
+    def evaluate_expression_formula(self, formula_text, data_context=None, default=None):
+        expression = str(formula_text or "").strip()
+        if not expression:
+            return default
+        safe_names = dict(data_context) if isinstance(data_context, dict) else {}
+        return self._evaluate_safe_expression(
+            expression,
+            names=safe_names,
+            functions=self._build_formula_functions(),
+            default=default,
+        )
 
     def get_production_column(self, column_map, key, fallback=None):
         value = column_map.get(key, fallback)
@@ -457,23 +747,140 @@ class DataHandlerService:
     def detect_production_columns(self, worksheet, configured_columns, start_row):
         resolved_columns = dict(configured_columns)
         header_row = max(1, int(start_row) - 1)
-        label_map = {"shop order": "shop_order", "part number": "part_number", "molds": "molds"}
         for column_index in range(1, worksheet.max_column + 1):
             raw_value = worksheet.cell(row=header_row, column=column_index).value
             normalized = self.normalize_header_label(raw_value)
-            field_name = label_map.get(normalized)
-            if field_name:
-                resolved_columns[field_name] = openpyxl.utils.get_column_letter(column_index)
+            role_name = PRODUCTION_IMPORT_LABEL_ROLES.get(normalized)
+            field_id = self.get_section_field_id_by_role("production", role_name) if role_name else None
+            if field_id:
+                resolved_columns[field_id] = openpyxl.utils.get_column_letter(column_index)
         return resolved_columns
 
-    def export_to_template(self, ui_data, shift, date_str):
+    def get_row_mapping_config(self, section_name):
+        section_config = ROW_SECTION_CONFIG.get(section_name, {})
+        mapping_key = section_config.get("mapping_key")
+        mapping = self.config.get(mapping_key, {}) if mapping_key else {}
+        raw_columns = mapping.get("columns", {}) if isinstance(mapping, dict) else {}
+        normalized_columns = {}
+        if isinstance(raw_columns, dict):
+            for field_id, raw_value in raw_columns.items():
+                normalized = self.normalize_row_mapping_column(section_name, field_id, raw_value)
+                if normalized.get("column"):
+                    normalized_columns[field_id] = normalized
+        return {
+            "start_row": max(1, int(mapping.get("start_row", 1) or 1)),
+            "max_rows": max(1, int(mapping.get("max_rows", section_config.get("default_max_rows", 25)) or 1)),
+            "columns": normalized_columns,
+        }
+
+    def normalize_row_mapping_column(self, section_name, field_id, raw_value):
+        default_export_transform = self.get_default_row_mapping_transform(section_name, field_id, "export")
+        default_import_transform = self.get_default_row_mapping_transform(section_name, field_id, "import")
+        if isinstance(raw_value, dict):
+            return {
+                "column": str(raw_value.get("column", "")).strip(),
+                "export_enabled": bool(raw_value.get("export_enabled", True)),
+                "import_enabled": bool(raw_value.get("import_enabled", True)),
+                "export_transform": str(raw_value.get("export_transform", default_export_transform) or default_export_transform).strip(),
+                "import_transform": str(raw_value.get("import_transform", default_import_transform) or default_import_transform).strip(),
+            }
+        return {
+            "column": str(raw_value or "").strip(),
+            "export_enabled": True,
+            "import_enabled": True,
+            "export_transform": default_export_transform,
+            "import_transform": default_import_transform,
+        }
+
+    def get_default_row_mapping_transform(self, section_name, field_id, direction):
+        field_role = self.get_section_field_role(section_name, field_id)
+        if section_name == "downtime" and field_role == "downtime_code":
+            return "code_number" if direction == "export" else "code_lookup"
+        if section_name == "downtime" and field_role == "stop_clock":
+            return "duration_minutes" if direction == "export" else "stop_from_duration"
+        return "value"
+
+    def row_has_values(self, section_name, row_data, field_ids=None):
+        candidate_fields = list(field_ids or self.get_open_row_field_ids(section_name) or row_data.keys())
+        for field_id in candidate_fields:
+            value = row_data.get(field_id)
+            if isinstance(value, bool):
+                if value:
+                    return True
+                continue
+            if str(value or "").strip():
+                return True
+        return False
+
+    def resolve_row_export_value(self, section_name, field_id, row_data, column_config, calculation_settings=None):
+        value = row_data.get(field_id)
+        transform = column_config.get("export_transform", "value")
+        if transform == "duration_minutes":
+            return self.calculate_runtime_downtime_minutes(
+                self.get_row_value_by_role(section_name, row_data, "start_clock", fallback_id="start"),
+                self.get_row_value_by_role(section_name, row_data, "stop_clock", fallback_id="stop"),
+                calculation_settings=calculation_settings,
+                fallback_label=self.get_row_value_by_role(section_name, row_data, "duration_minutes", fallback_id="time_calc"),
+            )
+        if transform == "code_number":
+            return get_code_number(value)
+        if transform == "bool_int":
+            return 1 if bool(value) else 0
+        if transform == "minutes_label":
+            return self.parse_total_minutes(value)
+        return value
+
+    def resolve_row_import_value(self, section_name, field_id, raw_value, partial_row, column_config, calculation_settings=None):
+        transform = column_config.get("import_transform", "value")
+        if transform == "code_lookup":
+            return normalize_code_value(raw_value)
+        if transform == "stop_from_duration":
+            return self.calculate_stop_time(
+                self.get_row_value_by_role(section_name, partial_row, "start_clock", fallback_id="start"),
+                raw_value,
+                calculation_settings=calculation_settings,
+            )
+
+        field_config = self.get_section_field_config(section_name, field_id)
+        if field_config.get("widget") == "checkbutton":
+            return self._coerce_bool(raw_value)
+        return self.format_cell_value(raw_value)
+
+    def _coerce_bool(self, value):
+        if isinstance(value, bool):
+            return value
+        text = str(value or "").strip().lower()
+        if text in {"1", "true", "yes", "on"}:
+            return True
+        if text in {"0", "false", "no", "off"}:
+            return False
+        return False
+
+    def _resolve_export_template_path(self):
+        template_path = str(self.config.get("template_path", "") or "").strip()
+        if not template_path:
+            return None
+        resolved_path = resource_path(template_path)
+        if os.path.exists(resolved_path):
+            return resolved_path
+        return None
+
+    def _create_export_workbook(self, target_path):
+        template_path = self._resolve_export_template_path()
+        if template_path:
+            shutil.copy(template_path, target_path)
+            workbook = openpyxl.load_workbook(target_path)
+        else:
+            workbook = openpyxl.Workbook()
+            workbook.active.title = "Production Log"
+        return workbook
+
+    def export_to_template(self, ui_data, shift, date_str, calculation_settings=None):
         clean_date = date_str.replace("/", "")
         export_prefix = str(self.settings.get("default_export_prefix", "Disamatic Production Sheet") or "Disamatic Production Sheet").strip()
         filename = f"{export_prefix} {shift}{clean_date}.xlsx"
         target_path = os.path.join(self.get_export_directory(date_str), filename)
-        full_template_path = resource_path(self.config["template_path"])
-        shutil.copy(full_template_path, target_path)
-        wb = openpyxl.load_workbook(target_path)
+        wb = self._create_export_workbook(target_path)
         ws = wb.active
         for field in self.config["header_fields"]:
             cell_coord = field.get("cell")
@@ -488,32 +895,32 @@ class DataHandlerService:
                             break
                 else:
                     cell.value = val
-        p_map = self.config["production_mapping"]
-        p_start = p_map["start_row"]
-        p_cols = p_map["columns"]
-        for index, row_data in enumerate(ui_data["production"]):
-            current_row = p_start + index
-            ws[f"{p_cols['shop_order']}{current_row}"] = row_data.get("shop_order")
-            ws[f"{p_cols['part_number']}{current_row}"] = row_data.get("part_number")
-            ws[f"{p_cols['molds']}{current_row}"] = row_data.get("molds")
-        d_map = self.config["downtime_mapping"]
-        d_start = d_map["start_row"]
-        d_cols = d_map["columns"]
-        for index, row_data in enumerate(ui_data["downtime"]):
-            current_row = d_start + index
-            short_code = get_code_number(row_data.get("code", ""))
-            duration_minutes = self.calculate_duration_minutes(row_data.get("start"), row_data.get("stop"))
-            if duration_minutes is None:
-                duration_minutes = self.parse_total_minutes(str(row_data.get("time_calc", "")).replace(" min", ""))
-            ws[f"{d_cols['start']}{current_row}"] = row_data.get("start")
-            ws[f"{d_cols['stop']}{current_row}"] = duration_minutes
-            ws[f"{d_cols['code']}{current_row}"] = short_code
-            ws[f"{d_cols['cause']}{current_row}"] = row_data.get("cause")
+
+        for section_name in ("production", "downtime"):
+            mapping = self.get_row_mapping_config(section_name)
+            start_row = mapping["start_row"]
+            columns = mapping["columns"]
+            export_rows = [row for row in ui_data.get(section_name, []) if self.row_has_values(section_name, row)]
+            for index, row_data in enumerate(export_rows):
+                current_row = start_row + index
+                for field_id, column_config in columns.items():
+                    if not column_config.get("export_enabled"):
+                        continue
+                    column_letter = column_config.get("column")
+                    if not column_letter:
+                        continue
+                    ws[f"{column_letter}{current_row}"] = self.resolve_row_export_value(
+                        section_name,
+                        field_id,
+                        row_data,
+                        column_config,
+                        calculation_settings=calculation_settings,
+                    )
         wb.save(target_path)
         wb.close()
         return target_path
 
-    def import_from_excel(self, file_path):
+    def import_from_excel(self, file_path, calculation_settings=None):
         workbook = openpyxl.load_workbook(file_path, data_only=True)
         formula_workbook = openpyxl.load_workbook(file_path, data_only=False)
         worksheet = workbook.active
@@ -528,55 +935,49 @@ class DataHandlerService:
                     value = self.resolve_import_cell_value(formula_workbook, formula_worksheet, cell_coord, formula_cache)
                 number_format = formula_worksheet[cell_coord].number_format if cell_coord else None
                 data["header"][field["id"]] = self.format_header_value(field["id"], value, number_format)
-        if not data["header"].get("cast_date"):
-            data["header"]["cast_date"] = self.compute_cast_date(data["header"].get("date"))
-        p_map = self.config["production_mapping"]
-        p_cols = self.detect_production_columns(formula_worksheet, p_map["columns"], p_map["start_row"])
-        for index in range(50):
-            row_idx = p_map["start_row"] + index
-            shop_order = worksheet[f"{p_cols['shop_order']}{row_idx}"].value
-            if shop_order is None:
-                shop_order = self.resolve_import_cell_value(formula_workbook, formula_worksheet, f"{p_cols['shop_order']}{row_idx}", formula_cache)
-            if not shop_order:
-                break
-            part_number = worksheet[f"{p_cols['part_number']}{row_idx}"].value
-            if part_number is None:
-                part_number = self.resolve_import_cell_value(formula_workbook, formula_worksheet, f"{p_cols['part_number']}{row_idx}", formula_cache)
-            molds = worksheet[f"{p_cols['molds']}{row_idx}"].value
-            if molds is None:
-                molds = self.resolve_import_cell_value(formula_workbook, formula_worksheet, f"{p_cols['molds']}{row_idx}", formula_cache)
-            data["production"].append(
-                {
-                    "shop_order": self.format_cell_value(shop_order),
-                    "part_number": self.format_cell_value(part_number),
-                    "molds": self.format_cell_value(molds),
-                }
-            )
-        d_map = self.config["downtime_mapping"]
-        d_cols = d_map["columns"]
-        for index in range(25):
-            row_idx = d_map["start_row"] + index
-            start_time = worksheet[f"{d_cols['start']}{row_idx}"].value
-            if start_time is None:
-                start_time = self.resolve_import_cell_value(formula_workbook, formula_worksheet, f"{d_cols['start']}{row_idx}", formula_cache)
-            if not start_time:
-                break
-            raw_val = worksheet[f"{d_cols['code']}{row_idx}"].value
-            if raw_val is None:
-                raw_val = self.resolve_import_cell_value(formula_workbook, formula_worksheet, f"{d_cols['code']}{row_idx}", formula_cache)
-            full_code = normalize_code_value(raw_val)
-            total_minutes = worksheet[f"{d_cols['stop']}{row_idx}"].value
-            if total_minutes is None:
-                total_minutes = self.resolve_import_cell_value(formula_workbook, formula_worksheet, f"{d_cols['stop']}{row_idx}", formula_cache)
-            cause = worksheet[f"{d_cols['cause']}{row_idx}"].value
-            if cause is None:
-                cause = self.resolve_import_cell_value(formula_workbook, formula_worksheet, f"{d_cols['cause']}{row_idx}", formula_cache)
-            data["downtime"].append(
-                {
-                    "start": self.format_cell_value(start_time),
-                    "stop": self.calculate_stop_time(start_time, total_minutes),
-                    "code": full_code,
-                    "cause": self.format_cell_value(cause),
-                }
-            )
+        cast_date_field_id = self.get_header_field_id_by_role("cast_date", fallback_id="cast_date")
+        date_field_id = self.get_header_field_id_by_role("log_date", fallback_id="date")
+        if cast_date_field_id and not data["header"].get(cast_date_field_id):
+            data["header"][cast_date_field_id] = self.compute_cast_date(data["header"].get(date_field_id))
+
+        production_mapping = self.get_row_mapping_config("production")
+        detected_columns = self.detect_production_columns(
+            formula_worksheet,
+            {field_id: config["column"] for field_id, config in production_mapping["columns"].items()},
+            production_mapping["start_row"],
+        )
+        for field_id, column_config in production_mapping["columns"].items():
+            if field_id in detected_columns:
+                column_config["column"] = detected_columns[field_id]
+
+        for section_name in ("production", "downtime"):
+            mapping = production_mapping if section_name == "production" else self.get_row_mapping_config("downtime")
+            for index in range(mapping["max_rows"]):
+                row_idx = mapping["start_row"] + index
+                row_data = {}
+                for field_id, column_config in mapping["columns"].items():
+                    if not column_config.get("import_enabled"):
+                        continue
+                    column_letter = column_config.get("column")
+                    if not column_letter:
+                        continue
+                    cell_ref = f"{column_letter}{row_idx}"
+                    raw_value = worksheet[cell_ref].value
+                    if raw_value is None:
+                        raw_value = self.resolve_import_cell_value(formula_workbook, formula_worksheet, cell_ref, formula_cache)
+                    row_data[field_id] = self.resolve_row_import_value(
+                        section_name,
+                        field_id,
+                        raw_value,
+                        row_data,
+                        column_config,
+                        calculation_settings=calculation_settings,
+                    )
+
+                if not self.row_has_values(section_name, row_data, mapping["columns"].keys()):
+                    break
+                data[section_name].append(row_data)
+
+        workbook.close()
+        formula_workbook.close()
         return data

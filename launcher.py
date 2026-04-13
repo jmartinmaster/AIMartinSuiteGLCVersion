@@ -20,27 +20,20 @@ import json
 import ttkbootstrap as tb
 
 from app.app_logging import log_exception
+from app.external_data_registry import ExternalDataRegistry
+from app.module_registry import get_launcher_module_names
 from app.theme_manager import DEFAULT_THEME, apply_readability_overrides, normalize_theme, resolve_base_theme
-from app.utils import external_path, resource_path
+from app.utils import resource_path
 from app.controllers.app_controller import Dispatcher
 from app.app_platform import SPLASH_LOGO_RELATIVE_PATH, apply_app_icon, apply_windows_app_id, apply_windows_window_icons
 
 __module_name__ = "Dispatcher Core"
 __version__ = "2.1.5"
-USER_FACING_MODULE_NAMES = (
-    "about",
-    "help_viewer",
-    "layout_manager",
-    "production_log",
-    "rate_manager",
-    "recovery_viewer",
-    "settings_manager",
-    "update_manager",
-)
 
 
 def run_application(main_module=None, initial_module_name=None):
-    settings_path = external_path("settings.json")
+    data_registry = ExternalDataRegistry()
+    settings_path = data_registry.resolve_read_path("settings")
     theme_name = DEFAULT_THEME
     if main_module is None:
         import sys
@@ -68,12 +61,13 @@ def run_application(main_module=None, initial_module_name=None):
 
 
 def build_argument_parser():
+    launcher_module_names = get_launcher_module_names()
     parser = argparse.ArgumentParser(
         description="Launch Production Logging Center or open the shell focused on a specific module.",
     )
     parser.add_argument(
         "--module",
-        choices=USER_FACING_MODULE_NAMES,
+        choices=launcher_module_names,
         help="Open the application shell focused on the specified module.",
     )
     return parser

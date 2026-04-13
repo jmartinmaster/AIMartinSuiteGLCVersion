@@ -20,13 +20,15 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.request
 import zipfile
 
 from app.app_identity import DEFAULT_UPDATE_REPOSITORY_URL, DEB_PACKAGE_NAME, LEGACY_EXE_NAME, format_versioned_deb_name, format_versioned_exe_name, load_version_from_main, normalize_version, parse_version
-from app.app_platform import is_ubuntu_runtime
+from app.app_platform import is_ubuntu_runtime, open_with_system_default
+from app.form_definition_registry import DEFAULT_FORM_ID, DEFAULT_FORM_NAME, FormDefinitionRegistry
 from app.persistence import write_json_with_backup, write_text_with_backup
 from app.utils import ensure_external_directory, external_path, local_or_resource_path, resolve_local_venv_python
 
@@ -42,32 +44,53 @@ LEGACY_REMOTE_EXE_PATH = "dist/TheMartinSuite_GLC.exe"
 LEGACY_REMOTE_DEB_PATH = f"dist/ubuntu/{DEB_PACKAGE_NAME}.deb"
 MODULE_PAYLOAD_EXCLUDED_KEYS = {"__init__", "update_manager"}
 SETTINGS_RELATIVE_PATH = "settings.json"
-JSON_PAYLOAD_OPTIONS = [
-    {
-        "key": "layout_config",
-        "relative_path": "layout_config.json",
-        "fallback_name": "Layout Config",
-        "backup_dir": os.path.join("data", "backups", "layouts"),
-    },
-    {
-        "key": "rates",
-        "relative_path": "rates.json",
-        "fallback_name": "Rates Config",
-        "backup_dir": os.path.join("data", "backups", "rates"),
-    },
-]
 DOCUMENTATION_PAYLOAD_RELATIVE_ROOT = os.path.join("docs", "help")
 DOCUMENTATION_PAYLOAD_BACKUP_ROOT = os.path.join("data", "backups", "docs")
-DOCUMENTATION_STANDALONE_FILES = ["docs/legal/LICENSE.txt"]
+DOCUMENTATION_STANDALONE_FILES = [
+    "docs/legal/LICENSE.txt",
+    "docs/production_log_json_architecture.md",
+]
 MODULE_PAYLOAD_MVC_PATH_SPECS = [
     ("controllers", "{module_key}_controller.py"),
     ("models", "{module_key}_model.py"),
     ("views", "{module_key}_view.py"),
 ]
+UBUNTU_PACKAGE_VERSION_PATTERN = re.compile(r"(?P<version>\d+\.\d+(?:\.\d+)?)")
 
 
 def _default_module_payload_name(module_key):
     return module_key.replace("_", " ").title()
+
+
+def discover_json_payload_options():
+    default_form_name = DEFAULT_FORM_NAME
+    try:
+        registry = FormDefinitionRegistry()
+        default_form = registry.get_form(DEFAULT_FORM_ID)
+        default_form_name = default_form.get("name", DEFAULT_FORM_NAME) if default_form.get("built_in") else DEFAULT_FORM_NAME
+    except Exception:
+        default_form_name = DEFAULT_FORM_NAME
+
+    return [
+        {
+            "key": "layout_config",
+            "relative_path": "layout_config.json",
+            "fallback_name": f"{default_form_name} Layout",
+            "backup_dir": os.path.join("data", "backups", "layouts"),
+        },
+        {
+            "key": "form_definitions",
+            "relative_path": "form_definitions.json",
+            "fallback_name": "Form Definitions",
+            "backup_dir": os.path.join("data", "backups", "forms"),
+        },
+        {
+            "key": "rates",
+            "relative_path": "rates.json",
+            "fallback_name": "Rates Config",
+            "backup_dir": os.path.join("data", "backups", "rates"),
+        },
+    ]
 
 
 def _build_module_payload_paths(modules_path, module_key, file_name):
@@ -297,7 +320,7 @@ def discover_module_payload_options(modules_path):
                 "display": f"{module_name} ({file_name})",
             })
 
-    for spec in JSON_PAYLOAD_OPTIONS:
+    for spec in discover_json_payload_options():
         options.append({
             "kind": "json",
             "key": spec["key"],
@@ -809,6 +832,231 @@ def resolve_download_directory():
     return os.path.abspath("dist")
 
 
+def _extract_ubuntu_package_version(version_text):
+    parsed = parse_version(version_text)
+    if parsed is not None:
+        return normalize_version(parsed)
+
+    match = UBUNTU_PACKAGE_VERSION_PATTERN.search(str(version_text or ""))
+    if not match:
+        return None
+    return normalize_version(parse_version(match.group("version")))
+
+
+def _run_ubuntu_query_command(command, timeout=15):
+    try:
+        return subprocess.run(
+            command,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def detect_installed_ubuntu_package_version(package_name=DEB_PACKAGE_NAME):
+    dpkg_query_path = shutil.which("dpkg-query")
+    if not dpkg_query_path:
+        return None
+
+    result = _run_ubuntu_query_command([dpkg_query_path, "-W", "-f=${Status}\t${Version}", package_name])
+    if result is None or result.returncode != 0:
+        return None
+
+    output_text = (result.stdout or "").strip()
+    if not output_text:
+        return None
+
+    try:
+        status_text, version_text = output_text.split("\t", 1)
+    except ValueError:
+        return None
+
+    if status_text.strip() != "install ok installed":
+        return None
+    return version_text.strip() or None
+
+
+def detect_ubuntu_repo_candidate_version(package_name=DEB_PACKAGE_NAME):
+    apt_cache_path = shutil.which("apt-cache")
+    if not apt_cache_path:
+        return None
+
+    result = _run_ubuntu_query_command([apt_cache_path, "policy", package_name])
+    if result is None or result.returncode != 0:
+        return None
+
+    for line in (result.stdout or "").splitlines():
+        stripped_line = line.strip()
+        if not stripped_line.startswith("Candidate:"):
+            continue
+        candidate_text = stripped_line.split(":", 1)[1].strip()
+        if candidate_text == "(none)":
+            return None
+        return candidate_text or None
+
+    return None
+
+
+def resolve_ubuntu_repo_upgrade_handoff(downloaded_path, target_version=None):
+    if not is_ubuntu_runtime():
+        return None
+
+    normalized_path = os.path.abspath(downloaded_path)
+    pkexec_path = shutil.which("pkexec")
+    apt_manager_path = shutil.which("apt-get") or shutil.which("apt")
+    shell_path = shutil.which("sh") or ("/bin/sh" if os.path.exists("/bin/sh") else None)
+    if not pkexec_path or not apt_manager_path or not shell_path:
+        return None
+
+    installed_version = detect_installed_ubuntu_package_version()
+    repo_candidate_version = detect_ubuntu_repo_candidate_version()
+    if not installed_version or not repo_candidate_version:
+        return None
+
+    installed_compare = _extract_ubuntu_package_version(installed_version)
+    candidate_compare = _extract_ubuntu_package_version(repo_candidate_version)
+    target_compare = _extract_ubuntu_package_version(target_version)
+    if candidate_compare is None:
+        return None
+    if installed_compare is not None and candidate_compare <= installed_compare:
+        return None
+    if target_compare is not None and candidate_compare < target_compare:
+        return None
+
+    repo_upgrade_command = (
+        f'"{apt_manager_path}" update && '
+        f'"{apt_manager_path}" install --only-upgrade -y {DEB_PACKAGE_NAME}'
+    )
+    result = _build_ubuntu_package_install_result(
+        normalized_path,
+        "pkexec apt repository upgrade",
+        mode="command",
+        command=[pkexec_path, shell_path, "-lc", repo_upgrade_command],
+    )
+    file_name = os.path.basename(normalized_path)
+    result.update({
+        "upgrade_source": "repository",
+        "repo_candidate_version": repo_candidate_version,
+        "installed_version": installed_version,
+        "status_message": "Ubuntu repository update started. Restart the app after installation finishes.",
+        "detail": (
+            f"Downloaded {file_name}, detected repository candidate {repo_candidate_version}, and started a privileged apt upgrade for {DEB_PACKAGE_NAME}. "
+            "Ubuntu will refresh package metadata, apply the repository upgrade, and then you can restart the app."
+        ),
+        "toast_message": f"Started the Ubuntu repository update for {DEB_PACKAGE_NAME}.",
+    })
+    return result
+
+
+def _build_ubuntu_package_install_result(downloaded_path, installer_label, *, mode, command=None, fallback_reason=None):
+    file_name = os.path.basename(downloaded_path)
+    if mode == "command":
+        detail = (
+            f"Downloaded {file_name} and started a privileged {installer_label} handoff for the installed {DEB_PACKAGE_NAME} Ubuntu package. "
+            "Authenticate the Ubuntu prompt if one appears, let the package update finish, then restart the app."
+        )
+        if fallback_reason:
+            detail = f"{detail} The direct installer launch reported: {fallback_reason}"
+        return {
+            "mode": mode,
+            "installer_label": installer_label,
+            "command": list(command or []),
+            "status_message": "Ubuntu package updater started. Restart the app after installation finishes.",
+            "detail": detail,
+            "toast_message": f"Started the Ubuntu package updater via {installer_label}.",
+        }
+
+    detail = (
+        f"Downloaded {file_name} and opened it with the {installer_label}. "
+        "Complete the package installation there, then restart the app."
+    )
+    if fallback_reason:
+        detail = f"{detail} The automatic installer handoff fell back to the package handler after: {fallback_reason}"
+    return {
+        "mode": mode,
+        "installer_label": installer_label,
+        "command": [],
+        "status_message": "Ubuntu package opened. Complete the installation, then restart the app.",
+        "detail": detail,
+        "toast_message": "Opened the Ubuntu package in the system package handler.",
+    }
+
+
+def resolve_ubuntu_package_install_handoff(downloaded_path):
+    if not is_ubuntu_runtime():
+        raise RuntimeError("Ubuntu package install handoff is only available on Ubuntu runtimes.")
+
+    normalized_path = os.path.abspath(downloaded_path)
+    if not os.path.exists(normalized_path):
+        raise FileNotFoundError(f"The downloaded Ubuntu package could not be found: {normalized_path}")
+
+    pkexec_path = shutil.which("pkexec")
+    apt_path = shutil.which("apt")
+    gdebi_path = shutil.which("gdebi")
+    dpkg_path = shutil.which("dpkg")
+
+    if pkexec_path and apt_path:
+        return _build_ubuntu_package_install_result(
+            normalized_path,
+            "pkexec apt install",
+            mode="command",
+            command=[pkexec_path, apt_path, "install", "-y", normalized_path],
+        )
+
+    if pkexec_path and gdebi_path:
+        return _build_ubuntu_package_install_result(
+            normalized_path,
+            "pkexec gdebi",
+            mode="command",
+            command=[pkexec_path, gdebi_path, "-n", normalized_path],
+        )
+
+    if pkexec_path and dpkg_path:
+        return _build_ubuntu_package_install_result(
+            normalized_path,
+            "pkexec dpkg",
+            mode="command",
+            command=[pkexec_path, dpkg_path, "-i", normalized_path],
+        )
+
+    return _build_ubuntu_package_install_result(
+        normalized_path,
+        "system package handler",
+        mode="open",
+    )
+
+
+def launch_ubuntu_package_install(downloaded_path, target_version=None):
+    handoff = resolve_ubuntu_repo_upgrade_handoff(downloaded_path, target_version=target_version)
+    if handoff is None:
+        handoff = resolve_ubuntu_package_install_handoff(downloaded_path)
+    if handoff["mode"] == "open":
+        open_with_system_default(downloaded_path)
+        return handoff
+
+    try:
+        subprocess.Popen(
+            handoff["command"],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    except OSError as exc:
+        open_with_system_default(downloaded_path)
+        return _build_ubuntu_package_install_result(
+            os.path.abspath(downloaded_path),
+            "system package handler",
+            mode="open",
+            fallback_reason=str(exc),
+        )
+
+    return handoff
+
+
 def resolve_source_workspace():
     return ensure_external_directory(os.path.join("data", "updater", "source-staging"))
 
@@ -954,3 +1202,276 @@ def resolve_final_built_executable_path(built_exe_path, download_directory=None,
             "The rebuilt executable has the same name as the running EXE. Bump the version before using packaged source rebuild updates."
         )
     return target_path
+
+
+class UpdateManagerModel:
+    def parse_json_payload_metadata(self, file_text, fallback_name):
+        return _parse_json_payload_metadata(file_text, fallback_name)
+
+    def read_module_metadata_from_path(self, file_path, fallback_name):
+        return _read_module_metadata_from_path(file_path, fallback_name)
+
+    def detect_branch_name(self):
+        return _detect_branch_name()
+
+    def detect_remote_info(self, preferred_url=None):
+        return _detect_remote_info(preferred_url=preferred_url)
+
+    def remote_updates_available(self, remote_info, branch_name=None):
+        return _remote_updates_available(remote_info, branch_name)
+
+    def update_configuration_note(self, remote_info=None):
+        return _update_configuration_note(remote_info)
+
+    def discover_module_payload_options(self, modules_path):
+        return discover_module_payload_options(modules_path)
+
+    def discover_documentation_payload_options(self):
+        return discover_documentation_payload_options()
+
+    def get_local_module_payload_metadata(self, modules_path, loaded_modules, option, external_override_path=None):
+        return get_local_module_payload_metadata(
+            modules_path,
+            loaded_modules,
+            option,
+            external_override_path=external_override_path,
+        )
+
+    def evaluate_module_payload_option(self, modules_path, loaded_modules, option, branch_name, remote_info, external_override_path=None):
+        return evaluate_module_payload_option(
+            modules_path,
+            loaded_modules,
+            option,
+            branch_name,
+            remote_info,
+            external_override_path=external_override_path,
+        )
+
+    def scan_available_module_payload_updates(self, dispatcher, branch_name=None, remote_info=None):
+        return scan_available_module_payload_updates(dispatcher, branch_name=branch_name, remote_info=remote_info)
+
+    def scan_available_documentation_payload_updates(self, branch_name=None, remote_info=None, configured_url=None):
+        return scan_available_documentation_payload_updates(
+            branch_name=branch_name,
+            remote_info=remote_info,
+            configured_url=configured_url,
+        )
+
+    def install_documentation_payload(self, option, remote_info, branch_name, remote_text=None):
+        payload_text = remote_text if remote_text is not None else fetch_remote_payload_text(remote_info, branch_name, option["relative_path"], timeout=15)
+        return install_documentation_payload_option(option, payload_text)
+
+    def install_module_payload(self, option, remote_info, branch_name, install_module_override, remote_text=None):
+        payload_paths = option.get("payload_paths") or [option["relative_path"]]
+        if option.get("kind") == "module" and len(payload_paths) > 1:
+            payload_text = {}
+            for relative_path in payload_paths:
+                if relative_path == option["relative_path"] and remote_text is not None:
+                    payload_text[relative_path] = remote_text
+                else:
+                    payload_text[relative_path] = fetch_remote_payload_text(remote_info, branch_name, relative_path, timeout=15)
+        else:
+            payload_text = remote_text if remote_text is not None else fetch_remote_payload_text(remote_info, branch_name, option["relative_path"], timeout=15)
+        return install_module_payload_option(option, payload_text, install_module_override)
+
+    def build_local_manifest(self, dispatcher_module):
+        return build_local_manifest(dispatcher_module)
+
+    def evaluate_stable_update_entry(self, entry, remote_text, stable_artifact_status_label, stable_artifact_name_for_version):
+        return evaluate_stable_update_entry(
+            entry,
+            remote_text,
+            stable_artifact_status_label,
+            stable_artifact_name_for_version,
+        )
+
+    def fetch_remote_file(self, remote_info, branch_name, relative_path, timeout=15):
+        return fetch_remote_payload_text(remote_info, branch_name, relative_path, timeout=timeout)
+
+    def fetch_remote_bytes(self, remote_info, branch_name, relative_path, timeout=30):
+        return fetch_remote_bytes(remote_info, branch_name, relative_path, timeout=timeout)
+
+    def fetch_remote_snapshot_bytes(self, remote_info, branch_name):
+        return fetch_remote_snapshot_bytes(remote_info, branch_name)
+
+    def remote_executable_candidates(self, row, stable_artifact_kind, stable_artifact_name_for_version):
+        return remote_executable_candidates(row, stable_artifact_kind, stable_artifact_name_for_version)
+
+    def probe_remote_executable(self, remote_info, branch_name, row, stable_artifact_kind, stable_artifact_name_for_version):
+        return probe_remote_executable(remote_info, branch_name, row, stable_artifact_kind, stable_artifact_name_for_version)
+
+    def download_remote_executable(self, remote_info, branch_name, row, stable_artifact_kind, stable_artifact_name_for_version):
+        return download_remote_executable(remote_info, branch_name, row, stable_artifact_kind, stable_artifact_name_for_version)
+
+    def resolve_download_directory(self):
+        return resolve_download_directory()
+
+    def resolve_source_workspace(self):
+        return resolve_source_workspace()
+
+    def resolve_source_log_directory(self):
+        return resolve_source_log_directory()
+
+    def cleanup_source_stage_dir(self, stage_dir):
+        return cleanup_source_stage_dir(stage_dir)
+
+    def remove_paths(self, path_values):
+        return remove_paths(path_values)
+
+    def locate_extracted_source_root(self, extract_dir):
+        return locate_extracted_source_root(extract_dir)
+
+    def validate_source_snapshot(self, source_root):
+        return validate_source_snapshot(source_root)
+
+    def resolve_build_python_command(self, download_directory=None):
+        return resolve_build_python_command(download_directory)
+
+    def write_source_build_log(self, log_name, content):
+        return write_source_build_log(log_name, content)
+
+    def resolve_built_executable(self, source_root):
+        return resolve_built_executable(source_root)
+
+    def resolve_final_built_executable_path(self, built_exe_path, download_directory=None, current_executable=None):
+        return resolve_final_built_executable_path(
+            built_exe_path,
+            download_directory=download_directory,
+            current_executable=current_executable,
+        )
+
+    def build_stable_update_rows(self, local_manifest, remote_info, branch_name, stable_artifact_kind, stable_artifact_name_for_version, stable_artifact_status_label):
+        comparison_rows = []
+        for entry in local_manifest or []:
+            try:
+                remote_text = self.fetch_remote_file(remote_info, branch_name, entry["relative_path"])
+            except urllib.error.HTTPError as exc:
+                if exc.code == 404:
+                    comparison_rows.append(
+                        {
+                            **entry,
+                            "remote_version": "Missing",
+                            "status": "Not in repository branch",
+                            "update_available": False,
+                        }
+                    )
+                    continue
+                raise
+
+            current_row = self.evaluate_stable_update_entry(
+                entry,
+                remote_text,
+                stable_artifact_status_label,
+                stable_artifact_name_for_version,
+            )
+            if current_row["update_available"]:
+                remote_path, resolved_name = self.probe_remote_executable(
+                    remote_info,
+                    branch_name,
+                    current_row,
+                    stable_artifact_kind,
+                    stable_artifact_name_for_version,
+                )
+                if remote_path:
+                    current_row["remote_exe_path"] = remote_path
+                    current_row["remote_exe_name"] = resolved_name
+                else:
+                    current_row["status"] = f"{stable_artifact_status_label} artifact missing"
+                    current_row["update_available"] = False
+            comparison_rows.append(current_row)
+        return comparison_rows
+
+    def stage_downloaded_artifact(self, row, remote_info, branch_name, stable_artifact_kind, stable_artifact_name_for_version, download_directory):
+        remote_exe_bytes, resolved_name = self.download_remote_executable(
+            remote_info,
+            branch_name,
+            row,
+            stable_artifact_kind,
+            stable_artifact_name_for_version,
+        )
+        os.makedirs(download_directory, exist_ok=True)
+        final_exe_path = os.path.join(download_directory, resolved_name)
+        temp_exe_path = f"{final_exe_path}.download"
+        with open(temp_exe_path, "wb") as handle:
+            handle.write(remote_exe_bytes)
+        os.replace(temp_exe_path, final_exe_path)
+        return final_exe_path
+
+    def resolve_ubuntu_package_install_handoff(self, downloaded_path):
+        return resolve_ubuntu_package_install_handoff(downloaded_path)
+
+    def launch_ubuntu_package_install(self, downloaded_path, target_version=None):
+        return launch_ubuntu_package_install(downloaded_path, target_version=target_version)
+
+    def stage_source_snapshot(self, remote_info, branch_name, stage_root):
+        owner = remote_info.get("owner") if isinstance(remote_info, dict) else None
+        repo = remote_info.get("repo") if isinstance(remote_info, dict) else None
+        if not owner or not repo or not branch_name:
+            raise RuntimeError("Repository origin or branch could not be determined for the source snapshot.")
+
+        snapshot_bytes = self.fetch_remote_snapshot_bytes(remote_info, branch_name)
+        stage_dir = tempfile.mkdtemp(prefix="source-update-", dir=stage_root)
+        archive_name = f"{repo}-{branch_name}.zip"
+        archive_path = os.path.join(stage_dir, archive_name)
+        with open(archive_path, "wb") as handle:
+            handle.write(snapshot_bytes)
+
+        extract_dir = os.path.join(stage_dir, "snapshot")
+        os.makedirs(extract_dir, exist_ok=True)
+        with zipfile.ZipFile(archive_path) as archive_handle:
+            archive_handle.extractall(extract_dir)
+
+        source_root = self.locate_extracted_source_root(extract_dir)
+        self.validate_source_snapshot(source_root)
+        return {
+            "archive_path": archive_path,
+            "stage_dir": stage_dir,
+            "extract_dir": extract_dir,
+            "source_root": source_root,
+        }
+
+    def run_source_build(self, source_root, branch_name, download_directory=None, current_executable=None):
+        if is_ubuntu_runtime() or os.name != "nt":
+            raise RuntimeError("Advanced source rebuilds currently target packaged Windows builds only.")
+
+        command_prefix, runtime_display = self.resolve_build_python_command(download_directory)
+        build_command = command_prefix + ["build.py", "--target", "windows", "--non-interactive"]
+        env = os.environ.copy()
+        env["MARTIN_KEEP_DIST"] = "1"
+        env["MARTIN_SKIP_TASKKILL"] = "1"
+        env["MARTIN_BUILD_TARGET"] = "windows"
+        creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        result = subprocess.run(
+            build_command,
+            cwd=source_root,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=1800,
+            env=env,
+            creationflags=creation_flags,
+        )
+        build_log_text = (
+            f"Command: {' '.join(build_command)}\n"
+            f"Working Directory: {source_root}\n"
+            f"Return Code: {result.returncode}\n\n"
+            f"STDOUT:\n{result.stdout}\n\nSTDERR:\n{result.stderr}\n"
+        )
+        log_name = f"source-build-{branch_name}.log"
+        build_log_path = self.write_source_build_log(log_name, build_log_text)
+        if result.returncode != 0:
+            raise RuntimeError(f"The staged build exited with code {result.returncode}.")
+
+        built_exe_path = self.resolve_built_executable(source_root)
+        final_exe_path = self.resolve_final_built_executable_path(
+            built_exe_path,
+            download_directory=download_directory,
+            current_executable=current_executable,
+        )
+        shutil.copy2(built_exe_path, final_exe_path)
+        return {
+            "runtime_display": runtime_display,
+            "build_log_path": build_log_path,
+            "built_exe_path": built_exe_path,
+            "final_exe_path": final_exe_path,
+        }

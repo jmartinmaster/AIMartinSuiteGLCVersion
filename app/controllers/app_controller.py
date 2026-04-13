@@ -27,6 +27,9 @@ from ttkbootstrap.constants import BOTH, BOTTOM, DANGER, INFO, LEFT, RIGHT, SUCC
 from ttkbootstrap.widgets import ToastNotification
 
 from app.app_logging import log_exception
+from app.data_request_worker import DataRequestWorker
+from app.external_data_registry import ExternalDataRegistry
+from app.module_registry import ModuleRegistry
 from app.security import gatekeeper
 from app.theme_manager import apply_readability_overrides, normalize_theme, resolve_base_theme
 from app.utils import external_path, local_or_resource_path, resource_path
@@ -40,46 +43,7 @@ __module_name__ = "Dispatcher Core"
 __version__ = "2.1.5"
 
 ISSUE_REPORT_URL = "https://github.com/jmartinmaster/AIMartinSuiteGLCVersion/issues/new/choose"
-PROTECTED_MODULES = ["layout_manager", "settings_manager", "rate_manager", "update_manager", "internal_code_editor", "security_admin", "developer_admin", "production_log_calculations"]
-HIDDEN_MODULES = ["internal_code_editor", "security_admin", "developer_admin", "production_log_calculations"]
-MODULE_ALLOWED_ROLES = {
-    "internal_code_editor": {"developer"},
-    "security_admin": {"admin", "developer"},
-    "developer_admin": {"developer"},
-    "production_log_calculations": {"developer"},
-}
-TOP_NAV_MODULE_NAMES = ["production_log", "layout_manager", "rate_manager", "recovery_viewer", "update_manager"]
-BOTTOM_NAV_MODULE_NAMES = ["help_viewer", "settings_manager", "about"]
 MODULE_PRELOAD_POLL_SECONDS = 1.0
-MANAGED_MODULE_NAMES = [
-    "about",
-    "app_logging",
-    "app_platform",
-    "data_handler",
-    "data_handler_service",
-    "developer_admin",
-    "dev_logging",
-    "downtime_codes",
-    "help_viewer",
-    "internal_code_editor",
-    "layout_config_service",
-    "layout_manager",
-    "persistence",
-    "production_log",
-    "production_log_calculations",
-    "rate_manager",
-    "recovery_viewer",
-    "security_admin",
-    "security",
-    "security_service",
-    "settings_manager",
-    "splash",
-    "theme_manager",
-    "update_bindings",
-    "update_manager",
-    "update_state",
-    "utils",
-]
 
 
 class Dispatcher:
@@ -92,12 +56,14 @@ class Dispatcher:
         self.root.geometry("1000x600")
         self._update_status_clear_after_id = None
         self.security_session_listeners = []
+        self.external_data_registry = ExternalDataRegistry()
+        self.data_request_worker = None
 
         modules_path = resource_path("app")
         external_modules_path = external_path("app")
-        layout_config = local_or_resource_path("layout_config.json")
-        rate_config = local_or_resource_path("rates.json")
-        settings_path = external_path("settings.json")
+        layout_config = self.external_data_registry.resolve_read_path("layout_config")
+        rate_config = self.external_data_registry.resolve_read_path("rates")
+        settings_path = self.external_data_registry.resolve_read_path("settings")
 
         self.model = AppModel(
             modules_path=modules_path,
@@ -106,10 +72,11 @@ class Dispatcher:
             rate_config=rate_config,
             settings_path=settings_path,
         )
+        self.module_registry = ModuleRegistry()
         self.security = SecurityService(
-            PROTECTED_MODULES,
-            module_allowed_roles=MODULE_ALLOWED_ROLES,
-            hidden_modules=HIDDEN_MODULES,
+            self.get_protected_module_names(),
+            module_allowed_roles=self.get_module_allowed_roles(),
+            hidden_modules=self.get_hidden_security_module_names(),
         )
         self.model.loaded_modules = {"main": self.main_module}
         self._configure_module_import_paths()
@@ -119,6 +86,8 @@ class Dispatcher:
         self.update_coordinator = UpdateCoordinator(self.root)
         self.refresh_animation_settings()
         self.root.protocol("WM_DELETE_WINDOW", self.shutdown)
+        self.data_request_worker = DataRequestWorker(self._enqueue_on_main_thread, exception_logger=self._log_data_request_error)
+        self.data_request_worker.start()
 
         self.view = AppShellView(self.root, self.update_coordinator)
         self.view.build()
@@ -134,6 +103,7 @@ class Dispatcher:
         self.root.after(1500, self.notify_external_override_policy_state)
         self.root.after(900, self.prompt_old_executable_cleanup)
         self.root.after(1800, self.check_for_available_module_updates)
+        self.data_request_worker.submit(self.external_data_registry.warm_cache, description="external_data_registry.warm_cache")
 
     def _sync_view_aliases(self):
         self.main_container = self.view.main_container
@@ -211,6 +181,24 @@ class Dispatcher:
     @property
     def runtime_settings_listeners(self):
         return self.model.runtime_settings_listeners
+
+    def get_managed_module_names(self):
+        return self.module_registry.get_managed_module_names()
+
+    def get_navigation_module_names(self):
+        return self.module_registry.get_navigation_module_names()
+
+    def get_preload_module_names(self):
+        return self.module_registry.get_preload_module_names()
+
+    def get_protected_module_names(self):
+        return self.module_registry.get_protected_module_names()
+
+    def get_hidden_security_module_names(self):
+        return self.module_registry.get_hidden_security_module_names()
+
+    def get_module_allowed_roles(self):
+        return self.module_registry.get_module_allowed_roles()
 
     @property
     def module_update_check_in_progress(self):
@@ -306,13 +294,16 @@ class Dispatcher:
         return module
 
     def _resolve_managed_module_path(self, module_name):
-        return f"app.{module_name}"
+        return self.module_registry.get_module_path(module_name)
 
     def _resolve_initial_module_name(self, module_name):
         available_module_names = {name for _display_name, name in self.get_navigation_modules()}
         if module_name in available_module_names:
             return module_name
-        return "production_log"
+        default_module_name = self.module_registry.get_default_initial_module_name()
+        if default_module_name in available_module_names:
+            return default_module_name
+        return next(iter(sorted(available_module_names)), default_module_name)
 
     def _iter_managed_source_files(self):
         source_roots = [("bundled", self.modules_path)]
@@ -367,7 +358,7 @@ class Dispatcher:
         targets = []
         if self.active_module_name:
             targets.append(self.active_module_name)
-        for module_name in self.get_user_facing_modules(apply_whitelist=False):
+        for module_name in self.get_preload_module_names():
             if module_name not in targets:
                 targets.append(module_name)
         return targets
@@ -422,6 +413,8 @@ class Dispatcher:
         if self.active_module_instance is not None and hasattr(self.active_module_instance, "can_navigate_away"):
             if not self.active_module_instance.can_navigate_away():
                 return
+        if self.data_request_worker is not None:
+            self.data_request_worker.stop()
         self.stop_module_preloader()
         gatekeeper.remove_session_listener(self._handle_gatekeeper_session_change)
         try:
@@ -430,16 +423,16 @@ class Dispatcher:
             pass
 
     def get_external_module_override_path(self, module_name):
-        return self.model.get_external_module_override_path(module_name, MANAGED_MODULE_NAMES)
+        return self.model.get_external_module_override_path(module_name, self.get_managed_module_names())
 
     def has_external_modules_directory(self):
         return self.model.has_external_modules_directory()
 
     def get_external_module_override_names(self):
-        return self.model.get_external_module_override_names(MANAGED_MODULE_NAMES)
+        return self.model.get_external_module_override_names(self.get_managed_module_names())
 
     def get_bundled_module_names(self):
-        return self.model.get_bundled_module_names(MANAGED_MODULE_NAMES)
+        return self.model.get_bundled_module_names(self.get_managed_module_names())
 
     def has_external_module_overrides(self):
         return bool(self.get_external_module_override_names())
@@ -506,7 +499,7 @@ class Dispatcher:
 
     def remove_external_module_overrides(self, module_names=None, include_bytecode=True):
         return self.model.remove_external_module_overrides(
-            MANAGED_MODULE_NAMES,
+            self.get_managed_module_names(),
             module_names=module_names,
             include_bytecode=include_bytecode,
         )
@@ -717,44 +710,18 @@ class Dispatcher:
         visible_modules = self.get_user_facing_modules(apply_whitelist=True)
         for module_name in visible_modules:
             entry = (self.get_module_display_name(module_name), module_name)
-            if module_name in TOP_NAV_MODULE_NAMES:
-                grouped_items["top"].append(entry)
-            elif module_name in BOTTOM_NAV_MODULE_NAMES:
-                grouped_items["bottom"].append(entry)
-            else:
-                grouped_items["middle"].append(entry)
+            navigation_group = self.module_registry.get_navigation_group(module_name)
+            grouped_items.get(navigation_group, grouped_items["middle"]).append(entry)
         return grouped_items
 
     def get_hidden_module_names(self):
-        return {
-            "about",
-            "security",
-            "app_logging",
-            "app_platform",
-            "data_handler",
-            "data_handler_service",
-            "downtime_codes",
-            "help_viewer",
-            "layout_config_service",
-            "persistence",
-            "security_service",
-            "splash",
-            "theme_manager",
-            "update_bindings",
-            "update_state",
-            "utils",
-            "dev_logging",
-        }
+        return set(self.module_registry.get_non_navigation_module_names())
 
     def get_module_display_name(self, module_name):
-        custom_names = {
-            "security_admin": "Security Admin",
-            "developer_admin": "Developer Tools",
-            "production_log_calculations": "Production Log Calculations",
-        }
-        if module_name in custom_names:
-            return custom_names[module_name]
-        return str(module_name).replace("_", " ").title()
+        try:
+            return self.module_registry.get_module_display_name(module_name)
+        except Exception:
+            return str(module_name).replace("_", " ").title()
 
     def notify_production_log_calculation_settings_changed(self):
         seen_instances = set()
@@ -779,14 +746,40 @@ class Dispatcher:
             except Exception as exc:
                 log_exception("notify_production_log_calculation_settings_changed.persistent", exc)
 
+    def notify_active_form_changed(self, source_instance=None):
+        seen_instances = set()
+        source_instance_id = id(source_instance) if source_instance is not None else None
+
+        active_module = self.active_module_instance
+        if active_module is not None and hasattr(active_module, "on_active_form_changed"):
+            active_instance_id = id(active_module)
+            if active_instance_id != source_instance_id:
+                seen_instances.add(active_instance_id)
+                try:
+                    active_module.on_active_form_changed()
+                except Exception as exc:
+                    log_exception("notify_active_form_changed.active", exc)
+
+        for session in self.persistent_module_instances.values():
+            module_instance = session.get("instance")
+            if module_instance is None:
+                continue
+            instance_id = id(module_instance)
+            if instance_id in seen_instances or instance_id == source_instance_id:
+                continue
+            if not hasattr(module_instance, "on_active_form_changed"):
+                continue
+            seen_instances.add(instance_id)
+            try:
+                module_instance.on_active_form_changed()
+            except Exception as exc:
+                log_exception("notify_active_form_changed.persistent", exc)
+
     def get_user_facing_modules(self, apply_whitelist=False):
-        hidden_modules = self.get_hidden_module_names()
         whitelist = set(self.runtime_settings.get("module_whitelist", [])) if apply_whitelist else set()
         visible_modules = []
 
-        for module_name in self.get_bundled_module_names():
-            if module_name in hidden_modules:
-                continue
+        for module_name in self.get_navigation_module_names():
             if not self.security.is_module_visible(module_name):
                 continue
             if whitelist and module_name not in whitelist:
@@ -801,7 +794,7 @@ class Dispatcher:
         return [
             (self.get_module_display_name(module_name), module_name)
             for module_name in self.get_user_facing_modules(apply_whitelist=False)
-            if module_name != "update_manager"
+            if self.module_registry.is_module_persistable(module_name)
         ]
 
     def normalize_module_whitelist(self, raw_value):
@@ -814,7 +807,7 @@ class Dispatcher:
     def is_module_persistent(self, module_name):
         if not module_name:
             return False
-        if module_name == "update_manager":
+        if self.module_registry.is_module_always_persistent(module_name):
             return True
         return module_name in self.runtime_settings.get("persistent_modules", [])
 
@@ -890,7 +883,32 @@ class Dispatcher:
             self._set_window_alpha(1.0)
             self.model.transition_in_progress = False
 
+    def _is_main_thread(self):
+        return threading.current_thread() is threading.main_thread()
+
+    def _enqueue_on_main_thread(self, callback):
+        if self._is_main_thread():
+            return callback()
+        try:
+            self.root.after(0, callback)
+        except Exception as exc:
+            log_exception("dispatcher.enqueue_on_main_thread", exc)
+        return None
+
+    def _log_data_request_error(self, description, exc):
+        log_exception(f"dispatcher.data_request.{description}", exc)
+
     def load_module(self, module_name, use_transition=True, ensure_authorized=True):
+        # Tk widget creation stays on the UI thread; worker threads may only enqueue load requests.
+        if not self._is_main_thread():
+            return self._enqueue_on_main_thread(
+                lambda: self.load_module(
+                    module_name,
+                    use_transition=use_transition,
+                    ensure_authorized=ensure_authorized,
+                )
+            )
+
         if ensure_authorized and self.security.requires_authentication(module_name):
             try:
                 success = self.security.authenticate_module(

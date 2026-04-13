@@ -16,14 +16,14 @@
 import json
 import os
 
-from app.persistence import write_json_with_backup
-from app.utils import external_path, local_or_resource_path
+from app.external_data_registry import ExternalDataRegistry
 
 
 class RateManagerModel:
     def __init__(self):
-        self.data_file = local_or_resource_path("rates.json")
-        self.save_path = external_path("rates.json")
+        self.data_registry = ExternalDataRegistry()
+        self.data_file = self.data_registry.resolve_read_path("rates")
+        self.save_path = self.data_registry.resolve_write_path("rates")
         self.rates = self.load_data()
         self.editing_part = None
 
@@ -39,12 +39,7 @@ class RateManagerModel:
         return {}
 
     def save_data(self):
-        backup_info = write_json_with_backup(
-            self.save_path,
-            self.rates,
-            backup_dir=external_path("data/backups/rates"),
-            keep_count=12,
-        )
+        backup_info = self.data_registry.save_json("rates", self.rates, keep_count=12)
         self.data_file = self.save_path
         return backup_info
 

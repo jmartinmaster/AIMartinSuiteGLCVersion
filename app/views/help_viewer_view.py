@@ -23,7 +23,7 @@ from ttkbootstrap.constants import BOTH, DISABLED, E, END, EW, HORIZONTAL, LEFT,
 from app.utils import local_or_resource_path
 
 __module_name__ = "Help Viewer"
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 
 
 class RoundedNavChip(tk.Canvas):
@@ -186,7 +186,10 @@ class HelpViewerView:
         self.doc_index = [
             ("User Guide", "docs/help/user_guide.md"),
             ("App Icons", "docs/help/app_icons.md"),
+            ("Form Definitions", "docs/help/form_definitions.md"),
             ("Layout JSON", "docs/help/layout_config.md"),
+            ("Production Log Calculations", "docs/help/production_log_calculations.md"),
+            ("Production Log JSON Architecture", "docs/production_log_json_architecture.md"),
             ("Settings JSON", "docs/help/settings_json.md"),
             ("Rates JSON", "docs/help/rates_json.md"),
             ("Draft JSON", "docs/help/draft_json.md"),
