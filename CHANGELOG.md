@@ -13,6 +13,14 @@ Version headings below are aligned to the current `2.x` release line used by Dis
 - Updated Settings Manager to keep general application settings in the standard page while exposing security and developer administration through dedicated privileged surfaces.
 - Refined Production Log pending-draft behavior so delete confirmation stays parented above the selector window, refresh can redraw header-derived values, and Start Time / End Time remain exportable computed header fields driven by Shift and Hours.
 - Expanded Update Manager and external override handling so module payload installs can stage grouped MVC file sets while still presenting as a single module payload.
+- Added an external data registry and dispatcher-owned background data-request worker so shared JSON payload discovery, fallback resolution, and startup cache warmup no longer rely on scattered path handling across models.
+- Added multi-form layout ownership and active-form-aware layout loading through the form-definition and layout-config services, allowing Create Form groundwork to move beyond a single hardcoded layout source.
+- Expanded Layout Manager so create and duplicate form flows can collect descriptions, optionally activate the new form immediately, and edit normalized section metadata for header, production, and downtime sections.
+- Split Layout Manager workbook-facing controls into a dedicated `Import / Export` tab, moved template-path editing out of raw JSON-only workflow, and kept Block View focused on schema and field structure updates.
+- Made Layout Manager preview less coordinate-first by emphasizing visible field labels while retaining detailed edit metadata in tooltips, and fixed split-surface selection scrolling so each tab scrolls its own canvas correctly.
+- Added a lightweight local project librarian CLI that reuses the AST symbol index, catalogs searchable repo text locally, records git-change snapshots, and supports an in-memory REPL for faster repeated lookups.
+- Hardened workbook import and export routing so section metadata, field-level toggles, mapping-column toggles, and stale-mapping pruning are enforced through bounded header, production, and downtime profiles, with unsupported future profiles skipped safely and surfaced as warnings.
+- Moved Production Log further toward section-aware runtime helpers so row collection, repopulation, open-row behavior, and active-form refresh flows rely less on direct production-versus-downtime list access.
 - Refreshed Help Center documentation and module version markers to match the current shell, security, updater, and Production Log behavior.
 
 ### Notes

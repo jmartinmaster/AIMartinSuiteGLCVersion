@@ -17,14 +17,16 @@ import json
 import os
 from datetime import datetime
 
+from app.external_data_registry import ExternalDataRegistry
 from app.form_definition_registry import DEFAULT_FORM_ID, FormDefinitionRegistry
 from app.persistence import write_json_with_backup
 from app.utils import external_path
 
 
 class RecoveryViewerModel:
-    def __init__(self):
-        self.registry = FormDefinitionRegistry()
+    def __init__(self, data_registry=None):
+        self.form_registry = FormDefinitionRegistry()
+        self.data_registry = data_registry or ExternalDataRegistry()
         self.records = []
 
     def refresh_records(self):
@@ -88,38 +90,34 @@ class RecoveryViewerModel:
         return records
 
     def collect_config_backup_records(self):
-        sources = [
-            {
-                "kind": "Settings Backup",
-                "form_name": "System",
-                "target_path": external_path("settings.json"),
-                "backup_dir": external_path("data/backups/settings"),
-            },
-            {
-                "kind": "Form Definitions Backup",
-                "form_name": "System",
-                "target_path": external_path("form_definitions.json"),
-                "backup_dir": external_path("data/backups/forms"),
-                "notifies_active_form": True,
-            },
-            {
-                "kind": "Rates Backup",
-                "form_name": "System",
-                "target_path": external_path("rates.json"),
-                "backup_dir": external_path("data/backups/rates"),
-            },
-        ]
-        sources[1:1] = self.collect_form_layout_backup_sources()
+        shared_sources = self.collect_shared_config_backup_sources()
+        sources = shared_sources[:1] + self.collect_form_layout_backup_sources() + shared_sources[1:]
 
         records = []
         for source in sources:
             records.extend(self._collect_config_backup_records_for_source(source))
         return records
 
+    def collect_shared_config_backup_sources(self):
+        sources = []
+        for spec in self.data_registry.get_recovery_specs():
+            if spec.key == "layout_config":
+                continue
+            sources.append(
+                {
+                    "kind": spec.recovery_kind or spec.display_name,
+                    "form_name": "System",
+                    "target_path": self.data_registry.resolve_write_path(spec.key),
+                    "backup_dir": self.data_registry.resolve_backup_dir(spec.key),
+                    "notifies_active_form": bool(spec.notifies_active_form),
+                }
+            )
+        return sources
+
     def collect_form_layout_backup_sources(self):
         sources = []
         known_form_ids = set()
-        for form_info in self.registry.list_forms():
+        for form_info in self.form_registry.list_forms():
             form_id = form_info.get("id") or DEFAULT_FORM_ID
             known_form_ids.add(form_id)
             kind = "Default Layout Backup" if form_info.get("built_in") else "Form Layout Backup"
@@ -208,7 +206,7 @@ class RecoveryViewerModel:
 
     def get_form_name(self, form_id=None):
         try:
-            form_info = self.registry.get_form(form_id)
+            form_info = self.form_registry.get_form(form_id)
             return str(form_info.get("name") or form_info.get("id") or "Form")
         except Exception:
             if str(form_id or "").strip() in {"", DEFAULT_FORM_ID}:

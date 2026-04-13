@@ -15,6 +15,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 import json
 import os
+import shutil
 from dataclasses import dataclass
 
 from app.persistence import write_json_with_backup
@@ -165,12 +166,26 @@ class ExternalDataRegistry:
         except OSError:
             return
 
+    def _restore_from_legacy_backup(self, source_backup_path, target_path):
+        if not os.path.exists(source_backup_path):
+            return None
+        try:
+            os.makedirs(os.path.dirname(target_path), exist_ok=True)
+            shutil.copy2(source_backup_path, target_path)
+            return target_path
+        except OSError:
+            return None
+
     def migrate_legacy_file(self, key):
         write_path = self.resolve_write_path(key)
         if os.path.exists(write_path):
             return write_path
 
         for legacy_path in self.resolve_legacy_paths(key):
+            restored_path = self._restore_from_legacy_backup(f"{legacy_path}.bak", write_path)
+            if restored_path:
+                return restored_path
+
             if not os.path.exists(legacy_path):
                 continue
             try:
@@ -180,6 +195,10 @@ class ExternalDataRegistry:
                 return write_path
             except OSError:
                 return legacy_path
+
+        restored_path = self._restore_from_legacy_backup(f"{write_path}.bak", write_path)
+        if restored_path:
+            return restored_path
         return write_path
 
     def resolve_read_path(self, key, migrate_legacy=True):

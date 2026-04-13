@@ -14,8 +14,10 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 import argparse
-import os
 import json
+import os
+import signal
+import sys
 
 import ttkbootstrap as tb
 
@@ -29,6 +31,59 @@ from app.app_platform import SPLASH_LOGO_RELATIVE_PATH, apply_app_icon, apply_wi
 
 __module_name__ = "Dispatcher Core"
 __version__ = "2.1.5"
+
+
+class _SigintCoordinator:
+    def __init__(self, root, dispatcher):
+        self.root = root
+        self.dispatcher = dispatcher
+        self.sigint_count = 0
+        self.pending_sigint = False
+        self.graceful_shutdown_requested = False
+        self._poll_after_id = None
+
+    def handle_signal(self, _signum, _frame):
+        self.sigint_count += 1
+        self.pending_sigint = True
+        if self.sigint_count == 1:
+            sys.stderr.write("Ctrl+C received. Requesting graceful shutdown...\n")
+            sys.stderr.flush()
+            return
+        sys.stderr.write("Second Ctrl+C received. Forcing exit.\n")
+        sys.stderr.flush()
+
+    def start(self):
+        self._schedule_poll()
+
+    def stop(self):
+        if self._poll_after_id is None:
+            return
+        try:
+            self.root.after_cancel(self._poll_after_id)
+        except Exception:
+            pass
+        self._poll_after_id = None
+
+    def _schedule_poll(self):
+        try:
+            self._poll_after_id = self.root.after(100, self._poll)
+        except Exception:
+            self._poll_after_id = None
+
+    def _poll(self):
+        self._poll_after_id = None
+        if self.pending_sigint:
+            self.pending_sigint = False
+            if not self.graceful_shutdown_requested:
+                self.graceful_shutdown_requested = True
+                try:
+                    self.dispatcher.shutdown()
+                except Exception as exc:
+                    log_exception("launcher.sigint_shutdown", exc)
+                    os._exit(130)
+            else:
+                os._exit(130)
+        self._schedule_poll()
 
 
 def run_application(main_module=None, initial_module_name=None):
@@ -56,8 +111,30 @@ def run_application(main_module=None, initial_module_name=None):
     from app.splash import show_splash_screen
 
     show_splash_screen(app_root, duration=5000, logo_path=resource_path(SPLASH_LOGO_RELATIVE_PATH))
-    Dispatcher(app_root, main_module=main_module, initial_module_name=initial_module_name)
-    app_root.mainloop()
+    dispatcher = Dispatcher(app_root, main_module=main_module, initial_module_name=initial_module_name)
+
+    previous_sigint_handler = None
+    sigint_coordinator = None
+    try:
+        previous_sigint_handler = signal.getsignal(signal.SIGINT)
+        sigint_coordinator = _SigintCoordinator(app_root, dispatcher)
+        signal.signal(signal.SIGINT, sigint_coordinator.handle_signal)
+        sigint_coordinator.start()
+    except (AttributeError, ValueError) as exc:
+        log_exception("launcher.sigint_setup", exc)
+        previous_sigint_handler = None
+        sigint_coordinator = None
+
+    try:
+        app_root.mainloop()
+    finally:
+        if sigint_coordinator is not None:
+            sigint_coordinator.stop()
+        if previous_sigint_handler is not None:
+            try:
+                signal.signal(signal.SIGINT, previous_sigint_handler)
+            except (AttributeError, ValueError):
+                pass
 
 
 def build_argument_parser():

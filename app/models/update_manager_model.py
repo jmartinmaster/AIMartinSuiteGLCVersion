@@ -28,6 +28,7 @@ import zipfile
 
 from app.app_identity import DEFAULT_UPDATE_REPOSITORY_URL, DEB_PACKAGE_NAME, LEGACY_EXE_NAME, format_versioned_deb_name, format_versioned_exe_name, load_version_from_main, normalize_version, parse_version
 from app.app_platform import is_ubuntu_runtime, open_with_system_default
+from app.external_data_registry import ExternalDataRegistry
 from app.form_definition_registry import DEFAULT_FORM_ID, DEFAULT_FORM_NAME, FormDefinitionRegistry
 from app.persistence import write_json_with_backup, write_text_with_backup
 from app.utils import ensure_external_directory, external_path, local_or_resource_path, resolve_local_venv_python
@@ -62,35 +63,13 @@ def _default_module_payload_name(module_key):
     return module_key.replace("_", " ").title()
 
 
-def discover_json_payload_options():
-    default_form_name = DEFAULT_FORM_NAME
-    try:
-        registry = FormDefinitionRegistry()
-        default_form = registry.get_form(DEFAULT_FORM_ID)
-        default_form_name = default_form.get("name", DEFAULT_FORM_NAME) if default_form.get("built_in") else DEFAULT_FORM_NAME
-    except Exception:
-        default_form_name = DEFAULT_FORM_NAME
+def _get_external_data_registry(data_registry=None):
+    return data_registry or ExternalDataRegistry()
 
-    return [
-        {
-            "key": "layout_config",
-            "relative_path": "layout_config.json",
-            "fallback_name": f"{default_form_name} Layout",
-            "backup_dir": os.path.join("data", "backups", "layouts"),
-        },
-        {
-            "key": "form_definitions",
-            "relative_path": "form_definitions.json",
-            "fallback_name": "Form Definitions",
-            "backup_dir": os.path.join("data", "backups", "forms"),
-        },
-        {
-            "key": "rates",
-            "relative_path": "rates.json",
-            "fallback_name": "Rates Config",
-            "backup_dir": os.path.join("data", "backups", "rates"),
-        },
-    ]
+
+def discover_json_payload_options(data_registry=None):
+    registry = _get_external_data_registry(data_registry)
+    return [registry.build_update_payload_option(spec.key) for spec in registry.get_update_payload_specs()]
 
 
 def _build_module_payload_paths(modules_path, module_key, file_name):
@@ -201,8 +180,11 @@ def _normalize_update_repository_url(raw_value):
     return str(raw_value or "").strip()
 
 
-def _load_external_settings_payload(settings_path=None):
-    resolved_settings_path = settings_path or external_path(SETTINGS_RELATIVE_PATH)
+def _load_external_settings_payload(settings_path=None, data_registry=None):
+    if settings_path is None:
+        return _get_external_data_registry(data_registry).load_json("settings", default_factory=dict)
+
+    resolved_settings_path = settings_path
     if not os.path.exists(resolved_settings_path):
         return {}
     try:
@@ -213,7 +195,7 @@ def _load_external_settings_payload(settings_path=None):
         return {}
 
 
-def _get_configured_update_repository_url(settings_lookup=None):
+def _get_configured_update_repository_url(settings_lookup=None, data_registry=None):
     configured_value = None
     if callable(settings_lookup):
         try:
@@ -228,7 +210,7 @@ def _get_configured_update_repository_url(settings_lookup=None):
     if configured_value is not None:
         return _normalize_update_repository_url(configured_value)
 
-    settings_payload = _load_external_settings_payload()
+    settings_payload = _load_external_settings_payload(data_registry=data_registry)
     return _normalize_update_repository_url(settings_payload.get("update_repository_url", DEFAULT_UPDATE_REPOSITORY_URL))
 
 
@@ -292,7 +274,7 @@ def _detect_remote_info(preferred_url=None):
     return _build_remote_info_from_url(remote_url)
 
 
-def discover_module_payload_options(modules_path):
+def discover_module_payload_options(modules_path, data_registry=None):
     options = []
     if modules_path and os.path.isdir(modules_path):
         for file_name in sorted(os.listdir(modules_path)):
@@ -320,16 +302,11 @@ def discover_module_payload_options(modules_path):
                 "display": f"{module_name} ({file_name})",
             })
 
-    for spec in discover_json_payload_options():
-        options.append({
-            "kind": "json",
-            "key": spec["key"],
-            "relative_path": spec["relative_path"],
-            "fallback_name": spec["fallback_name"],
-            "module_name": spec["fallback_name"],
-            "backup_dir": spec["backup_dir"],
-            "display": f"{spec['fallback_name']} ({os.path.basename(spec['relative_path'])})",
-        })
+    for spec in discover_json_payload_options(data_registry=data_registry):
+        option = dict(spec)
+        option.setdefault("kind", "json")
+        option.setdefault("display", f"{option['fallback_name']} ({os.path.basename(option['relative_path'])})")
+        options.append(option)
 
     return options
 
@@ -364,7 +341,7 @@ def get_local_module_payload_metadata(modules_path, loaded_modules, option, exte
         return {"module_name": "No payload selected", "version": "Unknown"}
 
     if option.get("kind") == "json":
-        local_path = external_path(option["relative_path"])
+        local_path = option.get("local_source_path") or option.get("local_target_path") or external_path(option["relative_path"])
         if not os.path.exists(local_path):
             return _parse_json_payload_metadata("", option["fallback_name"])
         try:
@@ -594,18 +571,20 @@ def scan_available_module_payload_updates(dispatcher, branch_name=None, remote_i
     loaded_modules = None
     modules_path = None
     external_override_path_resolver = None
+    data_registry = None
 
     if dispatcher is not None:
         modules_path = getattr(dispatcher, "modules_path", None)
         loaded_modules = getattr(dispatcher, "loaded_modules", None)
+        data_registry = getattr(dispatcher, "external_data_registry", None)
         if getattr(dispatcher, "are_external_module_overrides_enabled", None) and dispatcher.are_external_module_overrides_enabled():
             external_override_path_resolver = getattr(dispatcher, "get_external_module_override_path", None)
         if hasattr(dispatcher, "get_setting"):
-            configured_url = _get_configured_update_repository_url(dispatcher.get_setting)
+            configured_url = _get_configured_update_repository_url(dispatcher.get_setting, data_registry=data_registry)
 
     resolved_branch_name = branch_name or _detect_branch_name()
     resolved_remote_info = remote_info or _detect_remote_info(preferred_url=configured_url)
-    options = discover_module_payload_options(modules_path)
+    options = discover_module_payload_options(modules_path, data_registry=data_registry)
     if not _remote_updates_available(resolved_remote_info, resolved_branch_name):
         return {
             "branch_name": resolved_branch_name,
@@ -680,11 +659,14 @@ def install_module_payload_option(option, payload_text, install_module_override)
         remote_metadata = _parse_json_payload_metadata(payload_text, option["fallback_name"])
         if remote_metadata.get("version") != "Valid JSON":
             raise RuntimeError(f"The repository copy for {option['module_name']} is not valid JSON.")
-        target_path = external_path(option["relative_path"])
+        target_path = option.get("local_target_path") or external_path(option["relative_path"])
+        backup_dir = option.get("backup_dir")
+        if backup_dir and not os.path.isabs(backup_dir):
+            backup_dir = external_path(backup_dir)
         write_json_with_backup(
             target_path,
             remote_metadata["payload"],
-            backup_dir=external_path(option["backup_dir"]),
+            backup_dir=backup_dir,
             keep_count=12,
         )
         return target_path, remote_metadata.get("version", "Unknown")
@@ -1205,6 +1187,9 @@ def resolve_final_built_executable_path(built_exe_path, download_directory=None,
 
 
 class UpdateManagerModel:
+    def __init__(self, data_registry=None):
+        self.data_registry = data_registry or ExternalDataRegistry()
+
     def parse_json_payload_metadata(self, file_text, fallback_name):
         return _parse_json_payload_metadata(file_text, fallback_name)
 
@@ -1224,7 +1209,7 @@ class UpdateManagerModel:
         return _update_configuration_note(remote_info)
 
     def discover_module_payload_options(self, modules_path):
-        return discover_module_payload_options(modules_path)
+        return discover_module_payload_options(modules_path, data_registry=self.data_registry)
 
     def discover_documentation_payload_options(self):
         return discover_documentation_payload_options()

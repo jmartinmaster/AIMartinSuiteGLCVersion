@@ -62,6 +62,7 @@ See also:
    - downtime rows from `downtime_row_fields`
 5. The runtime now normalizes optional semantic `role` metadata for header fields and row fields. Core controller/view behavior resolves by role first and falls back to the historical field ids so older local configs still load safely.
 6. `DataHandlerService` uses the active calculation settings whenever it normalizes header values, derives shift windows, converts downtime values, and moves data into or out of workbooks.
+7. The active layout can now declare section-level routing metadata through `sections`. Repeating sections may include `default_max_rows`, and the workbook router derives its repeating-profile contract from the declared sections instead of only from hard-coded production and downtime constants.
 
 ## Calculation Profile Ownership
 
@@ -92,7 +93,8 @@ Workbook import and export are owned by `app/data_handler_service.py`.
 ### Export
 
 - Header export uses the `header_fields` cell mappings from `layout_config.json`.
-- Production and downtime export use `production_mapping` and `downtime_mapping`.
+- Repeating-row export uses the active layout section contract to resolve the repeating profiles that are implemented today.
+- The shipped layout still maps production and downtime through `production_mapping` and `downtime_mapping`.
 - Row mappings can be either simple column letters or object-form mappings with:
   - `column`
   - `import_enabled`
@@ -100,6 +102,7 @@ Workbook import and export are owned by `app/data_handler_service.py`.
   - `import_transform`
   - `export_transform`
 - The current default transforms include downtime code-number export/import lookup and downtime duration-minute export with stop-clock reconstruction on import.
+- If a form declares an unsupported future profile in `sections`, export skips that section safely and records a warning so the user can see what was ignored.
 
 Blank-template export is supported. If `template_path` resolves to an existing workbook, export copies that template first. If `template_path` is blank or does not resolve, `DataHandlerService` creates a new workbook with a single active sheet titled `Production Log` and writes the configured header and row mappings into it.
 
@@ -107,9 +110,11 @@ Blank-template export is supported. If `template_path` resolves to an existing w
 
 - Import opens the workbook twice: once for resolved values and once for raw formulas.
 - Header fields are read through their configured cells.
-- Production rows and downtime rows are read through their configured mappings.
+- Repeating rows are routed through the active layout section contract for implemented profiles.
+- The shipped layout still imports production rows and downtime rows through `production_mapping` and `downtime_mapping`.
 - Production import also attempts to auto-detect the `shop_order`, `part_number`, and `molds` columns from the row above the configured start row.
 - When a mapped cell is empty in the resolved workbook view, the importer can still evaluate a narrow subset of workbook formulas by resolving cell references and `SUM(...)` expressions before evaluating the resulting arithmetic expression.
+- If a form declares an unsupported future profile in `sections`, import skips that section safely and records a warning so the user can see what was ignored.
 
 This keeps import formula-aware for simple mapped sheets without trying to implement full Excel-calculation parity.
 
@@ -156,6 +161,7 @@ This restricted evaluator applies to the named formulas in `production_log_calcu
 ## Current Constraints
 
 - Semantic roles now cover the main runtime-sensitive fields, but backward compatibility still depends on the legacy ids as a fallback path for older local configs.
+- The import/export contract is now section-driven for implemented profiles, but only `header`, `production`, and `downtime` have runtime behavior today. Future profile declarations are warning-capable no-ops until explicit support is added.
 - The current form registry only supports create and activate flows. It does not yet provide rename, duplicate, or delete management for custom forms.
 - Some header field IDs still carry built-in model logic even though the fields are declared in JSON. In the current runtime, `cast_date`, `start_time`, `end_time`, and `target_time` are normalized from other header values rather than treated as plain free-text fields.
 - Workbook-formula import is intentionally limited. It should be treated as compatibility support for simple mapped sheets, not as a general Excel formula engine.
