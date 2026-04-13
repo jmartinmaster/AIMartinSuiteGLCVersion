@@ -26,7 +26,7 @@ from app.views.recovery_viewer_view import RecoveryViewerView
 class RecoveryViewerController:
     def __init__(self, parent, dispatcher):
         self.dispatcher = dispatcher
-        self.model = RecoveryViewerModel()
+        self.model = RecoveryViewerModel(data_registry=getattr(dispatcher, "external_data_registry", None))
         self.view = None
         self.view = RecoveryViewerView(parent, dispatcher, self)
         self.refresh_records()

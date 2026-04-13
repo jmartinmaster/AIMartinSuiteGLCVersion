@@ -23,6 +23,7 @@ from datetime import date, datetime
 import openpyxl
 
 from app.downtime_codes import get_code_number, normalize_code_value
+from app.external_data_registry import ExternalDataRegistry
 from app.form_definition_registry import FormDefinitionRegistry
 from app.production_log_roles import HEADER_DERIVED_ROLES, PRODUCTION_IMPORT_LABEL_ROLES, get_default_row_field_id, normalize_role_name, resolve_header_field_role, resolve_row_field_role
 from app.safe_expression import SafeExpressionEvaluator
@@ -40,23 +41,44 @@ DEFAULT_SHIFT_TIME_SETTINGS = {
     "shift_3_anchor_mode": "end",
     "shift_3_reference_time": "0600",
 }
-ROW_SECTION_CONFIG = {
-    "production": {
-        "field_key": "production_row_fields",
+DEFAULT_SECTIONS = (
+    {
+        "id": "header",
+        "name": "Header Fields",
+        "description": "Single-record header fields",
+        "fields_key": "header_fields",
+        "section_type": "single",
+        "behavior_profile": "header",
+    },
+    {
+        "id": "production",
+        "name": "Production Row Fields",
+        "description": "Repeating production rows",
+        "fields_key": "production_row_fields",
         "mapping_key": "production_mapping",
+        "section_type": "repeating",
+        "behavior_profile": "production",
         "default_max_rows": 50,
     },
-    "downtime": {
-        "field_key": "downtime_row_fields",
+    {
+        "id": "downtime",
+        "name": "Downtime Row Fields",
+        "description": "Repeating downtime rows",
+        "fields_key": "downtime_row_fields",
         "mapping_key": "downtime_mapping",
+        "section_type": "repeating",
+        "behavior_profile": "downtime",
         "default_max_rows": 25,
     },
-}
+)
+DEFAULT_REPEATING_SECTION_MAX_ROWS = 25
+IMPLEMENTED_BEHAVIOR_PROFILES = ("header", "production", "downtime")
 SAFE_EXPRESSION_EVALUATOR = SafeExpressionEvaluator()
 
 
 class DataHandlerService:
-    def __init__(self, form_id=None):
+    def __init__(self, form_id=None, data_registry=None):
+        self.data_registry = data_registry or ExternalDataRegistry()
         self.form_registry = FormDefinitionRegistry()
         self.form_info = self.form_registry.get_form(form_id)
         self.config_path = self.form_info["load_path"]
@@ -64,14 +86,108 @@ class DataHandlerService:
             self.config = self._normalize_layout_config(json.load(handle))
         self.settings = self.load_settings()
         self.pending_dir = ensure_external_directory("data/pending")
+        self._operation_warnings = []
 
     def _normalize_layout_config(self, config):
         normalized = dict(config) if isinstance(config, dict) else {}
+        normalized["sections"] = self._normalize_sections(normalized)
         normalized["header_fields"] = self._normalize_header_field_configs(normalized.get("header_fields"))
-        for section_name, section_config in ROW_SECTION_CONFIG.items():
-            field_key = section_config.get("field_key")
-            normalized[field_key] = self._normalize_row_field_configs(normalized.get(field_key), section_name)
+        for section in normalized["sections"]:
+            fields_key = str(section.get("fields_key") or "").strip()
+            if not fields_key:
+                continue
+            section_type = str(section.get("section_type") or "single").strip().lower()
+            behavior_profile = str(section.get("behavior_profile") or section.get("id") or "").strip().lower()
+            if section_type == "single":
+                if fields_key == "header_fields":
+                    normalized[fields_key] = self._normalize_header_field_configs(normalized.get(fields_key))
+                else:
+                    normalized[fields_key] = self._normalize_generic_field_configs(normalized.get(fields_key))
+                continue
+            normalized[fields_key] = self._normalize_row_field_configs(normalized.get(fields_key), behavior_profile)
         return normalized
+
+    def _normalize_sections(self, config):
+        raw_sections = config.get("sections") if isinstance(config, dict) else None
+        if not isinstance(raw_sections, list):
+            raw_sections = []
+
+        normalized_sections = []
+        seen_ids = set()
+        default_by_id = {section["id"]: dict(section) for section in DEFAULT_SECTIONS}
+
+        for raw_section in raw_sections:
+            if not isinstance(raw_section, dict):
+                continue
+            section_id = str(raw_section.get("id", "")).strip().lower()
+            if not section_id or section_id in seen_ids:
+                continue
+            normalized_section = dict(default_by_id.get(section_id, {"id": section_id}))
+            normalized_section["id"] = section_id
+            normalized_section["name"] = str(
+                raw_section.get("name", normalized_section.get("name", section_id.replace("_", " ").title()))
+            ).strip() or normalized_section.get("name", section_id)
+
+            description_text = str(raw_section.get("description", normalized_section.get("description", ""))).strip()
+            if description_text:
+                normalized_section["description"] = description_text
+            else:
+                normalized_section.pop("description", None)
+
+            fields_key = str(raw_section.get("fields_key", normalized_section.get("fields_key", ""))).strip()
+            if section_id == "header":
+                fields_key = "header_fields"
+            elif section_id == "production":
+                fields_key = "production_row_fields"
+            elif section_id == "downtime":
+                fields_key = "downtime_row_fields"
+            if not fields_key:
+                continue
+            normalized_section["fields_key"] = fields_key
+
+            mapping_key = str(raw_section.get("mapping_key", normalized_section.get("mapping_key", ""))).strip()
+            if section_id == "production":
+                mapping_key = "production_mapping"
+            elif section_id == "downtime":
+                mapping_key = "downtime_mapping"
+            if mapping_key:
+                normalized_section["mapping_key"] = mapping_key
+            else:
+                normalized_section.pop("mapping_key", None)
+
+            section_type = str(raw_section.get("section_type", normalized_section.get("section_type", "single"))).strip().lower()
+            normalized_section["section_type"] = section_type if section_type in {"single", "repeating"} else normalized_section.get("section_type", "single")
+
+            behavior_profile = str(raw_section.get("behavior_profile", normalized_section.get("behavior_profile", section_id))).strip().lower()
+            normalized_section["behavior_profile"] = behavior_profile or normalized_section.get("behavior_profile", section_id)
+
+            if normalized_section["section_type"] == "repeating":
+                default_max_rows = raw_section.get("default_max_rows", normalized_section.get("default_max_rows", DEFAULT_REPEATING_SECTION_MAX_ROWS))
+                try:
+                    normalized_section["default_max_rows"] = max(1, int(default_max_rows or DEFAULT_REPEATING_SECTION_MAX_ROWS))
+                except (TypeError, ValueError):
+                    normalized_section["default_max_rows"] = DEFAULT_REPEATING_SECTION_MAX_ROWS
+            else:
+                normalized_section.pop("default_max_rows", None)
+
+            normalized_sections.append(normalized_section)
+            seen_ids.add(section_id)
+
+        for default_section in DEFAULT_SECTIONS:
+            if default_section["id"] not in seen_ids:
+                normalized_sections.append(dict(default_section))
+
+        return normalized_sections
+
+    def _normalize_bool_setting(self, value, default=False):
+        if isinstance(value, bool):
+            return value
+        normalized = str(value or "").strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+        return bool(default)
 
     def _normalize_header_field_configs(self, configured_fields):
         if not isinstance(configured_fields, list):
@@ -91,7 +207,25 @@ class DataHandlerService:
                 normalized_field["role"] = role_name
             else:
                 normalized_field.pop("role", None)
+            normalized_field["import_enabled"] = self._normalize_bool_setting(normalized_field.get("import_enabled"), default=True)
+            normalized_field["export_enabled"] = self._normalize_bool_setting(normalized_field.get("export_enabled"), default=True)
             normalized_fields.append(normalized_field)
+            seen_ids.add(field_id)
+        return normalized_fields
+
+    def _normalize_generic_field_configs(self, configured_fields):
+        if not isinstance(configured_fields, list):
+            return []
+
+        normalized_fields = []
+        seen_ids = set()
+        for field in configured_fields:
+            if not isinstance(field, dict):
+                continue
+            field_id = str(field.get("id", "")).strip()
+            if not field_id or field_id in seen_ids:
+                continue
+            normalized_fields.append(dict(field))
             seen_ids.add(field_id)
         return normalized_fields
 
@@ -118,20 +252,14 @@ class DataHandlerService:
         return normalized_fields
 
     def load_settings(self):
-        settings_path = external_path("settings.json")
-        settings = {
+        default_settings = {
             "export_directory": "exports",
             "organize_exports_by_date": True,
             "default_export_prefix": "Disamatic Production Sheet",
         }
-        if os.path.exists(settings_path):
-            try:
-                with open(settings_path, "r", encoding="utf-8") as handle:
-                    loaded = json.load(handle)
-                if isinstance(loaded, dict):
-                    settings.update(loaded)
-            except Exception:
-                pass
+        settings = self.data_registry.load_json("settings", default_factory=lambda: dict(default_settings))
+        if not isinstance(settings, dict):
+            settings = dict(default_settings)
         return settings
 
     def parse_export_date(self, raw_date):
@@ -172,7 +300,80 @@ class DataHandlerService:
         return formatted
 
     def get_header_fields(self):
-        return self.config.get("header_fields", [])
+        return self.get_section_field_configs("header")
+
+    def get_sections(self, config=None):
+        config_data = config if isinstance(config, dict) else self.config
+        return [dict(section) for section in config_data.get("sections", []) if isinstance(section, dict)]
+
+    def is_behavior_profile_implemented(self, behavior_profile):
+        normalized_profile = str(behavior_profile or "").strip().lower()
+        return normalized_profile in IMPLEMENTED_BEHAVIOR_PROFILES
+
+    def get_declared_sections(self, config=None, expected_type=None):
+        sections = []
+        for section in self.get_sections(config=config):
+            if expected_type and str(section.get("section_type", "")).strip().lower() != expected_type:
+                continue
+            sections.append(section)
+        return sections
+
+    def clear_operation_warnings(self):
+        self._operation_warnings = []
+
+    def get_last_operation_warnings(self):
+        return [dict(warning) for warning in self._operation_warnings]
+
+    def format_operation_warnings(self, warnings=None):
+        warning_items = warnings if warnings is not None else self._operation_warnings
+        lines = []
+        for warning in warning_items:
+            message = str(warning.get("message") or "").strip()
+            if message:
+                lines.append(message)
+        return "\n".join(lines)
+
+    def collect_unsupported_profile_warnings(self, operation_name):
+        seen_keys = {
+            (warning.get("operation"), warning.get("section_id"), warning.get("behavior_profile"))
+            for warning in self._operation_warnings
+        }
+        for section in self.get_declared_sections():
+            behavior_profile = str(section.get("behavior_profile") or section.get("id") or "").strip().lower()
+            if self.is_behavior_profile_implemented(behavior_profile):
+                continue
+            warning_key = (operation_name, section.get("id"), behavior_profile)
+            if warning_key in seen_keys:
+                continue
+            section_name = str(section.get("name") or section.get("id") or behavior_profile or "Unnamed Section").strip()
+            profile_label = behavior_profile or "unknown"
+            self._operation_warnings.append(
+                {
+                    "operation": operation_name,
+                    "kind": "unsupported_profile",
+                    "section_id": str(section.get("id") or "").strip(),
+                    "section_name": section_name,
+                    "section_type": str(section.get("section_type") or "").strip().lower(),
+                    "behavior_profile": profile_label,
+                    "message": f"{operation_name.title()} skipped section '{section_name}' because behavior profile '{profile_label}' is not implemented yet.",
+                }
+            )
+            seen_keys.add(warning_key)
+
+    def get_routed_section(self, behavior_profile, config=None, expected_type=None):
+        normalized_profile = str(behavior_profile or "").strip().lower()
+        if not self.is_behavior_profile_implemented(normalized_profile):
+            return {}
+
+        matching_sections = []
+        for section in self.get_declared_sections(config=config, expected_type=expected_type):
+            if str(section.get("behavior_profile", "")).strip().lower() != normalized_profile:
+                continue
+            matching_sections.append(section)
+
+        if len(matching_sections) != 1:
+            return {}
+        return matching_sections[0]
 
     def get_header_field_config(self, field_id):
         for field in self.get_header_fields():
@@ -205,12 +406,25 @@ class DataHandlerService:
         return [field.get("id") for field in self.get_header_fields() if field.get("id")]
 
     def get_section_field_configs(self, section_name):
-        section_config = ROW_SECTION_CONFIG.get(section_name, {})
-        field_key = section_config.get("field_key")
+        expected_type = "single" if section_name == "header" else "repeating"
+        section_config = self.get_routed_section(section_name, expected_type=expected_type)
+        field_key = section_config.get("fields_key")
         if not field_key:
             return []
         fields = self.config.get(field_key, [])
         return [dict(field) for field in fields if isinstance(field, dict) and field.get("id")]
+
+    def get_routed_repeating_section_profiles(self):
+        routed_profiles = []
+        seen_profiles = set()
+        for section in self.get_declared_sections(expected_type="repeating"):
+            behavior_profile = str(section.get("behavior_profile") or section.get("id") or "").strip().lower()
+            if behavior_profile in seen_profiles:
+                continue
+            if self.get_routed_section(behavior_profile, expected_type="repeating"):
+                routed_profiles.append(behavior_profile)
+                seen_profiles.add(behavior_profile)
+        return routed_profiles
 
     def get_section_field_role(self, section_name, field_id):
         for field in self.get_section_field_configs(section_name):
@@ -757,19 +971,27 @@ class DataHandlerService:
         return resolved_columns
 
     def get_row_mapping_config(self, section_name):
-        section_config = ROW_SECTION_CONFIG.get(section_name, {})
-        mapping_key = section_config.get("mapping_key")
+        routed_section = self.get_routed_section(section_name, expected_type="repeating")
+        mapping_key = routed_section.get("mapping_key")
         mapping = self.config.get(mapping_key, {}) if mapping_key else {}
         raw_columns = mapping.get("columns", {}) if isinstance(mapping, dict) else {}
+        allowed_field_ids = {field.get("id") for field in self.get_section_field_configs(section_name) if field.get("id")}
         normalized_columns = {}
         if isinstance(raw_columns, dict):
             for field_id, raw_value in raw_columns.items():
+                if field_id not in allowed_field_ids:
+                    continue
                 normalized = self.normalize_row_mapping_column(section_name, field_id, raw_value)
                 if normalized.get("column"):
                     normalized_columns[field_id] = normalized
+        default_max_rows = routed_section.get("default_max_rows", DEFAULT_REPEATING_SECTION_MAX_ROWS)
+        try:
+            max_rows = max(1, int(mapping.get("max_rows", default_max_rows) or 1))
+        except (TypeError, ValueError):
+            max_rows = max(1, int(default_max_rows or DEFAULT_REPEATING_SECTION_MAX_ROWS))
         return {
             "start_row": max(1, int(mapping.get("start_row", 1) or 1)),
-            "max_rows": max(1, int(mapping.get("max_rows", section_config.get("default_max_rows", 25)) or 1)),
+            "max_rows": max_rows,
             "columns": normalized_columns,
         }
 
@@ -779,8 +1001,8 @@ class DataHandlerService:
         if isinstance(raw_value, dict):
             return {
                 "column": str(raw_value.get("column", "")).strip(),
-                "export_enabled": bool(raw_value.get("export_enabled", True)),
-                "import_enabled": bool(raw_value.get("import_enabled", True)),
+                "export_enabled": self._normalize_bool_setting(raw_value.get("export_enabled"), default=True),
+                "import_enabled": self._normalize_bool_setting(raw_value.get("import_enabled"), default=True),
                 "export_transform": str(raw_value.get("export_transform", default_export_transform) or default_export_transform).strip(),
                 "import_transform": str(raw_value.get("import_transform", default_import_transform) or default_import_transform).strip(),
             }
@@ -876,13 +1098,15 @@ class DataHandlerService:
         return workbook
 
     def export_to_template(self, ui_data, shift, date_str, calculation_settings=None):
+        self.clear_operation_warnings()
+        self.collect_unsupported_profile_warnings("export")
         clean_date = date_str.replace("/", "")
         export_prefix = str(self.settings.get("default_export_prefix", "Disamatic Production Sheet") or "Disamatic Production Sheet").strip()
         filename = f"{export_prefix} {shift}{clean_date}.xlsx"
         target_path = os.path.join(self.get_export_directory(date_str), filename)
         wb = self._create_export_workbook(target_path)
         ws = wb.active
-        for field in self.config["header_fields"]:
+        for field in self.get_header_fields():
             cell_coord = field.get("cell")
             val = ui_data["header"].get(field["id"])
             if cell_coord and field.get("export_enabled", True):
@@ -896,11 +1120,15 @@ class DataHandlerService:
                 else:
                     cell.value = val
 
-        for section_name in ("production", "downtime"):
+        for section_name in self.get_routed_repeating_section_profiles():
             mapping = self.get_row_mapping_config(section_name)
             start_row = mapping["start_row"]
             columns = mapping["columns"]
-            export_rows = [row for row in ui_data.get(section_name, []) if self.row_has_values(section_name, row)]
+            export_field_ids = [field_id for field_id, column_config in columns.items() if column_config.get("export_enabled")]
+            export_rows = [
+                row for row in ui_data.get(section_name, [])
+                if self.row_has_values(section_name, row, export_field_ids)
+            ]
             for index, row_data in enumerate(export_rows):
                 current_row = start_row + index
                 for field_id, column_config in columns.items():
@@ -921,13 +1149,17 @@ class DataHandlerService:
         return target_path
 
     def import_from_excel(self, file_path, calculation_settings=None):
+        self.clear_operation_warnings()
+        self.collect_unsupported_profile_warnings("import")
         workbook = openpyxl.load_workbook(file_path, data_only=True)
         formula_workbook = openpyxl.load_workbook(file_path, data_only=False)
         worksheet = workbook.active
         formula_worksheet = formula_workbook.active
         formula_cache = {}
-        data = {"header": {}, "production": [], "downtime": []}
-        for field in self.config["header_fields"]:
+        data = {"header": {}}
+        for section_name in self.get_routed_repeating_section_profiles():
+            data[section_name] = []
+        for field in self.get_header_fields():
             cell_coord = field.get("cell")
             if cell_coord and field.get("import_enabled", True):
                 value = worksheet[cell_coord].value
@@ -941,17 +1173,18 @@ class DataHandlerService:
             data["header"][cast_date_field_id] = self.compute_cast_date(data["header"].get(date_field_id))
 
         production_mapping = self.get_row_mapping_config("production")
-        detected_columns = self.detect_production_columns(
-            formula_worksheet,
-            {field_id: config["column"] for field_id, config in production_mapping["columns"].items()},
-            production_mapping["start_row"],
-        )
-        for field_id, column_config in production_mapping["columns"].items():
-            if field_id in detected_columns:
-                column_config["column"] = detected_columns[field_id]
+        if production_mapping["columns"]:
+            detected_columns = self.detect_production_columns(
+                formula_worksheet,
+                {field_id: config["column"] for field_id, config in production_mapping["columns"].items()},
+                production_mapping["start_row"],
+            )
+            for field_id, column_config in production_mapping["columns"].items():
+                if field_id in detected_columns:
+                    column_config["column"] = detected_columns[field_id]
 
-        for section_name in ("production", "downtime"):
-            mapping = production_mapping if section_name == "production" else self.get_row_mapping_config("downtime")
+        for section_name in self.get_routed_repeating_section_profiles():
+            mapping = production_mapping if section_name == "production" else self.get_row_mapping_config(section_name)
             for index in range(mapping["max_rows"]):
                 row_idx = mapping["start_row"] + index
                 row_data = {}

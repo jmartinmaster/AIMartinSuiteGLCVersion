@@ -54,6 +54,7 @@ class AppModel:
     module_preload_stop_event: object = field(default_factory=threading.Event)
     module_preload_thread: object = None
     module_preload_poll_seconds: float = 1.0
+    preload_data_lock: object = field(default_factory=threading.RLock)
 
     def ensure_external_modules_directory(self):
         os.makedirs(self.external_modules_path, exist_ok=True)

@@ -130,6 +130,11 @@ def parse_args():
         help="Refresh the local Python symbol index without building an artifact.",
     )
     parser.add_argument(
+        "--librarian-only",
+        action="store_true",
+        help="Refresh the local project librarian snapshot without building an artifact.",
+    )
+    parser.add_argument(
         "--target",
         choices=(WINDOWS_TARGET, UBUNTU_TARGET),
         help="Artifact target to build. Defaults to a prompt in interactive shells and the host-native target otherwise.",
@@ -212,6 +217,26 @@ def refresh_symbol_index():
     )
     print(f"- JSON: {result['json_path']}")
     print(f"- Markdown: {result['markdown_path']}")
+
+
+def refresh_project_librarian():
+    from project_librarian import DEFAULT_OUTPUT_DIR as LIBRARIAN_OUTPUT_DIR, ProjectLibrarianError, refresh_librarian_snapshot
+
+    try:
+        result = refresh_librarian_snapshot(repo_root=REPO_ROOT, output_dir=REPO_ROOT / LIBRARIAN_OUTPUT_DIR)
+    except ProjectLibrarianError as exc:
+        raise BuildError(f"Project librarian refresh failed: {exc}") from exc
+
+    summary = result["snapshot"]["summary"]
+    print(
+        "Refreshed project librarian: "
+        f"{summary['files']} files, "
+        f"{summary['symbols']} symbols, "
+        f"{summary['changed_files']} changed files."
+    )
+    print(f"- Snapshot: {result['snapshot_path']}")
+    print(f"- History: {result['history_path']}")
+    print(f"- Corpus: {result['corpus_path']}")
 
 
 def validate_target_for_host(target, host_platform):
@@ -649,6 +674,9 @@ def main():
     args = parse_args()
     if args.index_only:
         refresh_symbol_index()
+        return
+    if args.librarian_only:
+        refresh_project_librarian()
         return
 
     host_platform = detect_host_platform()

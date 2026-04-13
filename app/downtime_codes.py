@@ -13,11 +13,9 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-import json
-import os
 from functools import lru_cache
 
-from app.utils import external_path
+from app.external_data_registry import ExternalDataRegistry
 
 __module_name__ = "Downtime Codes"
 __version__ = "1.1.4"
@@ -39,23 +37,17 @@ DEFAULT_DT_CODE_MAP = {
 @lru_cache(maxsize=1)
 def load_code_map():
     code_map = dict(DEFAULT_DT_CODE_MAP)
-    settings_path = external_path("settings.json")
-    if os.path.exists(settings_path):
-        try:
-            with open(settings_path, "r", encoding="utf-8") as handle:
-                loaded = json.load(handle)
-            overrides = loaded.get("downtime_codes", {}) if isinstance(loaded, dict) else {}
-            if isinstance(overrides, dict):
-                for raw_code, raw_label in overrides.items():
-                    code = str(raw_code).strip()
-                    if not code:
-                        continue
-                    label = str(raw_label or "").strip()
-                    if not label:
-                        continue
-                    code_map[code] = label
-        except Exception:
-            pass
+    loaded = ExternalDataRegistry().load_json("settings", default_factory=dict)
+    overrides = loaded.get("downtime_codes", {}) if isinstance(loaded, dict) else {}
+    if isinstance(overrides, dict):
+        for raw_code, raw_label in overrides.items():
+            code = str(raw_code).strip()
+            if not code:
+                continue
+            label = str(raw_label or "").strip()
+            if not label:
+                continue
+            code_map[code] = label
     return code_map
 
 
@@ -80,15 +72,42 @@ def normalize_code_value(value):
     code_lookup = get_code_lookup()
     code_map = load_code_map()
 
-    leading = []
-    for char in text:
-        if char.isdigit():
-            leading.append(char)
-        else:
-            break
-    if leading:
-        code = "".join(leading)
-        return code_lookup.get(code, text)
+    def iter_code_candidates(raw_text):
+        candidates = []
+
+        def add_candidate(candidate):
+            normalized = str(candidate or "").strip()
+            if normalized and normalized not in candidates:
+                candidates.append(normalized)
+
+        add_candidate(raw_text)
+
+        leading = []
+        for char in raw_text:
+            if char.isdigit():
+                leading.append(char)
+            else:
+                break
+        if leading:
+            leading_text = "".join(leading)
+            add_candidate(leading_text)
+            add_candidate(leading_text.lstrip("0") or "0")
+
+        try:
+            numeric_value = float(raw_text)
+        except (TypeError, ValueError):
+            numeric_value = None
+
+        if numeric_value is not None and numeric_value.is_integer():
+            integer_text = str(int(numeric_value))
+            add_candidate(integer_text)
+            add_candidate(integer_text.lstrip("0") or "0")
+
+        return candidates
+
+    for code in iter_code_candidates(text):
+        if code in code_lookup:
+            return code_lookup[code]
 
     lowered = text.lower()
     for code, label in code_map.items():

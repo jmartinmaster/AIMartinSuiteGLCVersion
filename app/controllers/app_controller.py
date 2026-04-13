@@ -104,6 +104,7 @@ class Dispatcher:
         self.root.after(900, self.prompt_old_executable_cleanup)
         self.root.after(1800, self.check_for_available_module_updates)
         self.data_request_worker.submit(self.external_data_registry.warm_cache, description="external_data_registry.warm_cache")
+        self.root.after(2500, self.schedule_layout_manager_preload)
 
     def _sync_view_aliases(self):
         self.main_container = self.view.main_container
@@ -333,6 +334,9 @@ class Dispatcher:
         self.model.managed_source_signature = tuple(new_signature or ())
         self.model.managed_source_generation += 1
         self.model.preloaded_module_names.clear()
+        with self.model.preload_data_lock:
+            self.shared_data.pop("layout_manager_preload", None)
+            self.shared_data["layout_manager_preload_pending"] = False
         for module_name in list(self.loaded_modules):
             if module_name == "main":
                 continue
@@ -747,6 +751,8 @@ class Dispatcher:
                 log_exception("notify_production_log_calculation_settings_changed.persistent", exc)
 
     def notify_active_form_changed(self, source_instance=None):
+        self.invalidate_layout_manager_preload()
+        self.schedule_layout_manager_preload(force=True)
         seen_instances = set()
         source_instance_id = id(source_instance) if source_instance is not None else None
 
@@ -897,6 +903,73 @@ class Dispatcher:
 
     def _log_data_request_error(self, description, exc):
         log_exception(f"dispatcher.data_request.{description}", exc)
+
+    def _build_layout_manager_preload_payload(self):
+        from app.models.layout_manager_model import LayoutManagerModel
+
+        model = LayoutManagerModel()
+        config, source_path, form_info = model.load_current_config()
+        return {
+            "managed_source_generation": self.model.managed_source_generation,
+            "form_id": form_info.get("id"),
+            "source_path": source_path,
+            "save_path": form_info.get("save_path", source_path),
+            "form_info": dict(form_info),
+            "config": config,
+            "preview_grid": model.build_preview_grid(config),
+            "guardrails": model.build_editor_guardrails(config),
+            "protected_row_field_lookup": model.get_protected_row_field_lookup(config),
+            "loaded_at": time.time(),
+        }
+
+    def _store_layout_manager_preload_payload(self, payload):
+        with self.model.preload_data_lock:
+            self.shared_data["layout_manager_preload"] = payload
+            self.shared_data["layout_manager_preload_pending"] = False
+
+    def invalidate_layout_manager_preload(self):
+        with self.model.preload_data_lock:
+            self.shared_data.pop("layout_manager_preload", None)
+            self.shared_data["layout_manager_preload_pending"] = False
+
+    def schedule_layout_manager_preload(self, force=False):
+        if self.data_request_worker is None:
+            return
+
+        with self.model.preload_data_lock:
+            if not force:
+                cached_payload = self.shared_data.get("layout_manager_preload")
+                if isinstance(cached_payload, dict):
+                    if cached_payload.get("managed_source_generation") == self.model.managed_source_generation:
+                        return
+                if self.shared_data.get("layout_manager_preload_pending"):
+                    return
+            self.shared_data["layout_manager_preload_pending"] = True
+
+        def on_success(payload):
+            self._store_layout_manager_preload_payload(payload)
+
+        def on_error(exc):
+            with self.model.preload_data_lock:
+                self.shared_data["layout_manager_preload_pending"] = False
+            log_exception("dispatcher.layout_manager_preload", exc)
+
+        self.data_request_worker.submit(
+            self._build_layout_manager_preload_payload,
+            on_success=on_success,
+            on_error=on_error,
+            description="layout_manager_preload",
+        )
+
+    def consume_layout_manager_preload(self):
+        with self.model.preload_data_lock:
+            payload = self.shared_data.pop("layout_manager_preload", None)
+            if not isinstance(payload, dict):
+                return None
+            if payload.get("managed_source_generation") != self.model.managed_source_generation:
+                return None
+            self.shared_data["layout_manager_preload_pending"] = False
+            return payload
 
     def load_module(self, module_name, use_transition=True, ensure_authorized=True):
         # Tk widget creation stays on the UI thread; worker threads may only enqueue load requests.
@@ -1076,7 +1149,16 @@ class Dispatcher:
                 update_manager_module = self.loaded_modules.get("update_manager") or sys.modules.get(managed_update_module_path)
                 if update_manager_module is None:
                     update_manager_module = importlib.import_module(managed_update_module_path)
-                scan_result = update_manager_module.scan_available_module_payload_updates(self)
+
+                scan_callable = getattr(update_manager_module, "scan_available_module_payload_updates", None)
+                if callable(scan_callable):
+                    scan_result = scan_callable(self)
+                else:
+                    from app.models.update_manager_model import UpdateManagerModel
+
+                    scan_result = UpdateManagerModel(
+                        data_registry=getattr(self, "external_data_registry", None)
+                    ).scan_available_module_payload_updates(self)
             except Exception as exc:
                 self.root.after(0, lambda error=exc: self._finish_module_update_check(error=error))
                 return

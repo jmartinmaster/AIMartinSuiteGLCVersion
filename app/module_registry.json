@@ -148,7 +148,7 @@
             "launcher_visible": true,
             "persistable": true,
             "protected": true,
-            "preload_enabled": true
+            "preload_enabled": false
         },
         {
             "name": "module_registry",

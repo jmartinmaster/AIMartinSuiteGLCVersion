@@ -19,5 +19,9 @@ __module_name__ = "App Logging"
 __version__ = "1.1.4"
 
 
+def log_error(context, message):
+    print(f"[{context}] {message}", file=sys.stderr)
+
+
 def log_exception(context, exc):
-    print(f"[{context}] {exc}", file=sys.stderr)
+    log_error(context, exc)

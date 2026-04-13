@@ -20,10 +20,11 @@ from copy import deepcopy
 from datetime import datetime
 
 from app.downtime_codes import get_code_options
+from app.external_data_registry import ExternalDataRegistry
 from app.form_definition_registry import DEFAULT_FORM_ID, FormDefinitionRegistry
 from app.persistence import write_json_with_backup
 from app.production_log_roles import HEADER_BLANK_IGNORE_ROLES, HEADER_DERIVED_ROLES, resolve_header_field_role, resolve_row_field_role, normalize_role_name
-from app.utils import external_path, local_or_resource_path
+from app.utils import external_path
 from app.data_handler_service import DEFAULT_SHIFT_TIME_SETTINGS, DataHandlerService
 
 __module_name__ = "Production Log"
@@ -67,6 +68,7 @@ DEFAULT_PRODUCTION_ROW_FIELDS = [
         "label": "Part Number",
         "widget": "entry",
         "width": 15,
+        "math_trigger": True,
         "open_row_trigger": True,
         "user_input": True,
     },
@@ -76,6 +78,10 @@ DEFAULT_PRODUCTION_ROW_FIELDS = [
         "label": "Rate",
         "widget": "entry",
         "width": 12,
+        "lookup_source": "part_number_rate",
+        "lookup_key_role": "part_number",
+        "override_toggle_role": "rate_override_toggle",
+        "math_trigger": True,
         "readonly": True,
         "derived": True,
     },
@@ -84,6 +90,7 @@ DEFAULT_PRODUCTION_ROW_FIELDS = [
         "role": "rate_override_toggle",
         "label": "Override",
         "widget": "checkbutton",
+        "toggle_target_role": "rate_value",
         "default": False,
     },
     {
@@ -92,6 +99,7 @@ DEFAULT_PRODUCTION_ROW_FIELDS = [
         "label": "Molds",
         "widget": "entry",
         "width": 10,
+        "math_trigger": True,
         "open_row_trigger": True,
         "user_input": True,
     },
@@ -114,6 +122,7 @@ DEFAULT_DOWNTIME_ROW_FIELDS = [
         "label": "Start",
         "widget": "entry",
         "width": 8,
+        "math_trigger": True,
         "open_row_trigger": True,
         "user_input": True,
     },
@@ -123,6 +132,7 @@ DEFAULT_DOWNTIME_ROW_FIELDS = [
         "label": "Stop",
         "widget": "entry",
         "width": 8,
+        "math_trigger": True,
         "open_row_trigger": True,
         "user_input": True,
     },
@@ -161,22 +171,55 @@ DEFAULT_DOWNTIME_ROW_FIELDS = [
         "derived": True,
     },
 ]
+DEFAULT_SECTIONS = (
+    {
+        "id": "header",
+        "name": "Header Fields",
+        "description": "Single-record header fields",
+        "fields_key": "header_fields",
+        "section_type": "single",
+        "behavior_profile": "header",
+    },
+    {
+        "id": "production",
+        "name": "Production Row Fields",
+        "description": "Repeating production rows",
+        "fields_key": "production_row_fields",
+        "mapping_key": "production_mapping",
+        "section_type": "repeating",
+        "behavior_profile": "production",
+        "default_max_rows": 50,
+    },
+    {
+        "id": "downtime",
+        "name": "Downtime Row Fields",
+        "description": "Repeating downtime rows",
+        "fields_key": "downtime_row_fields",
+        "mapping_key": "downtime_mapping",
+        "section_type": "repeating",
+        "behavior_profile": "downtime",
+        "default_max_rows": 25,
+    },
+)
+SUPPORTED_BEHAVIOR_PROFILES = ("header", "production", "downtime")
 
 
 class ProductionLogModel:
-    def __init__(self):
+    def __init__(self, data_registry=None):
+        self.data_registry = data_registry or ExternalDataRegistry()
         self.form_registry = FormDefinitionRegistry()
         self.active_form_info = self.form_registry.get_active_form()
         self.form_id = self.active_form_info.get("id", DEFAULT_FORM_ID)
         self.form_name = self.active_form_info.get("name", "Production Logging Center")
         self.config_path = self.active_form_info["load_path"]
         self.dt_codes = get_code_options()
-        self.data_handler = DataHandlerService(form_id=self.form_id)
+        self.data_handler = DataHandlerService(form_id=self.form_id, data_registry=self.data_registry)
         self.settings = self.load_settings()
         self.calculation_settings = self.load_calculation_settings()
         self.default_hours = self._format_number(self.settings.get("default_shift_hours", 8.0))
         self.default_goal = self._format_number(self.settings.get("default_goal_mph", 240.0))
         self.auto_save_interval = self._coerce_positive_int(self.settings.get("auto_save_interval_min", 5), 5) * 60000
+        self.layout_config = self.load_layout_config()
 
     def get_active_form_info(self):
         return dict(self.active_form_info)
@@ -186,6 +229,17 @@ class ProductionLogModel:
 
     def get_form_section_title(self, suffix_text):
         suffix = str(suffix_text or "").strip()
+        section_id = {
+            "Header": "header",
+            "Jobs": "production",
+            "Downtime Issues": "downtime",
+        }.get(suffix)
+        if section_id:
+            config = getattr(self, "layout_config", None)
+            if not isinstance(config, dict):
+                config = self.load_layout_config()
+            section_name = self.get_section_name(section_id, config=config, fallback_name=suffix)
+            return f"{self.get_active_form_name()} {section_name}".strip()
         if not suffix:
             return self.get_active_form_name()
         return f"{self.get_active_form_name()} {suffix}".strip()
@@ -213,10 +267,12 @@ class ProductionLogModel:
 
     def load_layout_config(self):
         with open(self.config_path, "r", encoding="utf-8") as handle:
-            return self._normalize_layout_config(json.load(handle))
+            self.layout_config = self._normalize_layout_config(json.load(handle))
+        return deepcopy(self.layout_config)
 
     def _normalize_layout_config(self, config):
         normalized = dict(config) if isinstance(config, dict) else {}
+        normalized["sections"] = self._normalize_sections(normalized)
         normalized["header_fields"] = self._normalize_header_field_configs(normalized.get("header_fields"))
         normalized["production_row_fields"] = self._merge_row_field_configs(
             normalized.get("production_row_fields"),
@@ -229,6 +285,117 @@ class ProductionLogModel:
             "downtime",
         )
         return normalized
+
+    def _normalize_sections(self, config):
+        raw_sections = config.get("sections") if isinstance(config, dict) else None
+        if not isinstance(raw_sections, list):
+            raw_sections = []
+
+        normalized_sections = []
+        seen_ids = set()
+        default_by_id = {section["id"]: deepcopy(section) for section in DEFAULT_SECTIONS}
+
+        for raw_section in raw_sections:
+            if not isinstance(raw_section, dict):
+                continue
+            section_id = str(raw_section.get("id", "")).strip().lower()
+            if not section_id or section_id in seen_ids:
+                continue
+            normalized_section = default_by_id.get(section_id, {"id": section_id})
+            normalized_section["id"] = section_id
+            normalized_section["name"] = str(raw_section.get("name", normalized_section.get("name", section_id.replace("_", " ").title()))).strip() or normalized_section.get("name", section_id)
+
+            description_text = str(raw_section.get("description", normalized_section.get("description", ""))).strip()
+            if description_text:
+                normalized_section["description"] = description_text
+            else:
+                normalized_section.pop("description", None)
+
+            fields_key = str(raw_section.get("fields_key", normalized_section.get("fields_key", ""))).strip()
+            if section_id == "header":
+                fields_key = "header_fields"
+            elif section_id == "production":
+                fields_key = "production_row_fields"
+            elif section_id == "downtime":
+                fields_key = "downtime_row_fields"
+            normalized_section["fields_key"] = fields_key or normalized_section.get("fields_key", "")
+
+            mapping_key = str(raw_section.get("mapping_key", normalized_section.get("mapping_key", ""))).strip()
+            if section_id == "production":
+                mapping_key = "production_mapping"
+            elif section_id == "downtime":
+                mapping_key = "downtime_mapping"
+            if mapping_key:
+                normalized_section["mapping_key"] = mapping_key
+            else:
+                normalized_section.pop("mapping_key", None)
+
+            section_type = str(raw_section.get("section_type", normalized_section.get("section_type", "single"))).strip().lower()
+            normalized_section["section_type"] = section_type if section_type in {"single", "repeating"} else normalized_section.get("section_type", "single")
+
+            behavior_profile = str(raw_section.get("behavior_profile", normalized_section.get("behavior_profile", section_id))).strip().lower()
+            normalized_section["behavior_profile"] = behavior_profile or normalized_section.get("behavior_profile", section_id)
+
+            if normalized_section["section_type"] == "repeating":
+                default_max_rows = raw_section.get("default_max_rows", normalized_section.get("default_max_rows", 25))
+                try:
+                    normalized_section["default_max_rows"] = max(1, int(default_max_rows or 25))
+                except (TypeError, ValueError):
+                    normalized_section["default_max_rows"] = 25
+            else:
+                normalized_section.pop("default_max_rows", None)
+
+            normalized_sections.append(normalized_section)
+            seen_ids.add(section_id)
+
+        for default_section in DEFAULT_SECTIONS:
+            section_id = default_section["id"]
+            if section_id not in seen_ids:
+                normalized_sections.append(deepcopy(default_section))
+
+        return normalized_sections
+
+    def get_sections(self, config=None):
+        config_data = config or self.layout_config
+        return [deepcopy(section) for section in config_data.get("sections", []) if isinstance(section, dict)]
+
+    def get_section_info(self, section_id, config=None):
+        normalized_section_id = str(section_id or "").strip().lower()
+        for section in self.get_sections(config=config):
+            if section.get("id") == normalized_section_id:
+                return section
+        return {}
+
+    def get_section_name(self, section_id, config=None, fallback_name=None):
+        section_info = self.get_section_info(section_id, config=config)
+        if section_info:
+            return section_info.get("name") or fallback_name or str(section_id or "").replace("_", " ").title()
+        return fallback_name or str(section_id or "").replace("_", " ").title()
+
+    def get_routed_section_by_profile(self, behavior_profile, config=None, expected_type=None):
+        normalized_profile = normalize_role_name(behavior_profile)
+        if normalized_profile not in SUPPORTED_BEHAVIOR_PROFILES:
+            return {}
+
+        matching_sections = []
+        for section in self.get_sections(config=config):
+            section_profile = normalize_role_name(section.get("behavior_profile"))
+            if section_profile != normalized_profile:
+                continue
+            if expected_type and str(section.get("section_type", "")).strip().lower() != expected_type:
+                continue
+            matching_sections.append(section)
+
+        if len(matching_sections) != 1:
+            return {}
+        return matching_sections[0]
+
+    def get_active_repeating_profiles(self, config=None):
+        active_profiles = []
+        for profile_name in ("production", "downtime"):
+            if self.get_routed_section_by_profile(profile_name, config=config, expected_type="repeating"):
+                active_profiles.append(profile_name)
+        return active_profiles
 
     def _normalize_header_field_configs(self, configured_fields):
         if not isinstance(configured_fields, list):
@@ -284,12 +451,15 @@ class ProductionLogModel:
 
     def get_section_field_configs(self, section_name, config=None):
         config_data = config or self.load_layout_config()
-        key_map = {
-            "header": "header_fields",
-            "production": "production_row_fields",
-            "downtime": "downtime_row_fields",
-        }
-        config_key = key_map.get(section_name)
+        section_info = self.get_section_info(section_name, config=config_data)
+        config_key = section_info.get("fields_key")
+        if not config_key:
+            key_map = {
+                "header": "header_fields",
+                "production": "production_row_fields",
+                "downtime": "downtime_row_fields",
+            }
+            config_key = key_map.get(section_name)
         if not config_key:
             return []
         field_configs = config_data.get(config_key, [])
@@ -324,6 +494,53 @@ class ProductionLogModel:
                 return field
         return {}
 
+    def get_first_section_field_config_by_key(self, section_name, key_name, expected_value=None, config=None):
+        expected_text = str(expected_value).strip().lower() if expected_value is not None else None
+        for field in self.get_section_field_configs(section_name, config=config):
+            if key_name not in field:
+                continue
+            if expected_text is None:
+                return field
+            candidate = str(field.get(key_name, "")).strip().lower()
+            if candidate == expected_text:
+                return field
+        return {}
+
+    def get_rate_value_field_config(self, config=None):
+        field_config = self.get_first_section_field_config_by_key("production", "lookup_source", "part_number_rate", config=config)
+        if field_config:
+            return field_config
+        return self.get_section_field_config_by_role("production", "rate_value", config=config)
+
+    def get_rate_override_field_config(self, config=None):
+        rate_field = self.get_rate_value_field_config(config=config)
+        target_role = normalize_role_name(rate_field.get("override_toggle_role")) if rate_field else ""
+        if target_role:
+            field_config = self.get_section_field_config_by_role("production", target_role, config=config)
+            if field_config:
+                return field_config
+        field_config = self.get_first_section_field_config_by_key("production", "toggle_target_role", "rate_value", config=config)
+        if field_config:
+            return field_config
+        return self.get_section_field_config_by_role("production", "rate_override_toggle", config=config)
+
+    def get_rate_value_role(self, config=None):
+        field_config = self.get_rate_value_field_config(config=config)
+        if field_config:
+            return self._resolve_field_role("production", field_config)
+        return "rate_value"
+
+    def get_rate_override_role(self, config=None):
+        field_config = self.get_rate_override_field_config(config=config)
+        if field_config:
+            return self._resolve_field_role("production", field_config)
+        return "rate_override_toggle"
+
+    def get_rate_lookup_key_role(self, config=None):
+        field_config = self.get_rate_value_field_config(config=config)
+        lookup_key_role = normalize_role_name(field_config.get("lookup_key_role")) if field_config else ""
+        return lookup_key_role or "part_number"
+
     def get_header_field_role(self, field_id, config=None):
         for field in self.get_section_field_configs("header", config=config):
             if field.get("id") == field_id:
@@ -356,6 +573,13 @@ class ProductionLogModel:
             if field.get("open_row_trigger")
         ]
 
+    def get_default_row_math_trigger_roles(self, section_name):
+        if section_name == "production":
+            return {"part_number", "rate_value", "mold_count"}
+        if section_name == "downtime":
+            return {"start_clock", "stop_clock"}
+        return set()
+
     def normalize_header_data(self, header_data):
         return self.data_handler.normalize_header_data(
             header_data,
@@ -375,16 +599,10 @@ class ProductionLogModel:
         return deepcopy(DEFAULT_CALCULATION_FORMULAS)
 
     def load_calculation_settings(self):
-        settings_source_path = local_or_resource_path("production_log_calculations.json")
-        payload = {}
-        if os.path.exists(settings_source_path):
-            try:
-                with open(settings_source_path, "r", encoding="utf-8") as handle:
-                    loaded = json.load(handle)
-                if isinstance(loaded, dict):
-                    payload = loaded
-            except Exception:
-                payload = {}
+        payload = self.data_registry.load_json(
+            "production_log_calculations",
+            default_factory=self.get_default_calculation_settings,
+        )
         return self.normalize_calculation_settings(payload)
 
     def get_calculation_settings_copy(self):
@@ -501,20 +719,14 @@ class ProductionLogModel:
         return not significant_header_values and not production_has_data and not downtime_has_data
 
     def load_settings(self):
-        settings = {
+        default_settings = {
             "auto_save_interval_min": 5,
             "default_shift_hours": 8.0,
             "default_goal_mph": 240.0,
         }
-        settings_path = external_path("settings.json")
-        if os.path.exists(settings_path):
-            try:
-                with open(settings_path, "r", encoding="utf-8") as handle:
-                    loaded = json.load(handle)
-                if isinstance(loaded, dict):
-                    settings.update(loaded)
-            except Exception:
-                pass
+        settings = self.data_registry.load_json("settings", default_factory=lambda: dict(default_settings))
+        if not isinstance(settings, dict):
+            settings = dict(default_settings)
         settings["auto_save_interval_min"] = self._coerce_positive_int(settings.get("auto_save_interval_min", 5), 5)
         settings["default_shift_hours"] = self._coerce_float(settings.get("default_shift_hours", 8.0), 8.0)
         settings["default_goal_mph"] = self._coerce_float(settings.get("default_goal_mph", 240.0), 240.0)
@@ -738,18 +950,12 @@ class ProductionLogModel:
 
     def load_rates_data(self):
         rates_data = {}
-        rates_path = local_or_resource_path("rates.json")
-        if os.path.exists(rates_path):
-            try:
-                with open(rates_path, "r", encoding="utf-8") as rate_file:
-                    loaded_rates = json.load(rate_file)
-                if isinstance(loaded_rates, dict):
-                    for part_number, rate in loaded_rates.items():
-                        for lookup_key in self.build_part_lookup_keys(part_number):
-                            if lookup_key not in rates_data:
-                                rates_data[lookup_key] = rate
-            except Exception:
-                pass
+        loaded_rates = self.data_registry.load_json("rates", default_factory=dict)
+        if isinstance(loaded_rates, dict):
+            for part_number, rate in loaded_rates.items():
+                for lookup_key in self.build_part_lookup_keys(part_number):
+                    if lookup_key not in rates_data:
+                        rates_data[lookup_key] = rate
         return rates_data
 
     def coerce_minutes_value(self, value, default=0):

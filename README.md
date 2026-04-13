@@ -26,6 +26,30 @@ Production Logging Center is a desktop production support application for GLC op
 - The indexed symbol scope includes module-level variables/constants, dataclass fields, class attributes, and `self.<name>` instance attributes discovered by static analysis.
 - Local variables inside function bodies are intentionally excluded so the index stays focused enough to search quickly.
 
+## Project Librarian
+
+- The repository now includes a local project librarian at `project_librarian.py`.
+- The librarian refreshes a metadata snapshot plus a separate text corpus under `build/project-librarian/`, records git-change snapshots in `build/project-librarian/change-history.jsonl`, and then reuses that data as a RAM-loaded CLI workspace.
+- Running `python project_librarian.py` with no subcommand now opens the RAM-loaded interactive REPL by default.
+- The REPL startup banner now shows current repo stats plus a short set of example commands so the default entry path is easier to use.
+- `python project_librarian.py refresh` rebuilds the librarian snapshot.
+- `python project_librarian.py search "layout manager"` searches both file contents and flattened symbols.
+- `python project_librarian.py search "layout manager" --scope files --area docs --changed-only` narrows search to the areas and file states you care about.
+- `python project_librarian.py changes --status M --area app` reports tracked working-tree changes with area and recent-commit context.
+- `python project_librarian.py history` shows recent librarian refresh records.
+- `python project_librarian.py show project_librarian.py --query "docs-draft"` prints an indexed file excerpt from the RAM-loaded corpus.
+- `python project_librarian.py docs-draft` writes a documentation update draft under `build/project-librarian/drafts/`.
+- `python project_librarian.py docs-draft --apply --target README.md` writes a managed generated-doc block back into a markdown file instead of only emitting a draft artifact.
+- `python project_librarian.py changelog-draft --version 2.1.6` writes a changelog draft under `build/project-librarian/drafts/`.
+- `python project_librarian.py changelog-draft --version 2.1.6 --apply --target CHANGELOG.md` inserts or replaces that release entry in the changelog.
+- Draft generation now uses both changed-file grouping and touched symbol/commit context, so the bullets are less generic than simple area-only summaries.
+- `python project_librarian.py ai-models --ollama-host 127.0.0.1:11436` lists the models reachable on the selected Ollama host and highlights the preferred or recommended option.
+- `python project_librarian.py ai-doctor --ollama-host 127.0.0.1:11436` diagnoses delegate-script availability, Ollama connectivity, and model readiness before you try an AI-assisted command.
+- `python project_librarian.py ai-summary --ollama-host 127.0.0.1:11436` uses the local Qwen delegate as an optional helper for repo-change summaries when Ollama is available, and now reports clearer host/model diagnostics when it is not.
+- `python project_librarian.py repl --refresh` loads the project into RAM and keeps an interactive search session open for faster repeated lookups, file inspection, and draft generation.
+- `python build.py --librarian-only` runs the same refresh path without starting a package build.
+- The librarian is intentionally deterministic first: it uses the existing AST symbol index plus a text catalog of the repo for core search and tracking, and only uses a local model when you explicitly call the AI helper commands.
+
 ## Two Working Modes
 
 The project currently operates in two different forms:
