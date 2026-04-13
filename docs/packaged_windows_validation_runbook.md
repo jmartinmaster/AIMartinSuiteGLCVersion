@@ -70,14 +70,16 @@ Use this runbook on a Windows packaging machine after building the next EXE rele
 5. Enable External Override Trust and reload the affected module.
 6. Confirm the staged override becomes active.
 7. If documentation or JSON restores are available, confirm they still install successfully and preserve backups.
+8. If JSON restores include `layout_config.json` or `form_definitions.json`, confirm the restore completes without breaking the active-form selection surface.
 
 ## Recovery And Settings Validation
 
 1. Open Backup / Recovery and restore a draft snapshot back into Production Log.
 2. Restore a configuration backup and confirm the record list refreshes after restore.
-3. Open Settings and attempt to save invalid downtime-code rows, then confirm validation blocks the save.
-4. Save a valid downtime-code change and confirm it persists after reopening the dialog.
-5. Confirm module whitelist and persistent-module selections still save and reload correctly.
+3. If a form-layout or `form_definitions.json` backup is available, restore one and confirm the app refreshes the active-form state cleanly.
+4. Open Settings and attempt to save invalid downtime-code rows, then confirm validation blocks the save.
+5. Save a valid downtime-code change and confirm it persists after reopening the dialog.
+6. Confirm module whitelist and persistent-module selections still save and reload correctly.
 
 ## EXE Handoff Validation
 

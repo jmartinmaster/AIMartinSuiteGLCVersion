@@ -40,6 +40,9 @@ class RecoveryViewerController:
     def refresh_records(self):
         self.view.refresh_table(self.model.refresh_records())
 
+    def on_active_form_changed(self):
+        self.refresh_records()
+
     def get_selected_record(self):
         selected_index = self.view.get_selected_index()
         if selected_index is None:
@@ -107,6 +110,8 @@ class RecoveryViewerController:
 
         try:
             self.model.restore_config_backup(record)
+            if record.get("notifies_active_form") and hasattr(self.dispatcher, "notify_active_form_changed"):
+                self.dispatcher.notify_active_form_changed(source_instance=self)
             self.refresh_records()
             self.view.show_toast("Restore Complete", f"Restored {record['restore_target']} from backup.", SUCCESS)
         except Exception as exc:

@@ -42,7 +42,7 @@ class UpdateManagerView:
             text=(
                 "Compare the local Dispatcher Core version with the repository branch release target. "
                 "Odd third patch numbers stay in-progress and are ignored by the updater. "
-                "Stable updates follow the current runtime platform: Windows downloads and launches versioned EXEs, while Ubuntu downloads and opens versioned DEB packages."
+                "Stable updates follow the current runtime platform: Windows downloads and launches versioned EXEs, while Ubuntu prefers a configured apt repository upgrade when one matches the target and otherwise installs the downloaded versioned DEB package."
             ),
             wraplength=760,
             justify=LEFT,
@@ -75,7 +75,11 @@ class UpdateManagerView:
         module_payload.pack(fill=X, pady=(12, 0))
         tb.Label(
             module_payload,
-            text="Choose a single module or tracked config payload to compare and restore without rebuilding the EXE. Dispatcher Core stays outside this list and continues to update through the stable EXE path above.",
+            text=(
+                "Choose a single module or tracked config payload to compare and restore without replacing the packaged runtime artifact. "
+                "Tracked JSON payloads now include the default form layout and the form definitions registry. "
+                f"Dispatcher Core stays outside this list and continues to update through the stable {self.controller.stable_artifact_label} path above."
+            ),
             wraplength=720,
             justify=LEFT,
         ).pack(anchor=W)

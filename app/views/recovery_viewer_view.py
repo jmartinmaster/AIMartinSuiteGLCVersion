@@ -39,8 +39,8 @@ class RecoveryViewerView:
         tb.Label(
             container,
             text=(
-                "Browse pending drafts, recovery snapshots, and configuration backups. "
-                "Use Restore to copy a selected backup back into the active working file."
+                "Browse pending drafts, recovery snapshots, form-aware layout backups, and system configuration backups. "
+                "Use Restore to copy a selected backup back into the correct working file for that form or system resource."
             ),
             bootstyle=SECONDARY,
             wraplength=760,
@@ -58,14 +58,16 @@ class RecoveryViewerView:
         table_frame = tb.Frame(container)
         table_frame.pack(fill=BOTH, expand=True)
 
-        columns = ("kind", "name", "saved", "target")
+        columns = ("kind", "name", "form", "saved", "target")
         self.tree = tb.Treeview(table_frame, columns=columns, show="headings", bootstyle=INFO)
         self.tree.heading("kind", text="Type")
         self.tree.heading("name", text="File")
+        self.tree.heading("form", text="Form")
         self.tree.heading("saved", text="Saved")
         self.tree.heading("target", text="Restore Target")
         self.tree.column("kind", width=170, anchor=W)
         self.tree.column("name", width=250, anchor=W)
+        self.tree.column("form", width=190, anchor=W)
         self.tree.column("saved", width=170, anchor=W)
         self.tree.column("target", width=220, anchor=W)
 
@@ -85,7 +87,7 @@ class RecoveryViewerView:
                 "",
                 END,
                 iid=str(index),
-                values=(record["kind"], record["name"], record["saved_at"], record["restore_target"]),
+                values=(record["kind"], record["name"], record.get("form_name", "System"), record["saved_at"], record["restore_target"]),
             )
         self.status_var.set(f"Loaded {len(records)} recovery item(s).")
 

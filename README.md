@@ -59,6 +59,7 @@ These two forms do not have identical behavior. The Python version has access to
 - Automatic per-file external module overrides when a matching `.py` file exists in the external override app folder and admin-controlled override trust is enabled.
 - In-app help viewer and About screen.
 - Help Center navigation now includes top-level guide chips, a Hidden Modules reference, and smaller User Guide section chips for module-specific reading.
+- Help Center now also exposes the Production Log calculations reference and the JSON architecture note so the split between layout schema and runtime rules is visible in-app.
 - Bundled GPL license access from Help Center and About.
 - Theme support with readability overrides, including the Martin Modern Light industrial preset for the shared shell.
 - Rotated backup copies for settings, layout, and rate file saves.
@@ -76,7 +77,16 @@ These two forms do not have identical behavior. The Python version has access to
 ## Compatibility Notes
 
 - The current `layout_config.json` routes `target_time` through `header_fields`. Older local builds from before the config-driven Target Time change may not present that field correctly if they reuse the newer layout file.
+- The current Production Log schema now supports semantic `role` metadata in `layout_config.json`. Older local configs can omit those roles because the runtime auto-assigns defaults for the shipped core field ids.
 - The current `settings.json` includes `persistent_modules`. Older builds ignore that key safely, but they do not preserve module state across navigation.
+
+## Production Log JSON References
+
+- `layout_config.json` owns header layout, row schema, workbook mappings, and semantic field roles.
+- `production_log_calculations.json` owns runtime rules, fallback behavior, shift timing, and named formulas.
+- `docs/help/layout_config.md` documents the layout/schema contract.
+- `docs/help/production_log_calculations.md` documents the runtime rules profile.
+- `docs/production_log_json_architecture.md` is the maintainer-facing overview of how the two JSON contracts interact.
 
 
 ## Source / Python Mode

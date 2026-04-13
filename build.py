@@ -17,17 +17,17 @@
 import importlib
 import importlib.util
 import os
-import platform
 import shlex
 import shutil
 import stat
 import subprocess
 import sys
 import argparse
-from pathlib import Path, PureWindowsPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
-from app.app_identity import DEB_PACKAGE_NAME, LEGACY_EXE_NAME, format_versioned_deb_name, format_versioned_exe_name, load_version_from_main, normalize_version, parse_version, parse_versioned_exe_name
+from app.app_identity import DEB_PACKAGE_NAME, LEGACY_DEB_NAME, LEGACY_EXE_NAME, format_versioned_deb_name, format_versioned_exe_name, load_version_from_main, normalize_version, parse_version, parse_versioned_exe_name
 from symbol_index import DEFAULT_OUTPUT_DIR as SYMBOL_INDEX_OUTPUT_DIR, SymbolIndexError, generate_symbol_index
+from ubuntu_deb_packager import InstalledFile, build_default_package_config, build_ubuntu_deb_package, resolve_debian_architecture
 
 REPO_ROOT = Path(__file__).resolve().parent
 VERSION_SOURCE_PATH = REPO_ROOT / "launcher.py"
@@ -60,7 +60,7 @@ ICON_SOURCE_CANDIDATE_PATHS = [
     REPO_ROOT / "assets" / "icons" / "icon.png",
     REPO_ROOT / "assets" / "icons" / "icon.jpg",
 ]
-ICON_RUNTIME_PNG_SIZES = [16, 24, 32, 48, 64]
+ICON_RUNTIME_PNG_SIZES = [16, 24, 32, 48, 64, 512]
 ICON_ICO_SIZES = [(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)]
 BUILD_DATA_PATHS = [
     ("app", "app"),
@@ -69,6 +69,7 @@ BUILD_DATA_PATHS = [
     ("templates", "templates"),
     ("layout_config.json", "."),
     ("rates.json", "."),
+    ("production_log_calculations.json", "."),
 ]
 HIDDENIMPORTS = [
     "openpyxl",
@@ -91,9 +92,6 @@ WINDOWS_DIST_ROOT = REPO_ROOT / "dist"
 UBUNTU_DIST_ROOT = WINDOWS_DIST_ROOT / UBUNTU_TARGET
 UBUNTU_APP_DIST_ROOT = UBUNTU_DIST_ROOT / "app"
 UBUNTU_PACKAGE_ROOT = UBUNTU_DIST_ROOT / "package-root"
-UBUNTU_DESKTOP_TEMPLATE_PATH = REPO_ROOT / "packaging" / "ubuntu" / f"{DEB_PACKAGE_NAME}.desktop"
-UBUNTU_LAUNCHER_TEMPLATE_PATH = REPO_ROOT / "packaging" / "ubuntu" / "launcher.sh"
-UBUNTU_ICON_INSTALL_PATH = Path("usr") / "share" / "icons" / "hicolor" / "64x64" / "apps" / f"{DEB_PACKAGE_NAME}.png"
 
 
 class BuildError(RuntimeError):
@@ -445,127 +443,27 @@ def archive_previous_builds():
         os.remove(archive_path)
 
 
-def ensure_template_exists(template_path):
-    if not template_path.exists():
-        raise BuildError(f"Required packaging template is missing: {template_path}")
-
-
 def resolve_desktop_icon_source_path():
-    for candidate_name in ("icon-64.png", "icon.png", "icon.jpg"):
+    for candidate_name in ("icon-512.png", "icon.png", "icon-64.png", "icon.jpg"):
         candidate_path = REPO_ROOT / "assets" / "icons" / candidate_name
         if candidate_path.exists():
             return candidate_path
     raise BuildError("No desktop icon asset is available for the Ubuntu package.")
 
 
-def set_executable(path):
-    current_mode = os.stat(path).st_mode
-    os.chmod(path, current_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
-
-
-def estimate_installed_size_kib(root_path):
-    total_bytes = 0
-    for directory_path, _directory_names, file_names in os.walk(root_path):
-        for file_name in file_names:
-            file_path = os.path.join(directory_path, file_name)
-            if os.path.islink(file_path):
-                continue
-            total_bytes += os.path.getsize(file_path)
-    return max(1, (total_bytes + 1023) // 1024)
-
-
-def resolve_debian_architecture():
-    result = run_command(["dpkg", "--print-architecture"], capture_output=True)
-    if result.returncode == 0 and result.stdout:
-        return result.stdout.strip()
-    return {
-        "x86_64": "amd64",
-        "amd64": "amd64",
-        "aarch64": "arm64",
-        "arm64": "arm64",
-    }.get(platform.machine().lower(), "amd64")
-
-
-def build_dpkg_command(package_root, output_path, include_root_owner_group=True):
-    command = ["dpkg-deb", "--build"]
-    if include_root_owner_group:
-        command.append("--root-owner-group")
-    command.extend([str(package_root), str(output_path)])
-    return command
-
-
-def run_dpkg_build(package_root, output_path):
-    if output_path.exists():
-        output_path.unlink()
-
-    primary_result = run_command(build_dpkg_command(package_root, output_path, include_root_owner_group=True), capture_output=True)
-    if primary_result.returncode == 0:
-        return
-
-    if primary_result.stderr and "--root-owner-group" in primary_result.stderr:
-        fallback_result = run_command(build_dpkg_command(package_root, output_path, include_root_owner_group=False), capture_output=True)
-        if fallback_result.returncode == 0:
-            return
-        stderr_text = (fallback_result.stderr or fallback_result.stdout or "").strip()
-        raise BuildError(f"dpkg-deb failed while building the Ubuntu package: {stderr_text}")
-
-    stderr_text = (primary_result.stderr or primary_result.stdout or "").strip()
-    raise BuildError(f"dpkg-deb failed while building the Ubuntu package: {stderr_text}")
-
-
-def stage_ubuntu_package(bundle_root, architecture):
-    remove_readonly = build_remove_readonly_callback()
-    remove_path(UBUNTU_PACKAGE_ROOT, remove_readonly)
-
-    control_dir = UBUNTU_PACKAGE_ROOT / "DEBIAN"
-    app_install_dir = UBUNTU_PACKAGE_ROOT / "opt" / DEB_PACKAGE_NAME
-    bin_dir = UBUNTU_PACKAGE_ROOT / "usr" / "bin"
-    desktop_dir = UBUNTU_PACKAGE_ROOT / "usr" / "share" / "applications"
-    icon_dir = UBUNTU_PACKAGE_ROOT / UBUNTU_ICON_INSTALL_PATH.parent
-    doc_dir = UBUNTU_PACKAGE_ROOT / "usr" / "share" / "doc" / DEB_PACKAGE_NAME
-
-    for directory in (control_dir, app_install_dir, bin_dir, desktop_dir, icon_dir, doc_dir):
-        directory.mkdir(parents=True, exist_ok=True)
-
-    shutil.copytree(bundle_root, app_install_dir, dirs_exist_ok=True)
-
-    launcher_target = bin_dir / DEB_PACKAGE_NAME
-    shutil.copy2(UBUNTU_LAUNCHER_TEMPLATE_PATH, launcher_target)
-    set_executable(launcher_target)
-
-    desktop_target = desktop_dir / f"{DEB_PACKAGE_NAME}.desktop"
-    shutil.copy2(UBUNTU_DESKTOP_TEMPLATE_PATH, desktop_target)
-
-    icon_target = UBUNTU_PACKAGE_ROOT / UBUNTU_ICON_INSTALL_PATH
-    shutil.copy2(resolve_desktop_icon_source_path(), icon_target)
+def build_ubuntu_extra_files():
+    doc_root = PurePosixPath("usr") / "share" / "doc" / DEB_PACKAGE_NAME
+    extra_files = []
 
     license_path = REPO_ROOT / "docs" / "legal" / "LICENSE.txt"
     if license_path.exists():
-        shutil.copy2(license_path, doc_dir / "LICENSE.txt")
+        extra_files.append(InstalledFile(license_path, doc_root / "LICENSE.txt"))
 
     readme_path = REPO_ROOT / "README.md"
     if readme_path.exists():
-        shutil.copy2(readme_path, doc_dir / "README.md")
+        extra_files.append(InstalledFile(readme_path, doc_root / "README.md"))
 
-    bundled_launcher = app_install_dir / DEB_PACKAGE_NAME
-    if bundled_launcher.exists():
-        set_executable(bundled_launcher)
-
-    control_text = (
-        f"Package: {DEB_PACKAGE_NAME}\n"
-        f"Version: {APP_VERSION}\n"
-        "Section: utils\n"
-        "Priority: optional\n"
-        f"Architecture: {architecture}\n"
-        "Maintainer: Jamie Martin\n"
-        f"Installed-Size: {estimate_installed_size_kib(UBUNTU_PACKAGE_ROOT)}\n"
-        "Description: Production Logging Center (GLC Edition)\n"
-        " Desktop production support application for GLC operators.\n"
-    )
-    with open(control_dir / "control", "w", encoding="utf-8", newline="\n") as handle:
-        handle.write(control_text)
-
-    return UBUNTU_PACKAGE_ROOT
+    return tuple(extra_files)
 
 
 def ensure_command_available(command_name):
@@ -694,8 +592,6 @@ def run_ubuntu_build_direct():
     refresh_symbol_index()
     ensure_command_available("dpkg-deb")
     ensure_python_modules(REQUIRED_BUILD_MODULES)
-    ensure_template_exists(UBUNTU_DESKTOP_TEMPLATE_PATH)
-    ensure_template_exists(UBUNTU_LAUNCHER_TEMPLATE_PATH)
 
     pyinstaller_main = importlib.import_module("PyInstaller.__main__")
     architecture = resolve_debian_architecture()
@@ -709,9 +605,23 @@ def run_ubuntu_build_direct():
     if not bundle_root.exists():
         raise BuildError(f"PyInstaller completed, but the Ubuntu app bundle was not created at {bundle_root}.")
 
-    package_root = stage_ubuntu_package(bundle_root, architecture)
     output_path = UBUNTU_DIST_ROOT / deb_name
-    run_dpkg_build(package_root, output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    package_config = build_default_package_config(
+        bundle_source=bundle_root,
+        icon_source=resolve_desktop_icon_source_path(),
+        output_path=output_path,
+        output_alias_paths=(UBUNTU_DIST_ROOT / LEGACY_DEB_NAME,),
+        staging_root=UBUNTU_PACKAGE_ROOT,
+        version=APP_VERSION,
+        architecture=architecture,
+        extra_files=build_ubuntu_extra_files(),
+    )
+    try:
+        build_ubuntu_deb_package(package_config)
+    except Exception as exc:
+        raise BuildError(str(exc)) from exc
 
     print(f"\n--- Ubuntu package complete. Check {output_path} ---")
 

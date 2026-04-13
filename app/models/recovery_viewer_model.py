@@ -17,12 +17,14 @@ import json
 import os
 from datetime import datetime
 
+from app.form_definition_registry import DEFAULT_FORM_ID, FormDefinitionRegistry
 from app.persistence import write_json_with_backup
 from app.utils import external_path
 
 
 class RecoveryViewerModel:
     def __init__(self):
+        self.registry = FormDefinitionRegistry()
         self.records = []
 
     def refresh_records(self):
@@ -48,6 +50,7 @@ class RecoveryViewerModel:
                 {
                     "record_type": "draft",
                     "kind": "Pending Draft",
+                    "form_name": self._read_payload_form_name(path),
                     "name": filename,
                     "path": path,
                     "saved_at": saved_at,
@@ -73,6 +76,7 @@ class RecoveryViewerModel:
                 {
                     "record_type": "snapshot",
                     "kind": "Recovery Snapshot",
+                    "form_name": payload.get("meta", {}).get("form_name") or self.get_form_name(payload.get("meta", {}).get("form_id")),
                     "name": filename,
                     "path": path,
                     "saved_at": saved_at,
@@ -87,60 +91,129 @@ class RecoveryViewerModel:
         sources = [
             {
                 "kind": "Settings Backup",
+                "form_name": "System",
                 "target_path": external_path("settings.json"),
                 "backup_dir": external_path("data/backups/settings"),
             },
             {
-                "kind": "Layout Backup",
-                "target_path": external_path("layout_config.json"),
-                "backup_dir": external_path("data/backups/layouts"),
+                "kind": "Form Definitions Backup",
+                "form_name": "System",
+                "target_path": external_path("form_definitions.json"),
+                "backup_dir": external_path("data/backups/forms"),
+                "notifies_active_form": True,
             },
             {
                 "kind": "Rates Backup",
+                "form_name": "System",
                 "target_path": external_path("rates.json"),
                 "backup_dir": external_path("data/backups/rates"),
             },
         ]
+        sources[1:1] = self.collect_form_layout_backup_sources()
 
         records = []
         for source in sources:
-            os.makedirs(source["backup_dir"], exist_ok=True)
-            adjacent_backup = f"{source['target_path']}.bak"
-            if os.path.exists(adjacent_backup):
-                saved_at = self.read_saved_at(adjacent_backup)
-                records.append(
-                    {
-                        "record_type": "config_backup",
-                        "kind": f"{source['kind']} (.bak)",
-                        "name": os.path.basename(adjacent_backup),
-                        "path": adjacent_backup,
-                        "saved_at": saved_at,
-                        "sort_key": self.sort_key(saved_at, adjacent_backup),
-                        "restore_target": os.path.basename(source["target_path"]),
-                        "target_path": source["target_path"],
-                        "backup_dir": source["backup_dir"],
-                    }
-                )
-
-            for filename in os.listdir(source["backup_dir"]):
-                if not filename.endswith(".json"):
-                    continue
-                path = os.path.join(source["backup_dir"], filename)
-                saved_at = self.read_saved_at(path)
-                records.append(
-                    {
-                        "record_type": "config_backup",
-                        "kind": source["kind"],
-                        "name": filename,
-                        "path": path,
-                        "saved_at": saved_at,
-                        "sort_key": self.sort_key(saved_at, path),
-                        "restore_target": os.path.basename(source["target_path"]),
-                        "target_path": source["target_path"],
-                        "backup_dir": source["backup_dir"],
-                    }
-                )
+            records.extend(self._collect_config_backup_records_for_source(source))
         return records
+
+    def collect_form_layout_backup_sources(self):
+        sources = []
+        known_form_ids = set()
+        for form_info in self.registry.list_forms():
+            form_id = form_info.get("id") or DEFAULT_FORM_ID
+            known_form_ids.add(form_id)
+            kind = "Default Layout Backup" if form_info.get("built_in") else "Form Layout Backup"
+            sources.append(
+                {
+                    "kind": kind,
+                    "form_id": form_id,
+                    "form_name": form_info.get("name") or self.get_form_name(form_id),
+                    "target_path": form_info.get("save_path"),
+                    "backup_dir": form_info.get("backup_dir"),
+                    "notifies_active_form": True,
+                }
+            )
+
+        layout_backup_root = external_path(os.path.join("data", "backups", "layouts"))
+        os.makedirs(layout_backup_root, exist_ok=True)
+        for child_name in os.listdir(layout_backup_root):
+            child_path = os.path.join(layout_backup_root, child_name)
+            if not os.path.isdir(child_path):
+                continue
+            form_id = str(child_name or "").strip()
+            if not form_id or form_id in known_form_ids:
+                continue
+            sources.append(
+                {
+                    "kind": "Archived Form Layout Backup",
+                    "form_id": form_id,
+                    "form_name": self.get_form_name(form_id),
+                    "target_path": external_path(os.path.join("data", "forms", f"{form_id}.json")),
+                    "backup_dir": child_path,
+                    "notifies_active_form": True,
+                }
+            )
+
+        return sources
+
+    def _collect_config_backup_records_for_source(self, source):
+        records = []
+        backup_dir = source["backup_dir"]
+        os.makedirs(backup_dir, exist_ok=True)
+        adjacent_backup = f"{source['target_path']}.bak"
+        if os.path.exists(adjacent_backup):
+            saved_at = self.read_saved_at(adjacent_backup)
+            records.append(
+                {
+                    "record_type": "config_backup",
+                    "kind": f"{source['kind']} (.bak)",
+                    "form_name": source.get("form_name", "System"),
+                    "name": os.path.basename(adjacent_backup),
+                    "path": adjacent_backup,
+                    "saved_at": saved_at,
+                    "sort_key": self.sort_key(saved_at, adjacent_backup),
+                    "restore_target": os.path.basename(source["target_path"]),
+                    "target_path": source["target_path"],
+                    "backup_dir": backup_dir,
+                    "notifies_active_form": bool(source.get("notifies_active_form")),
+                }
+            )
+
+        for filename in os.listdir(backup_dir):
+            if not filename.endswith(".json"):
+                continue
+            path = os.path.join(backup_dir, filename)
+            saved_at = self.read_saved_at(path)
+            records.append(
+                {
+                    "record_type": "config_backup",
+                    "kind": source["kind"],
+                    "form_name": source.get("form_name", "System"),
+                    "name": filename,
+                    "path": path,
+                    "saved_at": saved_at,
+                    "sort_key": self.sort_key(saved_at, path),
+                    "restore_target": os.path.basename(source["target_path"]),
+                    "target_path": source["target_path"],
+                    "backup_dir": backup_dir,
+                    "notifies_active_form": bool(source.get("notifies_active_form")),
+                }
+            )
+        return records
+
+    def _read_payload_form_name(self, path):
+        payload = self.load_json(path)
+        meta = payload.get("meta", {}) if isinstance(payload, dict) else {}
+        return meta.get("form_name") or self.get_form_name(meta.get("form_id"))
+
+    def get_form_name(self, form_id=None):
+        try:
+            form_info = self.registry.get_form(form_id)
+            return str(form_info.get("name") or form_info.get("id") or "Form")
+        except Exception:
+            if str(form_id or "").strip() in {"", DEFAULT_FORM_ID}:
+                return "Production Logging Center"
+            return str(form_id or "Form").replace("_", " ").title()
 
     def read_saved_at(self, path):
         payload = self.load_json(path)

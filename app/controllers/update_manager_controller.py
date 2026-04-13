@@ -15,55 +15,16 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import os
-import shutil
-import subprocess
 import sys
-import tempfile
 import threading
-import urllib.error
-import zipfile
 from tkinter import messagebox
 
 import ttkbootstrap as tb
-from ttkbootstrap.constants import *
+from ttkbootstrap.constants import DANGER, INFO, SUCCESS, WARNING
 from ttkbootstrap.dialogs import Messagebox
 from app.app_identity import format_versioned_deb_name, format_versioned_exe_name
-from app.app_platform import get_platform_update_artifact_kind, get_platform_update_artifact_label, is_windows_runtime, open_with_system_default
-from app.models.update_manager_model import (
-    _detect_branch_name,
-    _detect_remote_info,
-    _parse_json_payload_metadata,
-    _read_module_metadata_from_path,
-    _remote_updates_available,
-    _update_configuration_note,
-    build_local_manifest,
-    cleanup_source_stage_dir,
-    discover_documentation_payload_options,
-    discover_module_payload_options,
-    download_remote_executable,
-    evaluate_module_payload_option,
-    evaluate_stable_update_entry,
-    fetch_remote_bytes,
-    fetch_remote_payload_text,
-    fetch_remote_snapshot_bytes,
-    get_local_module_payload_metadata,
-    install_documentation_payload_option,
-    install_module_payload_option,
-    locate_extracted_source_root,
-    probe_remote_executable,
-    remote_executable_candidates,
-    remove_paths,
-    resolve_built_executable,
-    resolve_build_python_command,
-    resolve_download_directory,
-    resolve_final_built_executable_path,
-    resolve_source_log_directory,
-    resolve_source_workspace,
-    scan_available_documentation_payload_updates,
-    scan_available_module_payload_updates,
-    validate_source_snapshot,
-    write_source_build_log,
-)
+from app.app_platform import get_platform_update_artifact_kind, get_platform_update_artifact_label, is_windows_runtime
+from app.models.update_manager_model import UpdateManagerModel
 from app.views.update_manager_view import UpdateManagerView
 
 __module_name__ = "Update Manager"
@@ -76,10 +37,11 @@ class UpdateManagerController:
     def __init__(self, parent, dispatcher):
         self.parent = None
         self.dispatcher = dispatcher
+        self.model = UpdateManagerModel()
         self.coordinator = self.dispatcher.update_coordinator
-        self.branch_name = self.coordinator.branch_name or _detect_branch_name()
+        self.branch_name = self.coordinator.branch_name or self.model.detect_branch_name()
         configured_repo_url = self.dispatcher.get_setting("update_repository_url", None)
-        self.remote_info = self.coordinator.remote_info if self.coordinator.remote_info.get("display") != "Unknown repository" else _detect_remote_info(preferred_url=configured_repo_url)
+        self.remote_info = self.coordinator.remote_info if self.coordinator.remote_info.get("display") != "Unknown repository" else self.model.detect_remote_info(preferred_url=configured_repo_url)
         self.local_manifest = self.coordinator.local_manifest
         self.comparison_rows = self.coordinator.comparison_rows
         self.status_var = self.coordinator.status_var
@@ -92,8 +54,10 @@ class UpdateManagerController:
         self.note_var = self.coordinator.note_var
         self.job_phase_var = self.coordinator.job_phase_var
         self.job_detail_var = self.coordinator.job_detail_var
+        self.stable_artifact_kind = get_platform_update_artifact_kind()
+        self.stable_artifact_label = get_platform_update_artifact_label()
         self.module_payload_options = self._discover_payload_options()
-        self.documentation_payload_options = discover_documentation_payload_options()
+        self.documentation_payload_options = self.model.discover_documentation_payload_options()
         default_option = next((option for option in self.module_payload_options if option["key"] == "about"), None)
         if default_option is None and self.module_payload_options:
             default_option = self.module_payload_options[0]
@@ -103,7 +67,7 @@ class UpdateManagerController:
         self.module_payload_local_version_var = tb.StringVar(value="Unknown")
         self.module_payload_remote_version_var = tb.StringVar(value="Not checked")
         self.module_payload_status_var = tb.StringVar(value="Pending")
-        self.module_payload_note_var = tb.StringVar(value="Select a payload to compare against the repository. Dispatcher Core (launcher.py) remains an EXE-only update boundary.")
+        self.module_payload_note_var = tb.StringVar(value=self._payload_boundary_note("Select a payload to compare against the repository."))
         self.module_payload_in_progress = False
         self.documentation_payload_tracked_var = tb.StringVar(value=f"{len(self.documentation_payload_options)} tracked file(s)")
         self.documentation_payload_remote_state_var = tb.StringVar(value="Not checked")
@@ -111,8 +75,6 @@ class UpdateManagerController:
         self.documentation_payload_note_var = tb.StringVar(value="Documentation restores are grouped into one action so bundled help files can be refreshed without choosing individual documents.")
         self.documentation_payload_in_progress = False
         self.container = None
-        self.stable_artifact_kind = get_platform_update_artifact_kind()
-        self.stable_artifact_label = get_platform_update_artifact_label()
         self.coordinator.branch_name = self.branch_name
         self.coordinator.remote_info = self.remote_info
         self.branch_var.set(self.branch_name or "Unknown")
@@ -140,6 +102,9 @@ class UpdateManagerController:
             return format_versioned_deb_name(version_text)
         return format_versioned_exe_name(version_text)
 
+    def _payload_boundary_note(self, prefix_text):
+        return f"{prefix_text} Dispatcher Core (launcher.py) remains on the stable {self.stable_artifact_label} update boundary."
+
     def mount(self, parent):
         self.parent = parent
         self.view = UpdateManagerView(parent, self)
@@ -147,6 +112,10 @@ class UpdateManagerController:
 
     def on_hide(self):
         return None
+
+    def on_active_form_changed(self):
+        self.module_payload_options = self._discover_payload_options()
+        self.handle_module_payload_selection_change()
 
     def on_unload(self):
         self.dispatcher.unregister_runtime_settings_listener(self._handle_runtime_settings_change)
@@ -156,22 +125,22 @@ class UpdateManagerController:
         self._apply_remote_configuration()
 
     def _apply_remote_configuration(self):
-        self.branch_name = _detect_branch_name()
+        self.branch_name = self.model.detect_branch_name()
         configured_repo_url = self.dispatcher.get_setting("update_repository_url", None)
-        self.remote_info = _detect_remote_info(preferred_url=configured_repo_url)
+        self.remote_info = self.model.detect_remote_info(preferred_url=configured_repo_url)
         self.coordinator.branch_name = self.branch_name
         self.coordinator.remote_info = self.remote_info
         self.branch_var.set(self.branch_name or "Unknown")
         self.repo_var.set(self.remote_info.get("display", "Updates not configured"))
 
     def _updates_configured(self):
-        return _remote_updates_available(self.remote_info, self.branch_name)
+        return self.model.remote_updates_available(self.remote_info, self.branch_name)
 
     def _update_configuration_note(self):
-        return _update_configuration_note(self.remote_info)
+        return self.model.update_configuration_note(self.remote_info)
 
     def _discover_payload_options(self):
-        return discover_module_payload_options(getattr(self.dispatcher, "modules_path", None))
+        return self.model.discover_module_payload_options(getattr(self.dispatcher, "modules_path", None))
 
     def _payload_job_is_busy(self):
         return any([
@@ -200,7 +169,7 @@ class UpdateManagerController:
         override_path = None
         if option and option.get("kind") == "module" and self.dispatcher.are_external_module_overrides_enabled():
             override_path = self.dispatcher.get_external_module_override_path(option["key"])
-        return get_local_module_payload_metadata(
+        return self.model.get_local_module_payload_metadata(
             self.dispatcher.modules_path,
             self.dispatcher.loaded_modules,
             option,
@@ -211,7 +180,7 @@ class UpdateManagerController:
         override_path = None
         if option and option.get("kind") == "module" and self.dispatcher.are_external_module_overrides_enabled():
             override_path = self.dispatcher.get_external_module_override_path(option["key"])
-        return evaluate_module_payload_option(
+        return self.model.evaluate_module_payload_option(
             self.dispatcher.modules_path,
             self.dispatcher.loaded_modules,
             option,
@@ -228,7 +197,7 @@ class UpdateManagerController:
             self.module_payload_local_version_var.set("Unknown")
             self.module_payload_remote_version_var.set("Not available")
             self.module_payload_status_var.set("Unavailable")
-            self.module_payload_note_var.set("No payload-eligible items are available. Dispatcher Core (launcher.py) remains an EXE-only update boundary.")
+            self.module_payload_note_var.set(self._payload_boundary_note("No payload-eligible items are available."))
             return
 
         local_metadata = self._get_local_module_payload_metadata(option)
@@ -245,7 +214,7 @@ class UpdateManagerController:
         self.refresh_module_payload_summary(
             remote_version="Not checked",
             status="Pending",
-            note=f"Check the repository to compare the selected {option['module_name']} payload. Dispatcher Core (launcher.py) still updates through the EXE path above.",
+            note=self._payload_boundary_note(f"Check the repository to compare the selected {option['module_name']} payload."),
         )
 
     def _has_recoverable_source_job(self):
@@ -302,7 +271,7 @@ class UpdateManagerController:
             ):
                 return
 
-        removed_items = remove_paths([self.coordinator.source_build_log_path, self.coordinator.source_stage_dir])
+        removed_items = self.model.remove_paths([self.coordinator.source_build_log_path, self.coordinator.source_stage_dir])
 
         self.coordinator.clear_source_snapshot()
         self.coordinator.set_build_runtime(None, None)
@@ -349,7 +318,7 @@ class UpdateManagerController:
             self.refresh_module_payload_summary(
                 remote_version="Not available",
                 status="Unavailable",
-                note="No payload-eligible items are available. Dispatcher Core (launcher.py) remains an EXE-only update boundary.",
+                note=self._payload_boundary_note("No payload-eligible items are available."),
             )
             return
 
@@ -388,7 +357,7 @@ class UpdateManagerController:
             )
             return
 
-        scan_result = scan_available_documentation_payload_updates(branch_name=self.branch_name, remote_info=self.remote_info)
+        scan_result = self.model.scan_available_documentation_payload_updates(branch_name=self.branch_name, remote_info=self.remote_info)
         available_results = scan_result.get("available_results", [])
         available_count = len(available_results)
 
@@ -415,11 +384,11 @@ class UpdateManagerController:
         if option.get("kind") == "json":
             try:
                 with open(installed_path, "r", encoding="utf-8") as handle:
-                    installed_metadata = _parse_json_payload_metadata(handle.read(), option["fallback_name"])
+                    installed_metadata = self.model.parse_json_payload_metadata(handle.read(), option["fallback_name"])
             except OSError:
                 installed_metadata = None
         else:
-            installed_metadata = _read_module_metadata_from_path(installed_path, option["fallback_name"])
+            installed_metadata = self.model.read_module_metadata_from_path(installed_path, option["fallback_name"])
 
         if installed_metadata:
             self.module_payload_local_version_var.set(installed_metadata.get("version", "Unknown"))
@@ -498,21 +467,16 @@ class UpdateManagerController:
         Messagebox.show_error(f"Could not install the {option['module_name']} payload:\n\n{exc}", "Module Payload Error")
 
     def _install_documentation_payload_option(self, option, remote_text=None):
-        payload_text = remote_text if remote_text is not None else self._fetch_remote_file(option["relative_path"])
-        return install_documentation_payload_option(option, payload_text)
+        return self.model.install_documentation_payload(option, self.remote_info, self.branch_name, remote_text=remote_text)
 
     def _install_module_payload_option(self, option, remote_text=None):
-        payload_paths = option.get("payload_paths") or [option["relative_path"]]
-        if option.get("kind") == "module" and len(payload_paths) > 1:
-            payload_text = {}
-            for relative_path in payload_paths:
-                if relative_path == option["relative_path"] and remote_text is not None:
-                    payload_text[relative_path] = remote_text
-                else:
-                    payload_text[relative_path] = self._fetch_remote_file(relative_path)
-        else:
-            payload_text = remote_text if remote_text is not None else self._fetch_remote_file(option["relative_path"])
-        return install_module_payload_option(option, payload_text, self.dispatcher.install_module_override)
+        return self.model.install_module_payload(
+            option,
+            self.remote_info,
+            self.branch_name,
+            self.dispatcher.install_module_override,
+            remote_text=remote_text,
+        )
 
     def apply_module_payload_update(self):
         if self._payload_job_is_busy():
@@ -562,7 +526,7 @@ class UpdateManagerController:
             installed_items = []
             failed_items = []
             try:
-                scan_result = scan_available_documentation_payload_updates(branch_name=self.branch_name, remote_info=self.remote_info)
+                scan_result = self.model.scan_available_documentation_payload_updates(branch_name=self.branch_name, remote_info=self.remote_info)
                 available_results = scan_result.get("available_results", [])
                 if not available_results:
                     self.dispatcher.root.after(0, lambda: self._finish_documentation_payload_install([], []))
@@ -593,15 +557,15 @@ class UpdateManagerController:
         threading.Thread(target=worker, daemon=True).start()
 
     def _detect_branch_name(self):
-        return _detect_branch_name()
+        return self.model.detect_branch_name()
 
     def _detect_remote_info(self):
         configured_repo_url = self.dispatcher.get_setting("update_repository_url", None)
-        return _detect_remote_info(preferred_url=configured_repo_url)
+        return self.model.detect_remote_info(preferred_url=configured_repo_url)
 
     def refresh_local_manifest(self):
         dispatcher_module = self.dispatcher.loaded_modules.get("main") or sys.modules.get("main") or sys.modules.get("__main__")
-        self.local_manifest[:] = build_local_manifest(dispatcher_module)
+        self.local_manifest[:] = self.model.build_local_manifest(dispatcher_module)
 
     def refresh_summary(self):
         entry = self.local_manifest[0] if self.local_manifest else {
@@ -625,7 +589,7 @@ class UpdateManagerController:
             self.note_var.set("Run a repository check to compare the packaged release target.")
 
     def _fetch_remote_file(self, relative_path):
-        return fetch_remote_payload_text(self.remote_info, self.branch_name, relative_path, timeout=15)
+        return self.model.fetch_remote_file(self.remote_info, self.branch_name, relative_path, timeout=15)
 
     def _finish_apply_all_module_payload_updates(self, installed_items, failed_items):
         self.module_payload_in_progress = False
@@ -689,7 +653,7 @@ class UpdateManagerController:
             installed_items = []
             failed_items = []
             try:
-                scan_result = scan_available_module_payload_updates(self.dispatcher, branch_name=self.branch_name, remote_info=self.remote_info)
+                scan_result = self.model.scan_available_module_payload_updates(self.dispatcher, branch_name=self.branch_name, remote_info=self.remote_info)
                 available_results = scan_result.get("available_results", [])
                 if not available_results:
                     self.dispatcher.root.after(0, lambda: self._finish_apply_all_module_payload_updates([], []))
@@ -720,54 +684,28 @@ class UpdateManagerController:
         threading.Thread(target=worker, daemon=True).start()
 
     def _fetch_remote_bytes(self, relative_path):
-        return fetch_remote_bytes(self.remote_info, self.branch_name, relative_path)
+        return self.model.fetch_remote_bytes(self.remote_info, self.branch_name, relative_path)
 
     def _fetch_remote_snapshot_bytes(self):
-        return fetch_remote_snapshot_bytes(self.remote_info, self.branch_name)
+        return self.model.fetch_remote_snapshot_bytes(self.remote_info, self.branch_name)
 
     def _remote_executable_candidates(self, row):
-        return remote_executable_candidates(row, self.stable_artifact_kind, self._stable_artifact_name_for_version)
+        return self.model.remote_executable_candidates(row, self.stable_artifact_kind, self._stable_artifact_name_for_version)
 
     def _probe_remote_executable(self, row):
-        return probe_remote_executable(self.remote_info, self.branch_name, row, self.stable_artifact_kind, self._stable_artifact_name_for_version)
+        return self.model.probe_remote_executable(self.remote_info, self.branch_name, row, self.stable_artifact_kind, self._stable_artifact_name_for_version)
 
     def check_for_updates(self):
         self.coordinator.set_job_phase("checking", f"Checking the repository for newer stable {self._stable_artifact_noun(plural=True)}.", mode="stable")
         self.refresh_local_manifest()
-        comparison_rows = []
-
-        for entry in self.local_manifest:
-            try:
-                remote_text = self._fetch_remote_file(entry["relative_path"])
-            except urllib.error.HTTPError as exc:
-                if exc.code == 404:
-                    comparison_rows.append({
-                        **entry,
-                        "remote_version": "Missing",
-                        "status": "Not in repository branch",
-                        "update_available": False,
-                    })
-                    continue
-                raise
-
-            comparison_rows.append(
-                evaluate_stable_update_entry(
-                    entry,
-                    remote_text,
-                    self._stable_artifact_status_label(),
-                    self._stable_artifact_name_for_version,
-                )
-            )
-
-            current_row = comparison_rows[-1]
-            if current_row["update_available"]:
-                remote_path, resolved_name = self._probe_remote_executable(current_row)
-                if remote_path:
-                    current_row["remote_exe_path"] = remote_path
-                    current_row["remote_exe_name"] = resolved_name
-                else:
-                    current_row["status"] = f"{self._stable_artifact_status_label()} artifact missing"
-                    current_row["update_available"] = False
+        comparison_rows = self.model.build_stable_update_rows(
+            self.local_manifest,
+            self.remote_info,
+            self.branch_name,
+            self.stable_artifact_kind,
+            self._stable_artifact_name_for_version,
+            self._stable_artifact_status_label(),
+        )
 
         self.comparison_rows[:] = comparison_rows
         self.refresh_summary()
@@ -779,54 +717,51 @@ class UpdateManagerController:
             self.coordinator.set_job_phase("idle", f"No stable {self._stable_artifact_noun(plural=True)} are ready.", mode="stable")
 
     def _download_remote_executable(self, row):
-        return download_remote_executable(self.remote_info, self.branch_name, row, self.stable_artifact_kind, self._stable_artifact_name_for_version)
+        return self.model.download_remote_executable(self.remote_info, self.branch_name, row, self.stable_artifact_kind, self._stable_artifact_name_for_version)
 
-    def _finish_downloaded_update(self, downloaded_path):
+    def _finish_downloaded_update(self, downloaded_path, remote_version=None):
         self.coordinator.download_in_progress = False
         if not is_windows_runtime():
             try:
-                open_with_system_default(downloaded_path)
+                handoff_result = self.model.launch_ubuntu_package_install(downloaded_path, target_version=remote_version)
             except Exception as exc:
-                Messagebox.show_error(f"The updated package was downloaded but could not be opened:\n\n{exc}", "Launch Error")
-                self.status_var.set("Update package downloaded, but it could not be opened.")
-                self.coordinator.set_job_phase("failed", "Stable update package downloaded, but opening it failed.", mode="stable")
-                self.dispatcher.set_update_status("Stable update package downloaded, but opening it failed.", DANGER, active=True, mode="stable")
+                Messagebox.show_error(f"The updated package was downloaded but the Ubuntu installer could not be started:\n\n{exc}", "Install Error")
+                self.status_var.set("Update package downloaded, but Ubuntu could not start the installer.")
+                self.coordinator.set_job_phase("failed", "Stable update package downloaded, but starting the Ubuntu installer failed.", mode="stable")
+                self.dispatcher.set_update_status("Stable update package downloaded, but Ubuntu could not start the installer.", DANGER, active=True, mode="stable")
                 return
 
-            status_detail = (
-                f"Downloaded {os.path.basename(downloaded_path)} and opened it with the system package handler. "
-                "Complete the installation there, then restart the app."
+            status_message = handoff_result.get("status_message", "Ubuntu package update started. Restart the app after installation.")
+            status_detail = handoff_result.get(
+                "detail",
+                (
+                    f"Downloaded {os.path.basename(downloaded_path)} and handed it to Ubuntu for installation. "
+                    "Restart the app after the package update finishes."
+                ),
             )
-            self.status_var.set("Update package opened. Complete the installation in your package tool.")
-            self.coordinator.set_job_phase("handoff", status_detail, mode="stable")
-            self.dispatcher.set_update_status("Stable update package opened. Complete the installation in your package tool.", SUCCESS, active=True, mode="stable")
+            self.status_var.set(status_message)
+            self.coordinator.set_job_phase("complete", status_detail, mode="stable")
+            self.dispatcher.set_update_status(status_message, SUCCESS, active=True, mode="stable")
             self.dispatcher.clear_update_status_after(self.SUCCESS_BANNER_AUTOHIDE_MS)
-            return
-
-        removed_overrides = []
-        try:
-            removed_overrides = self.dispatcher.remove_external_module_overrides()
-        except Exception as exc:
-            Messagebox.show_error(f"The update was downloaded, but old module overrides could not be cleared:\n\n{exc}", "Override Cleanup Error")
-            self.status_var.set("Update downloaded, but override cleanup failed.")
-            self.coordinator.set_job_phase("failed", "Stable update downloaded, but override cleanup failed.", mode="stable")
-            self.dispatcher.set_update_status("Stable update downloaded, but override cleanup failed.", DANGER, active=True, mode="stable")
+            self.dispatcher.show_toast("Update Manager", handoff_result.get("toast_message", status_message), SUCCESS)
             return
 
         try:
             os.startfile(downloaded_path)
         except Exception as exc:
-            Messagebox.show_error(f"The updated executable was downloaded but could not be launched:\n\n{exc}", "Launch Error")
-            self.status_var.set("Update downloaded, but launch failed.")
-            self.coordinator.set_job_phase("failed", "Stable update downloaded, but launch failed.", mode="stable")
-            self.dispatcher.set_update_status("Stable update downloaded, but launch failed.", DANGER, active=True, mode="stable")
+            Messagebox.show_error(f"The updated {self._stable_artifact_noun()} was downloaded but could not be launched:\n\n{exc}", "Launch Error")
+            self.status_var.set(f"{self.stable_artifact_label} downloaded, but it could not be launched.")
+            self.coordinator.set_job_phase("failed", f"Stable {self._stable_artifact_noun()} downloaded, but launching it failed.", mode="stable")
+            self.dispatcher.set_update_status(f"Stable {self._stable_artifact_noun()} downloaded, but launching it failed.", DANGER, active=True, mode="stable")
             return
 
-        removed_count = len(removed_overrides)
-        status_detail = f"Launched {os.path.basename(downloaded_path)} and cleared {removed_count} stale module override(s) before closing the current version."
-        self.status_var.set("Updated executable launched. Closing the current version.")
-        self.coordinator.set_job_phase("handoff", status_detail, mode="stable")
-        self.dispatcher.set_update_status("Stable update launched. Closing the current version.", SUCCESS, active=True, mode="stable")
+        status_detail = (
+            f"Downloaded {os.path.basename(downloaded_path)} and launched it. "
+            "This session will close so the updated build can take over."
+        )
+        self.status_var.set(f"{self.stable_artifact_label} downloaded. Launching the updated build.")
+        self.coordinator.set_job_phase("complete", status_detail, mode="stable")
+        self.dispatcher.set_update_status(f"Stable {self._stable_artifact_noun()} downloaded. Launching the updated build.", SUCCESS, active=True, mode="stable")
         self.dispatcher.root.after(300, self.dispatcher.root.destroy)
 
     def _handle_download_failure(self, exc):
@@ -837,35 +772,35 @@ class UpdateManagerController:
         Messagebox.show_error(f"Could not download the updated {self._stable_artifact_noun()}:\n\n{exc}", "Update Error")
 
     def _resolve_download_directory(self):
-        return resolve_download_directory()
+        return self.model.resolve_download_directory()
 
     def _resolve_source_workspace(self):
-        return resolve_source_workspace()
+        return self.model.resolve_source_workspace()
 
     def _resolve_source_log_directory(self):
-        return resolve_source_log_directory()
+        return self.model.resolve_source_log_directory()
 
     def _cleanup_source_stage_dir(self, stage_dir):
-        cleanup_source_stage_dir(stage_dir)
+        self.model.cleanup_source_stage_dir(stage_dir)
 
     def _locate_extracted_source_root(self, extract_dir):
-        return locate_extracted_source_root(extract_dir)
+        return self.model.locate_extracted_source_root(extract_dir)
 
     def _validate_source_snapshot(self, source_root):
-        validate_source_snapshot(source_root)
+        self.model.validate_source_snapshot(source_root)
 
     def _resolve_build_python_command(self):
-        return resolve_build_python_command(self._resolve_download_directory())
+        return self.model.resolve_build_python_command(self._resolve_download_directory())
 
     def _write_source_build_log(self, log_name, content):
-        return write_source_build_log(log_name, content)
+        return self.model.write_source_build_log(log_name, content)
 
     def _resolve_built_executable(self, source_root):
-        return resolve_built_executable(source_root)
+        return self.model.resolve_built_executable(source_root)
 
     def _resolve_final_built_executable_path(self, built_exe_path):
         current_executable = os.path.abspath(sys.executable) if getattr(sys, "frozen", False) else None
-        return resolve_final_built_executable_path(
+        return self.model.resolve_final_built_executable_path(
             built_exe_path,
             download_directory=self._resolve_download_directory(),
             current_executable=current_executable,
@@ -946,39 +881,19 @@ class UpdateManagerController:
         def worker():
             build_log_path = None
             try:
-                command_prefix, runtime_display = self._resolve_build_python_command()
+                build_result = self.model.run_source_build(
+                    source_root,
+                    self.branch_name,
+                    download_directory=self._resolve_download_directory(),
+                    current_executable=os.path.abspath(sys.executable) if getattr(sys, "frozen", False) else None,
+                )
+                runtime_display = build_result["runtime_display"]
+                build_log_path = build_result["build_log_path"]
+                built_exe_path = build_result["built_exe_path"]
+                final_exe_path = build_result["final_exe_path"]
                 self.coordinator.set_build_runtime(runtime_display, None)
                 self.coordinator.set_source_phase("source_building", f"Building the staged source snapshot with {runtime_display}.")
-                build_command = command_prefix + ["build.py"]
-                env = os.environ.copy()
-                env["MARTIN_KEEP_DIST"] = "1"
-                env["MARTIN_SKIP_TASKKILL"] = "1"
-                creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-                result = subprocess.run(
-                    build_command,
-                    cwd=source_root,
-                    check=False,
-                    capture_output=True,
-                    text=True,
-                    timeout=1800,
-                    env=env,
-                    creationflags=creation_flags,
-                )
-                build_log_text = (
-                    f"Command: {' '.join(build_command)}\n"
-                    f"Working Directory: {source_root}\n"
-                    f"Return Code: {result.returncode}\n\n"
-                    f"STDOUT:\n{result.stdout}\n\nSTDERR:\n{result.stderr}\n"
-                )
-                log_name = f"source-build-{self.branch_name}.log"
-                build_log_path = self._write_source_build_log(log_name, build_log_text)
-                if result.returncode != 0:
-                    raise RuntimeError(f"The staged build exited with code {result.returncode}.")
-
-                built_exe_path = self._resolve_built_executable(source_root)
                 self.coordinator.set_source_phase("source_packaging", f"Copying rebuilt executable {os.path.basename(built_exe_path)} next to the current app.")
-                final_exe_path = self._resolve_final_built_executable_path(built_exe_path)
-                shutil.copy2(built_exe_path, final_exe_path)
             except Exception as exc:
                 if not self.coordinator.source_build_runtime:
                     self.coordinator.set_build_runtime(None, str(exc))
@@ -1062,35 +977,28 @@ class UpdateManagerController:
                     "source_downloading",
                     f"Downloading the source snapshot for {owner}/{repo}@{self.branch_name} in the background.",
                 )
-                snapshot_bytes = self._fetch_remote_snapshot_bytes()
-
-                stage_root = self._resolve_source_workspace()
-                stage_dir = tempfile.mkdtemp(prefix="source-update-", dir=stage_root)
-                archive_name = f"{repo}-{self.branch_name}.zip"
-                archive_path = os.path.join(stage_dir, archive_name)
-                with open(archive_path, "wb") as handle:
-                    handle.write(snapshot_bytes)
+                snapshot_result = self.model.stage_source_snapshot(
+                    self.remote_info,
+                    self.branch_name,
+                    self._resolve_source_workspace(),
+                )
+                archive_path = snapshot_result["archive_path"]
+                stage_dir = snapshot_result["stage_dir"]
+                extract_dir = snapshot_result["extract_dir"]
+                source_root = snapshot_result["source_root"]
 
                 self.coordinator.set_source_phase(
                     "source_staging",
                     f"Saved the source snapshot archive to {archive_path}.",
                 )
-
-                extract_dir = os.path.join(stage_dir, "snapshot")
-                os.makedirs(extract_dir, exist_ok=True)
                 self.coordinator.set_source_phase(
                     "source_extracting",
                     "Extracting the downloaded source snapshot into the staging area.",
                 )
-                with zipfile.ZipFile(archive_path) as archive_handle:
-                    archive_handle.extractall(extract_dir)
-
-                source_root = self._locate_extracted_source_root(extract_dir)
                 self.coordinator.set_source_phase(
                     "source_validating",
                     "Validating the staged source snapshot before handing it to the build worker.",
                 )
-                self._validate_source_snapshot(source_root)
             except Exception as exc:
                 self.dispatcher.root.after(0, lambda error=exc, current_stage_dir=stage_dir: self._handle_source_download_failure(error, current_stage_dir))
                 return
@@ -1126,13 +1034,13 @@ class UpdateManagerController:
             )
         elif getattr(sys, "frozen", False):
             prompt_text = (
-                f"Download {target_name} to {download_directory} and open it with the system package installer?\n\n"
-                "The current app will stay open. Complete the package installation there, then restart the app."
+                f"Download {target_name} to {download_directory} and start the Ubuntu package update?\n\n"
+                "If a matching Ubuntu package source is already configured, the updater will prefer that apt upgrade path. Otherwise it will install the downloaded DEB directly. Restart the app after the update finishes."
             )
         else:
             prompt_text = (
-                f"Download {target_name} to {download_directory} and open it with the system package installer?\n\n"
-                "This source session will stay open while you complete the package installation."
+                f"Download {target_name} to {download_directory} and start the Ubuntu package update?\n\n"
+                "If a matching Ubuntu package source is already configured, the updater will prefer that apt upgrade path. Otherwise it will install the downloaded DEB directly while this source session stays open."
             )
         if not messagebox.askyesno(
             "Download And Apply Update",
@@ -1147,18 +1055,19 @@ class UpdateManagerController:
 
         def worker():
             try:
-                remote_exe_bytes, resolved_name = self._download_remote_executable(row)
-                os.makedirs(download_directory, exist_ok=True)
-                final_exe_path = os.path.join(download_directory, resolved_name)
-                temp_exe_path = f"{final_exe_path}.download"
-                with open(temp_exe_path, "wb") as handle:
-                    handle.write(remote_exe_bytes)
-                os.replace(temp_exe_path, final_exe_path)
+                final_exe_path = self.model.stage_downloaded_artifact(
+                    row,
+                    self.remote_info,
+                    self.branch_name,
+                    self.stable_artifact_kind,
+                    self._stable_artifact_name_for_version,
+                    download_directory,
+                )
             except Exception as exc:
                 self.dispatcher.root.after(0, lambda error=exc: self._handle_download_failure(error))
                 return
 
-            self.dispatcher.root.after(0, lambda path=final_exe_path: self._finish_downloaded_update(path))
+            self.dispatcher.root.after(0, lambda path=final_exe_path, version=row.get("remote_version"): self._finish_downloaded_update(path, version))
 
         threading.Thread(target=worker, daemon=True).start()
 

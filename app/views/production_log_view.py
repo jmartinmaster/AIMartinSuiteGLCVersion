@@ -26,7 +26,7 @@ from app.models.production_log_model import BALANCE_DOWNTIME_CAUSE, DEFAULT_GHOS
 from app.theme_manager import get_theme_tokens
 
 __module_name__ = "Production Log"
-__version__ = "1.2.7"
+__version__ = "1.2.8"
 
 
 class ProductionLogView:
@@ -37,6 +37,9 @@ class ProductionLogView:
         self.controller.view = self
         self.model = model
         self.config_path = self.model.config_path
+        self.layout_config = {}
+        self.production_field_configs = []
+        self.downtime_field_configs = []
         self.dt_codes = list(self.model.dt_codes)
         self.data_handler = self.model.data_handler
         self.production_rows = []
@@ -46,6 +49,7 @@ class ProductionLogView:
         self.default_hours = str(self.model.default_hours)
         self.default_goal = str(self.model.default_goal)
         self.auto_save_interval = int(self.model.auto_save_interval)
+        self.auto_save_after_id = None
         self.current_draft_path = None
         self.latest_draft_path = None
         self.last_export_path = None
@@ -61,15 +65,21 @@ class ProductionLogView:
         self.balance_target_downtime_total_minutes = 0
         self.balance_action_mode = "balance"
         self.balance_downtime_btn = None
-        self.balance_mix_var = tk.DoubleVar(value=100.0)
+        self.reload_layout_config()
+        self.balance_mix_var = tk.DoubleVar(value=self.model.get_default_balance_mix_pct())
         self.balance_mix_value_lbl = None
 
         self.setup_ui()
-        self.parent.after(self.auto_save_interval, self.auto_save)
+        self.auto_save_after_id = self.parent.after(self.auto_save_interval, self.auto_save)
 
     def auto_save(self):
         self.controller.auto_save()
-        self.parent.after(self.auto_save_interval, self.auto_save)
+        self.auto_save_after_id = self.parent.after(self.auto_save_interval, self.auto_save)
+
+    def reload_layout_config(self):
+        self.layout_config = self.model.load_layout_config()
+        self.production_field_configs = self.model.get_section_field_configs("production", config=self.layout_config)
+        self.downtime_field_configs = self.model.get_section_field_configs("downtime", config=self.layout_config)
 
     def get_pending_dir(self):
         return self.controller.get_pending_dir()
@@ -88,17 +98,8 @@ class ProductionLogView:
 
     def collect_ui_data(self):
         header_data = self.collect_header_data()
-        production_data = []
-        for row in self.production_rows:
-            production_data.append({
-                "shop_order": row["shop_order"].get(),
-                "part_number": row["part_number"].get(),
-                "rate_lookup": row["rate_lookup"].get(),
-                "rate_override_enabled": bool(row["rate_override_enabled_var"].get()),
-                "molds": row["molds"].get(),
-                "time_calc": row["time_calc"].cget("text"),
-            })
-        downtime_data = [{key: (value.get() if hasattr(value, "get") else value.cget("text")) for key, value in row.items()} for row in self.downtime_rows]
+        production_data = [self.collect_row_data("production", row) for row in self.production_rows]
+        downtime_data = [self.collect_row_data("downtime", row) for row in self.downtime_rows]
         return {
             "header": header_data,
             "production": production_data,
@@ -127,6 +128,61 @@ class ProductionLogView:
         for event_name in events:
             widget.bind(event_name, self.mark_dirty, add="+")
 
+    def get_row_field_configs(self, section_name):
+        if section_name == "production":
+            return self.production_field_configs
+        if section_name == "downtime":
+            return self.downtime_field_configs
+        return []
+
+    def get_header_field_id(self, role_name, fallback_id=None):
+        return self.model.get_header_field_id_by_role(role_name, config=self.layout_config, fallback_id=fallback_id)
+
+    def get_row_field_id(self, section_name, role_name, fallback_id=None):
+        return self.model.get_section_field_id_by_role(section_name, role_name, config=self.layout_config, fallback_id=fallback_id)
+
+    def get_row_widget(self, row, section_name, role_name, fallback_id=None):
+        field_id = self.get_row_field_id(section_name, role_name, fallback_id=fallback_id)
+        if field_id:
+            return row.get(field_id)
+        if fallback_id:
+            return row.get(fallback_id)
+        return None
+
+    def get_row_variable(self, row, section_name, role_name, fallback_id=None):
+        field_id = self.get_row_field_id(section_name, role_name, fallback_id=fallback_id)
+        if field_id:
+            return row.get(f"{field_id}_var")
+        if fallback_id:
+            return row.get(f"{fallback_id}_var")
+        return None
+
+    def get_row_value_by_role(self, row, section_name, role_name, fallback_id=None):
+        return self.get_widget_value(self.get_row_widget(row, section_name, role_name, fallback_id=fallback_id))
+
+    def get_open_row_field_ids(self, section_name):
+        return [field["id"] for field in self.get_row_field_configs(section_name) if field.get("open_row_trigger")]
+
+    def collect_row_data(self, section_name, row, include_derived=True):
+        row_data = {}
+        for field_config in self.get_row_field_configs(section_name):
+            field_id = field_config["id"]
+            if not include_derived and field_config.get("derived"):
+                continue
+            widget_type = field_config.get("widget", "entry")
+            if widget_type == "checkbutton":
+                variable = row.get(f"{field_id}_var")
+                row_data[field_id] = bool(variable.get()) if variable is not None else False
+                continue
+            widget = row.get(field_id)
+            if widget is None:
+                continue
+            if widget_type == "display":
+                row_data[field_id] = widget.cget("text")
+                continue
+            row_data[field_id] = self.get_widget_value(widget)
+        return row_data
+
     def row_has_input(self, row, field_names):
         for field_name in field_names:
             widget = row.get(field_name)
@@ -140,7 +196,8 @@ class ProductionLogView:
         if not self.production_rows:
             self.add_production_row()
             return
-        if any(not self.row_has_input(row, ("shop_order", "part_number", "molds")) for row in self.production_rows):
+        open_field_ids = self.get_open_row_field_ids("production")
+        if any(not self.row_has_input(row, open_field_ids) for row in self.production_rows):
             return
         self.add_production_row()
 
@@ -148,7 +205,8 @@ class ProductionLogView:
         if not self.downtime_rows:
             self.add_downtime_row()
             return
-        if any(not self.row_has_input(row, ("start", "stop", "code", "cause")) for row in self.downtime_rows):
+        open_field_ids = self.get_open_row_field_ids("downtime")
+        if any(not self.row_has_input(row, open_field_ids) for row in self.downtime_rows):
             return
         self.add_downtime_row()
 
@@ -230,7 +288,7 @@ class ProductionLogView:
     def build_recovery_status_text(self, latest, current_name, dirty_text, pending_count, snapshot_count):
         latest_text = f"Latest: {latest['filename']} ({latest['saved_at']})" if latest else "Latest: No pending drafts"
         detail_text = (
-            f"Current: {current_name} | State: {dirty_text} | Pending: {pending_count} | Recovery: {snapshot_count}"
+            f"Form: {self.model.get_active_form_name()} | Current: {current_name} | State: {dirty_text} | Pending: {pending_count} | Recovery: {snapshot_count}"
         )
         return f"{latest_text}\n{detail_text}"
 
@@ -238,19 +296,19 @@ class ProductionLogView:
         return self.controller.refresh_view()
 
     def build_header_section(self):
-        header_wrapper = tb.Labelframe(self.content_stack, text=" Form 510-09: Production Logging Center Header ", padding=15, style="Martin.Card.TLabelframe")
+        header_wrapper = tb.Labelframe(self.content_stack, text=f" {self.model.get_form_section_title('Header')} ", padding=15, style="Martin.Card.TLabelframe")
         header_wrapper.pack(fill=X, padx=10, pady=10)
         try:
-            config = self.model.load_layout_config()
-            for field in config["header_fields"]:
+            for field in self.layout_config.get("header_fields", []):
+                field_role = self.model.get_header_field_role(field["id"], config=self.layout_config)
                 tb.Label(header_wrapper, text=field["label"]).grid(row=field["row"], column=field["col"], padx=5, pady=5, sticky=W)
                 entry = tb.Entry(header_wrapper, width=field.get("width", 10))
                 default_value = field.get("default", "")
-                if field["id"] == "hours":
+                if field_role == "shift_hours":
                     default_value = self.default_hours
-                elif field["id"] == "goal_mph":
+                elif field_role == "goal_rate":
                     default_value = self.default_goal
-                elif field["id"] == "total_molds":
+                elif field_role == "total_molds":
                     default_value = "0"
                 if default_value:
                     entry.insert(0, default_value)
@@ -262,36 +320,175 @@ class ProductionLogView:
                     self.bind_dirty_tracking(entry, ("<KeyRelease>",))
                     entry.bind("<FocusOut>", self.controller.on_header_field_focus_out, add="+")
 
-            if "hours" in self.entries:
-                self.entries["hours"].bind("<KeyRelease>", self.controller.on_hours_changed, add="+")
-            if "goal_mph" in self.entries:
-                self.entries["goal_mph"].bind("<KeyRelease>", self.controller.on_goal_changed, add="+")
+            hours_field_id = self.get_header_field_id("shift_hours", fallback_id="hours")
+            if hours_field_id in self.entries:
+                self.entries[hours_field_id].bind("<KeyRelease>", self.controller.on_hours_changed, add="+")
+            goal_field_id = self.get_header_field_id("goal_rate", fallback_id="goal_mph")
+            if goal_field_id in self.entries:
+                self.entries[goal_field_id].bind("<KeyRelease>", self.controller.on_goal_changed, add="+")
         except Exception as exc:
             tb.Label(header_wrapper, text=f"Layout Error: {exc}", bootstyle=DANGER).pack()
 
     def build_production_section(self):
-        prod_wrapper = tb.Labelframe(self.content_stack, text=" Production Logging Center Jobs ", padding=10, style="Martin.Card.TLabelframe")
+        prod_wrapper = tb.Labelframe(self.content_stack, text=f" {self.model.get_form_section_title('Jobs')} ", padding=10, style="Martin.Card.TLabelframe")
         prod_wrapper.pack(fill=X, padx=10, pady=5)
-        prod_columns = tb.Frame(prod_wrapper, style="Martin.Surface.TFrame")
-        prod_columns.pack(fill=X, pady=(0, 4))
-        for text, width, side in (
-            ("X", 3, LEFT),
-            ("Shop Order", 15, LEFT),
-            ("Part Number", 15, LEFT),
-            ("Rate", 12, LEFT),
-            ("Override", 8, LEFT),
-            ("Molds", 10, LEFT),
-            ("Time", 10, RIGHT),
-        ):
-            tb.Label(prod_columns, text=text, width=width, anchor=W if side == LEFT else E, style="Martin.Muted.TLabel").pack(side=side, padx=5)
+        self.build_dynamic_row_header(prod_wrapper, self.production_field_configs)
         self.production_container = tb.Frame(prod_wrapper, style="Martin.Surface.TFrame")
         self.production_container.pack(fill=X)
 
     def build_downtime_section(self):
-        dt_wrapper = tb.Labelframe(self.content_stack, text=" Production Logging Center Downtime Issues ", padding=10, style="Martin.Card.TLabelframe")
+        dt_wrapper = tb.Labelframe(self.content_stack, text=f" {self.model.get_form_section_title('Downtime Issues')} ", padding=10, style="Martin.Card.TLabelframe")
         dt_wrapper.pack(fill=X, padx=10, pady=5)
+        self.build_dynamic_row_header(dt_wrapper, self.downtime_field_configs)
         self.downtime_container = tb.Frame(dt_wrapper, style="Martin.Surface.TFrame")
         self.downtime_container.pack(fill=X)
+
+    def build_dynamic_row_header(self, parent, field_configs):
+        header_frame = tb.Frame(parent, style="Martin.Surface.TFrame")
+        header_frame.pack(fill=X, pady=(0, 4))
+        tb.Label(header_frame, text="X", width=3, style="Martin.Muted.TLabel").grid(row=0, column=0, padx=5, sticky=W)
+        for column_index, field_config in enumerate(field_configs, start=1):
+            if field_config.get("expand"):
+                header_frame.columnconfigure(column_index, weight=1)
+            label_kwargs = {
+                "text": field_config.get("label", field_config.get("id", "")),
+                "style": "Martin.Muted.TLabel",
+            }
+            width = field_config.get("width")
+            if width:
+                label_kwargs["width"] = width
+            tb.Label(header_frame, **label_kwargs).grid(
+                row=0,
+                column=column_index,
+                padx=5,
+                sticky=(field_config.get("sticky") or ("ew" if field_config.get("expand") else W)),
+            )
+
+    def create_dynamic_row(self, section_name, parent):
+        field_configs = self.get_row_field_configs(section_name)
+        row_frame = tb.Frame(parent, style="Martin.Surface.TFrame")
+        row_frame.pack(fill=X, pady=2)
+        row = {"__frame": row_frame, "__section": section_name}
+        delete_command = self.controller.remove_production_row if section_name == "production" else self.controller.remove_downtime_row
+        row["delete_btn"] = tb.Button(
+            row_frame,
+            text="X",
+            width=3,
+            bootstyle=DANGER,
+            command=lambda current_row=row, current_command=delete_command: current_command(current_row),
+        )
+        row["delete_btn"].grid(row=0, column=0, padx=5, sticky=W)
+
+        for column_index, field_config in enumerate(field_configs, start=1):
+            if field_config.get("expand"):
+                row_frame.columnconfigure(column_index, weight=1)
+            widget = self.create_row_field_widget(row_frame, row, section_name, field_config)
+            row[field_config["id"]] = widget
+            widget.grid(
+                row=0,
+                column=column_index,
+                padx=5,
+                sticky=(field_config.get("sticky") or ("ew" if field_config.get("expand") else W)),
+            )
+
+        self.bind_dynamic_row_events(section_name, row)
+        return row
+
+    def create_row_field_widget(self, parent, row, section_name, field_config):
+        field_id = field_config["id"]
+        field_role = self.model.get_section_field_role(section_name, field_id, config=self.layout_config)
+        widget_type = field_config.get("widget", "entry")
+        width = field_config.get("width")
+        default_value = field_config.get("default", "")
+
+        if widget_type == "combobox":
+            widget = tb.Combobox(
+                parent,
+                values=self.resolve_field_options(field_config),
+                width=width,
+                state=field_config.get("state", "normal"),
+            )
+            if default_value not in (None, ""):
+                widget.set(str(default_value))
+            return widget
+
+        if widget_type == "checkbutton":
+            variable = tk.BooleanVar(value=bool(default_value))
+            row[f"{field_id}_var"] = variable
+            command = None
+            if field_role == "rate_override_toggle":
+                command = lambda current_row=row: self.controller.on_rate_override_toggled(current_row)
+            return tb.Checkbutton(parent, variable=variable, command=command)
+
+        if widget_type == "display":
+            label_kwargs = {
+                "text": str(default_value or ""),
+                "width": width,
+            }
+            if field_config.get("bootstyle"):
+                label_kwargs["bootstyle"] = field_config.get("bootstyle")
+            widget = tb.Label(parent, **label_kwargs)
+            if field_config.get("bold"):
+                widget.configure(font=("", 10, "bold"))
+            return widget
+
+        widget = tb.Entry(parent, width=width)
+        if default_value not in (None, ""):
+            widget.insert(0, str(default_value))
+        if field_config.get("readonly"):
+            widget.config(state="readonly")
+        return widget
+
+    def resolve_field_options(self, field_config):
+        options_source = field_config.get("options_source")
+        if options_source == "downtime_codes":
+            return self.dt_codes
+        raw_values = field_config.get("values", [])
+        return list(raw_values) if isinstance(raw_values, list) else []
+
+    def bind_dynamic_row_events(self, section_name, row):
+        if section_name == "production":
+            self.bind_production_row_events(row)
+            return
+        self.bind_downtime_row_events(row)
+
+    def bind_production_row_events(self, row):
+        for field_id in self.get_open_row_field_ids("production"):
+            widget = row.get(field_id)
+            if hasattr(widget, "bind"):
+                widget.bind("<KeyRelease>", self.on_production_row_edited, add="+")
+
+        for role_name in ("job_order", "part_number", "rate_value", "mold_count"):
+            widget = self.get_row_widget(row, "production", role_name)
+            if widget is not None and hasattr(widget, "bind"):
+                self.bind_dirty_tracking(widget, ("<KeyRelease>",))
+
+        for role_name in ("part_number", "rate_value", "mold_count"):
+            widget = self.get_row_widget(row, "production", role_name)
+            if widget is not None and hasattr(widget, "bind"):
+                widget.bind("<KeyRelease>", lambda _event: self.controller.update_row_math(), add="+")
+
+    def bind_downtime_row_events(self, row):
+        for role_name in ("start_clock", "stop_clock", "cause_text"):
+            widget = self.get_row_widget(row, "downtime", role_name)
+            if widget is not None and hasattr(widget, "bind"):
+                self.bind_dirty_tracking(widget, ("<KeyRelease>",))
+
+        for role_name in ("start_clock", "stop_clock"):
+            widget = self.get_row_widget(row, "downtime", role_name)
+            if widget is not None and hasattr(widget, "bind"):
+                widget.bind("<KeyRelease>", lambda _event: self.controller.update_row_math(), add="+")
+                widget.bind("<KeyRelease>", self.on_downtime_row_value_changed, add="+")
+                widget.bind("<KeyRelease>", self.on_downtime_row_edited, add="+")
+
+        code_widget = self.get_row_widget(row, "downtime", "downtime_code", fallback_id="code")
+        if code_widget is not None and hasattr(code_widget, "bind"):
+            code_widget.bind("<<ComboboxSelected>>", self.mark_dirty, add="+")
+            code_widget.bind("<<ComboboxSelected>>", self.on_downtime_row_edited, add="+")
+
+        cause_widget = self.get_row_widget(row, "downtime", "cause_text", fallback_id="cause")
+        if cause_widget is not None and hasattr(cause_widget, "bind"):
+            cause_widget.bind("<KeyRelease>", self.on_downtime_row_edited, add="+")
 
     def build_footer_section(self):
         self.footer = tb.Frame(self.content_stack, padding=20, style="Martin.Content.TFrame")
@@ -506,13 +703,13 @@ class ProductionLogView:
         segments = []
         for index, row in enumerate(self.production_rows, start=1):
             try:
-                molds = int(float(row["molds"].get() or 0))
+                molds = int(float(self.get_row_value_by_role(row, "production", "mold_count", fallback_id="molds") or 0))
             except Exception:
                 molds = 0
             if molds <= 0:
                 continue
-            shop_order = row["shop_order"].get().strip()
-            part_number = row["part_number"].get().strip()
+            shop_order = self.get_row_value_by_role(row, "production", "job_order", fallback_id="shop_order").strip()
+            part_number = self.get_row_value_by_role(row, "production", "part_number", fallback_id="part_number").strip()
             label_bits = [bit for bit in (shop_order, part_number) if bit]
             label = " / ".join(label_bits) if label_bits else f"Job {index}"
             segments.append({
@@ -636,78 +833,13 @@ class ProductionLogView:
         canvas.create_text(width / 2, height / 2 + 22, text="The chart will update as soon as the form has data.", fill=muted_fg, font=("Segoe UI", 10))
 
     def add_production_row(self):
-        row_frame = tb.Frame(self.production_container)
-        row_frame.pack(fill=X, pady=2)
-        row = {
-            "shop_order": tb.Entry(row_frame, width=15),
-            "part_number": tb.Entry(row_frame, width=15),
-            "rate_lookup": tb.Entry(row_frame, width=12),
-            "molds": tb.Entry(row_frame, width=10),
-            "time_calc": tb.Label(row_frame, text="0 min", width=10, font=("", 10, "bold")),
-        }
-        row["rate_override_enabled_var"] = tk.BooleanVar(value=False)
-        row["rate_override_enabled"] = tb.Checkbutton(
-            row_frame,
-            variable=row["rate_override_enabled_var"],
-            command=lambda current_row=row: self.controller.on_rate_override_toggled(current_row),
-        )
-        row["delete_btn"] = tb.Button(
-            row_frame,
-            text="X",
-            width=3,
-            bootstyle=DANGER,
-            command=lambda current_row=row: self.controller.remove_production_row(current_row),
-        )
-        row["rate_lookup"].config(state="readonly")
-        row["delete_btn"].pack(side=LEFT, padx=5)
-        for key in ("shop_order", "part_number", "rate_lookup", "rate_override_enabled", "molds"):
-            row[key].pack(side=LEFT, padx=5)
-        row["time_calc"].pack(side=RIGHT, padx=10)
-        row["part_number"].bind("<KeyRelease>", lambda _event: self.controller.update_row_math(), add="+")
-        row["rate_lookup"].bind("<KeyRelease>", lambda _event: self.controller.update_row_math(), add="+")
-        row["molds"].bind("<KeyRelease>", lambda _event: self.controller.update_row_math(), add="+")
-        row["shop_order"].bind("<KeyRelease>", self.on_production_row_edited, add="+")
-        self.bind_dirty_tracking(row["shop_order"], ("<KeyRelease>",))
-        self.bind_dirty_tracking(row["part_number"], ("<KeyRelease>",))
-        self.bind_dirty_tracking(row["rate_lookup"], ("<KeyRelease>",))
-        self.bind_dirty_tracking(row["molds"], ("<KeyRelease>",))
+        row = self.create_dynamic_row("production", self.production_container)
         self.production_rows.append(row)
         self.update_ghost_total_display()
         return row
 
     def add_downtime_row(self):
-        row_frame = tb.Frame(self.downtime_container)
-        row_frame.pack(fill=X, pady=2)
-        row = {
-            "start": tb.Entry(row_frame, width=8),
-            "stop": tb.Entry(row_frame, width=8),
-            "code": tb.Combobox(row_frame, values=self.dt_codes, width=18, state="readonly"),
-            "cause": tb.Entry(row_frame),
-            "time_calc": tb.Label(row_frame, text="0 min", width=10, foreground="red", font=("", 10, "bold")),
-        }
-        row["delete_btn"] = tb.Button(
-            row_frame,
-            text="X",
-            width=3,
-            bootstyle=DANGER,
-            command=lambda current_row=row: self.controller.remove_downtime_row(current_row),
-        )
-        row["delete_btn"].pack(side=LEFT, padx=5)
-        row["start"].pack(side=LEFT, padx=5)
-        row["stop"].pack(side=LEFT, padx=5)
-        row["code"].pack(side=LEFT, padx=5)
-        row["time_calc"].pack(side=RIGHT, padx=10)
-        row["cause"].pack(side=LEFT, fill=X, expand=True, padx=5)
-        row["start"].bind("<KeyRelease>", lambda _event: self.controller.update_row_math(), add="+")
-        row["stop"].bind("<KeyRelease>", lambda _event: self.controller.update_row_math(), add="+")
-        row["start"].bind("<KeyRelease>", self.on_downtime_row_value_changed, add="+")
-        row["stop"].bind("<KeyRelease>", self.on_downtime_row_value_changed, add="+")
-        row["code"].bind("<<ComboboxSelected>>", self.mark_dirty, add="+")
-        row["code"].bind("<<ComboboxSelected>>", self.on_downtime_row_edited, add="+")
-        row["cause"].bind("<KeyRelease>", self.on_downtime_row_edited, add="+")
-        self.bind_dirty_tracking(row["start"], ("<KeyRelease>",))
-        self.bind_dirty_tracking(row["stop"], ("<KeyRelease>",))
-        self.bind_dirty_tracking(row["cause"], ("<KeyRelease>",))
+        row = self.create_dynamic_row("downtime", self.downtime_container)
         self.downtime_rows.append(row)
         return row
 
@@ -749,7 +881,9 @@ class ProductionLogView:
         return self.model.resolve_lookup_rate(part_number, rates_data, global_goal)
 
     def set_rate_lookup_value(self, row, value, editable=False):
-        rate_entry = row["rate_lookup"]
+        rate_entry = self.get_row_widget(row, "production", "rate_value", fallback_id="rate_lookup")
+        if rate_entry is None:
+            return
         rate_entry.config(state="normal")
         rate_entry.delete(0, END)
         rate_entry.insert(0, value)
@@ -762,7 +896,7 @@ class ProductionLogView:
         return self.controller.on_rate_override_toggled(row)
 
     def update_target_time_display(self):
-        target_time_entry = self.entries.get("target_time")
+        target_time_entry = self.entries.get(self.get_header_field_id("target_time", fallback_id="target_time"))
         if target_time_entry is None:
             return
         target_value = self.controller.get_target_time_value()
@@ -780,6 +914,13 @@ class ProductionLogView:
             target_time_entry.insert(0, target_value)
         if original_state == "readonly":
             target_time_entry.config(state="readonly")
+
+    def apply_calculation_settings(self, mark_dirty=False):
+        self.balance_mix_var.set(self.model.get_default_balance_mix_pct())
+        self.update_balance_mix_display()
+        self.apply_header_data(self.get_raw_header_data(), mark_dirty=mark_dirty)
+        self.update_target_time_display()
+        self.update_ghost_total_display()
 
     def update_ghost_total_display(self):
         if not hasattr(self, "ghost_total_lbl"):
@@ -873,18 +1014,25 @@ class ProductionLogView:
 
     def set_downtime_row_duration(self, row, duration_minutes, set_balance_metadata=False):
         duration_minutes = max(0, int(duration_minutes))
-        start_minutes = self.parse_clock_value(row["start"].get())
+        start_widget = self.get_row_widget(row, "downtime", "start_clock", fallback_id="start")
+        stop_widget = self.get_row_widget(row, "downtime", "stop_clock", fallback_id="stop")
+        code_widget = self.get_row_widget(row, "downtime", "downtime_code", fallback_id="code")
+        cause_widget = self.get_row_widget(row, "downtime", "cause_text", fallback_id="cause")
+        start_minutes = self.parse_clock_value(self.get_widget_value(start_widget))
         if start_minutes is None:
             start_minutes = 0
-            row["start"].delete(0, END)
-            row["start"].insert(0, self.format_clock_value(start_minutes))
-        row["stop"].delete(0, END)
-        row["stop"].insert(0, self.format_clock_value(start_minutes + duration_minutes))
+            if start_widget is not None:
+                start_widget.delete(0, END)
+                start_widget.insert(0, self.format_clock_value(start_minutes))
+        if stop_widget is not None:
+            stop_widget.delete(0, END)
+            stop_widget.insert(0, self.format_clock_value(start_minutes + duration_minutes))
         if set_balance_metadata:
-            if not row["code"].get().strip() and self.dt_codes:
-                row["code"].set(self.dt_codes[0])
-            row["cause"].delete(0, END)
-            row["cause"].insert(0, BALANCE_DOWNTIME_CAUSE)
+            if code_widget is not None and not code_widget.get().strip() and self.dt_codes:
+                code_widget.set(self.dt_codes[0])
+            if cause_widget is not None:
+                cause_widget.delete(0, END)
+                cause_widget.insert(0, BALANCE_DOWNTIME_CAUSE)
 
     def get_shift_total_minutes(self):
         return self.controller.get_shift_total_minutes()
@@ -911,20 +1059,24 @@ class ProductionLogView:
         if field_id not in self.entries:
             return
         entry = self.entries[field_id]
-        # Only call .cget('state') if widget supports it
+        self.set_input_widget_value(entry, value)
+
+    def set_input_widget_value(self, widget, value):
         original_state = None
-        if hasattr(entry, 'cget'):
+        if hasattr(widget, "cget"):
             try:
-                original_state = entry.cget("state")
+                original_state = widget.cget("state")
             except Exception:
                 original_state = None
         if original_state == "readonly":
-            entry.config(state="normal")
-        if hasattr(entry, 'delete') and hasattr(entry, 'insert'):
-            entry.delete(0, END)
-            entry.insert(0, str(value) if value is not None else "")
+            widget.config(state="normal")
+        if hasattr(widget, "delete") and hasattr(widget, "insert"):
+            widget.delete(0, END)
+            widget.insert(0, str(value) if value is not None else "")
+        elif hasattr(widget, "set"):
+            widget.set(str(value) if value is not None else "")
         if original_state == "readonly":
-            entry.config(state="readonly")
+            widget.config(state="readonly")
 
     def get_widget_value(self, widget):
         if widget is None:
@@ -942,6 +1094,30 @@ class ProductionLogView:
                     continue
         return str(widget)
 
+    def apply_row_data(self, section_name, row, row_data):
+        for field_config in self.get_row_field_configs(section_name):
+            field_id = field_config["id"]
+            field_role = self.model.get_section_field_role(section_name, field_id, config=self.layout_config)
+            if field_id not in row_data:
+                continue
+            value = row_data.get(field_id)
+            widget_type = field_config.get("widget", "entry")
+            if widget_type == "checkbutton":
+                variable = row.get(f"{field_id}_var")
+                if variable is not None:
+                    variable.set(str(value).strip().lower() in {"1", "true", "yes", "on"})
+                continue
+            widget = row.get(field_id)
+            if widget is None:
+                continue
+            if field_role == "rate_value":
+                self.set_rate_lookup_value(row, str(value) if value is not None else "", editable=True)
+                continue
+            if widget_type == "display":
+                widget.config(text=str(value) if value is not None else "")
+                continue
+            self.set_input_widget_value(widget, value)
+
     def clear_dynamic_rows(self):
         for widget in self.production_container.winfo_children():
             widget.destroy()
@@ -957,28 +1133,14 @@ class ProductionLogView:
         self.clear_dynamic_rows()
         for production_data in data.get("production", []):
             current_row = self.add_production_row()
-            for key, value in production_data.items():
-                if key == "rate_override_enabled":
-                    current_row["rate_override_enabled_var"].set(str(value).strip().lower() in {"1", "true", "yes", "on"})
-                    continue
-                if key == "rate_lookup":
-                    self.set_rate_lookup_value(current_row, str(value) if value is not None else "", editable=True)
-                    continue
-                if key in current_row and hasattr(current_row[key], "insert"):
-                    current_row[key].delete(0, END)
-                    current_row[key].insert(0, str(value) if value is not None else "")
-            if current_row["rate_override_enabled_var"].get():
-                current_row["rate_lookup"].config(state="normal")
+            self.apply_row_data("production", current_row, production_data)
+            override_var = self.get_row_variable(current_row, "production", "rate_override_toggle", fallback_id="rate_override_enabled")
+            rate_widget = self.get_row_widget(current_row, "production", "rate_value", fallback_id="rate_lookup")
+            if override_var is not None and override_var.get() and rate_widget is not None:
+                rate_widget.config(state="normal")
         for downtime_data in data.get("downtime", []):
             current_row = self.add_downtime_row()
-            for key, value in downtime_data.items():
-                if key in current_row:
-                    widget = current_row[key]
-                    if hasattr(widget, "set"):
-                        widget.set(str(value) if value is not None else "")
-                    elif hasattr(widget, "insert"):
-                        widget.delete(0, END)
-                        widget.insert(0, str(value) if value is not None else "")
+            self.apply_row_data("downtime", current_row, downtime_data)
         if not self.production_rows:
             self.add_production_row()
         if not self.downtime_rows:
@@ -1007,7 +1169,7 @@ class ProductionLogView:
     def update_recovery_ui(self):
         drafts = self.list_pending_drafts()
         recovery_snapshots = self.list_recovery_snapshots()
-        latest = drafts[0] if drafts else None
+        latest = self.get_latest_pending_draft()
         self.latest_draft_path = latest["path"] if latest else None
         current_name = os.path.basename(self.current_draft_path) if self.current_draft_path else "No active draft"
         pending_count = len(drafts)
@@ -1142,6 +1304,7 @@ class ProductionLogView:
         card = tb.Labelframe(container, text=f" {draft_record['filename']} ", padding=10, style="Martin.Card.TLabelframe")
         card.pack(fill=X, pady=5)
         tb.Label(card, text=f"Saved: {draft_record['saved_at']}", style="Martin.Muted.TLabel").pack(anchor=W)
+        tb.Label(card, text=f"Form: {draft_record.get('form_name', '(unknown)')}", style="Martin.Muted.TLabel").pack(anchor=W)
         tb.Label(card, text=f"Date: {draft_record['date'] or '(unknown)'} | Shift: {draft_record['shift'] or '(unknown)'}", style="Martin.Muted.TLabel").pack(anchor=W)
         actions = tb.Frame(card)
         actions.pack(fill=X, pady=(8, 0))
@@ -1187,4 +1350,13 @@ class ProductionLogView:
         return None
 
     def on_unload(self):
+        for after_id_name in ("auto_save_after_id", "summary_refresh_after_id", "summary_resize_after_id"):
+            after_id = getattr(self, after_id_name, None)
+            if after_id is None:
+                continue
+            try:
+                self.parent.after_cancel(after_id)
+            except Exception:
+                pass
+            setattr(self, after_id_name, None)
         return None
