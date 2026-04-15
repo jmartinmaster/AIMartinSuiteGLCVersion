@@ -304,7 +304,7 @@ class HelpViewerView:
         self.doc_text_widget.configure(yscrollcommand=scroll_y.set, xscrollcommand=scroll_x.set)
         self.doc_text_widget.config(state=DISABLED)
 
-        self.dispatcher.canvas.bind("<Configure>", self.on_viewport_resize, add="+")
+        self.dispatcher.bind_shell_viewport_resize(self.on_viewport_resize, add="+")
         initial_name, initial_path = self.doc_index[0]
         self.controller.show_document(initial_name, initial_path)
         self.parent.after(0, self.apply_viewport_layout)
@@ -382,8 +382,7 @@ class HelpViewerView:
         if not self.container or not self.doc_panel:
             return
         self.parent.update_idletasks()
-        viewport_width = max(self.dispatcher.canvas.winfo_width(), 760)
-        viewport_height = max(self.dispatcher.canvas.winfo_height(), 520)
+        viewport_width, viewport_height = self.dispatcher.get_shell_viewport_size(min_width=760, min_height=520)
         container_height = max(viewport_height - 14, 460)
         doc_panel_height = max(int(container_height * 0.72), 340)
         self.container.configure(width=viewport_width - 8, height=container_height)

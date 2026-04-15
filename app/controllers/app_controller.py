@@ -46,6 +46,66 @@ __version__ = "2.1.5"
 ISSUE_REPORT_URL = "https://github.com/jmartinmaster/AIMartinSuiteGLCVersion/issues/new/choose"
 MODULE_PRELOAD_POLL_SECONDS = 1.0
 
+MODULE_API_SURFACE = {
+    "navigation": (
+        "load_module",
+        "secure_load",
+        "refresh_navigation",
+        "get_navigation_modules",
+        "get_user_facing_modules",
+        "get_persistable_modules",
+    ),
+    "notifications_and_status": (
+        "show_toast",
+        "set_update_status",
+        "clear_update_status",
+        "clear_update_status_after",
+    ),
+    "settings_and_theme": (
+        "get_setting",
+        "refresh_runtime_settings",
+        "register_runtime_settings_listener",
+        "unregister_runtime_settings_listener",
+        "apply_theme",
+    ),
+    "module_runtime": (
+        "open_module_window",
+        "open_help_document",
+        "import_managed_module",
+        "notify_active_form_changed",
+        "notify_production_log_calculation_settings_changed",
+    ),
+    "security": (
+        "add_security_session_listener",
+        "remove_security_session_listener",
+        "has_external_modules_directory",
+        "get_external_module_override_names",
+        "is_external_module_override_trust_enabled",
+        "apply_external_override_policy_change",
+    ),
+    "ui_thread_and_shell": (
+        "run_on_main_thread",
+        "call_later",
+        "request_shutdown",
+        "bind_mousewheel_to_widget_tree",
+        "bind_shell_viewport_resize",
+        "get_shell_viewport_size",
+    ),
+    "layout_preload": (
+        "invalidate_layout_manager_preload",
+        "schedule_layout_manager_preload",
+        "consume_layout_manager_preload",
+    ),
+    "transitional_properties": (
+        "active_module_instance",
+        "modules_path",
+        "external_modules_path",
+        "loaded_modules",
+        "shared_data",
+        "update_coordinator",
+    ),
+}
+
 
 class Dispatcher:
     def __init__(self, root, main_module=None, initial_module_name=None):
@@ -187,6 +247,9 @@ class Dispatcher:
 
     def get_managed_module_names(self):
         return self.module_registry.get_managed_module_names()
+
+    def get_module_api_surface(self):
+        return MODULE_API_SURFACE
 
     def get_navigation_module_names(self):
         return self.module_registry.get_navigation_module_names()
@@ -905,6 +968,35 @@ class Dispatcher:
 
     def _log_data_request_error(self, description, exc):
         log_exception(f"dispatcher.data_request.{description}", exc)
+
+    def call_later(self, delay_ms, callback):
+        try:
+            delay_ms = int(delay_ms)
+        except Exception:
+            delay_ms = 0
+        return self.root.after(max(0, delay_ms), callback)
+
+    def run_on_main_thread(self, callback):
+        return self.call_later(0, callback)
+
+    def request_shutdown(self, delay_ms=0):
+        self.call_later(delay_ms, self.root.destroy)
+
+    def bind_shell_viewport_resize(self, callback, add="+"):
+        return self.canvas.bind("<Configure>", callback, add=add)
+
+    def get_shell_viewport_size(self, min_width=0, min_height=0):
+        try:
+            min_width = int(min_width)
+        except Exception:
+            min_width = 0
+        try:
+            min_height = int(min_height)
+        except Exception:
+            min_height = 0
+        width = max(self.canvas.winfo_width(), min_width)
+        height = max(self.canvas.winfo_height(), min_height)
+        return (width, height)
 
     def invalidate_layout_manager_preload(self):
         if self.layout_manager_dispatcher is None:
