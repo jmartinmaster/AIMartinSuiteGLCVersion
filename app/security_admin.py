@@ -13,11 +13,11 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-from app.controllers.settings_manager_controller import SettingsManagerController
+from app.controllers.security_admin_controller import SecurityAdminController
 
 __module_name__ = "Security Admin"
 __version__ = "1.0.0"
 
 
 def get_ui(parent, dispatcher):
-    return SettingsManagerController(parent, dispatcher, section_mode="security_admin")
+    return SecurityAdminController(parent, dispatcher)

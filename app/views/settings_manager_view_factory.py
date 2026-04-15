@@ -22,6 +22,7 @@ __version__ = "1.0.0"
 
 
 def create_settings_manager_view(parent, dispatcher, controller, section_mode="full"):
+    module_title = str(getattr(controller, "module_title", "Settings Manager") or "Settings Manager")
     controller.requested_view_backend = "qt" if bool(getattr(dispatcher, "is_pyqt6_shell_requested", lambda: False)()) else "tk"
     controller.resolved_view_backend = "tk"
     controller.view_backend_fallback_reason = None
@@ -32,15 +33,15 @@ def create_settings_manager_view(parent, dispatcher, controller, section_mode="f
             dispatcher,
             controller,
             {
-                "title": "Settings Manager Qt Runtime",
+                "title": f"{module_title} Qt Runtime",
                 "subtitle": (
-                    "Settings Manager is now running in a dedicated PyQt6 window using staged migration slices. "
+                    f"{module_title} is now running in a dedicated PyQt6 window using staged migration slices. "
                     "Use the controls below to raise or restart the sidecar window."
                 ),
-                "initial_status": "Launching Settings Manager Qt window...",
+                "initial_status": f"Launching {module_title} Qt window...",
             },
         )
 
     if controller.requested_view_backend == "qt":
-        controller.view_backend_fallback_reason = "PyQt6 is not installed; using the Tk Settings Manager."
+        controller.view_backend_fallback_reason = f"PyQt6 is not installed; using the Tk {module_title}."
     return SettingsManagerView(parent, dispatcher, controller, section_mode=section_mode)

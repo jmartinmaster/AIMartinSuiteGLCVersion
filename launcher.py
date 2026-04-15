@@ -186,6 +186,16 @@ def _run_qt_module_session_from_payload(session_path, session_payload):
 
         return run_settings_manager_qt_session(session_path)
 
+    if module_name == "developer_admin":
+        from app.views.settings_manager_qt_view import run_settings_manager_qt_session
+
+        return run_settings_manager_qt_session(session_path)
+
+    if module_name == "security_admin":
+        from app.views.settings_manager_qt_view import run_settings_manager_qt_session
+
+        return run_settings_manager_qt_session(session_path)
+
     if module_name == "update_manager":
         from app.views.update_manager_qt_view import run_update_manager_qt_session
 
