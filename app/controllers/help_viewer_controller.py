@@ -15,15 +15,80 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 import os
 
+from app.qt_module_runtime import QtModuleRuntimeManager
 from app.utils import local_or_resource_path
+from app.views.help_viewer_view_factory import create_help_viewer_view
 from app.views.help_viewer_view import HelpViewerView
+
+__module_name__ = "Help Viewer"
+__version__ = "1.1.0"
+
+DOC_GROUPS = {
+    "user_guide": {
+        "sections": [
+            ("Overview", "docs/help/user_guide.md"),
+            ("Production Log", "docs/help/user_guide_production_log.md"),
+            ("Rate Manager", "docs/help/user_guide_rate_manager.md"),
+            ("Layout Manager", "docs/help/user_guide_layout_manager.md"),
+            ("Settings Manager", "docs/help/user_guide_settings_manager.md"),
+            ("Backup / Recovery", "docs/help/user_guide_recovery_viewer.md"),
+            ("Update Manager", "docs/help/user_guide_update_manager.md"),
+        ],
+    },
+}
+
+DOC_INDEX = [
+    ("User Guide", "docs/help/user_guide.md"),
+    ("App Icons", "docs/help/app_icons.md"),
+    ("Form Definitions", "docs/help/form_definitions.md"),
+    ("Layout JSON", "docs/help/layout_config.md"),
+    ("Production Log Calculations", "docs/help/production_log_calculations.md"),
+    ("Production Log JSON Architecture", "docs/production_log_json_architecture.md"),
+    ("Settings JSON", "docs/help/settings_json.md"),
+    ("Rates JSON", "docs/help/rates_json.md"),
+    ("Draft JSON", "docs/help/draft_json.md"),
+    ("Hidden Modules", "docs/help/hidden_modules.md"),
+    ("License", "docs/legal/LICENSE.txt"),
+]
+
+
+def get_doc_group_name(doc_groups, doc_path):
+    for group_name, group in (doc_groups or {}).items():
+        for _section_name, section_path in group.get("sections", []):
+            if section_path == doc_path:
+                return group_name
+    return None
+
+
+def get_document_meta_label(doc_path, group_name=None):
+    if os.path.basename(doc_path).lower() == "license.txt":
+        return "Bundled license"
+    if group_name == "user_guide":
+        return "User Guide section"
+    return "Bundled guide"
+
+
+def read_help_document(relative_path):
+    candidate = local_or_resource_path(relative_path)
+    if os.path.exists(candidate):
+        with open(candidate, "r", encoding="utf-8") as handle:
+            return handle.read()
+    return f"Missing help document: {relative_path}"
 
 
 class HelpViewerController:
     def __init__(self, parent, dispatcher):
+        self.parent = parent
         self.dispatcher = dispatcher
         self.view = None
-        self.view = HelpViewerView(parent, dispatcher, self)
+        self.doc_groups = DOC_GROUPS
+        self.doc_index = DOC_INDEX
+        self.requested_view_backend = "qt"
+        self.resolved_view_backend = "tk"
+        self.view_backend_fallback_reason = None
+        self.active_doc_path = None
+        self.runtime_manager = QtModuleRuntimeManager("help_viewer", self.build_qt_session_payload)
+        self.view = create_help_viewer_view(parent, dispatcher, self)
 
     def __getattr__(self, attribute_name):
         view = self.__dict__.get("view")
@@ -32,22 +97,51 @@ class HelpViewerController:
         return getattr(view, attribute_name)
 
     def get_doc_group(self, doc_path):
-        for group_name, group in self.view.doc_groups.items():
-            for _section_name, section_path in group.get("sections", []):
-                if section_path == doc_path:
-                    return group_name
-        return None
+        return get_doc_group_name(self.doc_groups, doc_path)
 
     def read_doc(self, relative_path):
-        candidate = local_or_resource_path(relative_path)
-        if os.path.exists(candidate):
-            with open(candidate, "r", encoding="utf-8") as handle:
-                return handle.read()
-        return f"Missing help document: {relative_path}"
+        return read_help_document(relative_path)
 
     def show_document(self, doc_name, doc_path):
+        self.active_doc_path = doc_path
         self.view.show_document(doc_name, doc_path, self.read_doc(doc_path))
 
     def open_active_document(self):
-        if self.view.active_doc_path:
-            self.dispatcher.open_help_document(self.view.active_doc_path)
+        target_path = self.active_doc_path or getattr(self.view, "active_doc_path", None)
+        if target_path:
+            self.dispatcher.open_help_document(target_path)
+
+    def build_qt_session_payload(self):
+        root = self.parent.winfo_toplevel()
+        resolved_paths = {}
+        for _doc_name, doc_path in self.doc_index:
+            resolved_paths[doc_path] = local_or_resource_path(doc_path)
+        return {
+            "window_title": "Help Viewer - Production Logging Center",
+            "title": "Help Center",
+            "subtitle": "Bundled guides, release references, and editable JSON documentation.",
+            "doc_groups": self.doc_groups,
+            "doc_index": self.doc_index,
+            "resolved_paths": resolved_paths,
+            "initial_doc": self.doc_index[0][1] if self.doc_index else None,
+            "theme_tokens": dict(getattr(root, "_martin_theme_tokens", {}) or {}),
+        }
+
+    def open_or_raise_qt_window(self):
+        self.runtime_manager.ensure_running(force_restart=False)
+
+    def restart_qt_window(self):
+        self.runtime_manager.ensure_running(force_restart=True)
+
+    def stop_qt_window(self):
+        self.runtime_manager.stop_runtime(force=False)
+
+    def read_runtime_state(self):
+        return self.runtime_manager.read_state()
+
+    def on_hide(self):
+        return None
+
+    def on_unload(self):
+        if self.resolved_view_backend == "qt":
+            self.stop_qt_window()

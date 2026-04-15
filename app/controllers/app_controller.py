@@ -33,6 +33,7 @@ from app.module_registry import ModuleRegistry
 from app.security import gatekeeper
 from app.theme_manager import apply_readability_overrides, normalize_theme, resolve_base_theme
 from app.utils import external_path, local_or_resource_path, resource_path
+from app.layout_manager_dispatcher import LayoutManagerMiniDispatcher
 from app.models.app_model import AppModel
 from app.views.app_view import AppShellView
 from app.app_platform import get_work_area_insets
@@ -84,6 +85,7 @@ class Dispatcher:
         self.model.window_alpha_supported = self._supports_window_alpha()
         self.model.module_preload_poll_seconds = MODULE_PRELOAD_POLL_SECONDS
         self.update_coordinator = UpdateCoordinator(self.root)
+        self.layout_manager_dispatcher = LayoutManagerMiniDispatcher(self)
         self.refresh_animation_settings()
         self.root.protocol("WM_DELETE_WINDOW", self.shutdown)
         self.data_request_worker = DataRequestWorker(self._enqueue_on_main_thread, exception_logger=self._log_data_request_error)
@@ -334,9 +336,8 @@ class Dispatcher:
         self.model.managed_source_signature = tuple(new_signature or ())
         self.model.managed_source_generation += 1
         self.model.preloaded_module_names.clear()
-        with self.model.preload_data_lock:
-            self.shared_data.pop("layout_manager_preload", None)
-            self.shared_data["layout_manager_preload_pending"] = False
+        if self.layout_manager_dispatcher is not None:
+            self.layout_manager_dispatcher.invalidate_preload()
         for module_name in list(self.loaded_modules):
             if module_name == "main":
                 continue
@@ -420,6 +421,7 @@ class Dispatcher:
         if self.data_request_worker is not None:
             self.data_request_worker.stop()
         self.stop_module_preloader()
+        self.layout_manager_dispatcher.shutdown()
         gatekeeper.remove_session_listener(self._handle_gatekeeper_session_change)
         try:
             self.root.destroy()
@@ -904,72 +906,20 @@ class Dispatcher:
     def _log_data_request_error(self, description, exc):
         log_exception(f"dispatcher.data_request.{description}", exc)
 
-    def _build_layout_manager_preload_payload(self):
-        from app.models.layout_manager_model import LayoutManagerModel
-
-        model = LayoutManagerModel()
-        config, source_path, form_info = model.load_current_config()
-        return {
-            "managed_source_generation": self.model.managed_source_generation,
-            "form_id": form_info.get("id"),
-            "source_path": source_path,
-            "save_path": form_info.get("save_path", source_path),
-            "form_info": dict(form_info),
-            "config": config,
-            "preview_grid": model.build_preview_grid(config),
-            "guardrails": model.build_editor_guardrails(config),
-            "protected_row_field_lookup": model.get_protected_row_field_lookup(config),
-            "loaded_at": time.time(),
-        }
-
-    def _store_layout_manager_preload_payload(self, payload):
-        with self.model.preload_data_lock:
-            self.shared_data["layout_manager_preload"] = payload
-            self.shared_data["layout_manager_preload_pending"] = False
-
     def invalidate_layout_manager_preload(self):
-        with self.model.preload_data_lock:
-            self.shared_data.pop("layout_manager_preload", None)
-            self.shared_data["layout_manager_preload_pending"] = False
+        if self.layout_manager_dispatcher is None:
+            return
+        self.layout_manager_dispatcher.invalidate_preload()
 
     def schedule_layout_manager_preload(self, force=False):
-        if self.data_request_worker is None:
+        if self.layout_manager_dispatcher is None:
             return
-
-        with self.model.preload_data_lock:
-            if not force:
-                cached_payload = self.shared_data.get("layout_manager_preload")
-                if isinstance(cached_payload, dict):
-                    if cached_payload.get("managed_source_generation") == self.model.managed_source_generation:
-                        return
-                if self.shared_data.get("layout_manager_preload_pending"):
-                    return
-            self.shared_data["layout_manager_preload_pending"] = True
-
-        def on_success(payload):
-            self._store_layout_manager_preload_payload(payload)
-
-        def on_error(exc):
-            with self.model.preload_data_lock:
-                self.shared_data["layout_manager_preload_pending"] = False
-            log_exception("dispatcher.layout_manager_preload", exc)
-
-        self.data_request_worker.submit(
-            self._build_layout_manager_preload_payload,
-            on_success=on_success,
-            on_error=on_error,
-            description="layout_manager_preload",
-        )
+        self.layout_manager_dispatcher.schedule_preload(force=force)
 
     def consume_layout_manager_preload(self):
-        with self.model.preload_data_lock:
-            payload = self.shared_data.pop("layout_manager_preload", None)
-            if not isinstance(payload, dict):
-                return None
-            if payload.get("managed_source_generation") != self.model.managed_source_generation:
-                return None
-            self.shared_data["layout_manager_preload_pending"] = False
-            return payload
+        if self.layout_manager_dispatcher is None:
+            return None
+        return self.layout_manager_dispatcher.consume_preload()
 
     def load_module(self, module_name, use_transition=True, ensure_authorized=True):
         # Tk widget creation stays on the UI thread; worker threads may only enqueue load requests.
@@ -1053,11 +1003,17 @@ class Dispatcher:
             module_frame = tb.Frame(self.content_area, style="Martin.Surface.TFrame")
             module_frame.pack(fill=BOTH, expand=True)
 
-            module = self.import_managed_module(module_name, force_fresh=False)
+            module_instance = None
+            if module_name == "layout_manager" and self.layout_manager_dispatcher is not None:
+                module_instance = self.layout_manager_dispatcher.launch(module_frame)
+            else:
+                module = self.import_managed_module(module_name, force_fresh=False)
+                if hasattr(module, "get_ui"):
+                    module_instance = module.get_ui(module_frame, self)
 
-            if hasattr(module, "get_ui"):
+            if module_instance is not None:
                 self.active_module_name = module_name
-                self.active_module_instance = module.get_ui(module_frame, self)
+                self.active_module_instance = module_instance
                 self.active_module_frame = module_frame
                 if hasattr(self.active_module_instance, "apply_theme"):
                     self.active_module_instance.apply_theme()

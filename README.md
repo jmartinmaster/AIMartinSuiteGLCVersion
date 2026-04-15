@@ -46,9 +46,31 @@ Production Logging Center is a desktop production support application for GLC op
 - `python project_librarian.py ai-models --ollama-host 127.0.0.1:11436` lists the models reachable on the selected Ollama host and highlights the preferred or recommended option.
 - `python project_librarian.py ai-doctor --ollama-host 127.0.0.1:11436` diagnoses delegate-script availability, Ollama connectivity, and model readiness before you try an AI-assisted command.
 - `python project_librarian.py ai-summary --ollama-host 127.0.0.1:11436` uses the local Qwen delegate as an optional helper for repo-change summaries when Ollama is available, and now reports clearer host/model diagnostics when it is not.
+- `python project_librarian.py mcp-server --transport streamable-http --host 127.0.0.1 --port 8765` starts a persistent MCP server that keeps the librarian workspace loaded in RAM for shared reuse.
+- The MCP server runs as a dual-thread setup by default: one thread serves MCP requests and one background refresh worker updates the cached workspace on a timer. Use `--refresh-interval 0` if you want a fully manual refresh model.
+- Default HTTP endpoint for shared use is `http://127.0.0.1:8765/mcp`, and the server exposes MCP tools for refresh, status, stats, search, changes, history, file excerpts, docs/changelog drafts, and AI diagnostics.
+- The same server now also serves a human-facing dashboard at `http://127.0.0.1:8765/`, including live in-page search, file excerpt viewing, refresh without a page reload, changed-file browsing, refresh history, and a docs/changelog draft center.
+- The dashboard draft center can preview documentation and changelog drafts from the shared cache, write them to draft artifacts, or apply them back to `README.md` and `CHANGELOG.md`.
+- `python project_librarian.py mcp-server --auth-token auto` enables a simple shared token for both the browser dashboard and the HTTP MCP endpoint.
 - `python project_librarian.py repl --refresh` loads the project into RAM and keeps an interactive search session open for faster repeated lookups, file inspection, and draft generation.
 - `python build.py --librarian-only` runs the same refresh path without starting a package build.
 - The librarian is intentionally deterministic first: it uses the existing AST symbol index plus a text catalog of the repo for core search and tracking, and only uses a local model when you explicitly call the AI helper commands.
+
+### Shared MCP Mode
+
+- Start it in your own terminal with:
+	`python project_librarian.py mcp-server --transport streamable-http --host 127.0.0.1 --port 8765`
+- Or start it with a generated shared token:
+	`python project_librarian.py mcp-server --transport streamable-http --host 127.0.0.1 --port 8765 --auth-token auto`
+- Open the browser dashboard at:
+	`http://127.0.0.1:8765/`
+- If token auth is enabled, open the printed dashboard login URL or browse to:
+	`http://127.0.0.1:8765/?token=<token>`
+- Point any MCP-capable client at:
+	`http://127.0.0.1:8765/mcp`
+- If token auth is enabled, send either `Authorization: Bearer <token>`, the `X-Project-Librarian-Token: <token>` header, or `?token=<token>` on the MCP URL.
+- Keep the process running to preserve the in-memory workspace across multiple client requests.
+- Use `python project_librarian.py refresh` or the MCP `refresh` tool when you want an immediate rebuild outside the background refresh cycle.
 
 ## Two Working Modes
 

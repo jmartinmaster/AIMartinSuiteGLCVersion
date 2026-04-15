@@ -11,6 +11,7 @@ data/
 exports/
 logs/
 settings.json
+rates.json
 Sample_Data/
 .vault
 
@@ -18,7 +19,9 @@ Sample_Data/
 *.bak
 data/backups/
 data/pending/history/
-
+AIMartinSuiteGLCVersion-backup-20260415-071040.git
+AIMartinSuiteGLCVersion-rewrite-20260415-071040.git
+remove_rates_and_dist.sh
 # Build Artifacts
 build/
 dist/data

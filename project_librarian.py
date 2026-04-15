@@ -1,12 +1,17 @@
 import argparse
+import csv
+import html
 import json
 import os
 import re
+import secrets
 import shlex
 import shutil
 import subprocess
+import threading
+import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 from symbol_index import DEFAULT_OUTPUT_DIR as SYMBOL_INDEX_OUTPUT_DIR, JSON_OUTPUT_NAME as SYMBOL_INDEX_JSON_NAME, SymbolIndexError, generate_symbol_index
@@ -16,10 +21,20 @@ DEFAULT_OUTPUT_DIR = Path("build") / "project-librarian"
 SNAPSHOT_NAME = "librarian-snapshot.json"
 HISTORY_NAME = "change-history.jsonl"
 CORPUS_NAME = "search-corpus.json"
+EXCEL_LIBRARY_CONFIG_NAME = "excel_library_config.json"
+EXCEL_EXTENSIONS = (".xlsx", ".xls", ".xlsm", ".xlsb", ".csv")
+DEFAULT_EXCEL_KEYWORD_COLUMNS = ["Downtime Code", "Shop Order", "Part Number", "Date"]
 DRAFTS_DIR_NAME = "drafts"
 AI_CONTEXT_DIR_NAME = "ai-context"
 SNAPSHOT_VERSION = 2
 DEFAULT_AI_MODEL = "qwen2.5-coder:14b"
+DEFAULT_MCP_TRANSPORT = "streamable-http"
+DEFAULT_MCP_HOST = "127.0.0.1"
+DEFAULT_MCP_PORT = 8765
+DEFAULT_REFRESH_INTERVAL_SECONDS = 30.0
+HTTP_AUTH_ENV_NAME = "PROJECT_LIBRARIAN_TOKEN"
+HTTP_AUTH_COOKIE_NAME = "project_librarian_token"
+HTTP_AUTH_HEADER_NAME = "X-Project-Librarian-Token"
 README_TARGET_NAME = "README.md"
 CHANGELOG_TARGET_NAME = "CHANGELOG.md"
 DOC_BLOCK_START = "<!-- project-librarian:docs:start -->"
@@ -133,6 +148,235 @@ class LibrarianWorkspace:
     @property
     def file_lookup(self):
         return {record.get("path"): record for record in self.file_records if record.get("path")}
+
+
+class LibrarianService:
+    def __init__(
+        self,
+        repo_root=None,
+        output_dir=None,
+        refresh_if_missing=True,
+        refresh_first=False,
+        refresh_interval_seconds=DEFAULT_REFRESH_INTERVAL_SECONDS,
+        start_refresh_worker=True,
+    ):
+        self.repo_root = Path(repo_root or _repo_root_from_here()).resolve()
+        self.output_dir = _resolve_output_dir(self.repo_root, output_dir)
+        self.refresh_interval_seconds = max(0.0, float(refresh_interval_seconds or 0.0))
+        self._lock = threading.RLock()
+        self._stop_event = threading.Event()
+        self._refresh_thread = None
+        self._last_refresh_at = None
+        self._last_refresh_error = None
+        self._workspace = LibrarianWorkspace.load(
+            repo_root=self.repo_root,
+            output_dir=self.output_dir,
+            refresh_if_missing=refresh_if_missing,
+            refresh_first=refresh_first,
+        )
+        self._last_refresh_at = _utc_now_text()
+        if start_refresh_worker and self.refresh_interval_seconds > 0:
+            self.start_refresh_worker()
+
+    def start_refresh_worker(self):
+        if self._refresh_thread is not None and self._refresh_thread.is_alive():
+            return
+        self._stop_event.clear()
+        self._refresh_thread = threading.Thread(
+            target=self._refresh_loop,
+            name="project-librarian-refresh",
+            daemon=True,
+        )
+        self._refresh_thread.start()
+
+    def stop(self, join_timeout=2.0):
+        self._stop_event.set()
+        if self._refresh_thread is not None and self._refresh_thread.is_alive():
+            self._refresh_thread.join(timeout=max(0.1, float(join_timeout or 0.1)))
+
+    def _refresh_loop(self):
+        while not self._stop_event.wait(self.refresh_interval_seconds):
+            try:
+                self.refresh()
+            except Exception as exc:
+                self._last_refresh_error = str(exc)
+
+    def _with_workspace(self, callback):
+        with self._lock:
+            return callback(self._workspace)
+
+    def refresh(self):
+        def _refresh(workspace):
+            result = workspace.refresh()
+            self._last_refresh_at = _utc_now_text()
+            self._last_refresh_error = None
+            return result
+
+        return self._with_workspace(_refresh)
+
+    def status_payload(self):
+        def _build(workspace):
+            summary = workspace.snapshot.get("summary", {})
+            git_snapshot = workspace.snapshot.get("git", {})
+            return {
+                "repo_root": str(self.repo_root),
+                "output_dir": str(self.output_dir),
+                "branch": git_snapshot.get("branch", "unknown"),
+                "files": summary.get("files", 0),
+                "symbols": summary.get("symbols", 0),
+                "changed_files": summary.get("changed_files", 0),
+                "history_entries": summary.get("history_entries", len(workspace.history)),
+                "refresh_interval_seconds": self.refresh_interval_seconds,
+                "refresh_worker_running": bool(self._refresh_thread and self._refresh_thread.is_alive()),
+                "last_refresh_at": self._last_refresh_at,
+                "last_refresh_error": self._last_refresh_error,
+            }
+
+        return self._with_workspace(_build)
+
+    def stats_text(self):
+        return self._with_workspace(format_workspace_stats)
+
+    def snapshot_payload(self):
+        return self._with_workspace(lambda workspace: workspace.snapshot)
+
+    def history_payload(self, limit=10):
+        def _build(workspace):
+            return {
+                "count": min(len(workspace.history), max(1, int(limit))),
+                "history": workspace.history[-max(1, int(limit)):],
+                "formatted": format_history_report(workspace.history, limit=limit),
+            }
+
+        return self._with_workspace(_build)
+
+    def search_payload(self, query, scope="all", limit=20, area=None, changed_only=False, path_filter=None):
+        def _build(workspace):
+            results = search_snapshot(
+                workspace.snapshot,
+                workspace.corpus,
+                query,
+                scope=scope,
+                limit=limit,
+                area=area,
+                changed_only=changed_only,
+                path_filter=path_filter,
+            )
+            return {
+                "count": len(results),
+                "results": results,
+                "formatted": format_search_results(results),
+            }
+
+        return self._with_workspace(_build)
+
+    def changes_payload(self, limit=20, status_filter=None, area=None, path_filter=None, include_commits=True):
+        def _build(workspace):
+            filtered = _filter_changed_files(workspace.snapshot, status_filter=status_filter, area=area, path_filter=path_filter)
+            return {
+                "count": len(filtered),
+                "changes": filtered[: max(1, int(limit))],
+                "formatted": format_change_report(
+                    workspace.snapshot,
+                    limit=limit,
+                    status_filter=status_filter,
+                    area=area,
+                    path_filter=path_filter,
+                    include_commits=include_commits,
+                ),
+            }
+
+        return self._with_workspace(_build)
+
+    def show_excerpt(self, path_text, query=None, line=None, context=3):
+        return self._with_workspace(lambda workspace: show_file_excerpt(workspace, path_text, query=query, line=line, context=context))
+
+    def docs_draft_payload(self, title=None, changed_only=True, output_path=None, apply=False, target_path=README_TARGET_NAME):
+        def _build(workspace):
+            content = generate_docs_draft(workspace, title=title, changed_only=changed_only)
+            payload = {
+                "content": content,
+                "changed_only": changed_only,
+            }
+            if apply:
+                resolved_path = apply_docs_update(self.repo_root, content, target_path=target_path)
+                payload["applied_path"] = str(resolved_path)
+            else:
+                resolved_path = _write_generated_output(
+                    workspace.output_dir,
+                    DRAFTS_DIR_NAME,
+                    "docs_draft",
+                    content,
+                    output_path=output_path,
+                    output_base_dir=self.repo_root,
+                )
+                payload["output_path"] = str(resolved_path)
+            return payload
+
+        return self._with_workspace(_build)
+
+    def changelog_draft_payload(self, version_text=None, release_date=None, changed_only=True, output_path=None, apply=False, target_path=CHANGELOG_TARGET_NAME):
+        def _build(workspace):
+            content = generate_changelog_draft(
+                workspace,
+                version_text=version_text,
+                release_date=release_date,
+                changed_only=changed_only,
+            )
+            payload = {
+                "content": content,
+                "changed_only": changed_only,
+                "version": version_text or "Unreleased",
+            }
+            if apply:
+                resolved_path = apply_changelog_update(
+                    self.repo_root,
+                    content,
+                    version_label=version_text or "Unreleased",
+                    target_path=target_path,
+                )
+                payload["applied_path"] = str(resolved_path)
+            else:
+                resolved_path = _write_generated_output(
+                    workspace.output_dir,
+                    DRAFTS_DIR_NAME,
+                    "changelog_draft",
+                    content,
+                    output_path=output_path,
+                    output_base_dir=self.repo_root,
+                )
+                payload["output_path"] = str(resolved_path)
+            return payload
+
+        return self._with_workspace(_build)
+
+    def ai_models_payload(self, preferred_model=DEFAULT_AI_MODEL, ollama_host=None):
+        status = collect_ai_runtime_status(self.repo_root, preferred_model=preferred_model, ollama_host=ollama_host)
+        return {
+            "status": status,
+            "formatted": format_ai_model_list(status),
+        }
+
+    def ai_doctor_payload(self, preferred_model=DEFAULT_AI_MODEL, ollama_host=None):
+        status = collect_ai_runtime_status(self.repo_root, preferred_model=preferred_model, ollama_host=ollama_host)
+        return {
+            "status": status,
+            "formatted": format_ai_status_report(status),
+        }
+
+    def ai_summary_payload(self, task, mode="analysis", model=DEFAULT_AI_MODEL, changed_only=True, ollama_host=None):
+        def _build(workspace):
+            result = run_ai_summary(
+                workspace,
+                task=task,
+                mode=mode,
+                model=model,
+                changed_only=changed_only,
+                ollama_host=ollama_host,
+            )
+            return result
+
+        return self._with_workspace(_build)
 
 
 def _repo_root_from_here():
@@ -265,10 +509,12 @@ def _run_git_status(repo_root):
         index += 1
         if not entry:
             continue
-        status = entry[:2].strip() or "??"
+        raw_status = entry[:2]
+        status = raw_status.strip() or "??"
         path_text = entry[3:]
         change_record = {
             "status": status,
+            "xy": raw_status,
             "path": path_text,
             "area": _file_area(path_text),
         }
@@ -313,6 +559,82 @@ def _collect_recent_commits(repo_root, limit=5):
             }
         )
     return commits
+
+
+def _collect_git_status_payload(repo_root, commit_limit=12):
+    branch_name = _run_git_command(repo_root, "rev-parse", "--abbrev-ref", "HEAD") or "unknown"
+    upstream_name = _run_git_command(repo_root, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}")
+    ahead_count = 0
+    behind_count = 0
+    if upstream_name:
+        counts_result = _run_shell_command(
+            ["git", "rev-list", "--left-right", "--count", f"{upstream_name}...HEAD"],
+            cwd=repo_root,
+        )
+        if counts_result.returncode == 0:
+            parts = counts_result.stdout.strip().split()
+            if len(parts) >= 2:
+                behind_count = _coerce_int(parts[0], 0, minimum=0, maximum=999999)
+                ahead_count = _coerce_int(parts[1], 0, minimum=0, maximum=999999)
+
+    changed_files = _run_git_status(repo_root)
+    return {
+        "branch": branch_name,
+        "upstream": upstream_name,
+        "ahead": ahead_count,
+        "behind": behind_count,
+        "changed_files": changed_files,
+        "changed_count": len(changed_files),
+        "status_counts": _counts_from_items(changed_files, "status"),
+        "area_counts": _counts_from_items(changed_files, "area"),
+        "recent_commits": _collect_recent_commits(repo_root, limit=commit_limit),
+    }
+
+
+def _run_git_action(repo_root, args):
+    completed = _run_shell_command(["git", *args], cwd=repo_root)
+    stdout_text = (completed.stdout or "").strip()
+    stderr_text = (completed.stderr or "").strip()
+    if completed.returncode != 0:
+        detail = stderr_text or stdout_text or f"git {' '.join(args)} failed"
+        raise ProjectLibrarianError(detail)
+    return {
+        "ok": True,
+        "stdout": stdout_text,
+        "stderr": stderr_text,
+        "command": ["git", *args],
+    }
+
+
+def _read_git_diff_text(repo_root, path_text=None, staged=False):
+    command = ["git", "diff", "--no-ext-diff", "--color=never"]
+    if staged:
+        command.append("--staged")
+    if path_text:
+        command.extend(["--", path_text])
+    completed = _run_shell_command(command, cwd=repo_root)
+    if completed.returncode != 0:
+        raise ProjectLibrarianError((completed.stderr or completed.stdout or "Unable to read git diff.").strip())
+    return completed.stdout or ""
+
+
+def _read_git_commit_review(repo_root, commit_ref):
+    completed = _run_shell_command(
+        [
+            "git",
+            "show",
+            "--no-color",
+            "--no-ext-diff",
+            "--stat",
+            "--patch",
+            "--find-renames",
+            str(commit_ref),
+        ],
+        cwd=repo_root,
+    )
+    if completed.returncode != 0:
+        raise ProjectLibrarianError((completed.stderr or completed.stdout or "Unable to load commit review.").strip())
+    return completed.stdout or ""
 
 
 def _counts_from_items(items, key_name):
@@ -1325,6 +1647,2444 @@ def _resolve_ai_model(ai_status, requested_model):
     raise ProjectLibrarianError("No local Ollama model is available. Run 'project_librarian.py ai-models' or 'project_librarian.py ai-doctor' first.")
 
 
+def _html_escape(value):
+    return html.escape(str(value), quote=True)
+
+
+def _parse_bool(value):
+    if isinstance(value, bool):
+        return value
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _resolve_http_auth_token(auth_token=None):
+    candidate = auth_token if auth_token is not None else os.environ.get(HTTP_AUTH_ENV_NAME)
+    normalized = str(candidate or "").strip()
+    if not normalized:
+        return None, False
+    if normalized.lower() == "auto":
+        return secrets.token_urlsafe(24), True
+    return normalized, False
+
+
+def _request_token_candidates(request):
+    authorization_header = str(request.headers.get("authorization", "")).strip()
+    if authorization_header.lower().startswith("bearer "):
+        yield authorization_header.split(" ", 1)[1].strip()
+
+    header_token = str(request.headers.get(HTTP_AUTH_HEADER_NAME, "")).strip()
+    if header_token:
+        yield header_token
+
+    query_token = str(request.query_params.get("token", "")).strip()
+    if query_token:
+        yield query_token
+
+    cookie_token = str(request.cookies.get(HTTP_AUTH_COOKIE_NAME, "")).strip()
+    if cookie_token:
+        yield cookie_token
+
+
+def _request_has_valid_token(request, auth_token):
+    if not auth_token:
+        return True
+    for candidate in _request_token_candidates(request):
+        if candidate and secrets.compare_digest(candidate, auth_token):
+            return True
+    return False
+
+
+def _query_token_matches(request, auth_token):
+    if not auth_token:
+        return False
+    query_token = str(request.query_params.get("token", "")).strip()
+    return bool(query_token) and secrets.compare_digest(query_token, auth_token)
+
+
+def _coerce_int(value, default, minimum=1, maximum=500):
+    try:
+        normalized = int(value)
+    except (TypeError, ValueError):
+        normalized = int(default)
+    return max(minimum, min(maximum, normalized))
+
+
+def _json_text_for_html(value):
+    return json.dumps(value, ensure_ascii=True).replace("</", "<\\/")
+
+
+def _dashboard_bootstrap_payload(service):
+    return {
+        "status": service.status_payload(),
+        "changes": service.changes_payload(limit=12, include_commits=False),
+        "history": service.history_payload(limit=5),
+        "areas": list(AREA_ORDER),
+        "scopes": ["all", "symbols", "text", "paths"],
+        "docs_target": README_TARGET_NAME,
+        "changelog_target": CHANGELOG_TARGET_NAME,
+    }
+
+
+def _render_login_html():
+    return """<!doctype html>
+<html lang='en'>
+<head>
+    <meta charset='utf-8'>
+    <meta name='viewport' content='width=device-width, initial-scale=1'>
+    <title>Project Librarian Login</title>
+    <style>
+        body {
+            margin: 0;
+            min-height: 100vh;
+            display: grid;
+            place-items: center;
+            background: radial-gradient(circle at top, #173041 0%, #0b141b 65%);
+            color: #e7f2f8;
+            font-family: 'Segoe UI', sans-serif;
+        }
+        .panel {
+            width: min(520px, calc(100vw - 32px));
+            background: rgba(14, 25, 34, 0.96);
+            border: 1px solid #294556;
+            border-radius: 18px;
+            padding: 24px;
+            box-sizing: border-box;
+        }
+        h1 { margin: 0 0 10px; }
+        p { color: #a9c0cd; line-height: 1.55; }
+        label { display: block; margin: 18px 0 8px; color: #cde0e8; }
+        input {
+            width: 100%;
+            box-sizing: border-box;
+            background: #091117;
+            color: #eef8fb;
+            border: 1px solid #355466;
+            border-radius: 12px;
+            padding: 12px 14px;
+        }
+        button {
+            margin-top: 16px;
+            background: #14b8a6;
+            color: #062127;
+            border: none;
+            border-radius: 12px;
+            padding: 12px 16px;
+            font-weight: 700;
+            cursor: pointer;
+        }
+        code {
+            display: inline-block;
+            background: #091117;
+            border: 1px solid #24404f;
+            border-radius: 8px;
+            padding: 2px 6px;
+        }
+    </style>
+</head>
+<body>
+    <section class='panel'>
+        <h1>Project Librarian</h1>
+        <p>This shared server requires a token before the dashboard or MCP endpoint can be used.</p>
+        <form method='get' action='/'>
+            <label for='token'>Browser token</label>
+            <input id='token' name='token' type='password' autocomplete='current-password' autofocus>
+            <button type='submit'>Open Dashboard</button>
+        </form>
+        <p>MCP clients can authenticate with <code>Authorization: Bearer &lt;token&gt;</code>, the <code>""" + HTTP_AUTH_HEADER_NAME + """</code> header, or a <code>?token=...</code> query parameter.</p>
+    </section>
+</body>
+</html>
+"""
+
+
+def _render_dashboard_html(auth_enabled=False, bootstrap_payload=None):
+    auth_chip = "<span class='chip locked'>Token Protected</span>" if auth_enabled else "<span class='chip'>Local Only</span>"
+    logout_markup = "<form method='post' action='/logout'><button type='submit'>Logout</button></form>" if auth_enabled else ""
+    template = """<!doctype html>
+<html lang='en'>
+<head>
+    <meta charset='utf-8'>
+    <meta name='viewport' content='width=device-width, initial-scale=1'>
+    <title>Project Librarian</title>
+    <style>
+        :root {
+            color-scheme: dark;
+            --page-bg: #091117;
+            --page-grad: radial-gradient(circle at top left, #123446 0%, #091117 62%);
+            --panel-bg: rgba(15, 28, 37, 0.94);
+            --panel-strong: #102431;
+            --panel-border: #274557;
+            --text-main: #eef8fb;
+            --text-muted: #94adba;
+            --accent: #19c2af;
+            --accent-strong: #86fff0;
+            --warn: #f59e0b;
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            min-height: 100vh;
+            background: var(--page-grad);
+            color: var(--text-main);
+            font-family: 'Segoe UI', sans-serif;
+        }
+        a { color: var(--accent-strong); text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        button, input, select {
+            font: inherit;
+        }
+        button {
+            cursor: pointer;
+            border: 1px solid #315264;
+            border-radius: 12px;
+            background: #10202a;
+            color: var(--text-main);
+            padding: 10px 14px;
+        }
+        button.primary {
+            background: var(--accent);
+            color: #052128;
+            border: none;
+            font-weight: 700;
+        }
+        button.ghost {
+            background: transparent;
+        }
+        input, select, textarea {
+            width: 100%;
+            border: 1px solid #355466;
+            border-radius: 12px;
+            background: #0b161d;
+            color: var(--text-main);
+            padding: 11px 12px;
+        }
+        textarea {
+            min-height: 220px;
+            resize: vertical;
+        }
+        .shell {
+            max-width: 1440px;
+            margin: 0 auto;
+            padding: 24px;
+        }
+        .hero {
+            display: flex;
+            justify-content: space-between;
+            gap: 18px;
+            align-items: flex-start;
+            margin-bottom: 22px;
+        }
+        .hero h1 {
+            margin: 0 0 8px;
+            font-size: clamp(2rem, 3vw, 2.6rem);
+        }
+        .hero p {
+            margin: 0;
+            color: var(--text-muted);
+            max-width: 820px;
+            line-height: 1.55;
+        }
+        .hero-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            justify-content: flex-end;
+            align-items: center;
+        }
+        .hero-actions form {
+            margin: 0;
+        }
+        .chip {
+            display: inline-flex;
+            align-items: center;
+            border: 1px solid #305061;
+            border-radius: 999px;
+            padding: 7px 12px;
+            color: var(--accent-strong);
+            background: rgba(18, 44, 53, 0.72);
+        }
+        .chip.locked {
+            color: #fed7aa;
+            border-color: #6b4e22;
+            background: rgba(88, 57, 13, 0.45);
+        }
+        .statusbar {
+            margin: 0 0 18px;
+            padding: 12px 16px;
+            border-radius: 14px;
+            border: 1px solid var(--panel-border);
+            background: rgba(12, 24, 32, 0.92);
+            color: var(--text-muted);
+        }
+        .statusbar strong {
+            color: var(--text-main);
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+        .card, .panel {
+            background: var(--panel-bg);
+            border: 1px solid var(--panel-border);
+            border-radius: 18px;
+            box-shadow: 0 16px 48px rgba(0, 0, 0, 0.22);
+        }
+        .card {
+            padding: 14px;
+        }
+        .label {
+            font-size: 0.8rem;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: var(--text-muted);
+            margin-bottom: 6px;
+        }
+        .value {
+            font-size: 1.08rem;
+            font-weight: 700;
+            word-break: break-word;
+        }
+        .layout {
+            display: grid;
+            grid-template-columns: minmax(0, 1.3fr) minmax(320px, 0.9fr);
+            gap: 18px;
+        }
+        .panel {
+            padding: 18px;
+            margin-bottom: 18px;
+        }
+        .panel h2 {
+            margin: 0 0 14px;
+            font-size: 1.05rem;
+        }
+        .controls {
+            display: grid;
+            grid-template-columns: minmax(0, 2fr) repeat(3, minmax(110px, 1fr));
+            gap: 10px;
+            align-items: end;
+        }
+        .controls .wide {
+            grid-column: span 2;
+        }
+        .inline {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .checkbox {
+            display: inline-flex;
+            gap: 8px;
+            align-items: center;
+            color: var(--text-muted);
+        }
+        .checkbox input {
+            width: auto;
+        }
+        .split {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+            gap: 14px;
+        }
+        .results-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.94rem;
+        }
+        .results-table th,
+        .results-table td {
+            text-align: left;
+            padding: 10px;
+            border-top: 1px solid #223845;
+            vertical-align: top;
+        }
+        .results-table thead th {
+            border-top: none;
+            color: var(--text-muted);
+            font-weight: 600;
+        }
+        .results-table td button,
+        .list button {
+            padding: 0;
+            border: none;
+            background: none;
+            color: var(--accent-strong);
+            text-align: left;
+        }
+        .list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        .list li {
+            padding: 10px 0;
+            border-top: 1px solid #213745;
+        }
+        .list li:first-child {
+            padding-top: 0;
+            border-top: none;
+        }
+        .meta {
+            display: block;
+            margin-top: 4px;
+            color: var(--text-muted);
+            font-size: 0.88rem;
+        }
+        .preview {
+            margin: 0;
+            background: #071016;
+            border: 1px solid #223745;
+            border-radius: 14px;
+            padding: 14px;
+            min-height: 260px;
+            overflow: auto;
+            white-space: pre-wrap;
+            line-height: 1.48;
+        }
+        .muted { color: var(--text-muted); }
+        .message {
+            min-height: 1.4em;
+            color: var(--accent-strong);
+            margin-top: 10px;
+        }
+        .message.error {
+            color: #fca5a5;
+        }
+        .draft-actions,
+        .panel-actions {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            flex-wrap: wrap;
+            margin-top: 12px;
+        }
+        .footer-note {
+            margin-top: 8px;
+            color: var(--text-muted);
+            font-size: 0.9rem;
+        }
+        @media (max-width: 1120px) {
+            .layout,
+            .split {
+                grid-template-columns: 1fr;
+            }
+        }
+        @media (max-width: 860px) {
+            .hero {
+                flex-direction: column;
+            }
+            .hero-actions {
+                justify-content: flex-start;
+            }
+            .controls {
+                grid-template-columns: 1fr;
+            }
+            .controls .wide {
+                grid-column: span 1;
+            }
+        }
+        .tab-nav {
+            display: flex;
+            gap: 2px;
+            margin-bottom: 0;
+            border-bottom: 2px solid #1e3647;
+        }
+        .tab-btn {
+            background: transparent;
+            border: 1px solid transparent;
+            border-bottom: none;
+            border-radius: 10px 10px 0 0;
+            color: var(--text-muted);
+            cursor: pointer;
+            font-size: 0.92rem;
+            font-weight: 600;
+            margin-bottom: -2px;
+            padding: 10px 22px;
+            transition: background 0.15s, color 0.15s;
+        }
+        .tab-btn:hover { background: #112030; color: var(--text-main); }
+        .tab-btn.active {
+            background: #0f1e2a;
+            border-color: #1e3647;
+            border-bottom: 2px solid #0f1e2a;
+            color: var(--accent-strong);
+        }
+        .tab-pane { display: none; padding-top: 18px; }
+        .tab-pane.active { display: block; }
+        .split-wide {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+            gap: 14px;
+        }
+        @media (max-width: 860px) {
+            .split-wide { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <div class='shell'>
+        <section class='hero'>
+            <div>
+                <div class='inline'>
+                    <h1>Project Librarian</h1>
+                    __AUTH_CHIP__
+                </div>
+                <p>Shared browser dashboard and MCP server for the same RAM-loaded workspace. Search, file inspection, refresh, and docs or changelog drafting all use the one cached librarian service instead of spinning up a second repo load.</p>
+            </div>
+            <div class='hero-actions'>
+                <a href='/mcp'>MCP Endpoint</a>
+                <a href='/api/status'>Status JSON</a>
+                <button class='primary' id='refresh-button' type='button'>Refresh Cache</button>
+                __LOGOUT_BUTTON__
+            </div>
+        </section>
+
+        <section class='statusbar' id='status-banner'><strong>Loading shared workspace status...</strong></section>
+
+        <section class='grid' id='summary-cards'></section>
+
+        <nav class='tab-nav' role='tablist'>
+            <button class='tab-btn active' data-tab='librarian' role='tab' type='button'>Librarian</button>
+            <button class='tab-btn' data-tab='draft-center' role='tab' type='button'>Draft Center</button>
+            <button class='tab-btn' data-tab='excel-library' role='tab' type='button'>Excel Library</button>
+            <button class='tab-btn' data-tab='git-controls' role='tab' type='button'>Git Controls</button>
+        </nav>
+
+        <div class='tab-pane active' id='tab-librarian'>
+        <div class='layout'>
+            <div>
+                <section class='panel'>
+                    <h2>Search</h2>
+                    <form id='search-form'>
+                        <div class='controls'>
+                            <div>
+                                <label class='label' for='search-query'>Query</label>
+                                <input id='search-query' name='q' type='text' placeholder='Search symbols, paths, or indexed text'>
+                            </div>
+                            <div>
+                                <label class='label' for='search-scope'>Scope</label>
+                                <select id='search-scope' name='scope'></select>
+                            </div>
+                            <div>
+                                <label class='label' for='search-area'>Area</label>
+                                <select id='search-area' name='area'></select>
+                            </div>
+                            <div>
+                                <label class='label' for='search-path-filter'>Path Filter</label>
+                                <input id='search-path-filter' name='path_filter' type='text' placeholder='Optional path filter'>
+                            </div>
+                        </div>
+                        <div class='panel-actions'>
+                            <label class='checkbox'><input id='search-changed-only' name='changed_only' type='checkbox'>Changed only</label>
+                            <button class='primary' type='submit'>Run Search</button>
+                            <button class='ghost' id='search-clear' type='button'>Clear</button>
+                        </div>
+                    </form>
+                    <div class='message' id='search-message'></div>
+                </section>
+
+                <section class='panel'>
+                    <h2>Search Results</h2>
+                    <div id='search-results'><p class='muted'>Run a search to inspect indexed text and symbols without reloading the repository.</p></div>
+                </section>
+
+                <section class='panel'>
+                    <div class='inline' style='justify-content: space-between;'>
+                        <h2>File Excerpt</h2>
+                        <span class='muted' id='excerpt-path'></span>
+                    </div>
+                    <pre class='preview' id='file-excerpt'>Select a changed file or search result to inspect an excerpt here.</pre>
+                </section>
+            </div>
+
+            <div>
+                <section class='panel'>
+                    <h2>Changed Files</h2>
+                    <ul class='list' id='changes-list'></ul>
+                </section>
+
+                <section class='panel'>
+                    <h2>Recent Refreshes</h2>
+                    <ul class='list' id='history-list'></ul>
+                </section>
+            </div>
+        </div>
+        </div>
+
+        <div class='tab-pane' id='tab-draft-center'>
+        <section class='panel'>
+            <h2>Draft Center</h2>
+            <div class='split-wide'>
+                <div>
+                    <div class='inline' style='justify-content: space-between;'>
+                        <h3 style='margin: 0;'>Documentation Draft</h3>
+                        <label class='checkbox'><input id='docs-changed-only' type='checkbox' checked>Changed only</label>
+                    </div>
+                    <div class='controls' style='grid-template-columns: 1fr 1fr;'>
+                        <div>
+                            <label class='label' for='docs-title'>Title</label>
+                            <input id='docs-title' type='text' placeholder='Project Documentation Update Draft'>
+                        </div>
+                        <div>
+                            <label class='label' for='docs-target'>Apply Target</label>
+                            <input id='docs-target' type='text'>
+                        </div>
+                    </div>
+                    <div class='draft-actions'>
+                        <button class='primary' id='docs-preview' type='button'>Preview Draft</button>
+                        <button id='docs-save' type='button'>Write Draft File</button>
+                        <button id='docs-apply' type='button'>Apply to Target</button>
+                    </div>
+                    <div class='message' id='docs-message'></div>
+                    <pre class='preview' id='docs-preview-text'>No documentation draft generated yet.</pre>
+                </div>
+                <div>
+                    <div class='inline' style='justify-content: space-between;'>
+                        <h3 style='margin: 0;'>Changelog Draft</h3>
+                        <label class='checkbox'><input id='changelog-changed-only' type='checkbox' checked>Changed only</label>
+                    </div>
+                    <div class='controls' style='grid-template-columns: 1fr 1fr 1fr;'>
+                        <div>
+                            <label class='label' for='changelog-version'>Version</label>
+                            <input id='changelog-version' type='text' placeholder='Unreleased'>
+                        </div>
+                        <div>
+                            <label class='label' for='changelog-date'>Date</label>
+                            <input id='changelog-date' type='text' placeholder='YYYY-MM-DD'>
+                        </div>
+                        <div>
+                            <label class='label' for='changelog-target'>Apply Target</label>
+                            <input id='changelog-target' type='text'>
+                        </div>
+                    </div>
+                    <div class='draft-actions'>
+                        <button class='primary' id='changelog-preview' type='button'>Preview Draft</button>
+                        <button id='changelog-save' type='button'>Write Draft File</button>
+                        <button id='changelog-apply' type='button'>Apply to Target</button>
+                    </div>
+                    <div class='message' id='changelog-message'></div>
+                    <pre class='preview' id='changelog-preview-text'>No changelog draft generated yet.</pre>
+                </div>
+            </div>
+            <p class='footer-note'>Draft previews are generated from the shared cached workspace and can either be written to draft artifacts or applied back to README and CHANGELOG managed sections.</p>
+        </section>
+        </div>
+
+        <div class='tab-pane' id='tab-excel-library'>
+        <section class='panel'>
+            <h2>Excel Library</h2>
+            <p class='muted' style='margin: 0 0 14px;'>Configure a folder to browse Excel and CSV files. Choose keyword columns (header names like Shop Order/Part Number/Date or column letters like A,B,D) to power search indexing.</p>
+            <div class='controls' style='grid-template-columns: 1fr 2fr auto; align-items: end;'>
+                <div>
+                    <label class='label' for='excel-library-name'>Library Name</label>
+                    <input id='excel-library-name' type='text' placeholder='My Excel Library'>
+                </div>
+                <div>
+                    <label class='label' for='excel-folder-path'>Folder Path</label>
+                    <input id='excel-folder-path' type='text' placeholder='/absolute/path/to/excel/folder'>
+                </div>
+                <button class='primary' id='excel-save-config' type='button'>Save &amp; Scan</button>
+            </div>
+            <div class='controls' style='grid-template-columns: 1fr; margin-top: 10px;'>
+                <div>
+                    <label class='label' for='excel-keyword-columns'>Keyword Columns</label>
+                    <input id='excel-keyword-columns' type='text' placeholder='Downtime Code, Shop Order, Part Number, Date'>
+                </div>
+            </div>
+            <div class='message' id='excel-message'></div>
+        </section>
+
+        <section class='panel' id='excel-files-panel' style='display: none;'>
+            <div class='inline' style='justify-content: space-between; margin-bottom: 14px;'>
+                <h2 id='excel-panel-title' style='margin: 0;'>Excel Files</h2>
+                <button class='ghost' id='excel-rescan' type='button'>Rescan</button>
+            </div>
+            <div id='excel-files-list'></div>
+        </section>
+
+        <section class='panel'>
+            <div class='inline' style='justify-content: space-between; margin-bottom: 12px;'>
+                <h2 style='margin: 0;'>Excel Keyword Search</h2>
+            </div>
+            <div class='controls' style='grid-template-columns: minmax(0, 2fr) auto auto; align-items: end;'>
+                <div>
+                    <label class='label' for='excel-search-query'>Query</label>
+                    <input id='excel-search-query' type='text' placeholder='Search downtime code, shop order, part number, or date'>
+                </div>
+                <button class='primary' id='excel-search-run' type='button'>Search</button>
+                <button class='ghost' id='excel-search-clear' type='button'>Clear</button>
+            </div>
+            <div class='message' id='excel-search-message'></div>
+            <div id='excel-search-results'><p class='muted'>Search results will appear here.</p></div>
+        </section>
+        </div>
+
+        <div class='tab-pane' id='tab-git-controls'>
+        <section class='panel'>
+            <div class='inline' style='justify-content: space-between; margin-bottom: 10px;'>
+                <h2 style='margin: 0;'>Working Tree</h2>
+                <div class='inline'>
+                    <button class='ghost' id='git-refresh' type='button'>Refresh</button>
+                    <button class='ghost' id='git-stage-all' type='button'>Stage All</button>
+                    <button class='ghost' id='git-unstage-all' type='button'>Unstage All</button>
+                </div>
+            </div>
+            <div id='git-status-summary' class='muted'>Git status not loaded yet.</div>
+            <div id='git-changes-list' style='margin-top: 12px;'></div>
+            <div class='message' id='git-message'></div>
+        </section>
+
+        <section class='panel'>
+            <div class='split-wide'>
+                <div>
+                    <h2 style='margin-top: 0;'>Commit &amp; Push</h2>
+                    <div class='controls' style='grid-template-columns: 1fr;'>
+                        <div>
+                            <label class='label' for='git-commit-message'>Commit Message</label>
+                            <input id='git-commit-message' type='text' placeholder='Describe what changed'>
+                        </div>
+                    </div>
+                    <div class='draft-actions'>
+                        <button class='primary' id='git-commit-run' type='button'>Commit</button>
+                        <button id='git-review-head' type='button'>Review HEAD</button>
+                    </div>
+
+                    <div class='controls' style='grid-template-columns: 1fr 1fr auto; margin-top: 12px;'>
+                        <div>
+                            <label class='label' for='git-remote'>Remote</label>
+                            <input id='git-remote' type='text' value='origin'>
+                        </div>
+                        <div>
+                            <label class='label' for='git-branch'>Branch</label>
+                            <input id='git-branch' type='text' placeholder='Current branch'>
+                        </div>
+                        <button class='primary' id='git-push-run' type='button'>Push</button>
+                    </div>
+
+                    <h3 style='margin-bottom: 10px;'>Recent Commits</h3>
+                    <ul class='list' id='git-commits-list'></ul>
+                </div>
+                <div>
+                    <div class='inline' style='justify-content: space-between;'>
+                        <h2 style='margin: 0;'>Review</h2>
+                        <span id='git-review-label' class='muted'></span>
+                    </div>
+                    <pre class='preview' id='git-review-text'>Select a file diff or commit review target.</pre>
+                </div>
+            </div>
+        </section>
+        </div>
+
+    </div>
+
+    <script id='initial-state' type='application/json'>__INITIAL_STATE__</script>
+    <script>
+        const state = {
+            bootstrap: JSON.parse(document.getElementById('initial-state').textContent),
+            lastSearch: null,
+            lastPath: '',
+            lastQueryForExcerpt: '',
+        };
+
+        const byId = (id) => document.getElementById(id);
+        const cardsEl = byId('summary-cards');
+        const changesEl = byId('changes-list');
+        const historyEl = byId('history-list');
+        const searchResultsEl = byId('search-results');
+        const excerptEl = byId('file-excerpt');
+        const excerptPathEl = byId('excerpt-path');
+        const statusBannerEl = byId('status-banner');
+        const searchMessageEl = byId('search-message');
+        const docsMessageEl = byId('docs-message');
+        const changelogMessageEl = byId('changelog-message');
+        const excelMessageEl = byId('excel-message');
+        const excelSearchMessageEl = byId('excel-search-message');
+        const gitMessageEl = byId('git-message');
+
+        function setMessage(element, text, isError = false) {
+            element.textContent = text || '';
+            element.classList.toggle('error', Boolean(isError));
+        }
+
+        function escapeHtml(value) {
+            return String(value ?? '')
+                .replaceAll('&', '&amp;')
+                .replaceAll('<', '&lt;')
+                .replaceAll('>', '&gt;')
+                .replaceAll('"', '&quot;')
+                .replaceAll("'", '&#39;');
+        }
+
+        async function fetchJson(url, options = {}) {
+            const headers = { Accept: 'application/json', ...(options.headers || {}) };
+            if (options.body && !headers['Content-Type']) {
+                headers['Content-Type'] = 'application/json';
+            }
+            const response = await fetch(url, { credentials: 'same-origin', ...options, headers });
+            const contentType = response.headers.get('content-type') || '';
+            const payload = contentType.includes('application/json') ? await response.json() : await response.text();
+            if (!response.ok) {
+                const message = typeof payload === 'string' ? payload : payload.error || payload.message || `Request failed with status ${response.status}`;
+                throw new Error(message);
+            }
+            return payload;
+        }
+
+        function renderSummary(status) {
+            const cards = [
+                ['Branch', status.branch || 'unknown'],
+                ['Files', status.files || 0],
+                ['Symbols', status.symbols || 0],
+                ['Changed Files', status.changed_files || 0],
+                ['History Entries', status.history_entries || 0],
+                ['Last Refresh', status.last_refresh_at || 'unknown'],
+            ];
+            if (status.last_refresh_error) {
+                cards.push(['Refresh Error', status.last_refresh_error]);
+            }
+            cardsEl.innerHTML = cards.map(([label, value]) => `
+                <div class="card">
+                    <div class="label">${escapeHtml(label)}</div>
+                    <div class="value">${escapeHtml(value)}</div>
+                </div>
+            `).join('');
+
+            const workerText = status.refresh_worker_running ? 'running' : 'manual';
+            statusBannerEl.innerHTML = `<strong>${escapeHtml(status.repo_root || '')}</strong> on branch <strong>${escapeHtml(status.branch || 'unknown')}</strong>. Refresh worker: <strong>${escapeHtml(workerText)}</strong> at ${escapeHtml(status.refresh_interval_seconds || 0)}s.`;
+        }
+
+        function renderChanges(payload) {
+            const items = payload.changes || [];
+            if (!items.length) {
+                changesEl.innerHTML = '<li class="muted">No tracked changes.</li>';
+                return;
+            }
+            changesEl.innerHTML = items.map((item) => `
+                <li>
+                    <button type="button" class="open-file" data-path="${escapeHtml(item.path || '')}">${escapeHtml(item.path || '')}</button>
+                    <span class="meta">${escapeHtml(item.status || '?')} · ${escapeHtml(item.area || 'unknown')}</span>
+                </li>
+            `).join('');
+        }
+
+        function renderHistory(payload) {
+            const items = payload.history || [];
+            if (!items.length) {
+                historyEl.innerHTML = '<li class="muted">No refresh history yet.</li>';
+                return;
+            }
+            historyEl.innerHTML = items.map((item) => `
+                <li>
+                    <strong>${escapeHtml(item.generated_at || 'unknown')}</strong>
+                    <span class="meta">${escapeHtml(item.summary?.changed_files || 0)} changed files · ${escapeHtml(item.summary?.symbols || 0)} symbols</span>
+                </li>
+            `).join('');
+        }
+
+        function renderSearchResults(payload) {
+            const items = payload.results || [];
+            if (!items.length) {
+                searchResultsEl.innerHTML = '<p class="muted">No results for the current query.</p>';
+                return;
+            }
+            searchResultsEl.innerHTML = `
+                <table class="results-table">
+                    <thead>
+                        <tr><th>Path</th><th>Scope</th><th>Area</th><th>Line</th><th>Preview</th></tr>
+                    </thead>
+                    <tbody>
+                        ${items.map((item) => `
+                            <tr>
+                                <td><button type="button" class="open-file" data-path="${escapeHtml(item.path || '')}">${escapeHtml(item.path || '')}</button></td>
+                                <td>${escapeHtml(item.scope || '')}</td>
+                                <td>${escapeHtml(item.area || '')}</td>
+                                <td>${escapeHtml(item.line || '')}</td>
+                                <td>${escapeHtml(item.preview || '')}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+        }
+
+        function renderDraftPreview(targetId, payload, actionLabel) {
+            byId(targetId).textContent = payload.content || '';
+            const location = payload.applied_path || payload.output_path || '';
+            return location ? `${actionLabel}: ${location}` : actionLabel;
+        }
+
+        async function loadOverview() {
+            const [status, changes, history] = await Promise.all([
+                fetchJson('/api/status'),
+                fetchJson('/api/changes?limit=12&include_commits=0'),
+                fetchJson('/api/history?limit=5'),
+            ]);
+            state.bootstrap.status = status;
+            state.bootstrap.changes = changes;
+            state.bootstrap.history = history;
+            renderSummary(status);
+            renderChanges(changes);
+            renderHistory(history);
+        }
+
+        async function runSearch() {
+            const query = byId('search-query').value.trim();
+            const scope = byId('search-scope').value;
+            const area = byId('search-area').value;
+            const pathFilter = byId('search-path-filter').value.trim();
+            const changedOnly = byId('search-changed-only').checked;
+            if (!query) {
+                searchResultsEl.innerHTML = '<p class="muted">Run a search to inspect indexed text and symbols without reloading the repository.</p>';
+                setMessage(searchMessageEl, '');
+                state.lastSearch = null;
+                return;
+            }
+
+            const params = new URLSearchParams({ q: query, scope });
+            if (area) {
+                params.set('area', area);
+            }
+            if (pathFilter) {
+                params.set('path_filter', pathFilter);
+            }
+            if (changedOnly) {
+                params.set('changed_only', '1');
+            }
+            const payload = await fetchJson(`/api/search?${params.toString()}`);
+            state.lastSearch = { query, scope, area, pathFilter, changedOnly };
+            renderSearchResults(payload);
+            setMessage(searchMessageEl, `${payload.count || 0} result(s) loaded.`);
+        }
+
+        async function loadExcerpt(pathValue, query = '') {
+            if (!pathValue) {
+                return;
+            }
+            const params = new URLSearchParams({ path: pathValue });
+            if (query) {
+                params.set('query', query);
+            }
+            const payload = await fetchJson(`/api/file?${params.toString()}`);
+            state.lastPath = pathValue;
+            state.lastQueryForExcerpt = query;
+            excerptPathEl.textContent = pathValue;
+            excerptEl.textContent = payload.excerpt || '';
+        }
+
+        async function refreshWorkspace() {
+            await fetchJson('/api/refresh', { method: 'POST', body: JSON.stringify({}) });
+            await loadOverview();
+            if (state.lastSearch) {
+                await runSearch();
+            }
+            if (state.lastPath) {
+                await loadExcerpt(state.lastPath, state.lastQueryForExcerpt);
+            }
+        }
+
+        async function handleDraft(endpoint, targetId, messageEl, payload, successText) {
+            const response = await fetchJson(endpoint, {
+                method: 'POST',
+                body: JSON.stringify(payload),
+            });
+            setMessage(messageEl, renderDraftPreview(targetId, response, successText));
+            return response;
+        }
+
+        function _formatBytes(bytes) {
+            if (bytes < 1024) return `${bytes} B`;
+            if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)} KB`;
+            return `${(bytes / 1048576).toFixed(1)} MB`;
+        }
+
+        function renderExcelFiles(payload) {
+            const panel = byId('excel-files-panel');
+            const listEl = byId('excel-files-list');
+            const titleEl = byId('excel-panel-title');
+            if (payload.error && !(payload.files && payload.files.length)) {
+                setMessage(excelMessageEl, payload.error, true);
+                panel.style.display = 'none';
+                return;
+            }
+            const files = payload.files || [];
+            const folder = payload.folder || '';
+            setMessage(excelMessageEl, `${files.length} file(s) found in ${folder || '(no folder selected)'}.`);
+            titleEl.textContent = `Excel Files (${files.length})`;
+            panel.style.display = '';
+            if (!files.length) {
+                listEl.innerHTML = '<p class="muted">No Excel or CSV files found in this folder.</p>';
+                return;
+            }
+            listEl.innerHTML = `
+                <table class="results-table">
+                    <thead>
+                        <tr><th>File</th><th>Sheets</th><th>Size</th><th>Modified (UTC)</th></tr>
+                    </thead>
+                    <tbody>
+                        ${files.map((f) => `
+                            <tr>
+                                <td>${escapeHtml(f.name || '')}</td>
+                                <td>${f.sheets && f.sheets.length ? escapeHtml(f.sheets.join(', ')) : '<span class="muted">—</span>'}</td>
+                                <td>${escapeHtml(_formatBytes(f.size_bytes || 0))}</td>
+                                <td>${escapeHtml((f.modified_at || '').replace('T', ' ').replace('Z', ''))}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+        }
+
+        function renderExcelSearchResults(payload) {
+            const target = byId('excel-search-results');
+            const items = payload.results || [];
+            if (!items.length) {
+                target.innerHTML = '<p class="muted">No matches found for the current query.</p>';
+                return;
+            }
+            target.innerHTML = `
+                <table class="results-table">
+                    <thead>
+                        <tr><th>File</th><th>Sheet</th><th>Row</th><th>Field</th><th>Value</th></tr>
+                    </thead>
+                    <tbody>
+                        ${items.map((item) => `
+                            <tr>
+                                <td>${escapeHtml(item.file || '')}</td>
+                                <td>${escapeHtml(item.sheet || '')}</td>
+                                <td>${escapeHtml(item.row || '')}</td>
+                                <td>${escapeHtml(item.field || '')}</td>
+                                <td>${escapeHtml(item.value || '')}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+        }
+
+        function _gitHasStagedChanges(change) {
+            const token = String(change.xy || '  ');
+            return token.length >= 1 && token[0] !== ' ' && token[0] !== '?';
+        }
+
+        function _gitHasUnstagedChanges(change) {
+            const token = String(change.xy || '  ');
+            return (token.length >= 2 && token[1] !== ' ') || token.includes('?');
+        }
+
+        function renderGitStatus(payload) {
+            const summaryEl = byId('git-status-summary');
+            const changesEl = byId('git-changes-list');
+            const commitsEl = byId('git-commits-list');
+            const branch = payload.branch || 'unknown';
+            const upstream = payload.upstream || '(no upstream)';
+            byId('git-branch').value = byId('git-branch').value.trim() || branch;
+
+            summaryEl.innerHTML = `
+                <strong>Branch:</strong> ${escapeHtml(branch)}
+                · <strong>Upstream:</strong> ${escapeHtml(upstream)}
+                · <strong>Ahead:</strong> ${escapeHtml(payload.ahead || 0)}
+                · <strong>Behind:</strong> ${escapeHtml(payload.behind || 0)}
+                · <strong>Changed:</strong> ${escapeHtml(payload.changed_count || 0)}
+            `;
+
+            const changes = payload.changed_files || [];
+            if (!changes.length) {
+                changesEl.innerHTML = '<p class="muted">No local changes in working tree.</p>';
+            } else {
+                changesEl.innerHTML = `
+                    <table class="results-table">
+                        <thead>
+                            <tr><th>Status</th><th>Path</th><th>Actions</th></tr>
+                        </thead>
+                        <tbody>
+                            ${changes.map((item) => {
+                                const canStage = _gitHasUnstagedChanges(item);
+                                const canUnstage = _gitHasStagedChanges(item);
+                                const path = escapeHtml(item.path || '');
+                                const status = escapeHtml(item.status || item.xy || '??');
+                                return `
+                                    <tr>
+                                        <td>${status}</td>
+                                        <td>${path}</td>
+                                        <td>
+                                            ${canStage ? `<button type="button" class="git-stage-file" data-path="${path}">stage</button>` : '<span class="muted">—</span>'}
+                                            ${canUnstage ? `<button type="button" class="git-unstage-file" data-path="${path}">unstage</button>` : ''}
+                                            <button type="button" class="git-diff-file" data-path="${path}">diff</button>
+                                        </td>
+                                    </tr>
+                                `;
+                            }).join('')}
+                        </tbody>
+                    </table>
+                `;
+            }
+
+            const commits = payload.recent_commits || [];
+            if (!commits.length) {
+                commitsEl.innerHTML = '<li class="muted">No commits available.</li>';
+                return;
+            }
+            commitsEl.innerHTML = commits.map((commit) => `
+                <li>
+                    <button type="button" class="git-review-commit" data-commit="${escapeHtml(commit.commit || '')}">
+                        ${escapeHtml(commit.short_commit || '')} · ${escapeHtml(commit.subject || '')}
+                    </button>
+                    <span class="meta">${escapeHtml(commit.author || '')} · ${escapeHtml(commit.date || '')}</span>
+                </li>
+            `).join('');
+        }
+
+        function renderGitReview(label, textContent) {
+            byId('git-review-label').textContent = label || '';
+            byId('git-review-text').textContent = textContent || '';
+        }
+
+        async function loadGitStatus() {
+            const payload = await fetchJson('/api/git/status?limit=20');
+            renderGitStatus(payload);
+            return payload;
+        }
+
+        async function loadGitDiff(pathValue) {
+            const params = new URLSearchParams();
+            if (pathValue) {
+                params.set('path', pathValue);
+            }
+            const payload = await fetchJson(`/api/git/diff?${params.toString()}`);
+            renderGitReview(`Diff: ${pathValue || 'working tree'}`, payload.diff || '(no diff)');
+        }
+
+        async function loadGitCommitReview(commitValue = 'HEAD') {
+            const params = new URLSearchParams({ commit: commitValue });
+            const payload = await fetchJson(`/api/git/commit-review?${params.toString()}`);
+            renderGitReview(`Commit: ${payload.commit || commitValue}`, payload.review || '(empty commit review)');
+        }
+
+        async function runGitAction(endpoint, payload, successText) {
+            const response = await fetchJson(endpoint, {
+                method: 'POST',
+                body: JSON.stringify(payload || {}),
+            });
+            setMessage(gitMessageEl, successText || response.message || 'Git command complete.');
+            await loadGitStatus();
+            return response;
+        }
+
+        async function loadExcelFiles() {
+            const payload = await fetchJson('/api/excel-files');
+            renderExcelFiles(payload);
+        }
+
+        async function runExcelSearch() {
+            const query = byId('excel-search-query').value.trim();
+            if (!query) {
+                byId('excel-search-results').innerHTML = '<p class="muted">Search results will appear here.</p>';
+                setMessage(excelSearchMessageEl, '');
+                return;
+            }
+            const params = new URLSearchParams({ q: query, limit: '200' });
+            const payload = await fetchJson(`/api/excel-search?${params.toString()}`);
+            renderExcelSearchResults(payload);
+            setMessage(excelSearchMessageEl, `${payload.count || 0} match(es) for "${query}".`);
+        }
+
+        async function saveExcelConfig() {
+            const name = byId('excel-library-name').value.trim();
+            const folder = byId('excel-folder-path').value.trim();
+            const keywordColumns = byId('excel-keyword-columns').value.trim();
+            if (!folder) {
+                setMessage(excelMessageEl, 'Please enter a folder path.', true);
+                return;
+            }
+            const config = await fetchJson('/api/excel-config', {
+                method: 'POST',
+                body: JSON.stringify({
+                    name: name || 'Excel Library',
+                    folder,
+                    keyword_columns: keywordColumns,
+                }),
+            });
+            setMessage(excelMessageEl, `Saved. Scanning "${config.folder}"…`);
+            await loadExcelFiles();
+        }
+
+        async function loadExcelLibrary() {
+            try {
+                const config = await fetchJson('/api/excel-config');
+                byId('excel-library-name').value = config.name || '';
+                byId('excel-folder-path').value = config.folder || '';
+                const keywords = Array.isArray(config.keyword_columns) ? config.keyword_columns.join(', ') : '';
+                byId('excel-keyword-columns').value = keywords;
+                if (config.folder) {
+                    await loadExcelFiles();
+                }
+            } catch (error) {
+                setMessage(excelMessageEl, error.message, true);
+            }
+        }
+
+        function installSelectOptions() {
+            const scopeSelect = byId('search-scope');
+            scopeSelect.innerHTML = state.bootstrap.scopes.map((scope) => `<option value="${escapeHtml(scope)}">${escapeHtml(scope)}</option>`).join('');
+
+            const areaSelect = byId('search-area');
+            areaSelect.innerHTML = [''].concat(state.bootstrap.areas || []).map((area) => {
+                const label = area || 'all';
+                return `<option value="${escapeHtml(area)}">${escapeHtml(label)}</option>`;
+            }).join('');
+
+            byId('docs-target').value = state.bootstrap.docs_target || 'README.md';
+            byId('changelog-target').value = state.bootstrap.changelog_target || 'CHANGELOG.md';
+        }
+
+        function installEvents() {
+            byId('search-form').addEventListener('submit', async (event) => {
+                event.preventDefault();
+                try {
+                    await runSearch();
+                } catch (error) {
+                    setMessage(searchMessageEl, error.message, true);
+                }
+            });
+
+            byId('search-clear').addEventListener('click', () => {
+                byId('search-query').value = '';
+                byId('search-path-filter').value = '';
+                byId('search-area').value = '';
+                byId('search-scope').value = 'all';
+                byId('search-changed-only').checked = false;
+                searchResultsEl.innerHTML = '<p class="muted">Run a search to inspect indexed text and symbols without reloading the repository.</p>';
+                setMessage(searchMessageEl, '');
+                state.lastSearch = null;
+            });
+
+            document.addEventListener('click', async (event) => {
+                const button = event.target.closest('.open-file');
+                if (!button) {
+                    return;
+                }
+                try {
+                    await loadExcerpt(button.dataset.path || '', byId('search-query').value.trim());
+                } catch (error) {
+                    excerptEl.textContent = error.message;
+                    excerptPathEl.textContent = button.dataset.path || '';
+                }
+            });
+
+            document.addEventListener('click', async (event) => {
+                const stageBtn = event.target.closest('.git-stage-file');
+                const unstageBtn = event.target.closest('.git-unstage-file');
+                const diffBtn = event.target.closest('.git-diff-file');
+                const reviewBtn = event.target.closest('.git-review-commit');
+                if (!stageBtn && !unstageBtn && !diffBtn && !reviewBtn) {
+                    return;
+                }
+                try {
+                    if (stageBtn) {
+                        await runGitAction('/api/git/stage', { path: stageBtn.dataset.path || '' }, `Staged ${stageBtn.dataset.path || ''}`);
+                    } else if (unstageBtn) {
+                        await runGitAction('/api/git/unstage', { path: unstageBtn.dataset.path || '' }, `Unstaged ${unstageBtn.dataset.path || ''}`);
+                    } else if (diffBtn) {
+                        await loadGitDiff(diffBtn.dataset.path || '');
+                    } else if (reviewBtn) {
+                        await loadGitCommitReview(reviewBtn.dataset.commit || 'HEAD');
+                    }
+                } catch (error) {
+                    setMessage(gitMessageEl, error.message, true);
+                }
+            });
+
+            byId('refresh-button').addEventListener('click', async () => {
+                try {
+                    setMessage(searchMessageEl, 'Refreshing shared cache...');
+                    await refreshWorkspace();
+                    setMessage(searchMessageEl, 'Shared cache refreshed.');
+                } catch (error) {
+                    setMessage(searchMessageEl, error.message, true);
+                }
+            });
+
+            byId('docs-preview').addEventListener('click', async () => {
+                try {
+                    await handleDraft('/api/docs-draft', 'docs-preview-text', docsMessageEl, {
+                        title: byId('docs-title').value.trim() || null,
+                        changed_only: byId('docs-changed-only').checked,
+                        apply: false,
+                        target_path: byId('docs-target').value.trim() || 'README.md',
+                    }, 'Documentation draft generated');
+                } catch (error) {
+                    setMessage(docsMessageEl, error.message, true);
+                }
+            });
+
+            byId('docs-save').addEventListener('click', async () => {
+                try {
+                    await handleDraft('/api/docs-draft', 'docs-preview-text', docsMessageEl, {
+                        title: byId('docs-title').value.trim() || null,
+                        changed_only: byId('docs-changed-only').checked,
+                        apply: false,
+                        target_path: byId('docs-target').value.trim() || 'README.md',
+                    }, 'Documentation draft written');
+                } catch (error) {
+                    setMessage(docsMessageEl, error.message, true);
+                }
+            });
+
+            byId('docs-apply').addEventListener('click', async () => {
+                try {
+                    await handleDraft('/api/docs-draft', 'docs-preview-text', docsMessageEl, {
+                        title: byId('docs-title').value.trim() || null,
+                        changed_only: byId('docs-changed-only').checked,
+                        apply: true,
+                        target_path: byId('docs-target').value.trim() || 'README.md',
+                    }, 'Documentation draft applied');
+                } catch (error) {
+                    setMessage(docsMessageEl, error.message, true);
+                }
+            });
+
+            byId('changelog-preview').addEventListener('click', async () => {
+                try {
+                    await handleDraft('/api/changelog-draft', 'changelog-preview-text', changelogMessageEl, {
+                        version_text: byId('changelog-version').value.trim() || null,
+                        release_date: byId('changelog-date').value.trim() || null,
+                        changed_only: byId('changelog-changed-only').checked,
+                        apply: false,
+                        target_path: byId('changelog-target').value.trim() || 'CHANGELOG.md',
+                    }, 'Changelog draft generated');
+                } catch (error) {
+                    setMessage(changelogMessageEl, error.message, true);
+                }
+            });
+
+            byId('changelog-save').addEventListener('click', async () => {
+                try {
+                    await handleDraft('/api/changelog-draft', 'changelog-preview-text', changelogMessageEl, {
+                        version_text: byId('changelog-version').value.trim() || null,
+                        release_date: byId('changelog-date').value.trim() || null,
+                        changed_only: byId('changelog-changed-only').checked,
+                        apply: false,
+                        target_path: byId('changelog-target').value.trim() || 'CHANGELOG.md',
+                    }, 'Changelog draft written');
+                } catch (error) {
+                    setMessage(changelogMessageEl, error.message, true);
+                }
+            });
+
+            byId('changelog-apply').addEventListener('click', async () => {
+                try {
+                    await handleDraft('/api/changelog-draft', 'changelog-preview-text', changelogMessageEl, {
+                        version_text: byId('changelog-version').value.trim() || null,
+                        release_date: byId('changelog-date').value.trim() || null,
+                        changed_only: byId('changelog-changed-only').checked,
+                        apply: true,
+                        target_path: byId('changelog-target').value.trim() || 'CHANGELOG.md',
+                    }, 'Changelog draft applied');
+                } catch (error) {
+                    setMessage(changelogMessageEl, error.message, true);
+                }
+            });
+            document.querySelectorAll('.tab-btn').forEach((btn) => {
+                btn.addEventListener('click', () => {
+                    document.querySelectorAll('.tab-btn').forEach((b) => b.classList.remove('active'));
+                    document.querySelectorAll('.tab-pane').forEach((p) => p.classList.remove('active'));
+                    btn.classList.add('active');
+                    const pane = byId(`tab-${btn.dataset.tab}`);
+                    if (pane) pane.classList.add('active');
+                    if (btn.dataset.tab === 'excel-library') {
+                        loadExcelLibrary().catch((error) => setMessage(excelMessageEl, error.message, true));
+                    }
+                    if (btn.dataset.tab === 'git-controls') {
+                        loadGitStatus().catch((error) => setMessage(gitMessageEl, error.message, true));
+                    }
+                });
+            });
+
+            byId('excel-save-config').addEventListener('click', async () => {
+                try {
+                    await saveExcelConfig();
+                } catch (error) {
+                    setMessage(excelMessageEl, error.message, true);
+                }
+            });
+
+            byId('excel-rescan').addEventListener('click', async () => {
+                try {
+                    setMessage(excelMessageEl, 'Scanning…');
+                    await loadExcelFiles();
+                } catch (error) {
+                    setMessage(excelMessageEl, error.message, true);
+                }
+            });
+
+            byId('excel-search-run').addEventListener('click', async () => {
+                try {
+                    await runExcelSearch();
+                } catch (error) {
+                    setMessage(excelSearchMessageEl, error.message, true);
+                }
+            });
+
+            byId('excel-search-clear').addEventListener('click', () => {
+                byId('excel-search-query').value = '';
+                byId('excel-search-results').innerHTML = '<p class="muted">Search results will appear here.</p>';
+                setMessage(excelSearchMessageEl, '');
+            });
+
+            byId('excel-search-query').addEventListener('keydown', async (event) => {
+                if (event.key !== 'Enter') {
+                    return;
+                }
+                event.preventDefault();
+                try {
+                    await runExcelSearch();
+                } catch (error) {
+                    setMessage(excelSearchMessageEl, error.message, true);
+                }
+            });
+
+            byId('git-refresh').addEventListener('click', async () => {
+                try {
+                    await loadGitStatus();
+                    setMessage(gitMessageEl, 'Git status refreshed.');
+                } catch (error) {
+                    setMessage(gitMessageEl, error.message, true);
+                }
+            });
+
+            byId('git-stage-all').addEventListener('click', async () => {
+                try {
+                    await runGitAction('/api/git/stage', { all: true }, 'All changes staged.');
+                } catch (error) {
+                    setMessage(gitMessageEl, error.message, true);
+                }
+            });
+
+            byId('git-unstage-all').addEventListener('click', async () => {
+                try {
+                    await runGitAction('/api/git/unstage', { all: true }, 'All staged changes moved back to working tree.');
+                } catch (error) {
+                    setMessage(gitMessageEl, error.message, true);
+                }
+            });
+
+            byId('git-review-head').addEventListener('click', async () => {
+                try {
+                    await loadGitCommitReview('HEAD');
+                } catch (error) {
+                    setMessage(gitMessageEl, error.message, true);
+                }
+            });
+
+            byId('git-commit-run').addEventListener('click', async () => {
+                const message = byId('git-commit-message').value.trim();
+                if (!message) {
+                    setMessage(gitMessageEl, 'Commit message is required.', true);
+                    return;
+                }
+                try {
+                    const payload = await runGitAction('/api/git/commit', { message }, 'Commit created.');
+                    byId('git-commit-message').value = '';
+                    if (payload && payload.commit) {
+                        await loadGitCommitReview(payload.commit);
+                    }
+                } catch (error) {
+                    setMessage(gitMessageEl, error.message, true);
+                }
+            });
+
+            byId('git-push-run').addEventListener('click', async () => {
+                const remote = byId('git-remote').value.trim() || 'origin';
+                const branch = byId('git-branch').value.trim();
+                if (!branch) {
+                    setMessage(gitMessageEl, 'Branch is required before push.', true);
+                    return;
+                }
+                try {
+                    await runGitAction('/api/git/push', { remote, branch }, `Pushed ${branch} to ${remote}.`);
+                } catch (error) {
+                    setMessage(gitMessageEl, error.message, true);
+                }
+            });
+        }
+
+        async function start() {
+            installSelectOptions();
+            renderSummary(state.bootstrap.status || {});
+            renderChanges(state.bootstrap.changes || {});
+            renderHistory(state.bootstrap.history || {});
+            installEvents();
+            if (window.location.search.includes('token=')) {
+                window.history.replaceState({}, document.title, '/');
+            }
+        }
+
+        start().catch((error) => {
+            statusBannerEl.textContent = error.message;
+            statusBannerEl.classList.add('error');
+        });
+    </script>
+</body>
+</html>
+"""
+    return (
+        template.replace("__AUTH_CHIP__", auth_chip)
+        .replace("__LOGOUT_BUTTON__", logout_markup)
+        .replace("__INITIAL_STATE__", _json_text_for_html(bootstrap_payload or {}))
+    )
+
+
+def _load_excel_library_config(output_dir):
+    config_path = Path(output_dir) / EXCEL_LIBRARY_CONFIG_NAME
+    if config_path.exists():
+        try:
+            loaded = json.loads(config_path.read_text(encoding="utf-8"))
+            if not isinstance(loaded, dict):
+                loaded = {}
+            loaded.setdefault("folder", "")
+            loaded.setdefault("name", "Excel Library")
+            loaded.setdefault("keyword_columns", list(DEFAULT_EXCEL_KEYWORD_COLUMNS))
+            loaded["keyword_columns"] = _normalize_keyword_columns(loaded.get("keyword_columns")) or list(DEFAULT_EXCEL_KEYWORD_COLUMNS)
+            return loaded
+        except Exception:
+            pass
+    return {
+        "folder": "",
+        "name": "Excel Library",
+        "keyword_columns": list(DEFAULT_EXCEL_KEYWORD_COLUMNS),
+    }
+
+
+def _save_excel_library_config(output_dir, config):
+    config_path = Path(output_dir) / EXCEL_LIBRARY_CONFIG_NAME
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(json.dumps(config, indent=2), encoding="utf-8")
+
+
+def _normalize_keyword_columns(raw_value):
+    if isinstance(raw_value, str):
+        pieces = [part.strip() for part in raw_value.split(",")]
+    elif isinstance(raw_value, list):
+        pieces = [str(part).strip() for part in raw_value]
+    else:
+        pieces = []
+    return [piece for piece in pieces if piece]
+
+
+def _column_letter_to_index(value):
+    token = str(value or "").strip().upper()
+    if not token or not token.isalpha():
+        return None
+    index = 0
+    for char in token:
+        index = (index * 26) + (ord(char) - 64)
+    return index - 1
+
+
+def _normalize_excel_value(cell_value):
+    if cell_value is None:
+        return ""
+    if isinstance(cell_value, datetime):
+        return f"{cell_value.date().isoformat()} {cell_value.strftime('%m/%d/%Y')}"
+    if isinstance(cell_value, date):
+        return f"{cell_value.isoformat()} {cell_value.strftime('%m/%d/%Y')}"
+    text = str(cell_value).strip()
+    if not text:
+        return ""
+    return text
+
+
+def _resolve_keyword_column_indices(keyword_columns, header_row):
+    if not keyword_columns:
+        return []
+    header_lookup = {}
+    for index, value in enumerate(header_row or []):
+        key = str(value or "").strip().lower()
+        if key:
+            header_lookup[key] = index
+    indices = []
+    for token in keyword_columns:
+        col_index = _column_letter_to_index(token)
+        if col_index is not None:
+            indices.append(col_index)
+            continue
+        key = str(token).strip().lower()
+        if key in header_lookup:
+            indices.append(header_lookup[key])
+    return sorted(set(indices))
+
+
+def _iter_excel_keyword_rows(folder_path, keyword_columns):
+    folder = Path(folder_path)
+    if not folder.is_dir():
+        return
+    workbook_paths = sorted(
+        (path for path in folder.rglob("*") if path.is_file() and path.suffix.lower() in EXCEL_EXTENSIONS),
+        key=lambda p: str(p.relative_to(folder)).lower(),
+    )
+    for workbook_path in workbook_paths:
+        suffix = workbook_path.suffix.lower()
+        if suffix in (".xlsx", ".xlsm"):
+            try:
+                import openpyxl
+                workbook = openpyxl.load_workbook(str(workbook_path), read_only=True, data_only=True)
+            except Exception:
+                continue
+            try:
+                for sheet_name in workbook.sheetnames:
+                    worksheet = workbook[sheet_name]
+                    rows = worksheet.iter_rows(values_only=True)
+                    header_row = next(rows, None)
+                    keyword_indices = _resolve_keyword_column_indices(keyword_columns, header_row)
+                    for row_number, row in enumerate(rows, start=2):
+                        if not row:
+                            continue
+                        selected_indices = keyword_indices or range(len(row))
+                        fields = []
+                        for idx in selected_indices:
+                            if idx < 0 or idx >= len(row):
+                                continue
+                            cell_text = _normalize_excel_value(row[idx])
+                            if not cell_text:
+                                continue
+                            header_name = ""
+                            if header_row and idx < len(header_row):
+                                header_name = str(header_row[idx] or "").strip()
+                            if not header_name:
+                                header_name = f"Column {idx + 1}"
+                            fields.append({"field": header_name, "value": cell_text})
+                        if fields:
+                            yield {
+                                "file": str(workbook_path),
+                                "sheet": sheet_name,
+                                "row": row_number,
+                                "fields": fields,
+                            }
+            finally:
+                workbook.close()
+        elif suffix == ".csv":
+            try:
+                with workbook_path.open("r", encoding="utf-8", newline="") as handle:
+                    reader = csv.reader(handle)
+                    header_row = next(reader, None)
+                    keyword_indices = _resolve_keyword_column_indices(keyword_columns, header_row)
+                    for row_number, row in enumerate(reader, start=2):
+                        if not row:
+                            continue
+                        selected_indices = keyword_indices or range(len(row))
+                        fields = []
+                        for idx in selected_indices:
+                            if idx < 0 or idx >= len(row):
+                                continue
+                            cell_text = _normalize_excel_value(row[idx])
+                            if not cell_text:
+                                continue
+                            header_name = ""
+                            if header_row and idx < len(header_row):
+                                header_name = str(header_row[idx] or "").strip()
+                            if not header_name:
+                                header_name = f"Column {idx + 1}"
+                            fields.append({"field": header_name, "value": cell_text})
+                        if fields:
+                            yield {
+                                "file": str(workbook_path),
+                                "sheet": "CSV",
+                                "row": row_number,
+                                "fields": fields,
+                            }
+            except Exception:
+                continue
+
+
+def _search_excel_rows(folder_path, keyword_columns, query, limit=200):
+    query_text = str(query or "").strip().lower()
+    if not query_text:
+        return []
+    query_tokens = [token for token in re.split(r"\s+", query_text) if token]
+    if not query_tokens:
+        return []
+
+    results = []
+    for row_payload in _iter_excel_keyword_rows(folder_path, keyword_columns):
+        for field in row_payload["fields"]:
+            value_text = field["value"]
+            haystack = value_text.lower()
+            if all(token in haystack for token in query_tokens):
+                results.append(
+                    {
+                        "file": row_payload["file"],
+                        "sheet": row_payload["sheet"],
+                        "row": row_payload["row"],
+                        "field": field["field"],
+                        "value": value_text,
+                    }
+                )
+                if len(results) >= limit:
+                    return results
+    return results
+
+
+def _list_excel_files(folder_path):
+    folder = Path(folder_path)
+    if not folder.is_dir():
+        return []
+    results = []
+    for entry in sorted((path for path in folder.rglob("*") if path.is_file()), key=lambda p: str(p.relative_to(folder)).lower()):
+        if entry.suffix.lower() not in EXCEL_EXTENSIONS:
+            continue
+        stat = entry.stat()
+        file_info = {
+            "name": entry.name,
+            "path": str(entry),
+            "size_bytes": stat.st_size,
+            "modified_at": _format_iso_utc(stat.st_mtime),
+            "sheets": [],
+        }
+        if entry.suffix.lower() in (".xlsx", ".xlsm"):
+            try:
+                import openpyxl
+                wb = openpyxl.load_workbook(str(entry), read_only=True, data_only=True)
+                file_info["sheets"] = list(wb.sheetnames)
+                wb.close()
+            except Exception:
+                pass
+        results.append(file_info)
+    return results
+
+
+def _format_iso_utc(timestamp_float):
+    return datetime.fromtimestamp(timestamp_float, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _wrap_http_app_with_token_auth(app, auth_token):
+    if not auth_token:
+        return app
+
+    from starlette.requests import Request
+    from starlette.responses import HTMLResponse, JSONResponse, PlainTextResponse
+
+    class _ProtectedHttpApp:
+        def __init__(self, wrapped_app, required_token):
+            self._wrapped_app = wrapped_app
+            self._required_token = required_token
+
+        async def __call__(self, scope, receive, send):
+            if scope.get("type") != "http":
+                await self._wrapped_app(scope, receive, send)
+                return
+
+            path = str(scope.get("path") or "")
+            method = str(scope.get("method") or "GET").upper()
+            if (path == "/" and method == "GET") or (path == "/logout" and method == "POST"):
+                await self._wrapped_app(scope, receive, send)
+                return
+
+            request = Request(scope, receive=receive)
+            if _request_has_valid_token(request, self._required_token):
+                await self._wrapped_app(scope, receive, send)
+                return
+
+            if path.startswith("/api/"):
+                response = JSONResponse(
+                    {
+                        "error": (
+                            "Missing or invalid Project Librarian token. Provide Authorization: Bearer <token>, "
+                            f"the {HTTP_AUTH_HEADER_NAME} header, or ?token=<token>."
+                        )
+                    },
+                    status_code=401,
+                )
+            elif path.startswith("/mcp") or path.startswith("/sse") or path.startswith("/messages"):
+                response = PlainTextResponse(
+                    (
+                        "Unauthorized. Provide Authorization: Bearer <token>, "
+                        f"the {HTTP_AUTH_HEADER_NAME} header, or ?token=<token>."
+                    ),
+                    status_code=401,
+                )
+            else:
+                response = HTMLResponse(_render_login_html(), status_code=401)
+
+            await response(scope, receive, send)
+
+    return _ProtectedHttpApp(app, auth_token)
+
+
+def create_librarian_mcp_server(
+    service,
+    host=DEFAULT_MCP_HOST,
+    port=DEFAULT_MCP_PORT,
+    log_level="INFO",
+    auth_token=None,
+    transport=DEFAULT_MCP_TRANSPORT,
+):
+    try:
+        from mcp.server.fastmcp import FastMCP
+    except ImportError as exc:
+        raise ProjectLibrarianError(
+            "The 'mcp' package is required for mcp-server mode. Install it in the active environment first."
+        ) from exc
+    from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
+
+    server = FastMCP(
+        name="Project Librarian",
+        instructions=(
+            "Persistent in-memory repository librarian for search, change tracking, draft generation, and local AI diagnostics. "
+            "This server keeps one cached workspace instance alive so multiple MCP clients can share it without repeated reloads."
+        ),
+        host=host,
+        port=port,
+        log_level=log_level,
+    )
+
+    async def _request_json_payload(request):
+        try:
+            payload = await request.json()
+        except json.JSONDecodeError as exc:
+            raise ProjectLibrarianError("Request body must be valid JSON.") from exc
+        if not isinstance(payload, dict):
+            raise ProjectLibrarianError("Request body must be a JSON object.")
+        return payload
+
+    normalized_transport = str(transport or DEFAULT_MCP_TRANSPORT).strip().lower()
+
+    def _mcp_probe_payload(request=None):
+        base_url = ""
+        if request is not None:
+            try:
+                base_url = str(request.base_url).rstrip("/")
+            except Exception:
+                base_url = ""
+        endpoint_map = {
+            "streamable-http": f"{base_url}/mcp" if base_url else "/mcp",
+            "sse": f"{base_url}/sse" if base_url else "/sse",
+            "messages": f"{base_url}/messages" if base_url else "/messages",
+            "probe": f"{base_url}/api/mcp-probe" if base_url else "/api/mcp-probe",
+            "probe_sse": f"{base_url}/api/mcp-probe/sse" if base_url else "/api/mcp-probe/sse",
+            "probe_jsonrpc": f"{base_url}/api/mcp-probe/jsonrpc" if base_url else "/api/mcp-probe/jsonrpc",
+        }
+        return {
+            "status": "ok",
+            "server": "Project Librarian",
+            "auth_required": bool(auth_token),
+            "transport_configured": normalized_transport,
+            "endpoints": endpoint_map,
+            "auth": {
+                "accepted": ["Authorization: Bearer <token>", f"{HTTP_AUTH_HEADER_NAME}: <token>", "?token=<token>"],
+            },
+            "jsonrpc_probe_example": {
+                "method": "POST",
+                "url": endpoint_map["probe_jsonrpc"],
+                "body": {"jsonrpc": "2.0", "id": "probe-1", "method": "mcp.ping", "params": {}},
+            },
+            "sse_probe_example": {
+                "method": "GET",
+                "url": endpoint_map["probe_sse"],
+                "accept": "text/event-stream",
+            },
+        }
+
+    @server.custom_route("/api/mcp-probe", methods=["GET"], include_in_schema=False)
+    async def _mcp_probe_route(request):
+        return JSONResponse(_mcp_probe_payload(request))
+
+    @server.custom_route("/api/mcp-probe/sse", methods=["GET"], include_in_schema=False)
+    async def _mcp_probe_sse_route(request):
+        payload = _mcp_probe_payload(request)
+
+        async def _probe_stream():
+            yield "event: ready\n"
+            yield f"data: {json.dumps(payload)}\n\n"
+            yield "event: ping\n"
+            yield "data: mcp-sse-probe\n\n"
+
+        return StreamingResponse(_probe_stream(), media_type="text/event-stream")
+
+    @server.custom_route("/api/mcp-probe/jsonrpc", methods=["POST"], include_in_schema=False)
+    async def _mcp_probe_jsonrpc_route(request):
+        try:
+            payload = await _request_json_payload(request)
+        except Exception as exc:
+            return JSONResponse(
+                {
+                    "jsonrpc": "2.0",
+                    "id": None,
+                    "error": {"code": -32700, "message": f"Invalid JSON payload: {exc}"},
+                },
+                status_code=400,
+            )
+
+        request_id = payload.get("id")
+        method = str(payload.get("method") or "").strip()
+        if not method:
+            return JSONResponse(
+                {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "error": {"code": -32600, "message": "Missing JSON-RPC method."},
+                },
+                status_code=400,
+            )
+
+        if method in {"mcp.ping", "ping", "rpc.ping"}:
+            return JSONResponse(
+                {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "result": {
+                        "ok": True,
+                        "server": "Project Librarian",
+                        "transport_configured": normalized_transport,
+                        "auth_required": bool(auth_token),
+                    },
+                }
+            )
+
+        if method in {"mcp.probe", "rpc.discover", "probe"}:
+            return JSONResponse(
+                {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "result": _mcp_probe_payload(request),
+                }
+            )
+
+        return JSONResponse(
+            {
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "error": {"code": -32601, "message": f"Unsupported probe method: {method}"},
+            },
+            status_code=404,
+        )
+
+    @server.custom_route("/", methods=["GET"], include_in_schema=False)
+    async def _dashboard_route(request):
+        if auth_token and not _request_has_valid_token(request, auth_token):
+            return HTMLResponse(_render_login_html(), status_code=401)
+
+        response = HTMLResponse(
+            _render_dashboard_html(
+                auth_enabled=bool(auth_token),
+                bootstrap_payload=_dashboard_bootstrap_payload(service),
+            )
+        )
+        if auth_token and _query_token_matches(request, auth_token):
+            response.set_cookie(
+                HTTP_AUTH_COOKIE_NAME,
+                auth_token,
+                httponly=True,
+                samesite="strict",
+                max_age=86400,
+                path="/",
+            )
+        return response
+
+    @server.custom_route("/logout", methods=["POST"], include_in_schema=False)
+    async def _dashboard_logout_route(request):
+        response = RedirectResponse(url="/", status_code=303)
+        response.delete_cookie(HTTP_AUTH_COOKIE_NAME, path="/")
+        return response
+
+    @server.custom_route("/api/status", methods=["GET"], include_in_schema=False)
+    async def _dashboard_status_route(request):
+        payload = service.status_payload()
+        payload["auth_enabled"] = bool(auth_token)
+        return JSONResponse(payload)
+
+    @server.custom_route("/api/changes", methods=["GET"], include_in_schema=False)
+    async def _dashboard_changes_route(request):
+        limit = _coerce_int(request.query_params.get("limit"), 12, minimum=1, maximum=200)
+        status_filter = request.query_params.get("status_filter") or None
+        area = request.query_params.get("area") or None
+        path_filter = request.query_params.get("path_filter") or None
+        include_commits = _parse_bool(request.query_params.get("include_commits", "0"))
+        return JSONResponse(
+            service.changes_payload(
+                limit=limit,
+                status_filter=status_filter,
+                area=area,
+                path_filter=path_filter,
+                include_commits=include_commits,
+            )
+        )
+
+    @server.custom_route("/api/history", methods=["GET"], include_in_schema=False)
+    async def _dashboard_history_route(request):
+        limit = _coerce_int(request.query_params.get("limit"), 5, minimum=1, maximum=100)
+        return JSONResponse(service.history_payload(limit=limit))
+
+    @server.custom_route("/api/search", methods=["GET"], include_in_schema=False)
+    async def _dashboard_search_route(request):
+        query = str(request.query_params.get("q", "")).strip()
+        if not query:
+            return JSONResponse({"count": 0, "results": [], "formatted": ""})
+        scope = request.query_params.get("scope", "all") or "all"
+        area = request.query_params.get("area") or None
+        changed_only = _parse_bool(request.query_params.get("changed_only"))
+        path_filter = request.query_params.get("path_filter") or None
+        limit = _coerce_int(request.query_params.get("limit"), 20, minimum=1, maximum=100)
+        return JSONResponse(
+            service.search_payload(
+                query,
+                scope=scope,
+                limit=limit,
+                area=area,
+                changed_only=changed_only,
+                path_filter=path_filter,
+            )
+        )
+
+    @server.custom_route("/api/file", methods=["GET"], include_in_schema=False)
+    async def _dashboard_file_route(request):
+        path_text = str(request.query_params.get("path", "")).strip()
+        if not path_text:
+            return JSONResponse({"error": "The 'path' query parameter is required."}, status_code=400)
+        query = request.query_params.get("query") or None
+        line_value = request.query_params.get("line") or None
+        line_number = None if not line_value else _coerce_int(line_value, line_value, minimum=1, maximum=500000)
+        context = _coerce_int(request.query_params.get("context"), 5, minimum=1, maximum=40)
+        try:
+            excerpt = service.show_excerpt(path_text, query=query, line=line_number, context=context)
+        except Exception as exc:
+            return JSONResponse({"error": str(exc)}, status_code=404)
+        return JSONResponse({"path": path_text, "excerpt": excerpt})
+
+    @server.custom_route("/api/refresh", methods=["POST"], include_in_schema=False)
+    async def _dashboard_refresh_api_route(request):
+        refresh_result = service.refresh()
+        return JSONResponse(
+            {
+                "status": service.status_payload(),
+                "summary": refresh_result["snapshot"].get("summary", {}),
+                "snapshot_path": str(refresh_result["snapshot_path"]),
+            }
+        )
+
+    @server.custom_route("/refresh", methods=["POST"], include_in_schema=False)
+    async def _dashboard_refresh_route(request):
+        service.refresh()
+        return RedirectResponse(url="/", status_code=303)
+
+    @server.custom_route("/api/docs-draft", methods=["POST"], include_in_schema=False)
+    async def _dashboard_docs_draft_route(request):
+        try:
+            payload = await _request_json_payload(request)
+            return JSONResponse(
+                service.docs_draft_payload(
+                    title=(payload.get("title") or None),
+                    changed_only=_parse_bool(payload.get("changed_only", True)),
+                    output_path=(payload.get("output_path") or None),
+                    apply=_parse_bool(payload.get("apply", False)),
+                    target_path=str(payload.get("target_path") or README_TARGET_NAME),
+                )
+            )
+        except Exception as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+
+    @server.custom_route("/api/changelog-draft", methods=["POST"], include_in_schema=False)
+    async def _dashboard_changelog_draft_route(request):
+        try:
+            payload = await _request_json_payload(request)
+            return JSONResponse(
+                service.changelog_draft_payload(
+                    version_text=(payload.get("version_text") or None),
+                    release_date=(payload.get("release_date") or None),
+                    changed_only=_parse_bool(payload.get("changed_only", True)),
+                    output_path=(payload.get("output_path") or None),
+                    apply=_parse_bool(payload.get("apply", False)),
+                    target_path=str(payload.get("target_path") or CHANGELOG_TARGET_NAME),
+                )
+            )
+        except Exception as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+
+    @server.custom_route("/api/excel-config", methods=["GET"], include_in_schema=False)
+    async def _excel_config_get_route(request):
+        config = _load_excel_library_config(service.output_dir)
+        return JSONResponse(config)
+
+    @server.custom_route("/api/excel-config", methods=["POST"], include_in_schema=False)
+    async def _excel_config_save_route(request):
+        try:
+            payload = await _request_json_payload(request)
+            config = _load_excel_library_config(service.output_dir)
+            if "folder" in payload:
+                config["folder"] = str(payload["folder"]).strip()
+            if "name" in payload:
+                config["name"] = str(payload["name"]).strip() or "Excel Library"
+            if "keyword_columns" in payload:
+                config["keyword_columns"] = _normalize_keyword_columns(payload.get("keyword_columns"))
+                if not config["keyword_columns"]:
+                    config["keyword_columns"] = list(DEFAULT_EXCEL_KEYWORD_COLUMNS)
+            _save_excel_library_config(service.output_dir, config)
+            return JSONResponse(config)
+        except Exception as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+
+    @server.custom_route("/api/excel-files", methods=["GET"], include_in_schema=False)
+    async def _excel_files_route(request):
+        config = _load_excel_library_config(service.output_dir)
+        folder = config.get("folder", "").strip()
+        if not folder:
+            return JSONResponse({"files": [], "folder": "", "count": 0, "error": "No folder configured. Use the Excel Library tab to set a folder path."})
+        try:
+            files = _list_excel_files(folder)
+            return JSONResponse({"files": files, "folder": folder, "count": len(files)})
+        except Exception as exc:
+            return JSONResponse({"files": [], "folder": folder, "count": 0, "error": str(exc)}, status_code=400)
+
+    @server.custom_route("/api/excel-search", methods=["GET"], include_in_schema=False)
+    async def _excel_search_route(request):
+        config = _load_excel_library_config(service.output_dir)
+        folder = str(config.get("folder") or "").strip()
+        if not folder:
+            return JSONResponse({"results": [], "count": 0, "error": "No folder configured. Use the Excel Library tab to set a folder path."}, status_code=400)
+        query = str(request.query_params.get("q") or "").strip()
+        if not query:
+            return JSONResponse({"results": [], "count": 0, "query": ""})
+        limit = _coerce_int(request.query_params.get("limit"), 200, minimum=1, maximum=1000)
+        keyword_columns = _normalize_keyword_columns(config.get("keyword_columns"))
+        try:
+            results = _search_excel_rows(folder, keyword_columns, query, limit=limit)
+            return JSONResponse(
+                {
+                    "results": results,
+                    "count": len(results),
+                    "query": query,
+                    "folder": folder,
+                    "keyword_columns": keyword_columns,
+                }
+            )
+        except Exception as exc:
+            return JSONResponse({"results": [], "count": 0, "error": str(exc)}, status_code=400)
+
+    @server.custom_route("/api/git/status", methods=["GET"], include_in_schema=False)
+    async def _git_status_route(request):
+        limit = _coerce_int(request.query_params.get("limit"), 20, minimum=1, maximum=100)
+        try:
+            return JSONResponse(_collect_git_status_payload(service.repo_root, commit_limit=limit))
+        except Exception as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+
+    @server.custom_route("/api/git/diff", methods=["GET"], include_in_schema=False)
+    async def _git_diff_route(request):
+        path_text = str(request.query_params.get("path") or "").strip()
+        staged = _parse_bool(request.query_params.get("staged", "0"))
+        try:
+            return JSONResponse(
+                {
+                    "path": path_text,
+                    "staged": staged,
+                    "diff": _read_git_diff_text(service.repo_root, path_text=path_text or None, staged=staged),
+                }
+            )
+        except Exception as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+
+    @server.custom_route("/api/git/commit-review", methods=["GET"], include_in_schema=False)
+    async def _git_commit_review_route(request):
+        commit_ref = str(request.query_params.get("commit") or "HEAD").strip()
+        if not commit_ref:
+            commit_ref = "HEAD"
+        try:
+            return JSONResponse(
+                {
+                    "commit": commit_ref,
+                    "review": _read_git_commit_review(service.repo_root, commit_ref),
+                }
+            )
+        except Exception as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+
+    @server.custom_route("/api/git/stage", methods=["POST"], include_in_schema=False)
+    async def _git_stage_route(request):
+        try:
+            payload = await _request_json_payload(request)
+            if _parse_bool(payload.get("all")):
+                _run_git_action(service.repo_root, ["add", "-A"])
+                message = "Staged all changes."
+            else:
+                path_text = str(payload.get("path") or "").strip()
+                if not path_text:
+                    raise ProjectLibrarianError("'path' is required when 'all' is false.")
+                _run_git_action(service.repo_root, ["add", "--", path_text])
+                message = f"Staged {path_text}."
+            return JSONResponse({"ok": True, "message": message, "git": _collect_git_status_payload(service.repo_root, commit_limit=20)})
+        except Exception as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+
+    @server.custom_route("/api/git/unstage", methods=["POST"], include_in_schema=False)
+    async def _git_unstage_route(request):
+        try:
+            payload = await _request_json_payload(request)
+            if _parse_bool(payload.get("all")):
+                _run_git_action(service.repo_root, ["reset"])
+                message = "Moved all staged changes back to working tree."
+            else:
+                path_text = str(payload.get("path") or "").strip()
+                if not path_text:
+                    raise ProjectLibrarianError("'path' is required when 'all' is false.")
+                _run_git_action(service.repo_root, ["reset", "HEAD", "--", path_text])
+                message = f"Unstaged {path_text}."
+            return JSONResponse({"ok": True, "message": message, "git": _collect_git_status_payload(service.repo_root, commit_limit=20)})
+        except Exception as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+
+    @server.custom_route("/api/git/commit", methods=["POST"], include_in_schema=False)
+    async def _git_commit_route(request):
+        try:
+            payload = await _request_json_payload(request)
+            message_text = str(payload.get("message") or "").strip()
+            if not message_text:
+                raise ProjectLibrarianError("Commit message is required.")
+            _run_git_action(service.repo_root, ["commit", "-m", message_text])
+            latest = _collect_recent_commits(service.repo_root, limit=1)
+            commit_ref = latest[0].get("commit") if latest else ""
+            return JSONResponse(
+                {
+                    "ok": True,
+                    "message": "Commit created.",
+                    "commit": commit_ref,
+                    "recent_commits": _collect_recent_commits(service.repo_root, limit=20),
+                    "git": _collect_git_status_payload(service.repo_root, commit_limit=20),
+                }
+            )
+        except Exception as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+
+    @server.custom_route("/api/git/push", methods=["POST"], include_in_schema=False)
+    async def _git_push_route(request):
+        try:
+            payload = await _request_json_payload(request)
+            remote_name = str(payload.get("remote") or "origin").strip() or "origin"
+            branch_name = str(payload.get("branch") or "").strip()
+            if not branch_name:
+                branch_name = _run_git_command(service.repo_root, "rev-parse", "--abbrev-ref", "HEAD") or ""
+            if not branch_name:
+                raise ProjectLibrarianError("Unable to determine branch for push.")
+            _run_git_action(service.repo_root, ["push", remote_name, branch_name])
+            return JSONResponse(
+                {
+                    "ok": True,
+                    "message": f"Pushed {branch_name} to {remote_name}.",
+                    "git": _collect_git_status_payload(service.repo_root, commit_limit=20),
+                }
+            )
+        except Exception as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+
+    @server.resource("librarian://status", name="librarian-status", description="Current persistent librarian service status.")
+    def _status_resource() -> dict[str, object]:
+        return service.status_payload()
+
+    @server.resource("librarian://stats", name="librarian-stats", description="Human-readable librarian workspace statistics.")
+    def _stats_resource() -> str:
+        return service.stats_text()
+
+    @server.resource("librarian://snapshot", name="librarian-snapshot", description="Current librarian snapshot payload.")
+    def _snapshot_resource() -> dict[str, object]:
+        return service.snapshot_payload()
+
+    @server.tool(name="refresh", description="Refresh the shared in-memory librarian workspace and on-disk snapshot.", structured_output=True)
+    def _refresh_tool() -> dict[str, object]:
+        result = service.refresh()
+        summary = result["snapshot"]["summary"]
+        return {
+            "summary": summary,
+            "snapshot_path": str(result["snapshot_path"]),
+            "history_path": str(result["history_path"]),
+            "corpus_path": str(result["corpus_path"]),
+        }
+
+    @server.tool(name="status", description="Return the shared service status for the persistent librarian instance.", structured_output=True)
+    def _status_tool() -> dict[str, object]:
+        return service.status_payload()
+
+    @server.tool(name="stats", description="Return human-readable librarian workspace statistics.")
+    def _stats_tool() -> str:
+        return service.stats_text()
+
+    @server.tool(name="search", description="Search the cached librarian workspace without reloading it.", structured_output=True)
+    def _search_tool(
+        query: str,
+        scope: str = "all",
+        limit: int = 20,
+        area: str | None = None,
+        changed_only: bool = False,
+        path_filter: str | None = None,
+    ) -> dict[str, object]:
+        return service.search_payload(
+            query,
+            scope=scope,
+            limit=limit,
+            area=area,
+            changed_only=changed_only,
+            path_filter=path_filter,
+        )
+
+    @server.tool(name="changes", description="Report tracked git changes from the cached librarian snapshot.", structured_output=True)
+    def _changes_tool(
+        limit: int = 20,
+        status_filter: str | None = None,
+        area: str | None = None,
+        path_filter: str | None = None,
+        include_commits: bool = True,
+    ) -> dict[str, object]:
+        return service.changes_payload(
+            limit=limit,
+            status_filter=status_filter,
+            area=area,
+            path_filter=path_filter,
+            include_commits=include_commits,
+        )
+
+    @server.tool(name="history", description="Return recent librarian refresh history from the shared workspace.", structured_output=True)
+    def _history_tool(limit: int = 10) -> dict[str, object]:
+        return service.history_payload(limit=limit)
+
+    @server.tool(name="show_file", description="Show a file excerpt from the cached RAM-loaded corpus.")
+    def _show_tool(path_text: str, query: str | None = None, line: int | None = None, context: int = 3) -> str:
+        return service.show_excerpt(path_text, query=query, line=line, context=context)
+
+    @server.tool(name="docs_draft", description="Generate or apply a documentation draft using the shared workspace.", structured_output=True)
+    def _docs_draft_tool(
+        title: str | None = None,
+        changed_only: bool = True,
+        output_path: str | None = None,
+        apply: bool = False,
+        target_path: str = README_TARGET_NAME,
+    ) -> dict[str, object]:
+        return service.docs_draft_payload(
+            title=title,
+            changed_only=changed_only,
+            output_path=output_path,
+            apply=apply,
+            target_path=target_path,
+        )
+
+    @server.tool(name="changelog_draft", description="Generate or apply a changelog draft using the shared workspace.", structured_output=True)
+    def _changelog_draft_tool(
+        version_text: str | None = None,
+        release_date: str | None = None,
+        changed_only: bool = True,
+        output_path: str | None = None,
+        apply: bool = False,
+        target_path: str = CHANGELOG_TARGET_NAME,
+    ) -> dict[str, object]:
+        return service.changelog_draft_payload(
+            version_text=version_text,
+            release_date=release_date,
+            changed_only=changed_only,
+            output_path=output_path,
+            apply=apply,
+            target_path=target_path,
+        )
+
+    @server.tool(name="ai_models", description="List Ollama models visible to the persistent librarian service.", structured_output=True)
+    def _ai_models_tool(preferred_model: str = DEFAULT_AI_MODEL, ollama_host: str | None = None) -> dict[str, object]:
+        return service.ai_models_payload(preferred_model=preferred_model, ollama_host=ollama_host)
+
+    @server.tool(name="ai_doctor", description="Diagnose local Ollama and delegate readiness for the persistent librarian service.", structured_output=True)
+    def _ai_doctor_tool(preferred_model: str = DEFAULT_AI_MODEL, ollama_host: str | None = None) -> dict[str, object]:
+        return service.ai_doctor_payload(preferred_model=preferred_model, ollama_host=ollama_host)
+
+    @server.tool(name="ai_summary", description="Run the optional local AI summary against the shared librarian workspace.", structured_output=True)
+    def _ai_summary_tool(
+        task: str = "Summarize the current repository changes and likely next actions.",
+        mode: str = "analysis",
+        model: str = DEFAULT_AI_MODEL,
+        changed_only: bool = True,
+        ollama_host: str | None = None,
+    ) -> dict[str, object]:
+        return service.ai_summary_payload(
+            task=task,
+            mode=mode,
+            model=model,
+            changed_only=changed_only,
+            ollama_host=ollama_host,
+        )
+
+    return server
+
+
+def run_librarian_mcp_server(
+    repo_root=None,
+    output_dir=None,
+    transport=DEFAULT_MCP_TRANSPORT,
+    host=DEFAULT_MCP_HOST,
+    port=DEFAULT_MCP_PORT,
+    refresh_first=False,
+    refresh_interval_seconds=DEFAULT_REFRESH_INTERVAL_SECONDS,
+    log_level="INFO",
+    auth_token=None,
+):
+    resolved_auth_token, generated_auth_token = _resolve_http_auth_token(auth_token)
+    service = LibrarianService(
+        repo_root=repo_root,
+        output_dir=output_dir,
+        refresh_if_missing=True,
+        refresh_first=refresh_first,
+        refresh_interval_seconds=refresh_interval_seconds,
+        start_refresh_worker=refresh_interval_seconds > 0,
+    )
+    server = create_librarian_mcp_server(
+        service,
+        host=host,
+        port=port,
+        log_level=log_level,
+        auth_token=resolved_auth_token,
+        transport=transport,
+    )
+
+    if transport == "streamable-http":
+        print(f"Project Librarian dashboard at http://{host}:{port}/")
+        print(f"Project Librarian MCP server listening at http://{host}:{port}/mcp")
+    elif transport == "sse":
+        print(f"Project Librarian MCP server listening at http://{host}:{port}/sse")
+    else:
+        print("Project Librarian MCP server running on stdio transport")
+    if resolved_auth_token and transport != "stdio":
+        browser_hint = f"http://{host}:{port}/?token={resolved_auth_token}"
+        print(f"HTTP auth token enabled via {HTTP_AUTH_ENV_NAME if auth_token is None else '--auth-token'}")
+        print(f"Dashboard login URL: {browser_hint}")
+        print(f"MCP auth header: Authorization: Bearer {resolved_auth_token}")
+        if generated_auth_token:
+            print("Token mode: generated for this process")
+    if transport in {"streamable-http", "sse"}:
+        print(f"MCP probe JSON: http://{host}:{port}/api/mcp-probe")
+        print(f"MCP probe SSE: http://{host}:{port}/api/mcp-probe/sse")
+        print(f"MCP probe JSON-RPC: http://{host}:{port}/api/mcp-probe/jsonrpc")
+    if refresh_interval_seconds > 0:
+        print(f"Background refresh worker interval: {refresh_interval_seconds:.1f}s")
+    else:
+        print("Background refresh worker disabled")
+
+    try:
+        if transport == "stdio":
+            server.run(transport=transport)
+        else:
+            try:
+                import uvicorn
+            except ImportError as exc:
+                raise ProjectLibrarianError(
+                    "The 'uvicorn' package is required for HTTP MCP server mode. Install it in the active environment first."
+                ) from exc
+
+            if transport == "streamable-http":
+                app = server.streamable_http_app()
+            elif transport == "sse":
+                app = server.sse_app()
+            else:
+                raise ProjectLibrarianError(f"Unsupported MCP transport: {transport}")
+            app = _wrap_http_app_with_token_auth(app, resolved_auth_token)
+            uvicorn.run(app, host=host, port=port, log_level=log_level.lower())
+    finally:
+        service.stop()
+
+
 def generate_docs_draft(workspace, title=None, changed_only=True):
     records = _changed_file_records(workspace, changed_only=changed_only)
     grouped = _records_grouped_by_area(records)
@@ -1678,6 +4438,26 @@ def parse_args():
     ai_doctor_parser.add_argument("--model", default=DEFAULT_AI_MODEL, help="Preferred model to validate against the local list.")
     ai_doctor_parser.add_argument("--ollama-host", help="Optional OLLAMA_HOST override for local AI calls.")
 
+    mcp_parser = subparsers.add_parser("mcp-server", help="Run the librarian as a persistent MCP server with a shared in-memory workspace.")
+    mcp_parser.add_argument("--transport", choices=("stdio", "sse", "streamable-http"), default=DEFAULT_MCP_TRANSPORT)
+    mcp_parser.add_argument("--host", default=DEFAULT_MCP_HOST, help="Host to bind for HTTP-based transports.")
+    mcp_parser.add_argument("--port", type=int, default=DEFAULT_MCP_PORT, help="Port to bind for HTTP-based transports.")
+    mcp_parser.add_argument("--refresh", action="store_true", help="Refresh the workspace before starting the MCP server.")
+    mcp_parser.add_argument(
+        "--refresh-interval",
+        type=float,
+        default=DEFAULT_REFRESH_INTERVAL_SECONDS,
+        help="Background refresh interval in seconds for the second worker thread. Use 0 to disable it.",
+    )
+    mcp_parser.add_argument(
+        "--auth-token",
+        help=(
+            "Optional shared token for the browser dashboard and HTTP MCP endpoint. "
+            f"If omitted, {HTTP_AUTH_ENV_NAME} is used when present. Use 'auto' to generate a token for this run."
+        ),
+    )
+    mcp_parser.add_argument("--log-level", choices=("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"), default="INFO")
+
     repl_parser = subparsers.add_parser("repl", help="Load the project into RAM and interactively search it.")
     repl_parser.add_argument("--refresh", action="store_true", help="Refresh the snapshot before entering the REPL.")
 
@@ -1811,6 +4591,19 @@ def main():
     if args.command == "ai-doctor":
         print(format_ai_status_report(collect_ai_runtime_status(repo_root, preferred_model=args.model, ollama_host=args.ollama_host)))
         return 0
+
+    if args.command == "mcp-server":
+        return run_librarian_mcp_server(
+            repo_root=repo_root,
+            output_dir=output_dir,
+            transport=args.transport,
+            host=args.host,
+            port=args.port,
+            refresh_first=args.refresh,
+            refresh_interval_seconds=args.refresh_interval,
+            log_level=args.log_level,
+            auth_token=args.auth_token,
+        )
 
     if args.command == "stats":
         print(format_workspace_stats(workspace))

@@ -16,21 +16,27 @@
 from ttkbootstrap.constants import DANGER, SECONDARY, SUCCESS
 
 from app.models.internal_code_editor_model import InternalCodeEditorModel
-from app.views.internal_code_editor_view import InternalCodeEditorView
+from app.qt_module_runtime import QtModuleRuntimeManager
+from app.views.internal_code_editor_view_factory import create_internal_code_editor_view
 
 __module_name__ = "Internal Code Editor"
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 
 class InternalCodeEditorController:
     def __init__(self, parent, dispatcher):
         self.parent = parent
         self.dispatcher = dispatcher
+        self.requested_view_backend = "qt"
+        self.resolved_view_backend = "tk"
+        self.view_backend_fallback_reason = None
         self.model = InternalCodeEditorModel(dispatcher.modules_path, dispatcher.external_modules_path)
-        self.view = InternalCodeEditorView(parent, dispatcher, self)
+        self.runtime_manager = QtModuleRuntimeManager("internal_code_editor", self.build_qt_session_payload)
+        self.view = create_internal_code_editor_view(parent, dispatcher, self)
         self.current_analysis = {"definitions": [], "parse_error": None}
-        self.apply_theme()
-        self.refresh_file_list()
+        if self.resolved_view_backend == "tk":
+            self.apply_theme()
+            self.refresh_file_list()
 
     def __getattr__(self, attribute_name):
         view = self.__dict__.get("view")
@@ -39,7 +45,31 @@ class InternalCodeEditorController:
         return getattr(view, attribute_name)
 
     def apply_theme(self):
-        self.view.apply_theme()
+        if self.resolved_view_backend == "tk":
+            self.view.apply_theme()
+
+    def build_qt_session_payload(self):
+        root = self.parent.winfo_toplevel()
+        return {
+            "window_title": "Internal Code Editor - Production Logging Center",
+            "title": "Internal Code Editor",
+            "subtitle": "Edit Python modules in-place with search and file index support in a dedicated PyQt6 window.",
+            "bundled_app_path": self.model.bundled_app_path,
+            "external_app_path": self.model.external_app_path,
+            "theme_tokens": dict(getattr(root, "_martin_theme_tokens", {}) or {}),
+        }
+
+    def open_or_raise_qt_window(self):
+        self.runtime_manager.ensure_running(force_restart=False)
+
+    def restart_qt_window(self):
+        self.runtime_manager.ensure_running(force_restart=True)
+
+    def stop_qt_window(self):
+        self.runtime_manager.stop_runtime(force=False)
+
+    def read_runtime_state(self):
+        return self.runtime_manager.read_state()
 
     def refresh_file_list(self, selected_key=None, preferred_path=None):
         entries = self.model.refresh_file_entries()
@@ -160,9 +190,14 @@ class InternalCodeEditorController:
         self._find_match(backwards=True)
 
     def on_hide(self):
+        if self.resolved_view_backend == "qt":
+            return None
         return self.view.on_hide()
 
     def on_unload(self):
+        if self.resolved_view_backend == "qt":
+            self.stop_qt_window()
+            return None
         return self.view.on_unload()
 
     def _find_match(self, backwards):

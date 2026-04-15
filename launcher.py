@@ -21,16 +21,35 @@ import sys
 
 import ttkbootstrap as tb
 
+try:
+    from PyQt6.QtCore import Qt
+    from PyQt6.QtWidgets import QApplication
+
+    PYQT6_LAUNCHER_SUPPORT = True
+except ImportError:
+    QApplication = None
+    Qt = None
+    PYQT6_LAUNCHER_SUPPORT = False
+
 from app.app_logging import log_exception
 from app.external_data_registry import ExternalDataRegistry
 from app.module_registry import get_launcher_module_names
-from app.theme_manager import DEFAULT_THEME, apply_readability_overrides, normalize_theme, resolve_base_theme
+from app.theme_manager import (
+    DEFAULT_THEME,
+    apply_readability_overrides,
+    get_qt_palette,
+    get_qt_stylesheet,
+    normalize_theme,
+    resolve_base_theme,
+)
 from app.utils import resource_path
 from app.controllers.app_controller import Dispatcher
 from app.app_platform import SPLASH_LOGO_RELATIVE_PATH, apply_app_icon, apply_windows_app_id, apply_windows_window_icons
 
 __module_name__ = "Dispatcher Core"
-__version__ = "2.1.5"
+__version__ = "2.2.0"
+LAYOUT_MANAGER_QT_SESSION_ENV = "AIMARTIN_LAYOUT_MANAGER_QT_SESSION"
+QT_MODULE_SESSION_ENV = "AIMARTIN_QT_MODULE_SESSION"
 
 
 class _SigintCoordinator:
@@ -86,6 +105,95 @@ class _SigintCoordinator:
         self._schedule_poll()
 
 
+def create_qt_application(theme_name=None, theme_tokens=None):
+    if not PYQT6_LAUNCHER_SUPPORT:
+        raise RuntimeError("PyQt6 is not installed in the active Python environment.")
+
+    application = QApplication.instance()
+    if application is None:
+        try:
+            QApplication.setAttribute(Qt.ApplicationAttribute.AA_UseHighDpiPixmaps, True)
+        except AttributeError:
+            pass
+        try:
+            QApplication.setHighDpiScaleFactorRoundingPolicy(
+                Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
+            )
+        except AttributeError:
+            pass
+        application = QApplication([sys.argv[0]])
+
+    application.setStyleSheet(get_qt_stylesheet(theme_name=theme_name, theme_tokens=theme_tokens))
+    application.setPalette(get_qt_palette(theme_name=theme_name, theme_tokens=theme_tokens))
+    return application
+
+
+def _load_qt_module_session_payload(session_path):
+    with open(session_path, "r", encoding="utf-8") as session_file:
+        payload = json.load(session_file)
+    if not isinstance(payload, dict):
+        raise ValueError("Qt module session payload must be a JSON object.")
+    return payload
+
+
+def _run_qt_module_session_from_payload(session_path, session_payload):
+    module_name = str(session_payload.get("module") or "").strip()
+    if not module_name:
+        raise ValueError("Qt module session payload is missing the 'module' key.")
+
+    if module_name == "about":
+        from app.views.about_qt_view import run_about_qt_session
+
+        return run_about_qt_session(session_path)
+
+    if module_name == "help_viewer":
+        from app.views.help_viewer_qt_view import run_help_viewer_qt_session
+
+        return run_help_viewer_qt_session(session_path)
+
+    if module_name == "recovery_viewer":
+        from app.views.recovery_viewer_qt_view import run_recovery_viewer_qt_session
+
+        return run_recovery_viewer_qt_session(session_path)
+
+    if module_name == "layout_manager":
+        from app.views.layout_manager_qt_view import run_layout_manager_qt_session
+
+        return run_layout_manager_qt_session(session_path)
+
+    if module_name == "rate_manager":
+        from app.views.rate_manager_qt_view import run_rate_manager_qt_session
+
+        return run_rate_manager_qt_session(session_path)
+
+    if module_name == "production_log_calculations":
+        from app.views.production_log_calculations_qt_view import run_production_log_calculations_qt_session
+
+        return run_production_log_calculations_qt_session(session_path)
+
+    if module_name == "production_log":
+        from app.views.production_log_qt_view import run_production_log_qt_session
+
+        return run_production_log_qt_session(session_path)
+
+    if module_name == "internal_code_editor":
+        from app.views.internal_code_editor_qt_view import run_internal_code_editor_qt_session
+
+        return run_internal_code_editor_qt_session(session_path)
+
+    if module_name == "settings_manager":
+        from app.views.settings_manager_qt_view import run_settings_manager_qt_session
+
+        return run_settings_manager_qt_session(session_path)
+
+    if module_name == "update_manager":
+        from app.views.update_manager_qt_view import run_update_manager_qt_session
+
+        return run_update_manager_qt_session(session_path)
+
+    raise ValueError(f"Unsupported Qt module session: {module_name}")
+
+
 def run_application(main_module=None, initial_module_name=None):
     data_registry = ExternalDataRegistry()
     settings_path = data_registry.resolve_read_path("settings")
@@ -137,6 +245,23 @@ def run_application(main_module=None, initial_module_name=None):
                 pass
 
 
+def run_special_mode_from_environment():
+    session_path = os.environ.get(QT_MODULE_SESSION_ENV, "").strip()
+    if session_path:
+        session_payload = _load_qt_module_session_payload(session_path)
+        return _run_qt_module_session_from_payload(session_path, session_payload)
+
+    session_path = os.environ.get(LAYOUT_MANAGER_QT_SESSION_ENV, "").strip()
+    if not session_path:
+        return None
+
+    session_payload = _load_qt_module_session_payload(session_path)
+    if not session_payload.get("module"):
+        session_payload["module"] = "layout_manager"
+
+    return _run_qt_module_session_from_payload(session_path, session_payload)
+
+
 def build_argument_parser():
     launcher_module_names = get_launcher_module_names()
     parser = argparse.ArgumentParser(
@@ -151,9 +276,13 @@ def build_argument_parser():
 
 
 def main(argv=None):
+    special_mode_exit_code = run_special_mode_from_environment()
+    if special_mode_exit_code is not None:
+        return special_mode_exit_code
     args = build_argument_parser().parse_args(argv)
     run_application(initial_module_name=args.module)
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
