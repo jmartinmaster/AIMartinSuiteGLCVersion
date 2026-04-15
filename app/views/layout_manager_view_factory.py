@@ -28,9 +28,10 @@ LayoutManagerViewFactory = Callable[[object, object, object], LayoutManagerViewC
 
 def get_requested_layout_manager_ui_backend(dispatcher):
     runtime_settings = getattr(dispatcher, "runtime_settings", {}) or {}
+    default_backend = "qt" if bool(getattr(dispatcher, "is_pyqt6_shell_requested", lambda: False)()) else "tk"
     requested_backend = runtime_settings.get(
         "layout_manager_ui_backend",
-        os.environ.get("AIMARTIN_LAYOUT_MANAGER_UI_BACKEND", "tk"),
+        os.environ.get("AIMARTIN_LAYOUT_MANAGER_UI_BACKEND", default_backend),
     )
     requested_backend = str(requested_backend).strip().lower()
     if requested_backend not in {"tk", "qt"}:

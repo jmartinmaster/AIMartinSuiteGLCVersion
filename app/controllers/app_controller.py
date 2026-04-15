@@ -46,6 +46,14 @@ __version__ = "2.1.5"
 ISSUE_REPORT_URL = "https://github.com/jmartinmaster/AIMartinSuiteGLCVersion/issues/new/choose"
 MODULE_PRELOAD_POLL_SECONDS = 1.0
 
+SEVERITY_TO_BOOTSTYLE = {
+    "info": INFO,
+    "success": SUCCESS,
+    "warning": WARNING,
+    "danger": DANGER,
+    "error": DANGER,
+}
+
 MODULE_API_SURFACE = {
     "navigation": (
         "load_module",
@@ -57,12 +65,18 @@ MODULE_API_SURFACE = {
     ),
     "notifications_and_status": (
         "show_toast",
+        "notify_user",
         "set_update_status",
+        "set_status_banner",
         "clear_update_status",
         "clear_update_status_after",
     ),
     "settings_and_theme": (
         "get_setting",
+        "get_ui_shell_backend",
+        "is_pyqt6_shell_requested",
+        "get_active_shell_backend",
+        "get_shell_backend_fallback_reason",
         "refresh_runtime_settings",
         "register_runtime_settings_listener",
         "unregister_runtime_settings_listener",
@@ -142,6 +156,10 @@ class Dispatcher:
         self.model.loaded_modules = {"main": self.main_module}
         self._configure_module_import_paths()
         self.model.runtime_settings = self.load_runtime_settings()
+        self.requested_shell_backend = "tk"
+        self.active_shell_backend = "tk"
+        self.shell_backend_fallback_reason = None
+        self._refresh_shell_backend_state()
         self.model.window_alpha_supported = self._supports_window_alpha()
         self.model.module_preload_poll_seconds = MODULE_PRELOAD_POLL_SECONDS
         self.update_coordinator = UpdateCoordinator(self.root)
@@ -1173,6 +1191,7 @@ class Dispatcher:
 
     def refresh_runtime_settings(self):
         self.runtime_settings = self.load_runtime_settings()
+        self._refresh_shell_backend_state()
         self._configure_module_import_paths()
         self.refresh_animation_settings()
         self.prune_persistent_module_instances()
@@ -1202,6 +1221,29 @@ class Dispatcher:
 
     def get_setting(self, key, default=None):
         return self.runtime_settings.get(key, default)
+
+    def _refresh_shell_backend_state(self):
+        self.requested_shell_backend = self.get_ui_shell_backend()
+        self.active_shell_backend = "tk"
+        if self.requested_shell_backend != self.active_shell_backend:
+            self.shell_backend_fallback_reason = (
+                f"Requested shell backend '{self.requested_shell_backend}' is not available in this build; using '{self.active_shell_backend}'."
+            )
+        else:
+            self.shell_backend_fallback_reason = None
+
+    def get_ui_shell_backend(self):
+        backend = str(self.runtime_settings.get("ui_shell_backend", "tk") or "tk").strip().lower()
+        return backend if backend in {"tk", "pyqt6"} else "tk"
+
+    def is_pyqt6_shell_requested(self):
+        return self.get_ui_shell_backend() == "pyqt6"
+
+    def get_active_shell_backend(self):
+        return self.active_shell_backend
+
+    def get_shell_backend_fallback_reason(self):
+        return self.shell_backend_fallback_reason
 
     def _has_explicit_module_update_notification_setting(self):
         return bool(self.runtime_settings.get("_module_update_notifications_explicit", False))
@@ -1305,19 +1347,30 @@ class Dispatcher:
 
         bind_widget(root_widget)
 
+    def _normalize_bootstyle(self, style_value):
+        if isinstance(style_value, str):
+            normalized = style_value.strip().lower()
+            if normalized in SEVERITY_TO_BOOTSTYLE:
+                return SEVERITY_TO_BOOTSTYLE[normalized]
+        return style_value
+
     def show_toast(self, title, message, bootstyle=INFO, duration_ms=None):
         duration = duration_ms
         if duration is None:
             duration = int(self.get_setting("toast_duration_sec", 5)) * 1000
+        resolved_bootstyle = self._normalize_bootstyle(bootstyle)
         right_inset, bottom_inset = get_work_area_insets(self.root)
         toast = ToastNotification(
             title=title,
             message=message,
             duration=duration,
-            bootstyle=bootstyle,
+            bootstyle=resolved_bootstyle,
             position=(24 + right_inset, 24 + bottom_inset, "se"),
         )
         toast.show_toast()
+
+    def notify_user(self, title, message, severity="info", duration_ms=None):
+        self.show_toast(title, message, bootstyle=severity, duration_ms=duration_ms)
 
     def refresh_update_status_visibility(self):
         self.view.refresh_update_status_visibility()
@@ -1333,8 +1386,12 @@ class Dispatcher:
 
     def set_update_status(self, message, bootstyle=INFO, active=True, mode=None):
         self._cancel_scheduled_update_status_clear()
-        self.update_coordinator.set_banner(message, bootstyle=bootstyle, active=active, mode=mode)
+        resolved_bootstyle = self._normalize_bootstyle(bootstyle)
+        self.update_coordinator.set_banner(message, bootstyle=resolved_bootstyle, active=active, mode=mode)
         self.refresh_update_status_visibility()
+
+    def set_status_banner(self, message, severity="info", active=True, mode=None):
+        self.set_update_status(message, bootstyle=severity, active=active, mode=mode)
 
     def clear_update_status(self):
         self._cancel_scheduled_update_status_clear()
