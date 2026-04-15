@@ -15,6 +15,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 import os
 import sys
+import time
 import webbrowser
 
 import ttkbootstrap as tb
@@ -22,7 +23,9 @@ from ttkbootstrap.constants import INFO, SUCCESS, WARNING
 
 from app import recovery_viewer
 from app.models.production_log_model import ProductionLogModel
+from app.qt_module_runtime import QtModuleRuntimeManager
 from app.views.production_log_view import ProductionLogView, __version__ as PRODUCTION_LOG_VERSION
+from app.views.production_log_view_factory import create_production_log_view
 
 __module_name__ = "Production Log"
 __version__ = "1.2.8"
@@ -32,10 +35,15 @@ class ProductionLogController:
     def __init__(self, parent, dispatcher):
         self.parent = parent
         self.dispatcher = dispatcher
+        self.requested_view_backend = "tk"
+        self.resolved_view_backend = "tk"
+        self.view_backend_fallback_reason = None
         self.model = ProductionLogModel(data_registry=getattr(dispatcher, "external_data_registry", None))
         self.view = None
-        self.view = ProductionLogView(parent, dispatcher, self, self.model)
-        self.update_export_action_state()
+        self.runtime_manager = QtModuleRuntimeManager("production_log", self.build_qt_session_payload)
+        self.view = create_production_log_view(parent, dispatcher, self, self.model)
+        if self.resolved_view_backend == "tk":
+            self.update_export_action_state()
 
     def __getattr__(self, attribute_name):
         view = self.__dict__.get("view")
@@ -43,7 +51,49 @@ class ProductionLogController:
             raise AttributeError(attribute_name)
         return getattr(view, attribute_name)
 
+    def build_qt_session_payload(self):
+        root = self.parent.winfo_toplevel()
+        latest_draft = self.get_latest_pending_draft()
+        latest_draft_name = os.path.basename(str((latest_draft or {}).get("path") or "")).strip()
+        latest_draft_name = latest_draft_name or "None"
+        return {
+            "window_title": "Production Log - Production Logging Center",
+            "title": "Production Log",
+            "subtitle": "Qt sidecar bootstrap for Production Log migration.",
+            "pending_draft_count": len(self.list_pending_drafts()),
+            "recovery_snapshot_count": len(self.list_recovery_snapshots()),
+            "latest_draft_name": latest_draft_name,
+            "dt_code_count": len(self.model.dt_codes or []),
+            "updated_at": time.time(),
+            "theme_tokens": dict(getattr(root, "_martin_theme_tokens", {}) or {}),
+        }
+
+    def open_or_raise_qt_window(self):
+        self.runtime_manager.ensure_running(force_restart=False)
+
+    def restart_qt_window(self):
+        self.runtime_manager.ensure_running(force_restart=True)
+
+    def stop_qt_window(self):
+        self.runtime_manager.stop_runtime(force=False)
+
+    def read_runtime_state(self):
+        return self.runtime_manager.read_state()
+
+    def _qt_sidecar_active(self):
+        return self.resolved_view_backend == "qt"
+
+    def on_hide(self):
+        return None
+
+    def on_unload(self):
+        if self.resolved_view_backend == "qt":
+            self.stop_qt_window()
+
     def reload_active_form(self, data=None, draft_path=None, mark_dirty_after_load=False):
+        if self._qt_sidecar_active():
+            self.open_or_raise_qt_window()
+            return
         if self.view is not None and hasattr(self.view, "on_unload"):
             try:
                 self.view.on_unload()
@@ -63,6 +113,9 @@ class ProductionLogController:
             self.view.populate_from_data(data, source_path=draft_path, mark_dirty_after_load=mark_dirty_after_load)
 
     def on_active_form_changed(self):
+        if self._qt_sidecar_active():
+            self.open_or_raise_qt_window()
+            return
         try:
             if self.view is not None and self.view.has_unsaved_changes:
                 data = self.view.collect_ui_data()
@@ -73,12 +126,17 @@ class ProductionLogController:
         self.reload_active_form()
 
     def on_calculation_settings_changed(self):
+        if self._qt_sidecar_active():
+            self.open_or_raise_qt_window()
+            return
         self.model.refresh_calculation_settings()
         self.view.apply_calculation_settings(mark_dirty=False)
         self.update_row_math()
         self.calculate_metrics()
 
     def auto_save(self):
+        if self._qt_sidecar_active():
+            return
         if self.view.has_unsaved_changes:
             self.save_draft(is_auto=True)
 
@@ -132,6 +190,9 @@ class ProductionLogController:
             self.view.show_toast("Refresh View", "No previous draft found to reload.", INFO)
 
     def refresh_downtime_codes(self):
+        if self._qt_sidecar_active():
+            self.open_or_raise_qt_window()
+            return
         self.view.dt_codes = self.model.refresh_downtime_codes()
         for row in self.get_rows("downtime"):
             code_widget = self.view.get_row_widget(row, "downtime", "downtime_code", fallback_id="code")
@@ -702,6 +763,9 @@ class ProductionLogController:
         self.view.update_recovery_ui()
 
     def load_draft_path(self, draft_path, window=None):
+        if self._qt_sidecar_active():
+            self.open_or_raise_qt_window()
+            return
         if not self.view.confirm_discard_unsaved_changes():
             return
         try:

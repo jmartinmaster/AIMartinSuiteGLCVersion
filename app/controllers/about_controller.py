@@ -18,17 +18,24 @@ import subprocess
 import sys
 from tkinter import messagebox
 
-from app.views.about_view import AboutView
+from app.qt_module_runtime import QtModuleRuntimeManager
+from app.utils import local_or_resource_path
+from app.views.about_view_factory import create_about_view
 
 __module_name__ = "About System"
-__version__ = "1.0.1"
+__version__ = "1.1.0"
 
 
 class AboutController:
     def __init__(self, parent, dispatcher):
+        self.parent = parent
         self.dispatcher = dispatcher
         self.view = None
-        self.view = AboutView(parent, dispatcher, self)
+        self.requested_view_backend = "qt"
+        self.resolved_view_backend = "tk"
+        self.view_backend_fallback_reason = None
+        self.runtime_manager = QtModuleRuntimeManager("about", self.build_qt_session_payload)
+        self.view = create_about_view(parent, dispatcher, self)
 
     def __getattr__(self, attribute_name):
         view = self.__dict__.get("view")
@@ -38,6 +45,56 @@ class AboutController:
 
     def open_license(self):
         self.dispatcher.open_help_document("docs/legal/LICENSE.txt")
+
+    def get_info_text(self):
+        return (
+            "Author: Jamie Martin\n"
+            "License: GNU General Public License v3.0\n"
+            "Location: Ludington, MI\n"
+            "Environment: Windows / Portable Python 3.12"
+        )
+
+    def get_manifest_rows(self):
+        manifest_rows = []
+        for mod_key, mod_obj in self._iter_manifest_modules():
+            display_name = getattr(mod_obj, "__module_name__", mod_key)
+            version = getattr(mod_obj, "__version__", "Unknown")
+            source_suffix = "external" if self.dispatcher.is_module_loaded_from_external(mod_key, mod_obj) else "built-in"
+            manifest_rows.append(
+                {
+                    "display_name": display_name,
+                    "version": version,
+                    "source_suffix": source_suffix,
+                }
+            )
+        return manifest_rows
+
+    def build_qt_session_payload(self):
+        root = self.parent.winfo_toplevel()
+        license_path = local_or_resource_path("docs/legal/LICENSE.txt")
+        return {
+            "window_title": "About - Production Logging Center",
+            "title": "PRODUCTION LOGGING CENTER",
+            "subtitle": "GLC Edition",
+            "info_text": self.get_info_text(),
+            "module_manifest": self.get_manifest_rows(),
+            "license_path": license_path,
+            "can_repack": False,
+            "footer_text": "Copyright © 2026 Jamie Martin",
+            "theme_tokens": dict(getattr(root, "_martin_theme_tokens", {}) or {}),
+        }
+
+    def open_or_raise_qt_window(self):
+        self.runtime_manager.ensure_running(force_restart=False)
+
+    def restart_qt_window(self):
+        self.runtime_manager.ensure_running(force_restart=True)
+
+    def stop_qt_window(self):
+        self.runtime_manager.stop_runtime(force=False)
+
+    def read_runtime_state(self):
+        return self.runtime_manager.read_state()
 
     def _iter_manifest_modules(self):
         loaded_modules = getattr(self.dispatcher, "loaded_modules", {}) or {}
@@ -73,18 +130,23 @@ class AboutController:
             yield module_name, module_obj
 
     def render_module_manifest(self, parent):
-        module_entries = list(self._iter_manifest_modules())
+        module_entries = self.get_manifest_rows()
         if not module_entries:
             self.view.render_empty_manifest(parent)
             return
-        for mod_key, mod_obj in module_entries:
-            display_name = getattr(mod_obj, "__module_name__", mod_key)
-            version = getattr(mod_obj, "__version__", "Unknown")
-            source_suffix = " (external)" if self.dispatcher.is_module_loaded_from_external(mod_key, mod_obj) else ""
-            self.view.render_module_row(parent, display_name, version, source_suffix)
+        for row in module_entries:
+            source_suffix = " (external)" if row.get("source_suffix") == "external" else ""
+            self.view.render_module_row(parent, row.get("display_name", "Unknown"), row.get("version", "Unknown"), source_suffix)
 
     def can_repack(self):
         return bool(getattr(sys, "frozen", False))
+
+    def on_hide(self):
+        return None
+
+    def on_unload(self):
+        if self.resolved_view_backend == "qt":
+            self.stop_qt_window()
 
     def confirm_repack(self):
         message = "This will compile a new executable with your current settings.\n\nThe app will close, build, and restart automatically.\n\nProceed?"

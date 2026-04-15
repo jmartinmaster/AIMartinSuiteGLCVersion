@@ -17,21 +17,27 @@ from ttkbootstrap.constants import DANGER, INFO, SECONDARY, SUCCESS
 
 from app.models.layout_manager_model import LayoutManagerModel
 from app.theme_manager import get_theme_tokens
-from app.views.layout_manager_view import LayoutManagerView
+from app.views.layout_manager_qt_view import launch_layout_manager_qt_probe
+from app.views.layout_manager_view_contract import LayoutManagerViewContract
+from app.views.layout_manager_view_factory import create_layout_manager_view
 
 
 class LayoutManagerController:
-    def __init__(self, parent, dispatcher):
+    def __init__(self, parent, dispatcher, view_factory=None):
         self.parent = parent
         self.dispatcher = dispatcher
         self.model = LayoutManagerModel()
-        self.view = LayoutManagerView(parent, dispatcher, self)
         self.current_config = None
         self.preview_grid = None
         self.selected_block_item = None
         self.selected_form_id = None
         self.loaded_form_info = None
         self.pending_active_form_info = None
+        self.requested_view_backend = "tk"
+        self.resolved_view_backend = "tk"
+        self.view_backend_fallback_reason = None
+        self.view_factory = view_factory or create_layout_manager_view
+        self.view: LayoutManagerViewContract = self.view_factory(parent, dispatcher, self)
         self.apply_theme()
         self.load_config(initial=True)
 
@@ -340,6 +346,27 @@ class LayoutManagerController:
         except Exception as exc:
             self.view.show_preview_error(str(exc))
             self._update_status(f"Preview error: {exc}", bootstyle=DANGER)
+
+    def launch_qt_probe(self):
+        try:
+            config, _payload_details = self._resolve_editor_config()
+            root = self.parent.winfo_toplevel()
+            loaded_form = self._get_loaded_form_info()
+            launch_layout_manager_qt_probe(
+                {
+                    "window_title": "Layout Manager PyQt6 Probe",
+                    "requested_backend": self.requested_view_backend,
+                    "resolved_backend": self.resolved_view_backend,
+                    "form_name": loaded_form.get("name", "Form"),
+                    "form_id": loaded_form.get("id", "form"),
+                    "source_label": self._get_source_label(),
+                    "theme_tokens": get_theme_tokens(root=root),
+                    "serialized_config": self.model.serialize_config(config),
+                }
+            )
+            self._update_status("Opened PyQt6 probe window", bootstyle=SUCCESS)
+        except Exception as exc:
+            self.view.show_error("PyQt6 Probe", f"Could not open the PyQt6 probe window: {exc}")
 
     def add_header_field(self):
         try:

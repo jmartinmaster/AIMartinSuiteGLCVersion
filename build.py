@@ -42,6 +42,7 @@ MARTIN_BUILD_PYTHON_ENV = "MARTIN_BUILD_PYTHON"
 MAX_OLD_EXE_ARCHIVE = 10
 REQUIRED_BUILD_MODULES = [
     "PIL",
+    "PyQt6",
     "PyInstaller",
     "openpyxl",
     "ttkbootstrap",
@@ -72,6 +73,10 @@ BUILD_DATA_PATHS = [
     ("production_log_calculations.json", "."),
 ]
 HIDDENIMPORTS = [
+    "PyQt6",
+    "PyQt6.QtCore",
+    "PyQt6.QtGui",
+    "PyQt6.QtWidgets",
     "openpyxl",
     "openpyxl.cell.cell",
     "PIL._tkinter_finder",
@@ -81,6 +86,7 @@ HIDDENIMPORTS = [
 ]
 COLLECT_SUBMODULE_PACKAGES = [
     "app",
+    "PyQt6",
     "openpyxl",
     "PyInstaller",
 ]

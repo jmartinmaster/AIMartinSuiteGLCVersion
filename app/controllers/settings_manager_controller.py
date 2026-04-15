@@ -17,39 +17,127 @@ from copy import deepcopy
 import os
 
 from app.downtime_codes import DEFAULT_DT_CODE_MAP, clear_downtime_code_cache
+from app.qt_module_runtime import QtModuleRuntimeManager
 from app.security import gatekeeper
-from app.theme_manager import DEFAULT_THEME, get_theme_label, get_theme_labels, normalize_theme
+from app.theme_manager import DEFAULT_THEME, get_theme_label, get_theme_labels, get_theme_names, normalize_theme
 from app.models.security_model import ACCESS_RIGHTS, ROLE_DEFAULT_RIGHTS, ROLE_LIMITS, normalize_role, role_requires_password
 from app.models.settings_manager_model import SettingsManagerModel
-from app.views.settings_manager_view import SettingsManagerView
+from app.views.settings_manager_view_factory import create_settings_manager_view
 
 __module_name__ = "Settings Manager"
-__version__ = "1.0.2"
+__version__ = "1.2.0"
 
 
 class SettingsManagerController:
     def __init__(self, parent, dispatcher, section_mode="full"):
+        self.parent = parent
         self.dispatcher = dispatcher
         self.section_mode = str(section_mode or "full")
+        self.requested_view_backend = "qt"
+        self.resolved_view_backend = "tk"
+        self.view_backend_fallback_reason = None
+        self.runtime_manager = QtModuleRuntimeManager("settings_manager", self.build_qt_session_payload)
+        self._last_runtime_event_timestamp = None
         self.model = SettingsManagerModel()
-        self.sync_valid_module_options()
         self.view = None
-        self.view = SettingsManagerView(parent, dispatcher, self, section_mode=self.section_mode)
-        self.dispatcher.add_security_session_listener(self.on_security_session_changed)
-        self.view.build_form_fields(self.model.get_settings_copy(), self.get_theme_options())
-        self.refresh_module_whitelist_summary()
-        self.refresh_persistent_modules_summary()
-        self.refresh_external_modules_status()
-        self.refresh_security_status()
-        self.refresh_developer_admin_status()
-        self.view.set_theme_status(f"Current theme: {get_theme_label(self.model.saved_theme)}")
-        self.view.apply_section_mode()
+        self._security_listener_registered = False
+        self.sync_valid_module_options()
+        self.view = create_settings_manager_view(parent, dispatcher, self, section_mode=self.section_mode)
+        if self.resolved_view_backend == "tk":
+            self.dispatcher.add_security_session_listener(self.on_security_session_changed)
+            self._security_listener_registered = True
+            self.view.build_form_fields(self.model.get_settings_copy(), self.get_theme_options())
+            self.refresh_module_whitelist_summary()
+            self.refresh_persistent_modules_summary()
+            self.refresh_external_modules_status()
+            self.refresh_security_status()
+            self.refresh_developer_admin_status()
+            self.view.set_theme_status(f"Current theme: {get_theme_label(self.model.saved_theme)}")
+            self.view.apply_section_mode()
 
     def __getattr__(self, attribute_name):
         view = self.__dict__.get("view")
         if view is None:
             raise AttributeError(attribute_name)
         return getattr(view, attribute_name)
+
+    def build_qt_session_payload(self):
+        root = self.parent.winfo_toplevel()
+        navigation_modules = list(self.dispatcher.get_navigation_modules())
+        persistable_modules = list(self.dispatcher.get_persistable_modules())
+        return {
+            "window_title": "Settings Manager - Production Logging Center",
+            "title": "Settings Manager",
+            "subtitle": "Qt sidecar bootstrap view for staged Settings Manager migration.",
+            "section_mode": self.section_mode,
+            "theme_options": [{"key": theme_name, "label": get_theme_label(theme_name)} for theme_name in get_theme_names()],
+            "navigation_modules": [
+                {
+                    "display_name": display_name,
+                    "module_name": module_name,
+                }
+                for display_name, module_name in navigation_modules
+            ],
+            "persistable_modules": [
+                {
+                    "display_name": display_name,
+                    "module_name": module_name,
+                }
+                for display_name, module_name in persistable_modules
+            ],
+            "theme_tokens": dict(getattr(root, "_martin_theme_tokens", {}) or {}),
+            "external_modules_status": self.format_external_modules_status(),
+        }
+
+    def open_or_raise_qt_window(self):
+        self.runtime_manager.ensure_running(force_restart=False)
+
+    def restart_qt_window(self):
+        self.runtime_manager.ensure_running(force_restart=True)
+
+    def stop_qt_window(self):
+        self.runtime_manager.stop_runtime(force=False)
+
+    def read_runtime_state(self):
+        return self.runtime_manager.read_state()
+
+    def handle_runtime_state(self, state):
+        if self.resolved_view_backend != "qt":
+            return
+        if not isinstance(state, dict):
+            return
+
+        runtime_event = str(state.get("runtime_event") or "").strip().lower()
+        if runtime_event != "settings_saved":
+            return
+
+        event_timestamp = state.get("updated_at")
+        if event_timestamp == self._last_runtime_event_timestamp:
+            return
+        self._last_runtime_event_timestamp = event_timestamp
+
+        clear_downtime_code_cache()
+        requested_theme = normalize_theme(state.get("applied_theme", self.model.saved_theme))
+        applied_theme = self.dispatcher.apply_theme(requested_theme)
+        self.model.load_settings()
+        self.model.preview_theme = applied_theme
+        if bool(state.get("refresh_runtime_settings", True)):
+            self.dispatcher.refresh_runtime_settings()
+        if bool(state.get("apply_external_override_policy_change", False)):
+            try:
+                self.dispatcher.apply_external_override_policy_change()
+            except Exception:
+                pass
+        active_module = getattr(self.dispatcher, "active_module_instance", None)
+        if bool(state.get("refresh_downtime_codes", True)) and hasattr(active_module, "refresh_downtime_codes"):
+            try:
+                active_module.refresh_downtime_codes()
+            except Exception:
+                pass
+
+    def apply_theme(self):
+        if self.resolved_view_backend == "tk":
+            self.view.apply_theme()
 
     def on_security_session_changed(self, _event_name=None):
         self.sync_valid_module_options()
@@ -471,6 +559,11 @@ class SettingsManagerController:
         self.refresh_module_whitelist_summary()
 
     def on_unload(self):
-        self.dispatcher.remove_security_session_listener(self.on_security_session_changed)
+        if self._security_listener_registered:
+            self.dispatcher.remove_security_session_listener(self.on_security_session_changed)
+            self._security_listener_registered = False
+        if self.resolved_view_backend == "qt":
+            self.stop_qt_window()
+            return None
         if self.model.preview_theme != self.model.saved_theme:
             self.dispatcher.apply_theme(self.model.saved_theme)

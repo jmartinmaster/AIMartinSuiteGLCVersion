@@ -170,32 +170,8 @@ class HelpViewerView:
         self.doc_link_buttons = {}
         self.sub_doc_link_buttons = {}
         self.active_doc_path = None
-        self.doc_groups = {
-            "user_guide": {
-                "sections": [
-                    ("Overview", "docs/help/user_guide.md"),
-                    ("Production Log", "docs/help/user_guide_production_log.md"),
-                    ("Rate Manager", "docs/help/user_guide_rate_manager.md"),
-                    ("Layout Manager", "docs/help/user_guide_layout_manager.md"),
-                    ("Settings Manager", "docs/help/user_guide_settings_manager.md"),
-                    ("Backup / Recovery", "docs/help/user_guide_recovery_viewer.md"),
-                    ("Update Manager", "docs/help/user_guide_update_manager.md"),
-                ],
-            },
-        }
-        self.doc_index = [
-            ("User Guide", "docs/help/user_guide.md"),
-            ("App Icons", "docs/help/app_icons.md"),
-            ("Form Definitions", "docs/help/form_definitions.md"),
-            ("Layout JSON", "docs/help/layout_config.md"),
-            ("Production Log Calculations", "docs/help/production_log_calculations.md"),
-            ("Production Log JSON Architecture", "docs/production_log_json_architecture.md"),
-            ("Settings JSON", "docs/help/settings_json.md"),
-            ("Rates JSON", "docs/help/rates_json.md"),
-            ("Draft JSON", "docs/help/draft_json.md"),
-            ("Hidden Modules", "docs/help/hidden_modules.md"),
-            ("License", "docs/legal/LICENSE.txt"),
-        ]
+        self.doc_groups = self.controller.doc_groups
+        self.doc_index = self.controller.doc_index
         self.setup_ui()
 
     def setup_ui(self):

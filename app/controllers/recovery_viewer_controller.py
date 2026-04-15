@@ -20,22 +20,55 @@ from tkinter import messagebox
 from ttkbootstrap.constants import INFO, SUCCESS
 
 from app.models.recovery_viewer_model import RecoveryViewerModel
-from app.views.recovery_viewer_view import RecoveryViewerView
+from app.qt_module_runtime import QtModuleRuntimeManager
+from app.views.recovery_viewer_view_factory import create_recovery_viewer_view
+
+__module_name__ = "Recovery Viewer"
+__version__ = "1.1.0"
 
 
 class RecoveryViewerController:
     def __init__(self, parent, dispatcher):
+        self.parent = parent
         self.dispatcher = dispatcher
+        self.requested_view_backend = "qt"
+        self.resolved_view_backend = "tk"
+        self.view_backend_fallback_reason = None
         self.model = RecoveryViewerModel(data_registry=getattr(dispatcher, "external_data_registry", None))
         self.view = None
-        self.view = RecoveryViewerView(parent, dispatcher, self)
-        self.refresh_records()
+        self.runtime_manager = QtModuleRuntimeManager("recovery_viewer", self.build_qt_session_payload)
+        self.view = create_recovery_viewer_view(parent, dispatcher, self)
+        if self.resolved_view_backend == "tk":
+            self.refresh_records()
 
     def __getattr__(self, attribute_name):
         view = self.__dict__.get("view")
         if view is None:
             raise AttributeError(attribute_name)
         return getattr(view, attribute_name)
+
+    def build_qt_session_payload(self):
+        root = self.parent.winfo_toplevel()
+        return {
+            "window_title": "Backup / Recovery - Production Logging Center",
+            "title": "Backup / Recovery",
+            "subtitle": (
+                "Browse pending drafts, recovery snapshots, and backup artifacts in a dedicated PyQt6 window."
+            ),
+            "theme_tokens": dict(getattr(root, "_martin_theme_tokens", {}) or {}),
+        }
+
+    def open_or_raise_qt_window(self):
+        self.runtime_manager.ensure_running(force_restart=False)
+
+    def restart_qt_window(self):
+        self.runtime_manager.ensure_running(force_restart=True)
+
+    def stop_qt_window(self):
+        self.runtime_manager.stop_runtime(force=False)
+
+    def read_runtime_state(self):
+        return self.runtime_manager.read_state()
 
     def refresh_records(self):
         self.view.refresh_table(self.model.refresh_records())
@@ -137,3 +170,10 @@ class RecoveryViewerController:
         except Exception as exc:
             self.view.show_error("Restore Error", f"Could not restore draft snapshot: {exc}")
             return None
+
+    def on_hide(self):
+        return None
+
+    def on_unload(self):
+        if self.resolved_view_backend == "qt":
+            self.stop_qt_window()
