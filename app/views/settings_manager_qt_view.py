@@ -122,6 +122,10 @@ class SettingsManagerQtView(QMainWindow):
         self.security_rights_checkboxes = {}
         self.security_role_defaults = {}
         self._security_state = {}
+        self.section_mode = str(self.payload.get("section_mode") or "full")
+        self.summary_group = None
+        self.editable_group = None
+        self.downtime_group = None
         self.developer_admin_group = None
         self.developer_repository_input = None
         self.developer_advanced_checkbox = None
@@ -153,8 +157,8 @@ class SettingsManagerQtView(QMainWindow):
         subtitle_label.setWordWrap(True)
         root_layout.addWidget(subtitle_label)
 
-        summary_group = QGroupBox("Current Settings Snapshot")
-        summary_form = QFormLayout(summary_group)
+        self.summary_group = QGroupBox("Current Settings Snapshot")
+        summary_form = QFormLayout(self.summary_group)
 
         for key, label in [
             ("theme", "Theme"),
@@ -171,10 +175,10 @@ class SettingsManagerQtView(QMainWindow):
             self.value_labels[key] = value_label
             summary_form.addRow(QLabel(label), value_label)
 
-        root_layout.addWidget(summary_group)
+        root_layout.addWidget(self.summary_group)
 
-        editable_group = QGroupBox("Core Settings (Slice 1)")
-        editable_layout = QFormLayout(editable_group)
+        self.editable_group = QGroupBox("Core Settings (Slice 1)")
+        editable_layout = QFormLayout(self.editable_group)
 
         self.theme_combo = QComboBox()
         self.theme_combo.currentIndexChanged.connect(self._on_form_changed)
@@ -218,10 +222,10 @@ class SettingsManagerQtView(QMainWindow):
         module_lists_row.addWidget(self.persistent_modules_list)
         editable_layout.addRow(QLabel("Module Lists"), module_lists_row)
 
-        root_layout.addWidget(editable_group)
+        root_layout.addWidget(self.editable_group)
 
-        downtime_group = QGroupBox("Downtime Codes (Slice 2)")
-        downtime_layout = QVBoxLayout(downtime_group)
+        self.downtime_group = QGroupBox("Downtime Codes (Slice 2)")
+        downtime_layout = QVBoxLayout(self.downtime_group)
         downtime_hint = QLabel(
             "Edit numeric downtime codes inline. Imports and exports use these code numbers."
         )
@@ -251,7 +255,7 @@ class SettingsManagerQtView(QMainWindow):
         downtime_actions.addStretch(1)
         downtime_layout.addLayout(downtime_actions)
 
-        root_layout.addWidget(downtime_group)
+        root_layout.addWidget(self.downtime_group)
 
         self.security_admin_group = QGroupBox("Security Administration (Slice 3)")
         security_layout = QVBoxLayout(self.security_admin_group)
@@ -392,9 +396,36 @@ class SettingsManagerQtView(QMainWindow):
             label_widget.setText(str(snapshot.get(key, "-")))
         self.note_text.setPlainText(str(snapshot.get("note") or ""))
         self.security_session_label.setText(f"Session: {snapshot.get('security_summary', 'Locked')}")
-        self.security_admin_group.setVisible(bool(snapshot.get("security_admin_visible", False)))
-        self.developer_admin_group.setVisible(bool(snapshot.get("developer_admin_visible", False)))
+        self.apply_section_mode(snapshot)
         self.status_bar.showMessage("Settings snapshot refreshed.", 4000)
+
+    def apply_section_mode(self, snapshot):
+        snapshot = snapshot if isinstance(snapshot, dict) else {}
+        section_mode = str(snapshot.get("section_mode") or self.section_mode or "full")
+        self.section_mode = section_mode
+
+        self.summary_group.setVisible(True)
+        self.editable_group.setVisible(section_mode == "full")
+        self.downtime_group.setVisible(section_mode == "full")
+
+        security_visible = bool(snapshot.get("security_admin_visible", False))
+        developer_visible = bool(snapshot.get("developer_admin_visible", False))
+
+        if section_mode == "security_admin":
+            self.security_admin_group.setVisible(True)
+            self.developer_admin_group.setVisible(False)
+            self.setWindowTitle(str(self.payload.get("window_title") or "Security Admin - Production Logging Center"))
+            return
+
+        if section_mode == "developer_admin":
+            self.security_admin_group.setVisible(False)
+            self.developer_admin_group.setVisible(True)
+            self.setWindowTitle(str(self.payload.get("window_title") or "Developer Tools - Production Logging Center"))
+            return
+
+        self.security_admin_group.setVisible(security_visible)
+        self.developer_admin_group.setVisible(developer_visible)
+        self.setWindowTitle(str(self.payload.get("window_title") or "Settings Manager - Production Logging Center"))
 
     def _populate_module_list(self, widget, options, selected_names):
         widget.clear()

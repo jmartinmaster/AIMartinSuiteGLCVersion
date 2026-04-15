@@ -33,6 +33,7 @@ class SettingsManagerQtController:
         self.payload = dict(payload or {})
         self.module_name = str(self.payload.get("module_name") or self.payload.get("module") or "settings_manager")
         self.module_title = str(self.payload.get("title") or "Settings Manager")
+        self.section_mode = str(self.payload.get("section_mode") or "full")
         self.state_path = self.payload.get("state_path")
         self.command_path = self.payload.get("command_path")
         self.theme_options = list(self.payload.get("theme_options") or [])
@@ -82,15 +83,25 @@ class SettingsManagerQtController:
         whitelist = list(self.model.settings.get("module_whitelist", []))
         persistent_modules = list(self.model.settings.get("persistent_modules", []))
 
+        has_admin_session = gatekeeper.has_admin_session()
+        security_visible = has_admin_session
+        developer_visible = has_admin_session
+        if self.section_mode == "security_admin":
+            security_visible = True
+            developer_visible = False
+        elif self.section_mode == "developer_admin":
+            security_visible = False
+            developer_visible = True
+
         snapshot = {
             "theme": get_theme_label(selected_theme),
             "security_summary": gatekeeper.get_session_summary(),
-            "security_admin_visible": gatekeeper.has_admin_session(),
-            "developer_admin_visible": gatekeeper.has_admin_session(),
+            "security_admin_visible": security_visible,
+            "developer_admin_visible": developer_visible,
             "module_whitelist": ", ".join(whitelist) if whitelist else "All visible modules",
             "persistent_modules": ", ".join(persistent_modules) if persistent_modules else "Disabled",
             "external_override_trust": "Enabled" if gatekeeper.is_external_module_override_trust_enabled() else "Disabled",
-            "section_mode": str(self.payload.get("section_mode") or "full"),
+            "section_mode": self.section_mode,
             "note": "Slice 4 Qt sidecar: core settings, downtime codes, security administration, and developer tools are editable and persisted.",
         }
         self.view.set_editable_settings(

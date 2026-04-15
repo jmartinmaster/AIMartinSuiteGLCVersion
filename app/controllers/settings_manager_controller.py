@@ -36,6 +36,7 @@ class SettingsManagerController:
         section_mode="full",
         module_name="settings_manager",
         module_title="Settings Manager",
+        view_factory=None,
     ):
         self.parent = parent
         self.dispatcher = dispatcher
@@ -49,9 +50,10 @@ class SettingsManagerController:
         self._last_runtime_event_timestamp = None
         self.model = SettingsManagerModel()
         self.view = None
+        self.view_factory = view_factory or create_settings_manager_view
         self._security_listener_registered = False
         self.sync_valid_module_options()
-        self.view = create_settings_manager_view(parent, dispatcher, self, section_mode=self.section_mode)
+        self.view = self.view_factory(parent, dispatcher, self, section_mode=self.section_mode)
         if self.resolved_view_backend == "tk":
             self.dispatcher.add_security_session_listener(self.on_security_session_changed)
             self._security_listener_registered = True

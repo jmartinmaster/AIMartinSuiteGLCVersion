@@ -186,7 +186,7 @@ class AppModel:
     def load_runtime_settings(self, valid_navigation_modules=None, valid_persistent_modules=None):
         settings = {
             "theme": DEFAULT_THEME,
-            "ui_shell_backend": "tk",
+            "ui_shell_backend": "pyqt6",
             "enable_screen_transitions": True,
             "screen_transition_duration_ms": 360,
             "toast_duration_sec": 5,
@@ -216,9 +216,9 @@ class AppModel:
             settings["screen_transition_duration_ms"] = 360
 
         settings["theme"] = normalize_theme(settings.get("theme", DEFAULT_THEME))
-        normalized_shell_backend = str(settings.get("ui_shell_backend", "tk") or "tk").strip().lower()
+        normalized_shell_backend = str(settings.get("ui_shell_backend", "pyqt6") or "pyqt6").strip().lower()
         if normalized_shell_backend not in {"tk", "pyqt6"}:
-            normalized_shell_backend = "tk"
+            normalized_shell_backend = "pyqt6"
         settings["ui_shell_backend"] = normalized_shell_backend
         settings["module_whitelist"] = self.normalize_module_names(settings.get("module_whitelist", []), valid_navigation_modules)
         settings["persistent_modules"] = self.normalize_module_names(settings.get("persistent_modules", []), valid_persistent_modules)

@@ -69,7 +69,6 @@ BUILD_DATA_PATHS = [
     ("docs", "docs"),
     ("templates", "templates"),
     ("layout_config.json", "."),
-    ("rates.json", "."),
     ("production_log_calculations.json", "."),
 ]
 HIDDENIMPORTS = [
@@ -98,6 +97,8 @@ WINDOWS_DIST_ROOT = REPO_ROOT / "dist"
 UBUNTU_DIST_ROOT = WINDOWS_DIST_ROOT / UBUNTU_TARGET
 UBUNTU_APP_DIST_ROOT = UBUNTU_DIST_ROOT / "app"
 UBUNTU_PACKAGE_ROOT = UBUNTU_DIST_ROOT / "package-root"
+SANITIZED_RATES_SOURCE = REPO_ROOT / "rates_dummy.json"
+PUBLIC_VARIANT_DIST_ROOT = WINDOWS_DIST_ROOT / "variants" / "public"
 
 
 class BuildError(RuntimeError):
@@ -321,6 +322,38 @@ def get_existing_build_data_paths():
     return build_paths
 
 
+def prepare_sanitized_rates_asset(target):
+    if not SANITIZED_RATES_SOURCE.exists():
+        raise BuildError(
+            f"Missing sanitized rates source at {SANITIZED_RATES_SOURCE}. "
+            "Create rates_dummy.json before running build.py."
+        )
+
+    if target == WINDOWS_TARGET:
+        staged_root = WINDOWS_BUILD_ROOT
+    elif target == UBUNTU_TARGET:
+        staged_root = UBUNTU_BUILD_ROOT
+    else:
+        raise BuildError(f"Unsupported target for sanitized rates staging: {target}")
+
+    staged_directory = staged_root / "sanitized_data"
+    staged_directory.mkdir(parents=True, exist_ok=True)
+    staged_rates_path = staged_directory / "rates.json"
+    shutil.copy2(SANITIZED_RATES_SOURCE, staged_rates_path)
+    return staged_rates_path
+
+
+def copy_artifact_to_public_variant_dist(artifact_path):
+    source_path = Path(artifact_path)
+    if not source_path.exists():
+        raise BuildError(f"Expected artifact does not exist for public variant copy: {source_path}")
+
+    PUBLIC_VARIANT_DIST_ROOT.mkdir(parents=True, exist_ok=True)
+    destination_path = PUBLIC_VARIANT_DIST_ROOT / source_path.name
+    shutil.copy2(source_path, destination_path)
+    return destination_path
+
+
 def build_pyinstaller_args(target):
     if target == WINDOWS_TARGET:
         artifact_name = EXE_STEM
@@ -367,6 +400,9 @@ def build_pyinstaller_args(target):
 
     for source_path, destination_path in get_existing_build_data_paths():
         args.extend(["--add-data", f"{source_path}{os.pathsep}{destination_path}"])
+
+    sanitized_rates_path = prepare_sanitized_rates_asset(target)
+    args.extend(["--add-data", f"{sanitized_rates_path}{os.pathsep}."])
 
     return args
 
@@ -614,9 +650,12 @@ def run_windows_build():
     if not built_executable_path.exists():
         raise BuildError(f"PyInstaller completed, but the Windows executable was not created at {built_executable_path}.")
 
+    public_variant_executable_path = copy_artifact_to_public_variant_dist(built_executable_path)
+
     archive_previous_builds()
 
     print(f"\n--- Windows build complete. Check {built_executable_path} ---")
+    print(f"--- Public variant copy: {public_variant_executable_path} ---")
 
 
 def run_ubuntu_build_direct():
@@ -654,7 +693,10 @@ def run_ubuntu_build_direct():
     except Exception as exc:
         raise BuildError(str(exc)) from exc
 
+    public_variant_deb_path = copy_artifact_to_public_variant_dist(output_path)
+
     print(f"\n--- Ubuntu package complete. Check {output_path} ---")
+    print(f"--- Public variant copy: {public_variant_deb_path} ---")
 
 
 def run_target_build(target, host_platform, args):

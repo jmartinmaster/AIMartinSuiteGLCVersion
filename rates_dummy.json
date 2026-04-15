@@ -1,0 +1,6 @@
+{
+  "SAMPLE-PART-001": "100",
+  "SAMPLE-PART-002": "150",
+  "SAMPLE-PART-003": "200",
+  "_NOTE": "Sanitized sample rates for packaged release artifacts. Replace with private runtime rates outside distribution builds."
+}

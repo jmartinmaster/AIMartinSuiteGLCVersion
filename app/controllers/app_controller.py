@@ -121,6 +121,78 @@ MODULE_API_SURFACE = {
 }
 
 
+class TkHostUiAdapter:
+    def __init__(self, dispatcher):
+        self.dispatcher = dispatcher
+
+    def call_later(self, delay_ms, callback):
+        try:
+            delay_ms = int(delay_ms)
+        except Exception:
+            delay_ms = 0
+        return self.dispatcher.root.after(max(0, delay_ms), callback)
+
+    def run_on_main_thread(self, callback):
+        return self.call_later(0, callback)
+
+    def request_shutdown(self, delay_ms=0):
+        self.call_later(delay_ms, self.dispatcher.root.destroy)
+
+    def bind_shell_viewport_resize(self, callback, add="+"):
+        return self.dispatcher.canvas.bind("<Configure>", callback, add=add)
+
+    def get_shell_viewport_size(self, min_width=0, min_height=0):
+        try:
+            min_width = int(min_width)
+        except Exception:
+            min_width = 0
+        try:
+            min_height = int(min_height)
+        except Exception:
+            min_height = 0
+        width = max(self.dispatcher.canvas.winfo_width(), min_width)
+        height = max(self.dispatcher.canvas.winfo_height(), min_height)
+        return (width, height)
+
+    def bind_mousewheel_to_widget_tree(self, root_widget, scroll_target, axis="y"):
+        def on_mousewheel(event):
+            step = self.dispatcher.get_mousewheel_units(event)
+            if not step:
+                return None
+            if axis == "x":
+                scroll_target.xview_scroll(step, "units")
+            else:
+                scroll_target.yview_scroll(step, "units")
+            return "break"
+
+        def bind_widget(widget):
+            widget.bind("<MouseWheel>", on_mousewheel)
+            widget.bind("<Button-4>", on_mousewheel)
+            widget.bind("<Button-5>", on_mousewheel)
+            for child in widget.winfo_children():
+                bind_widget(child)
+
+        bind_widget(root_widget)
+
+    def show_toast(self, title, message, bootstyle=INFO, duration_ms=None):
+        duration = duration_ms
+        if duration is None:
+            duration = int(self.dispatcher.get_setting("toast_duration_sec", 5)) * 1000
+        resolved_bootstyle = self.dispatcher._normalize_bootstyle(bootstyle)
+        right_inset, bottom_inset = get_work_area_insets(self.dispatcher.root)
+        toast = ToastNotification(
+            title=title,
+            message=message,
+            duration=duration,
+            bootstyle=resolved_bootstyle,
+            position=(24 + right_inset, 24 + bottom_inset, "se"),
+        )
+        toast.show_toast()
+
+    def refresh_update_status_visibility(self):
+        self.dispatcher.view.refresh_update_status_visibility()
+
+
 class Dispatcher:
     def __init__(self, root, main_module=None, initial_module_name=None):
         self.root = root
@@ -156,7 +228,7 @@ class Dispatcher:
         self.model.loaded_modules = {"main": self.main_module}
         self._configure_module_import_paths()
         self.model.runtime_settings = self.load_runtime_settings()
-        self.requested_shell_backend = "tk"
+        self.requested_shell_backend = "pyqt6"
         self.active_shell_backend = "tk"
         self.shell_backend_fallback_reason = None
         self._refresh_shell_backend_state()
@@ -172,6 +244,7 @@ class Dispatcher:
         self.view = AppShellView(self.root, self.update_coordinator)
         self.view.build()
         self._sync_view_aliases()
+        self.host_ui_adapter = TkHostUiAdapter(self)
         gatekeeper.add_session_listener(self._handle_gatekeeper_session_change)
         self._setup_menu()
         self.pre_load_manifest()
@@ -988,33 +1061,19 @@ class Dispatcher:
         log_exception(f"dispatcher.data_request.{description}", exc)
 
     def call_later(self, delay_ms, callback):
-        try:
-            delay_ms = int(delay_ms)
-        except Exception:
-            delay_ms = 0
-        return self.root.after(max(0, delay_ms), callback)
+        return self.host_ui_adapter.call_later(delay_ms, callback)
 
     def run_on_main_thread(self, callback):
-        return self.call_later(0, callback)
+        return self.host_ui_adapter.run_on_main_thread(callback)
 
     def request_shutdown(self, delay_ms=0):
-        self.call_later(delay_ms, self.root.destroy)
+        self.host_ui_adapter.request_shutdown(delay_ms=delay_ms)
 
     def bind_shell_viewport_resize(self, callback, add="+"):
-        return self.canvas.bind("<Configure>", callback, add=add)
+        return self.host_ui_adapter.bind_shell_viewport_resize(callback, add=add)
 
     def get_shell_viewport_size(self, min_width=0, min_height=0):
-        try:
-            min_width = int(min_width)
-        except Exception:
-            min_width = 0
-        try:
-            min_height = int(min_height)
-        except Exception:
-            min_height = 0
-        width = max(self.canvas.winfo_width(), min_width)
-        height = max(self.canvas.winfo_height(), min_height)
-        return (width, height)
+        return self.host_ui_adapter.get_shell_viewport_size(min_width=min_width, min_height=min_height)
 
     def invalidate_layout_manager_preload(self):
         if self.layout_manager_dispatcher is None:
@@ -1233,8 +1292,8 @@ class Dispatcher:
             self.shell_backend_fallback_reason = None
 
     def get_ui_shell_backend(self):
-        backend = str(self.runtime_settings.get("ui_shell_backend", "tk") or "tk").strip().lower()
-        return backend if backend in {"tk", "pyqt6"} else "tk"
+        backend = str(self.runtime_settings.get("ui_shell_backend", "pyqt6") or "pyqt6").strip().lower()
+        return backend if backend in {"tk", "pyqt6"} else "pyqt6"
 
     def is_pyqt6_shell_requested(self):
         return self.get_ui_shell_backend() == "pyqt6"
@@ -1328,24 +1387,7 @@ class Dispatcher:
         return 0
 
     def bind_mousewheel_to_widget_tree(self, root_widget, scroll_target, axis="y"):
-        def on_mousewheel(event):
-            step = self.get_mousewheel_units(event)
-            if not step:
-                return None
-            if axis == "x":
-                scroll_target.xview_scroll(step, "units")
-            else:
-                scroll_target.yview_scroll(step, "units")
-            return "break"
-
-        def bind_widget(widget):
-            widget.bind("<MouseWheel>", on_mousewheel)
-            widget.bind("<Button-4>", on_mousewheel)
-            widget.bind("<Button-5>", on_mousewheel)
-            for child in widget.winfo_children():
-                bind_widget(child)
-
-        bind_widget(root_widget)
+        return self.host_ui_adapter.bind_mousewheel_to_widget_tree(root_widget, scroll_target, axis=axis)
 
     def _normalize_bootstyle(self, style_value):
         if isinstance(style_value, str):
@@ -1355,25 +1397,13 @@ class Dispatcher:
         return style_value
 
     def show_toast(self, title, message, bootstyle=INFO, duration_ms=None):
-        duration = duration_ms
-        if duration is None:
-            duration = int(self.get_setting("toast_duration_sec", 5)) * 1000
-        resolved_bootstyle = self._normalize_bootstyle(bootstyle)
-        right_inset, bottom_inset = get_work_area_insets(self.root)
-        toast = ToastNotification(
-            title=title,
-            message=message,
-            duration=duration,
-            bootstyle=resolved_bootstyle,
-            position=(24 + right_inset, 24 + bottom_inset, "se"),
-        )
-        toast.show_toast()
+        return self.host_ui_adapter.show_toast(title, message, bootstyle=bootstyle, duration_ms=duration_ms)
 
     def notify_user(self, title, message, severity="info", duration_ms=None):
         self.show_toast(title, message, bootstyle=severity, duration_ms=duration_ms)
 
     def refresh_update_status_visibility(self):
-        self.view.refresh_update_status_visibility()
+        return self.host_ui_adapter.refresh_update_status_visibility()
 
     def _cancel_scheduled_update_status_clear(self):
         if self._update_status_clear_after_id is None:

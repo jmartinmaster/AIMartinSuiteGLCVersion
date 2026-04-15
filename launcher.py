@@ -187,14 +187,14 @@ def _run_qt_module_session_from_payload(session_path, session_payload):
         return run_settings_manager_qt_session(session_path)
 
     if module_name == "developer_admin":
-        from app.views.settings_manager_qt_view import run_settings_manager_qt_session
+        from app.views.developer_admin_qt_view import run_developer_admin_qt_session
 
-        return run_settings_manager_qt_session(session_path)
+        return run_developer_admin_qt_session(session_path)
 
     if module_name == "security_admin":
-        from app.views.settings_manager_qt_view import run_settings_manager_qt_session
+        from app.views.security_admin_qt_view import run_security_admin_qt_session
 
-        return run_settings_manager_qt_session(session_path)
+        return run_security_admin_qt_session(session_path)
 
     if module_name == "update_manager":
         from app.views.update_manager_qt_view import run_update_manager_qt_session
@@ -208,6 +208,8 @@ def run_application(main_module=None, initial_module_name=None):
     data_registry = ExternalDataRegistry()
     settings_path = data_registry.resolve_read_path("settings")
     theme_name = DEFAULT_THEME
+    ui_shell_backend = "pyqt6"
+    runtime_settings = {"ui_shell_backend": ui_shell_backend}
     if main_module is None:
         import sys
 
@@ -216,9 +218,29 @@ def run_application(main_module=None, initial_module_name=None):
     if os.path.exists(settings_path):
         try:
             with open(settings_path, "r", encoding="utf-8") as handle:
-                theme_name = normalize_theme(json.load(handle).get("theme", DEFAULT_THEME))
+                settings_payload = json.load(handle)
+                if isinstance(settings_payload, dict):
+                    runtime_settings = dict(settings_payload)
+                    theme_name = normalize_theme(settings_payload.get("theme", DEFAULT_THEME))
+                    ui_shell_backend = str(settings_payload.get("ui_shell_backend", "pyqt6") or "pyqt6").strip().lower()
         except Exception as exc:
             log_exception("main.__main__.load_theme", exc)
+
+    if ui_shell_backend not in {"tk", "pyqt6"}:
+        ui_shell_backend = "pyqt6"
+
+    if ui_shell_backend == "pyqt6" and PYQT6_LAUNCHER_SUPPORT:
+        from app.views.pyqt6_host_shell_view import PyQt6HostShellView
+
+        apply_windows_app_id()
+        application = create_qt_application(theme_name=theme_name)
+        host_shell = PyQt6HostShellView(
+            theme_name=theme_name,
+            runtime_settings=runtime_settings,
+            initial_module_name=initial_module_name,
+        )
+        host_shell.show()
+        return application.exec()
 
     apply_windows_app_id()
     app_root = tb.Window(themename=resolve_base_theme(theme_name))

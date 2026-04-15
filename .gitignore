@@ -27,6 +27,7 @@ build/
 dist/data
 dist/ubuntu/app
 dist/ubuntu/package-root
+dist/variants/public
 dist/*.json
 
 #docs
