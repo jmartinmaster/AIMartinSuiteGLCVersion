@@ -1034,6 +1034,33 @@ class Dispatcher:
             log_exception(f"load_module.{module_name}", exc)
             tb.Label(self.content_area, text=f"Error loading {module_name}: {exc}", bootstyle=DANGER).pack(pady=20)
 
+    def open_module_window(self, module_name, title=None, geometry=None, minsize=None):
+        top_window = tk.Toplevel(self.root)
+        if title:
+            top_window.title(str(title))
+        if geometry:
+            top_window.geometry(str(geometry))
+        if isinstance(minsize, (tuple, list)) and len(minsize) == 2:
+            try:
+                top_window.minsize(int(minsize[0]), int(minsize[1]))
+            except Exception:
+                pass
+
+        try:
+            module = self.import_managed_module(module_name, force_fresh=False, track_loaded=False)
+            if not hasattr(module, "get_ui"):
+                raise AttributeError(f"Module '{module_name}' does not expose get_ui(parent, dispatcher).")
+            module.get_ui(top_window, self)
+        except Exception as exc:
+            log_exception(f"open_module_window.{module_name}", exc)
+            try:
+                top_window.destroy()
+            except Exception:
+                pass
+            messagebox.showerror("Module Window Error", f"Could not open {module_name}: {exc}")
+            return None
+        return top_window
+
     def open_help_document(self, relative_path):
         try:
             candidate = local_or_resource_path(relative_path)
