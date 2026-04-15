@@ -16,12 +16,9 @@
 import os
 import sys
 import time
+import tkinter as tk
 import webbrowser
 
-import ttkbootstrap as tb
-from ttkbootstrap.constants import INFO, SUCCESS, WARNING
-
-from app import recovery_viewer
 from app.models.production_log_model import ProductionLogModel
 from app.qt_module_runtime import QtModuleRuntimeManager
 from app.views.production_log_view import ProductionLogView, __version__ as PRODUCTION_LOG_VERSION
@@ -39,6 +36,7 @@ class ProductionLogController:
         self.resolved_view_backend = "tk"
         self.view_backend_fallback_reason = None
         self.model = ProductionLogModel(data_registry=getattr(dispatcher, "external_data_registry", None))
+        self._last_runtime_event_timestamp = None
         self.view = None
         self.runtime_manager = QtModuleRuntimeManager("production_log", self.build_qt_session_payload)
         self.view = create_production_log_view(parent, dispatcher, self, self.model)
@@ -79,6 +77,125 @@ class ProductionLogController:
 
     def read_runtime_state(self):
         return self.runtime_manager.read_state()
+
+    def handle_runtime_state(self, state):
+        if self.resolved_view_backend != "qt":
+            return
+        if not isinstance(state, dict):
+            return
+
+        runtime_event = str(state.get("runtime_event") or "").strip().lower()
+        if runtime_event not in {"load_draft_requested", "open_recovery_requested", "restore_snapshot_requested"}:
+            return
+
+        event_timestamp = state.get("updated_at")
+        if event_timestamp == self._last_runtime_event_timestamp:
+            return
+        self._last_runtime_event_timestamp = event_timestamp
+
+        if runtime_event == "load_draft_requested":
+            draft_path = str(state.get("draft_path") or "").strip()
+            if not draft_path:
+                self.runtime_manager.send_command(
+                    "host_action_completed",
+                    {
+                        "action_name": "load_draft_requested",
+                        "success": False,
+                        "message": "No draft path was provided by the sidecar request.",
+                    },
+                )
+                return
+            if not os.path.exists(draft_path):
+                self.runtime_manager.send_command(
+                    "host_action_completed",
+                    {
+                        "action_name": "load_draft_requested",
+                        "success": False,
+                        "message": f"Draft was not found: {os.path.basename(draft_path)}",
+                    },
+                )
+                return
+            load_result = self._handle_runtime_load_draft_request(draft_path)
+            self.runtime_manager.send_command(
+                "host_action_completed",
+                {
+                    "action_name": "load_draft_requested",
+                    "success": bool(load_result.get("success")),
+                    "message": str(load_result.get("message") or "Host processed load draft request."),
+                },
+            )
+            self.runtime_manager.send_command("refresh_snapshot", {"reason": "load_draft_requested"})
+            return
+
+        if runtime_event == "open_recovery_requested":
+            self.open_recovery_viewer()
+            self.runtime_manager.send_command(
+                "host_action_completed",
+                {
+                    "action_name": "open_recovery_requested",
+                    "success": True,
+                    "message": "Opened Recovery Viewer in host runtime.",
+                },
+            )
+            self.runtime_manager.send_command("refresh_snapshot", {"reason": "open_recovery_requested"})
+            return
+
+        if runtime_event == "restore_snapshot_requested":
+            snapshot_path = str(state.get("snapshot_path") or "").strip()
+            if not snapshot_path:
+                self.runtime_manager.send_command(
+                    "host_action_completed",
+                    {
+                        "action_name": "restore_snapshot_requested",
+                        "success": False,
+                        "message": "No recovery snapshot path was provided by the sidecar request.",
+                    },
+                )
+                return
+            if not os.path.exists(snapshot_path):
+                self.runtime_manager.send_command(
+                    "host_action_completed",
+                    {
+                        "action_name": "restore_snapshot_requested",
+                        "success": False,
+                        "message": f"Recovery snapshot not found: {os.path.basename(snapshot_path)}",
+                    },
+                )
+                return
+            restore_result = self._handle_runtime_load_draft_request(snapshot_path)
+            self.runtime_manager.send_command(
+                "host_action_completed",
+                {
+                    "action_name": "restore_snapshot_requested",
+                    "success": bool(restore_result.get("success")),
+                    "message": str(restore_result.get("message") or "Host processed recovery snapshot restore request."),
+                },
+            )
+            self.runtime_manager.send_command("refresh_snapshot", {"reason": "restore_snapshot_requested"})
+
+    def _handle_runtime_load_draft_request(self, draft_path):
+        try:
+            data = self.model.load_json(draft_path)
+        except Exception:
+            return {
+                "success": False,
+                "message": f"Failed to load draft: {os.path.basename(draft_path)}",
+            }
+
+        draft_form_id = self.model.resolve_draft_form_id(data.get("meta", {}))
+        if draft_form_id == self.model.form_id:
+            return {
+                "success": True,
+                "message": f"Draft is already on the active form: {os.path.basename(draft_path)}",
+            }
+
+        self.model.form_registry.activate_form(draft_form_id)
+        if hasattr(self.dispatcher, "notify_active_form_changed"):
+            self.dispatcher.notify_active_form_changed(source_instance=self)
+        return {
+            "success": True,
+            "message": f"Activated form from draft request: {os.path.basename(draft_path)}",
+        }
 
     def _qt_sidecar_active(self):
         return self.resolved_view_backend == "qt"
@@ -178,7 +295,10 @@ class ProductionLogController:
                 message = f"Draft saved to {os.path.basename(draft_path)}."
                 if backup_info.get("versioned_backup_path"):
                     message += " A recovery snapshot of the previous draft was stored in data/pending/history."
-                self.view.show_toast("Draft Saved", message, SUCCESS)
+                self.view.show_toast("Draft Saved", message, "success")
+
+            if self._qt_sidecar_active():
+                self.runtime_manager.send_command("refresh_snapshot")
         except Exception as exc:
             self.view.show_error("Draft Save Error", f"Could not save draft: {exc}")
 
@@ -187,7 +307,7 @@ class ProductionLogController:
         if latest:
             self.load_draft_path(latest["path"])
         else:
-            self.view.show_toast("Refresh View", "No previous draft found to reload.", INFO)
+            self.view.show_toast("Refresh View", "No previous draft found to reload.", "info")
 
     def refresh_downtime_codes(self):
         if self._qt_sidecar_active():
@@ -586,13 +706,13 @@ class ProductionLogController:
         balance_row = self.find_balance_downtime_row()
 
         if shift_total <= 0:
-            self.view.show_toast("Balance Downtime", "Enter a valid shift hour value before balancing.", WARNING)
+            self.view.show_toast("Balance Downtime", "Enter a valid shift hour value before balancing.", "warning")
             return
         if target_downtime_total < 0:
             self.view.show_toast(
                 "Balance Downtime",
                 f"Production time alone exceeds the shift total by {abs(target_downtime_total)} minutes. Downtime balancing cannot correct that overrun.",
-                WARNING,
+                "warning",
             )
             return
         if self.apply_weighted_downtime_balance(target_downtime_total):
@@ -605,7 +725,7 @@ class ProductionLogController:
                 message = f"Removed {abs(delta_minutes)} downtime minutes across the existing downtime rows using the selected balance mix."
             else:
                 message = "Redistributed downtime across the existing rows using the selected balance mix."
-            self.view.show_toast("Balance Downtime", message, SUCCESS)
+            self.view.show_toast("Balance Downtime", message, "success")
             return
 
         if target_downtime_total <= 0:
@@ -617,11 +737,11 @@ class ProductionLogController:
                 self.view.show_toast(
                     "Balance Downtime",
                     "Removed the balance downtime row because production now fully accounts for the shift.",
-                    SUCCESS,
+                    "success",
                 )
             else:
                 self.reset_balance_state()
-                self.view.show_toast("Balance Downtime", "Accounted time already matches the shift total.", INFO)
+                self.view.show_toast("Balance Downtime", "Accounted time already matches the shift total.", "info")
             return
 
         if balance_row is None:
@@ -636,7 +756,7 @@ class ProductionLogController:
             message = f"Removed {abs(delta_minutes)} downtime minutes from the balance row to match the shift total."
         else:
             message = "Updated the downtime balance row using the selected balance target."
-        self.view.show_toast("Balance Downtime", message, SUCCESS)
+        self.view.show_toast("Balance Downtime", message, "success")
 
     def get_last_export_path(self):
         if self.view.last_export_path and os.path.exists(self.view.last_export_path):
@@ -663,7 +783,7 @@ class ProductionLogController:
         self.view.show_toast(
             f"{operation_name.title()} Warnings",
             "Some declared profiles were skipped because runtime support is not implemented yet.",
-            WARNING,
+            "warning",
         )
 
     def export_to_excel(self):
@@ -685,7 +805,7 @@ class ProductionLogController:
             )
             self.view.last_export_path = target_path
             self.update_export_action_state()
-            self.view.show_toast("Export Complete", f"Excel export completed successfully: {os.path.basename(target_path)}", SUCCESS)
+            self.view.show_toast("Export Complete", f"Excel export completed successfully: {os.path.basename(target_path)}", "success")
             self.show_data_handler_warnings("export")
             if self.view.ask_yes_no(
                 "Export Complete",
@@ -722,13 +842,13 @@ class ProductionLogController:
         try:
             if sys.platform.startswith("win"):
                 os.startfile(export_path, "print")
-                self.view.show_toast("Printing", "Sent Excel file to the default printer.", INFO)
+                self.view.show_toast("Printing", "Sent Excel file to the default printer.", "info")
             else:
                 self.open_last_exported_file(show_prompt=False)
                 self.view.show_toast(
                     "Print Review",
                     "Opened the exported workbook for manual printing in the default application.",
-                    INFO,
+                    "info",
                 )
         except Exception as exc:
             self.view.show_error("Print Export", f"Could not print exported workbook: {exc}")
@@ -736,19 +856,30 @@ class ProductionLogController:
     def resume_latest_draft(self):
         latest = self.get_latest_pending_draft()
         if not latest:
-            self.view.show_toast("Resume Latest", "No pending drafts are available.", INFO)
+            self.view.show_toast("Resume Latest", "No pending drafts are available.", "info")
             return
         self.load_draft_path(latest["path"])
 
     def open_recovery_viewer(self):
-        top = tb.Toplevel(title="Backup / Recovery")
+        if hasattr(self.dispatcher, "open_module_window"):
+            opened = self.dispatcher.open_module_window(
+                "recovery_viewer",
+                title="Backup / Recovery",
+                geometry="980x620",
+                minsize=(820, 520),
+            )
+            if opened is not None:
+                return
+        top = tk.Toplevel(self.parent.winfo_toplevel())
+        top.title("Backup / Recovery")
         top.geometry("980x620")
         top.minsize(820, 520)
-        recovery_viewer.get_ui(top, self.dispatcher)
+        module = self.dispatcher.import_managed_module("recovery_viewer", force_fresh=False, track_loaded=False)
+        module.get_ui(top, self.dispatcher)
 
     def delete_current_draft(self):
         if not self.view.current_draft_path or not os.path.exists(self.view.current_draft_path):
-            self.view.show_toast("Delete Draft", "There is no saved draft attached to the current session.", INFO)
+            self.view.show_toast("Delete Draft", "There is no saved draft attached to the current session.", "info")
             return
         if not self.view.ask_yes_no("Delete Current Draft", f"Delete {os.path.basename(self.view.current_draft_path)}?"):
             return
@@ -761,12 +892,17 @@ class ProductionLogController:
         if self.view.current_draft_path == draft_path:
             self.view.current_draft_path = None
         self.view.update_recovery_ui()
+        if self._qt_sidecar_active():
+            self.runtime_manager.send_command("refresh_snapshot")
 
     def load_draft_path(self, draft_path, window=None):
         if self._qt_sidecar_active():
             self.open_or_raise_qt_window()
             return
-        if not self.view.confirm_discard_unsaved_changes():
+        self._load_draft_path_internal(draft_path, window=window, prompt_discard=True)
+
+    def _load_draft_path_internal(self, draft_path, window=None, prompt_discard=True):
+        if prompt_discard and not self.view.confirm_discard_unsaved_changes():
             return
         try:
             data = self.model.load_json(draft_path)
@@ -798,7 +934,7 @@ class ProductionLogController:
                 calculation_settings=self.model.get_calculation_settings_copy(),
             )
             self.view.populate_from_data(data, source_path=None, mark_dirty_after_load=True)
-            self.view.show_toast("Import Complete", "Excel import completed successfully.", SUCCESS)
+            self.view.show_toast("Import Complete", "Excel import completed successfully.", "success")
             self.show_data_handler_warnings("import")
         except Exception as exc:
             self.view.show_error("Import Error", f"Failed to import Excel: {exc}")

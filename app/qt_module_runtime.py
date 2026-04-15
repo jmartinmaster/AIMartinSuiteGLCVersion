@@ -129,13 +129,16 @@ class QtModuleRuntimeManager:
             log_exception(f"qt_module_runtime.read_state.{self.module_name}", exc)
             return {}
 
-    def send_command(self, action):
+    def send_command(self, action, metadata=None):
         command_path = self.command_path
         if command_path is None:
             return
+        payload = {"action": action, "requested_at": time.time()}
+        if isinstance(metadata, dict):
+            payload.update(_to_json_compatible(metadata))
         try:
             command_path.write_text(
-                json.dumps({"action": action, "requested_at": time.time()}, indent=2),
+                json.dumps(payload, indent=2),
                 encoding="utf-8",
             )
         except Exception as exc:

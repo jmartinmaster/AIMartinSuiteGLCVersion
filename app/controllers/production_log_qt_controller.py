@@ -101,6 +101,45 @@ class ProductionLogQtController:
     def open_recovery_folder(self):
         self._open_path(self.model.get_recovery_dir())
 
+    def request_load_draft(self, draft_path):
+        draft_path = str(draft_path or "").strip()
+        if not draft_path:
+            self.view.show_info("Production Log", "Select a draft to request loading.")
+            return
+        self.write_state(
+            status="ready",
+            message=f"Requested host draft load for {os.path.basename(draft_path)}.",
+            dirty=True,
+            runtime_event="load_draft_requested",
+            metadata={"draft_path": draft_path},
+        )
+
+    def request_open_recovery(self, snapshot_path=None):
+        metadata = {}
+        snapshot_path = str(snapshot_path or "").strip()
+        if snapshot_path:
+            metadata["snapshot_path"] = snapshot_path
+        self.write_state(
+            status="ready",
+            message="Requested host recovery viewer.",
+            dirty=True,
+            runtime_event="open_recovery_requested",
+            metadata=metadata,
+        )
+
+    def request_restore_snapshot(self, snapshot_path):
+        snapshot_path = str(snapshot_path or "").strip()
+        if not snapshot_path:
+            self.view.show_info("Production Log", "Select a recovery snapshot to restore first.")
+            return
+        self.write_state(
+            status="ready",
+            message=f"Requested host restore for {os.path.basename(snapshot_path)}.",
+            dirty=True,
+            runtime_event="restore_snapshot_requested",
+            metadata={"snapshot_path": snapshot_path},
+        )
+
     def poll_commands(self):
         if not self.command_path or not os.path.exists(self.command_path):
             return
@@ -115,7 +154,7 @@ class ProductionLogQtController:
             pass
 
         action = str(payload.get("action") or "").strip().lower()
-        command_payload = payload.get("payload") if isinstance(payload.get("payload"), dict) else {}
+        command_payload = payload if isinstance(payload, dict) else {}
         if action == "raise_window":
             self.show()
             self.write_state(status="ready", message="Raised Production Log Qt window.")
@@ -125,31 +164,17 @@ class ProductionLogQtController:
         elif action == "refresh_snapshot":
             reason = str(command_payload.get("reason") or "host_update").strip()
             self.refresh_snapshot(initial=False)
-            self.write_state(status="ready", message=f"Snapshot refreshed after {reason}.")
-
-    def request_load_draft(self, draft_path):
-        draft_path = str(draft_path or "").strip()
-        if not draft_path:
-            self.view.show_info("Production Log", "Select a draft first.")
-            return
-        self.write_state(
-            status="ready",
-            message=f"Requested host draft load for {os.path.basename(draft_path)}.",
-            dirty=True,
-            runtime_event="load_draft_requested",
-            metadata={"draft_path": draft_path},
-        )
-
-    def request_open_recovery(self, snapshot_path=""):
-        snapshot_path = str(snapshot_path or "").strip()
-        metadata = {"snapshot_path": snapshot_path} if snapshot_path else {}
-        self.write_state(
-            status="ready",
-            message="Requested host recovery viewer.",
-            dirty=True,
-            runtime_event="open_recovery_requested",
-            metadata=metadata,
-        )
+            self.view.set_status(f"Snapshot refreshed after {reason}.")
+        elif action == "host_action_completed":
+            action_name = str(command_payload.get("action_name") or "host_action").strip()
+            success = bool(command_payload.get("success", True))
+            message = str(command_payload.get("message") or "Host action completed.")
+            self.view.set_status(f"{action_name}: {message}")
+            self.write_state(
+                status="ready",
+                message=f"Received host completion for {action_name}.",
+                dirty=not success,
+            )
 
     def handle_close(self):
         self.write_state(status="closed", message="Production Log Qt window closed.")
