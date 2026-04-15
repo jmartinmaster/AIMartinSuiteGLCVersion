@@ -20,7 +20,6 @@ import threading
 from tkinter import messagebox
 
 import ttkbootstrap as tb
-from ttkbootstrap.constants import DANGER, INFO, SUCCESS, WARNING
 from ttkbootstrap.dialogs import Messagebox
 from app.app_identity import format_versioned_deb_name, format_versioned_exe_name
 from app.app_platform import get_platform_update_artifact_kind, get_platform_update_artifact_label, is_windows_runtime
@@ -30,6 +29,11 @@ from app.views.update_manager_view_factory import create_update_manager_view
 
 __module_name__ = "Update Manager"
 __version__ = "2.3.0"
+
+INFO = "info"
+SUCCESS = "success"
+WARNING = "warning"
+DANGER = "danger"
 
 
 class UpdateManagerController:

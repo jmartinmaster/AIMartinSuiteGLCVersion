@@ -22,9 +22,10 @@ __version__ = "1.0.0"
 
 
 def create_settings_manager_view(parent, dispatcher, controller, section_mode="full"):
+    controller.requested_view_backend = "qt" if bool(getattr(dispatcher, "is_pyqt6_shell_requested", lambda: False)()) else "tk"
     controller.resolved_view_backend = "tk"
     controller.view_backend_fallback_reason = None
-    if is_settings_manager_qt_runtime_available():
+    if controller.requested_view_backend == "qt" and is_settings_manager_qt_runtime_available():
         controller.resolved_view_backend = "qt"
         return QtModuleBridgeView(
             parent,
@@ -40,5 +41,6 @@ def create_settings_manager_view(parent, dispatcher, controller, section_mode="f
             },
         )
 
-    controller.view_backend_fallback_reason = "PyQt6 is not installed; using the Tk Settings Manager."
+    if controller.requested_view_backend == "qt":
+        controller.view_backend_fallback_reason = "PyQt6 is not installed; using the Tk Settings Manager."
     return SettingsManagerView(parent, dispatcher, controller, section_mode=section_mode)

@@ -22,9 +22,10 @@ __version__ = "1.0.0"
 
 
 def create_help_viewer_view(parent, dispatcher, controller):
+    controller.requested_view_backend = "qt" if bool(getattr(dispatcher, "is_pyqt6_shell_requested", lambda: False)()) else "tk"
     controller.resolved_view_backend = "tk"
     controller.view_backend_fallback_reason = None
-    if is_help_viewer_qt_runtime_available():
+    if controller.requested_view_backend == "qt" and is_help_viewer_qt_runtime_available():
         controller.resolved_view_backend = "qt"
         return QtModuleBridgeView(
             parent,
@@ -39,5 +40,6 @@ def create_help_viewer_view(parent, dispatcher, controller):
                 "initial_status": "Launching Help Viewer Qt window...",
             },
         )
-    controller.view_backend_fallback_reason = "PyQt6 is not installed; using the Tk Help Viewer."
+    if controller.requested_view_backend == "qt":
+        controller.view_backend_fallback_reason = "PyQt6 is not installed; using the Tk Help Viewer."
     return HelpViewerView(parent, dispatcher, controller)

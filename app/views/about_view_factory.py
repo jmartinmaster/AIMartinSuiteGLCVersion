@@ -22,16 +22,19 @@ __version__ = "1.0.0"
 
 
 def get_requested_about_ui_backend(dispatcher):
-    _dispatcher = dispatcher
-    return "qt"
+    if dispatcher is None:
+        return "tk"
+    if bool(getattr(dispatcher, "is_pyqt6_shell_requested", lambda: False)()):
+        return "qt"
+    return "tk"
 
 
 def create_about_view(parent, dispatcher, controller):
-    controller.requested_view_backend = "qt"
+    controller.requested_view_backend = get_requested_about_ui_backend(dispatcher)
     controller.resolved_view_backend = "tk"
     controller.view_backend_fallback_reason = None
 
-    if is_about_qt_runtime_available():
+    if controller.requested_view_backend == "qt" and is_about_qt_runtime_available():
         controller.resolved_view_backend = "qt"
         return QtModuleBridgeView(
             parent,
@@ -46,6 +49,7 @@ def create_about_view(parent, dispatcher, controller):
                 "initial_status": "Launching About Qt window...",
             },
         )
-    controller.view_backend_fallback_reason = "PyQt6 is not installed; using the Tk About view."
+    if controller.requested_view_backend == "qt":
+        controller.view_backend_fallback_reason = "PyQt6 is not installed; using the Tk About view."
 
     return AboutView(parent, dispatcher, controller)
