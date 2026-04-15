@@ -16,6 +16,7 @@
 from ttkbootstrap.constants import DANGER, INFO, SECONDARY, SUCCESS
 
 from app.models.layout_manager_model import LayoutManagerModel
+from app.qt_module_runtime import QtModuleRuntimeManager
 from app.theme_manager import get_theme_tokens
 from app.views.layout_manager_qt_view import launch_layout_manager_qt_probe
 from app.views.layout_manager_view_contract import LayoutManagerViewContract
@@ -36,10 +37,64 @@ class LayoutManagerController:
         self.requested_view_backend = "tk"
         self.resolved_view_backend = "tk"
         self.view_backend_fallback_reason = None
+        self._last_runtime_change_token = None
+        self.runtime_manager = QtModuleRuntimeManager("layout_manager", self.build_qt_session_payload)
         self.view_factory = view_factory or create_layout_manager_view
         self.view: LayoutManagerViewContract = self.view_factory(parent, dispatcher, self)
+        if self.resolved_view_backend == "qt":
+            return
         self.apply_theme()
         self.load_config(initial=True)
+
+    def build_qt_session_payload(self):
+        root = self.parent.winfo_toplevel()
+        loaded_form = self._get_loaded_form_info()
+        config = self.current_config
+        source_path = self.model.config_path
+
+        if not isinstance(config, dict):
+            config, source_path, loaded_form = self.model.load_current_config()
+
+        return {
+            "window_title": "Layout Manager - Production Logging Center",
+            "title": "Layout Manager",
+            "subtitle": "Qt sidecar runtime for staged Layout Manager migration.",
+            "requested_backend": self.requested_view_backend,
+            "resolved_backend": self.resolved_view_backend,
+            "form_info": dict(loaded_form or {}),
+            "source_path": source_path,
+            "save_path": self.model.save_path,
+            "config": config,
+            "guardrails": self.model.build_editor_guardrails(config),
+            "protected_row_field_lookup": self.model.get_protected_row_field_lookup(config),
+            "theme_tokens": dict(getattr(root, "_martin_theme_tokens", {}) or {}),
+        }
+
+    def open_or_raise_qt_window(self):
+        self.runtime_manager.ensure_running(force_restart=False)
+
+    def restart_qt_window(self):
+        self.runtime_manager.ensure_running(force_restart=True)
+
+    def stop_qt_window(self):
+        self.runtime_manager.stop_runtime(force=False)
+
+    def read_runtime_state(self):
+        return self.runtime_manager.read_state()
+
+    def handle_runtime_state(self, state):
+        if self.resolved_view_backend != "qt":
+            return
+        if not isinstance(state, dict):
+            return
+        change_token = state.get("change_token")
+        if change_token is None or change_token == self._last_runtime_change_token:
+            return
+        self._last_runtime_change_token = change_token
+        if hasattr(self.dispatcher, "invalidate_layout_manager_preload"):
+            self.dispatcher.invalidate_layout_manager_preload()
+        if hasattr(self.dispatcher, "schedule_layout_manager_preload"):
+            self.dispatcher.schedule_layout_manager_preload(force=True)
 
     def _get_preloaded_payload(self):
         if not hasattr(self.dispatcher, "consume_layout_manager_preload"):
@@ -261,6 +316,8 @@ class LayoutManagerController:
             self.update_preview()
 
     def on_hide(self):
+        if self.resolved_view_backend == "qt":
+            return None
         return self.view.on_hide()
 
     def on_active_form_changed(self):
@@ -283,6 +340,9 @@ class LayoutManagerController:
         self.load_config(initial=True)
 
     def on_unload(self):
+        if self.resolved_view_backend == "qt":
+            self.stop_qt_window()
+            return None
         return self.view.on_unload()
 
     def load_config(self, initial=False):

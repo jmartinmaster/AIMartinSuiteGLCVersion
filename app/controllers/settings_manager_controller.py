@@ -29,14 +29,23 @@ __version__ = "1.2.0"
 
 
 class SettingsManagerController:
-    def __init__(self, parent, dispatcher, section_mode="full"):
+    def __init__(
+        self,
+        parent,
+        dispatcher,
+        section_mode="full",
+        module_name="settings_manager",
+        module_title="Settings Manager",
+    ):
         self.parent = parent
         self.dispatcher = dispatcher
         self.section_mode = str(section_mode or "full")
+        self.module_name = str(module_name or "settings_manager")
+        self.module_title = str(module_title or "Settings Manager")
         self.requested_view_backend = "qt"
         self.resolved_view_backend = "tk"
         self.view_backend_fallback_reason = None
-        self.runtime_manager = QtModuleRuntimeManager("settings_manager", self.build_qt_session_payload)
+        self.runtime_manager = QtModuleRuntimeManager(self.module_name, self.build_qt_session_payload)
         self._last_runtime_event_timestamp = None
         self.model = SettingsManagerModel()
         self.view = None
@@ -65,10 +74,15 @@ class SettingsManagerController:
         root = self.parent.winfo_toplevel()
         navigation_modules = list(self.dispatcher.get_navigation_modules())
         persistable_modules = list(self.dispatcher.get_persistable_modules())
+        section_label = {
+            "developer_admin": "Developer administration",
+            "security_admin": "Security administration",
+        }.get(self.section_mode, "Settings administration")
         return {
-            "window_title": "Settings Manager - Production Logging Center",
-            "title": "Settings Manager",
-            "subtitle": "Qt sidecar bootstrap view for staged Settings Manager migration.",
+            "window_title": f"{self.module_title} - Production Logging Center",
+            "title": self.module_title,
+            "subtitle": f"Qt sidecar runtime for {section_label.lower()}.",
+            "module_name": self.module_name,
             "section_mode": self.section_mode,
             "theme_options": [{"key": theme_name, "label": get_theme_label(theme_name)} for theme_name in get_theme_names()],
             "navigation_modules": [

@@ -31,6 +31,8 @@ __version__ = "1.4.0"
 class SettingsManagerQtController:
     def __init__(self, payload):
         self.payload = dict(payload or {})
+        self.module_name = str(self.payload.get("module_name") or self.payload.get("module") or "settings_manager")
+        self.module_title = str(self.payload.get("title") or "Settings Manager")
         self.state_path = self.payload.get("state_path")
         self.command_path = self.payload.get("command_path")
         self.theme_options = list(self.payload.get("theme_options") or [])
@@ -57,7 +59,7 @@ class SettingsManagerQtController:
             "status": status,
             "dirty": bool(dirty),
             "message": str(message or ""),
-            "module": "settings_manager",
+            "module": self.module_name,
             "updated_at": time.time(),
         }
         if runtime_event:
@@ -100,7 +102,7 @@ class SettingsManagerQtController:
         self.view.render_snapshot(snapshot)
         self.view.configure_security_admin_panel(self.get_security_admin_state())
         self.view.configure_developer_admin_tools(self.get_developer_admin_settings_state())
-        message = "Settings Manager Qt window ready." if initial else "Refreshed Settings Manager snapshot."
+        message = f"{self.module_title} Qt window ready." if initial else f"Refreshed {self.module_title} snapshot."
         self.write_state(status="ready", message=message)
 
     def on_form_changed(self):

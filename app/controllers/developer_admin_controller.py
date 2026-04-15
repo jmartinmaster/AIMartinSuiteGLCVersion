@@ -13,11 +13,18 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-from app.controllers.developer_admin_controller import DeveloperAdminController
+from app.controllers.settings_manager_controller import SettingsManagerController
 
-__module_name__ = "Developer Tools"
+__module_name__ = "Developer Admin"
 __version__ = "1.0.0"
 
 
-def get_ui(parent, dispatcher):
-    return DeveloperAdminController(parent, dispatcher)
+class DeveloperAdminController(SettingsManagerController):
+    def __init__(self, parent, dispatcher):
+        super().__init__(
+            parent,
+            dispatcher,
+            section_mode="developer_admin",
+            module_name="developer_admin",
+            module_title="Developer Tools",
+        )

@@ -19,6 +19,7 @@ from typing import Callable
 from app.views.layout_manager_qt_view import is_layout_manager_qt_runtime_available
 from app.views.layout_manager_view import LayoutManagerView
 from app.views.layout_manager_view_contract import LayoutManagerViewContract
+from app.views.qt_module_bridge_view import QtModuleBridgeView
 
 __module_name__ = "Layout Manager View Factory"
 __version__ = "1.0.0"
@@ -49,9 +50,19 @@ def create_layout_manager_view(parent, dispatcher, controller):
         if not is_layout_manager_qt_runtime_available():
             controller.view_backend_fallback_reason = "PyQt6 is not installed; using the Tk layout manager view."
         else:
-            controller.view_backend_fallback_reason = (
-                "The PyQt6 probe is available, but the full Qt layout manager view is not yet contract-complete; "
-                "using the Tk layout manager view."
+            controller.resolved_view_backend = "qt"
+            return QtModuleBridgeView(
+                parent,
+                dispatcher,
+                controller,
+                {
+                    "title": "Layout Manager Qt Runtime",
+                    "subtitle": (
+                        "Layout Manager now runs in a dedicated PyQt6 window using the same session contract "
+                        "as other migrated modules. Use the controls below to raise or restart the sidecar window."
+                    ),
+                    "initial_status": "Launching Layout Manager Qt window...",
+                },
             )
 
     return LayoutManagerView(parent, dispatcher, controller)
