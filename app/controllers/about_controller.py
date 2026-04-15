@@ -206,7 +206,7 @@ class AboutController:
                 )
 
             os.startfile(batch_path)
-            self.dispatcher.root.destroy()
+            self.dispatcher.request_shutdown(delay_ms=0)
             sys.exit()
         except Exception as exc:
             messagebox.showerror("Repack Error", f"Failed to repack suite:\n{exc}")

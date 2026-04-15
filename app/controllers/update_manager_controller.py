@@ -633,10 +633,10 @@ class UpdateManagerController:
             try:
                 installed_path, remote_version = self._install_module_payload_option(option, remote_text=None)
             except Exception as exc:
-                self.dispatcher.root.after(0, lambda current_option=option.copy(), error=exc: self._handle_module_payload_failure(current_option, error))
+                self.dispatcher.run_on_main_thread(lambda current_option=option.copy(), error=exc: self._handle_module_payload_failure(current_option, error))
                 return
 
-            self.dispatcher.root.after(0, lambda current_option=option.copy(), path=installed_path, version=remote_version: self._finish_module_payload_install(current_option, path, version))
+            self.dispatcher.run_on_main_thread(lambda current_option=option.copy(), path=installed_path, version=remote_version: self._finish_module_payload_install(current_option, path, version))
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -665,7 +665,7 @@ class UpdateManagerController:
                 scan_result = self.model.scan_available_documentation_payload_updates(branch_name=self.branch_name, remote_info=self.remote_info)
                 available_results = scan_result.get("available_results", [])
                 if not available_results:
-                    self.dispatcher.root.after(0, lambda: self._finish_documentation_payload_install([], []))
+                    self.dispatcher.run_on_main_thread(lambda: self._finish_documentation_payload_install([], []))
                     return
 
                 for result in available_results:
@@ -688,7 +688,7 @@ class UpdateManagerController:
                     "error": exc,
                 })
 
-            self.dispatcher.root.after(0, lambda installed=installed_items, failed=failed_items: self._finish_documentation_payload_install(installed, failed))
+            self.dispatcher.run_on_main_thread(lambda installed=installed_items, failed=failed_items: self._finish_documentation_payload_install(installed, failed))
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -792,7 +792,7 @@ class UpdateManagerController:
                 scan_result = self.model.scan_available_module_payload_updates(self.dispatcher, branch_name=self.branch_name, remote_info=self.remote_info)
                 available_results = scan_result.get("available_results", [])
                 if not available_results:
-                    self.dispatcher.root.after(0, lambda: self._finish_apply_all_module_payload_updates([], []))
+                    self.dispatcher.run_on_main_thread(lambda: self._finish_apply_all_module_payload_updates([], []))
                     return
 
                 for result in available_results:
@@ -815,7 +815,7 @@ class UpdateManagerController:
                     "error": exc,
                 })
 
-            self.dispatcher.root.after(0, lambda installed=installed_items, failed=failed_items: self._finish_apply_all_module_payload_updates(installed, failed))
+            self.dispatcher.run_on_main_thread(lambda installed=installed_items, failed=failed_items: self._finish_apply_all_module_payload_updates(installed, failed))
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -898,7 +898,7 @@ class UpdateManagerController:
         self.status_var.set(f"{self.stable_artifact_label} downloaded. Launching the updated build.")
         self.coordinator.set_job_phase("complete", status_detail, mode="stable")
         self.dispatcher.set_update_status(f"Stable {self._stable_artifact_noun()} downloaded. Launching the updated build.", SUCCESS, active=True, mode="stable")
-        self.dispatcher.root.after(300, self.dispatcher.root.destroy)
+        self.dispatcher.request_shutdown(delay_ms=300)
 
     def _handle_download_failure(self, exc):
         self.coordinator.download_in_progress = False
@@ -995,7 +995,7 @@ class UpdateManagerController:
             self.dispatcher.set_update_status("Advanced source rebuild succeeded, but relaunch failed.", DANGER, active=True, mode="advanced")
             return
 
-        self.dispatcher.root.after(300, self.dispatcher.root.destroy)
+        self.dispatcher.request_shutdown(delay_ms=300)
 
     def _begin_source_build_worker(self):
         if self.coordinator.download_in_progress or self.coordinator.source_job_in_progress:
@@ -1033,11 +1033,10 @@ class UpdateManagerController:
             except Exception as exc:
                 if not self.coordinator.source_build_runtime:
                     self.coordinator.set_build_runtime(None, str(exc))
-                self.dispatcher.root.after(0, lambda error=exc, log_path=build_log_path: self._handle_source_build_failure(error, log_path))
+                self.dispatcher.run_on_main_thread(lambda error=exc, log_path=build_log_path: self._handle_source_build_failure(error, log_path))
                 return
 
-            self.dispatcher.root.after(
-                0,
+            self.dispatcher.run_on_main_thread(
                 lambda built_exe_path=built_exe_path, final_exe_path=final_exe_path, log_path=build_log_path, current_stage_dir=stage_dir: self._finish_source_build(
                     built_exe_path,
                     final_exe_path,
@@ -1136,11 +1135,10 @@ class UpdateManagerController:
                     "Validating the staged source snapshot before handing it to the build worker.",
                 )
             except Exception as exc:
-                self.dispatcher.root.after(0, lambda error=exc, current_stage_dir=stage_dir: self._handle_source_download_failure(error, current_stage_dir))
+                self.dispatcher.run_on_main_thread(lambda error=exc, current_stage_dir=stage_dir: self._handle_source_download_failure(error, current_stage_dir))
                 return
 
-            self.dispatcher.root.after(
-                0,
+            self.dispatcher.run_on_main_thread(
                 lambda archive_path=archive_path, stage_dir=stage_dir, extract_dir=extract_dir, source_root=source_root: self._finish_source_download(
                     archive_path,
                     stage_dir,
@@ -1200,10 +1198,10 @@ class UpdateManagerController:
                     download_directory,
                 )
             except Exception as exc:
-                self.dispatcher.root.after(0, lambda error=exc: self._handle_download_failure(error))
+                self.dispatcher.run_on_main_thread(lambda error=exc: self._handle_download_failure(error))
                 return
 
-            self.dispatcher.root.after(0, lambda path=final_exe_path, version=row.get("remote_version"): self._finish_downloaded_update(path, version))
+            self.dispatcher.run_on_main_thread(lambda path=final_exe_path, version=row.get("remote_version"): self._finish_downloaded_update(path, version))
 
         threading.Thread(target=worker, daemon=True).start()
 
