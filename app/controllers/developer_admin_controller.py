@@ -14,6 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 from app.controllers.settings_manager_controller import SettingsManagerController
+from app.views.developer_admin_view_factory import create_developer_admin_view
 
 __module_name__ = "Developer Admin"
 __version__ = "1.0.0"
@@ -27,4 +28,5 @@ class DeveloperAdminController(SettingsManagerController):
             section_mode="developer_admin",
             module_name="developer_admin",
             module_title="Developer Tools",
+            view_factory=create_developer_admin_view,
         )

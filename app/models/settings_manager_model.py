@@ -67,6 +67,7 @@ class SettingsManagerModel:
             "update_repository_url": DEFAULT_UPDATE_REPOSITORY_URL,
             "enable_advanced_dev_updates": False,
             "theme": DEFAULT_THEME,
+            "ui_shell_backend": "pyqt6",
             "enable_screen_transitions": True,
             "enable_module_update_notifications": True,
             "screen_transition_duration_ms": 360,
@@ -118,6 +119,10 @@ class SettingsManagerModel:
             settings["downtime_codes"] = normalized_codes
 
         settings["theme"] = normalize_theme(settings.get("theme", DEFAULT_THEME))
+        normalized_shell_backend = str(settings.get("ui_shell_backend", "pyqt6") or "pyqt6").strip().lower()
+        if normalized_shell_backend not in {"tk", "pyqt6"}:
+            normalized_shell_backend = "pyqt6"
+        settings["ui_shell_backend"] = normalized_shell_backend
         settings["enable_advanced_dev_updates"] = bool(settings.get("enable_advanced_dev_updates", False))
         settings["enable_screen_transitions"] = bool(settings.get("enable_screen_transitions", True))
         settings["enable_module_update_notifications"] = bool(settings.get("enable_module_update_notifications", True))

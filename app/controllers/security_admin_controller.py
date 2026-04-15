@@ -14,6 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 from app.controllers.settings_manager_controller import SettingsManagerController
+from app.views.security_admin_view_factory import create_security_admin_view
 
 __module_name__ = "Security Admin"
 __version__ = "1.0.0"
@@ -27,4 +28,5 @@ class SecurityAdminController(SettingsManagerController):
             section_mode="security_admin",
             module_name="security_admin",
             module_title="Security Admin",
+            view_factory=create_security_admin_view,
         )
