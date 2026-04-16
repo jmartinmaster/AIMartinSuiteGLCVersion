@@ -96,9 +96,17 @@ class ProductionLogView:
                 "rate_lookup": row["rate_lookup"].get(),
                 "rate_override_enabled": bool(row["rate_override_enabled_var"].get()),
                 "molds": row["molds"].get(),
-                "time_calc": row["time_calc"].cget("text"),
+                "time_calc": self.get_widget_value(row["time_calc"]),
             })
-        downtime_data = [{key: (value.get() if hasattr(value, "get") else value.cget("text")) for key, value in row.items()} for row in self.downtime_rows]
+        downtime_data = []
+        for row in self.downtime_rows:
+            downtime_data.append({
+                "start": self.get_widget_value(row["start"]),
+                "stop": self.get_widget_value(row["stop"]),
+                "code": self.get_widget_value(row["code"]),
+                "cause": self.get_widget_value(row["cause"]),
+                "time_calc": self.get_widget_value(row["time_calc"]),
+            })
         return {
             "header": header_data,
             "production": production_data,
@@ -766,13 +774,7 @@ class ProductionLogView:
         if target_time_entry is None:
             return
         target_value = self.controller.get_target_time_value()
-        # Only call .cget('state') if widget supports it
-        original_state = None
-        if hasattr(target_time_entry, 'cget'):
-            try:
-                original_state = target_time_entry.cget("state")
-            except Exception:
-                original_state = None
+        original_state = self.get_widget_option(target_time_entry, "state")
         if original_state == "readonly":
             target_time_entry.config(state="normal")
         if hasattr(target_time_entry, 'delete') and hasattr(target_time_entry, 'insert'):
@@ -911,13 +913,7 @@ class ProductionLogView:
         if field_id not in self.entries:
             return
         entry = self.entries[field_id]
-        # Only call .cget('state') if widget supports it
-        original_state = None
-        if hasattr(entry, 'cget'):
-            try:
-                original_state = entry.cget("state")
-            except Exception:
-                original_state = None
+        original_state = self.get_widget_option(entry, "state")
         if original_state == "readonly":
             entry.config(state="normal")
         if hasattr(entry, 'delete') and hasattr(entry, 'insert'):
@@ -926,20 +922,42 @@ class ProductionLogView:
         if original_state == "readonly":
             entry.config(state="readonly")
 
+    def get_widget_option(self, widget, option_name):
+        """Safely read a widget option value without relying on direct cget calls.
+
+        Uses widget `configure(option)` first, then falls back to mapping access
+        (`widget[option]`). Returns `None` if the option is unavailable.
+        """
+        if widget is None:
+            return None
+        if hasattr(widget, "configure"):
+            try:
+                option_config = widget.configure(option_name)
+                if isinstance(option_config, (tuple, list)) and option_config:
+                    return option_config[-1]
+                if option_config is not None:
+                    return option_config
+            except (tk.TclError, AttributeError, KeyError, TypeError):
+                pass
+        if hasattr(widget, "__getitem__"):
+            try:
+                return widget[option_name]
+            except (tk.TclError, AttributeError, KeyError, TypeError):
+                pass
+        return None
+
     def get_widget_value(self, widget):
         if widget is None:
             return ""
         if hasattr(widget, "get"):
             try:
                 return widget.get()
-            except Exception:
+            except (tk.TclError, AttributeError, KeyError, TypeError):
                 pass
-        if hasattr(widget, "cget"):
-            for option_name in ("text", "value"):
-                try:
-                    return widget.cget(option_name)
-                except Exception:
-                    continue
+        for option_name in ("text", "value"):
+            option_value = self.get_widget_option(widget, option_name)
+            if option_value is not None:
+                return option_value
         return str(widget)
 
     def clear_dynamic_rows(self):
