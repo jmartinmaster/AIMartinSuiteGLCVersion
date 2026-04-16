@@ -944,7 +944,7 @@ class ProductionLogView:
         if hasattr(widget, "get"):
             try:
                 return widget.get()
-            except Exception:
+            except (tk.TclError, AttributeError, KeyError, TypeError):
                 pass
         for option_name in ("text", "value"):
             option_value = self.get_widget_option(widget, option_name)
