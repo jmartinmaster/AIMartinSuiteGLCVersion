@@ -98,7 +98,15 @@ class ProductionLogView:
                 "molds": row["molds"].get(),
                 "time_calc": self.get_widget_value(row["time_calc"]),
             })
-        downtime_data = [{key: self.get_widget_value(value) for key, value in row.items()} for row in self.downtime_rows]
+        downtime_data = []
+        for row in self.downtime_rows:
+            downtime_data.append({
+                "start": self.get_widget_value(row["start"]),
+                "stop": self.get_widget_value(row["stop"]),
+                "code": self.get_widget_value(row["code"]),
+                "cause": self.get_widget_value(row["cause"]),
+                "time_calc": self.get_widget_value(row["time_calc"]),
+            })
         return {
             "header": header_data,
             "production": production_data,
