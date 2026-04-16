@@ -96,9 +96,9 @@ class ProductionLogView:
                 "rate_lookup": row["rate_lookup"].get(),
                 "rate_override_enabled": bool(row["rate_override_enabled_var"].get()),
                 "molds": row["molds"].get(),
-                "time_calc": row["time_calc"].cget("text"),
+                "time_calc": self.get_widget_value(row["time_calc"]),
             })
-        downtime_data = [{key: (value.get() if hasattr(value, "get") else value.cget("text")) for key, value in row.items()} for row in self.downtime_rows]
+        downtime_data = [{key: self.get_widget_value(value) for key, value in row.items()} for row in self.downtime_rows]
         return {
             "header": header_data,
             "production": production_data,
