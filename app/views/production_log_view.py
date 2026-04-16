@@ -915,6 +915,11 @@ class ProductionLogView:
             entry.config(state="readonly")
 
     def get_widget_option(self, widget, option_name):
+        """Safely read a widget option value without relying on direct cget calls.
+
+        Uses widget `configure(option)` first, then falls back to mapping access
+        (`widget[option]`). Returns `None` if the option is unavailable.
+        """
         if widget is None:
             return None
         if hasattr(widget, "configure"):
@@ -924,12 +929,12 @@ class ProductionLogView:
                     return option_config[-1]
                 if option_config is not None:
                     return option_config
-            except Exception:
+            except (tk.TclError, AttributeError, KeyError, TypeError):
                 pass
         if hasattr(widget, "__getitem__"):
             try:
                 return widget[option_name]
-            except Exception:
+            except (tk.TclError, AttributeError, KeyError, TypeError):
                 pass
         return None
 
