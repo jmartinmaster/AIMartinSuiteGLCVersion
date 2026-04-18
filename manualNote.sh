@@ -18,7 +18,7 @@ mkdir -p "$OUT_DIR"
 
 cat > "$NOTE_PATH" <<EOF
 # Manual Test Notes
-
+#tracking test
 - Date: $(date -Iseconds)
 - Area: $LABEL
 - Branch: $(git -C "$ROOT_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)

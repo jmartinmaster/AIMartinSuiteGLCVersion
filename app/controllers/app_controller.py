@@ -20,7 +20,6 @@ import threading
 import time
 import tkinter as tk
 import webbrowser
-from tkinter import messagebox
 
 import ttkbootstrap as tb
 from ttkbootstrap.constants import BOTH, BOTTOM, DANGER, INFO, LEFT, RIGHT, SUCCESS, WARNING, X
@@ -36,9 +35,9 @@ from app.utils import external_path, local_or_resource_path, resource_path
 from app.layout_manager_dispatcher import LayoutManagerMiniDispatcher
 from app.models.app_model import AppModel
 from app.views.app_view import AppShellView
-from app.app_platform import get_work_area_insets
 from app.security_service import SecurityService
 from app.update_state import UpdateCoordinator
+from app.host_ui_adapter import TkHostUiAdapter
 
 __module_name__ = "Dispatcher Core"
 __version__ = "2.1.5"
@@ -121,80 +120,15 @@ MODULE_API_SURFACE = {
 }
 
 
-class TkHostUiAdapter:
-    def __init__(self, dispatcher):
-        self.dispatcher = dispatcher
-
-    def call_later(self, delay_ms, callback):
-        try:
-            delay_ms = int(delay_ms)
-        except Exception:
-            delay_ms = 0
-        return self.dispatcher.root.after(max(0, delay_ms), callback)
-
-    def run_on_main_thread(self, callback):
-        return self.call_later(0, callback)
-
-    def request_shutdown(self, delay_ms=0):
-        self.call_later(delay_ms, self.dispatcher.root.destroy)
-
-    def bind_shell_viewport_resize(self, callback, add="+"):
-        return self.dispatcher.canvas.bind("<Configure>", callback, add=add)
-
-    def get_shell_viewport_size(self, min_width=0, min_height=0):
-        try:
-            min_width = int(min_width)
-        except Exception:
-            min_width = 0
-        try:
-            min_height = int(min_height)
-        except Exception:
-            min_height = 0
-        width = max(self.dispatcher.canvas.winfo_width(), min_width)
-        height = max(self.dispatcher.canvas.winfo_height(), min_height)
-        return (width, height)
-
-    def bind_mousewheel_to_widget_tree(self, root_widget, scroll_target, axis="y"):
-        def on_mousewheel(event):
-            step = self.dispatcher.get_mousewheel_units(event)
-            if not step:
-                return None
-            if axis == "x":
-                scroll_target.xview_scroll(step, "units")
-            else:
-                scroll_target.yview_scroll(step, "units")
-            return "break"
-
-        def bind_widget(widget):
-            widget.bind("<MouseWheel>", on_mousewheel)
-            widget.bind("<Button-4>", on_mousewheel)
-            widget.bind("<Button-5>", on_mousewheel)
-            for child in widget.winfo_children():
-                bind_widget(child)
-
-        bind_widget(root_widget)
-
-    def show_toast(self, title, message, bootstyle=INFO, duration_ms=None):
-        duration = duration_ms
-        if duration is None:
-            duration = int(self.dispatcher.get_setting("toast_duration_sec", 5)) * 1000
-        resolved_bootstyle = self.dispatcher._normalize_bootstyle(bootstyle)
-        right_inset, bottom_inset = get_work_area_insets(self.dispatcher.root)
-        toast = ToastNotification(
-            title=title,
-            message=message,
-            duration=duration,
-            bootstyle=resolved_bootstyle,
-            position=(24 + right_inset, 24 + bottom_inset, "se"),
-        )
-        toast.show_toast()
-
-    def refresh_update_status_visibility(self):
-        self.dispatcher.view.refresh_update_status_visibility()
-
-
 class Dispatcher:
-    def __init__(self, root, main_module=None, initial_module_name=None):
+    def __init__(
+        self,
+        root,
+        main_module=None,
+        initial_module_name=None,
+        runtime_settings_override=None,
+        host_ui_adapter_factory=None,
+    ):
         self.root = root
         self.main_module = main_module or sys.modules.get("main") or sys.modules.get("__main__")
         self.dispatcher_version = getattr(self.main_module, "__version__", None) or "0.0.0"
@@ -228,9 +162,12 @@ class Dispatcher:
         self.model.loaded_modules = {"main": self.main_module}
         self._configure_module_import_paths()
         self.model.runtime_settings = self.load_runtime_settings()
+        if isinstance(runtime_settings_override, dict):
+            self.model.runtime_settings.update(runtime_settings_override)
         self.requested_shell_backend = "pyqt6"
         self.active_shell_backend = "tk"
         self.shell_backend_fallback_reason = None
+        self.host_ui_adapter_factory = host_ui_adapter_factory
         self._refresh_shell_backend_state()
         self.model.window_alpha_supported = self._supports_window_alpha()
         self.model.module_preload_poll_seconds = MODULE_PRELOAD_POLL_SECONDS
@@ -244,7 +181,8 @@ class Dispatcher:
         self.view = AppShellView(self.root, self.update_coordinator)
         self.view.build()
         self._sync_view_aliases()
-        self.host_ui_adapter = TkHostUiAdapter(self)
+        self.host_ui_adapter = None
+        self._switch_active_host_ui_adapter()
         gatekeeper.add_session_listener(self._handle_gatekeeper_session_change)
         self._setup_menu()
         self.pre_load_manifest()
@@ -684,7 +622,7 @@ class Dispatcher:
             webbrowser.open(ISSUE_REPORT_URL)
         except Exception as exc:
             log_exception("open_issue_report_page", exc)
-            messagebox.showerror("Report A Problem", f"Could not open the GitHub issue page:\n\n{exc}")
+            self.host_ui_adapter.show_error("Report A Problem", f"Could not open the GitHub issue page:\n\n{exc}")
 
     def menu_open(self, event=None):
         self.load_module("production_log")
@@ -721,7 +659,7 @@ class Dispatcher:
                 return
         except Exception as exc:
             log_exception("menu_login.error", exc)
-            messagebox.showerror("Security Error", f"Sign in failed: {exc}")
+            self.host_ui_adapter.show_error("Security Error", f"Sign in failed: {exc}")
             return
 
         self.refresh_navigation()
@@ -740,7 +678,7 @@ class Dispatcher:
                 return
         except Exception as exc:
             log_exception("menu_change_login.error", exc)
-            messagebox.showerror("Security Error", f"Change login failed: {exc}")
+            self.host_ui_adapter.show_error("Security Error", f"Change login failed: {exc}")
             return
 
         self.refresh_navigation()
@@ -847,7 +785,7 @@ class Dispatcher:
                 return
         except Exception as exc:
             log_exception(f"secure_load.error.{module_name}", exc)
-            messagebox.showerror("Security Error", f"Auth failed: {exc}")
+            self.host_ui_adapter.show_error("Security Error", f"Auth failed: {exc}")
             return
 
         self.refresh_navigation()
@@ -1114,7 +1052,7 @@ class Dispatcher:
                 self.refresh_navigation()
             except Exception as exc:
                 log_exception(f"load_module.auth.{module_name}", exc)
-                messagebox.showerror("Security Error", f"Auth failed: {exc}")
+                self.host_ui_adapter.show_error("Security Error", f"Auth failed: {exc}")
                 return
 
         def perform_load():
@@ -1204,16 +1142,13 @@ class Dispatcher:
             tb.Label(self.content_area, text=f"Error loading {module_name}: {exc}", bootstyle=DANGER).pack(pady=20)
 
     def open_module_window(self, module_name, title=None, geometry=None, minsize=None):
-        top_window = tk.Toplevel(self.root)
-        if title:
-            top_window.title(str(title))
-        if geometry:
-            top_window.geometry(str(geometry))
-        if isinstance(minsize, (tuple, list)) and len(minsize) == 2:
-            try:
-                top_window.minsize(int(minsize[0]), int(minsize[1]))
-            except Exception:
-                pass
+        top_window = self.host_ui_adapter.create_module_window(title=title, geometry=geometry, minsize=minsize)
+        if top_window is None:
+            self.host_ui_adapter.show_warning(
+                "Module Window Unsupported",
+                f"Standalone module windows are not available for active backend '{self.active_shell_backend}'.",
+            )
+            return None
 
         try:
             module = self.import_managed_module(module_name, force_fresh=False, track_loaded=False)
@@ -1222,11 +1157,8 @@ class Dispatcher:
             module.get_ui(top_window, self)
         except Exception as exc:
             log_exception(f"open_module_window.{module_name}", exc)
-            try:
-                top_window.destroy()
-            except Exception:
-                pass
-            messagebox.showerror("Module Window Error", f"Could not open {module_name}: {exc}")
+            self.host_ui_adapter.destroy_module_window(top_window)
+            self.host_ui_adapter.show_error("Module Window Error", f"Could not open {module_name}: {exc}")
             return None
         return top_window
 
@@ -1241,7 +1173,7 @@ class Dispatcher:
                 return
             raise FileNotFoundError(relative_path)
         except Exception as exc:
-            messagebox.showerror("Help Document Error", f"Could not open help document: {exc}")
+            self.host_ui_adapter.show_error("Help Document Error", f"Could not open help document: {exc}")
 
     def load_runtime_settings(self):
         valid_navigation_modules = self.get_user_facing_modules(apply_whitelist=False)
@@ -1251,6 +1183,7 @@ class Dispatcher:
     def refresh_runtime_settings(self):
         self.runtime_settings = self.load_runtime_settings()
         self._refresh_shell_backend_state()
+        self._switch_active_host_ui_adapter()
         self._configure_module_import_paths()
         self.refresh_animation_settings()
         self.prune_persistent_module_instances()
@@ -1283,13 +1216,40 @@ class Dispatcher:
 
     def _refresh_shell_backend_state(self):
         self.requested_shell_backend = self.get_ui_shell_backend()
-        self.active_shell_backend = "tk"
+        active_backend = str(self.runtime_settings.get("active_ui_shell_backend", "") or "").strip().lower()
+        if active_backend not in {"tk", "pyqt6"}:
+            active_backend = "tk"
+        self.active_shell_backend = active_backend
+
+        fallback_reason = self.runtime_settings.get("ui_shell_backend_fallback_reason")
+        if isinstance(fallback_reason, str) and fallback_reason.strip():
+            self.shell_backend_fallback_reason = fallback_reason.strip()
+            return
+
         if self.requested_shell_backend != self.active_shell_backend:
             self.shell_backend_fallback_reason = (
                 f"Requested shell backend '{self.requested_shell_backend}' is not available in this build; using '{self.active_shell_backend}'."
             )
-        else:
-            self.shell_backend_fallback_reason = None
+            return
+
+        self.shell_backend_fallback_reason = None
+
+    def _switch_active_host_ui_adapter(self):
+        if callable(self.host_ui_adapter_factory):
+            adapter = self.host_ui_adapter_factory(self.active_shell_backend, self)
+            if adapter is not None:
+                self.host_ui_adapter = adapter
+                return
+
+        if self.active_shell_backend == "tk":
+            self.host_ui_adapter = TkHostUiAdapter(self, toast_factory=ToastNotification)
+            return
+
+        if self.active_shell_backend != "tk" and self.shell_backend_fallback_reason is None:
+            self.shell_backend_fallback_reason = (
+                f"Host adapter for backend '{self.active_shell_backend}' is not available in Dispatcher; using 'tk'."
+            )
+        self.host_ui_adapter = TkHostUiAdapter(self, toast_factory=ToastNotification)
 
     def get_ui_shell_backend(self):
         backend = str(self.runtime_settings.get("ui_shell_backend", "pyqt6") or "pyqt6").strip().lower()
@@ -1459,7 +1419,7 @@ class Dispatcher:
             return
 
         file_list = "\n".join(f"- {entry['name']}" for entry in obsolete_executables)
-        if not messagebox.askyesno(
+        if not self.host_ui_adapter.ask_yes_no(
             "Remove Older Versions",
             (
                 "Older local EXE versions were found next to the current build:\n\n"
@@ -1475,7 +1435,7 @@ class Dispatcher:
             self.show_toast("Cleanup Complete", f"Removed {len(removed)} older EXE file(s).", SUCCESS)
         if failed:
             failure_list = "\n".join(f"- {name}" for name in failed)
-            messagebox.showwarning(
+            self.host_ui_adapter.show_warning(
                 "Cleanup Incomplete",
                 f"These EXE files could not be removed:\n\n{failure_list}",
             )

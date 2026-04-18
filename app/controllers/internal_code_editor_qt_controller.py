@@ -220,6 +220,8 @@ class InternalCodeEditorQtController:
         if action == "raise_window":
             self.show()
             self.write_state(status="ready", message="Raised Internal Code Editor Qt window.", dirty=self.model.is_dirty)
+        elif action == "save_current_file":
+            self.save_current_file()
         elif action == "close_window":
             self.handle_close()
             self.view.close()
