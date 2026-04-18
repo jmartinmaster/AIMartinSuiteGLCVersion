@@ -19,13 +19,14 @@ from functools import partial
 from app.module_registry import ModuleRegistry
 from app.qt_module_runtime import QtModuleRuntimeManager
 from app.theme_manager import get_theme_tokens, normalize_theme
+from app.host_ui_adapter import PyQt6HostUiAdapter
 
 __module_name__ = "PyQt6 Host Shell"
 __version__ = "0.1.0"
 
 try:
     from PyQt6.QtCore import QTimer
-    from PyQt6.QtGui import QFont
+    from PyQt6.QtGui import QAction, QFont, QKeySequence
     from PyQt6.QtWidgets import (
         QFrame,
         QHBoxLayout,
@@ -41,10 +42,12 @@ try:
 
     PYQT6_AVAILABLE = True
 except ImportError:
+    QAction = None
     QFrame = None
     QFont = None
     QHBoxLayout = None
     QLabel = None
+    QKeySequence = None
     QMainWindow = object
     QPushButton = None
     QPlainTextEdit = None
@@ -72,8 +75,14 @@ class PyQt6HostShellView(QMainWindow):
         self.runtime_managers = {}
         self.module_buttons = {}
         self.module_catalog = self._build_module_catalog()
+        self.persistent_module_names = set()
+        self._load_persistent_module_names()
+        self.navigation_state_listeners = []
         self.active_module_name = None
+        self.host_ui_adapter = PyQt6HostUiAdapter(self)
+        self._menu_actions = {}
         self._build_ui()
+        self._configure_menu_bar()
 
         self.state_timer = QTimer(self)
         self.state_timer.setInterval(900)
@@ -83,6 +92,35 @@ class PyQt6HostShellView(QMainWindow):
         initial = self._resolve_initial_module_name(initial_module_name)
         if initial is not None:
             self.open_or_raise_module(initial, restart=False)
+
+    def _load_persistent_module_names(self):
+        catalog_names = {entry.get("name") for entry in self.module_catalog}
+        configured = self.runtime_settings.get("persistent_modules") or []
+        if not isinstance(configured, (list, tuple, set)):
+            configured = []
+        self.persistent_module_names = {
+            str(module_name).strip()
+            for module_name in configured
+            if str(module_name).strip() and str(module_name).strip() in catalog_names
+        }
+
+    def is_module_persistent(self, module_name):
+        return str(module_name or "").strip() in self.persistent_module_names
+
+    def add_navigation_state_listener(self, listener):
+        if callable(listener) and listener not in self.navigation_state_listeners:
+            self.navigation_state_listeners.append(listener)
+
+    def remove_navigation_state_listener(self, listener):
+        if listener in self.navigation_state_listeners:
+            self.navigation_state_listeners.remove(listener)
+
+    def _notify_navigation_state(self, event_name, **payload):
+        for listener in list(self.navigation_state_listeners):
+            try:
+                listener(event_name, dict(payload))
+            except Exception:
+                pass
 
     def _build_module_catalog(self):
         modules = []
@@ -221,6 +259,87 @@ class PyQt6HostShellView(QMainWindow):
 
         self._refresh_nav_button_states()
 
+    def _configure_menu_bar(self):
+        menu_bar = self.menuBar()
+        if menu_bar is None or QAction is None:
+            return
+
+        file_menu = menu_bar.addMenu("File")
+        self._menu_actions["open"] = self._add_menu_action(file_menu, "Open Draft", self.menu_open, shortcut=QKeySequence.StandardKey.Open)
+        self._menu_actions["save"] = self._add_menu_action(file_menu, "Save Draft", self.menu_save, shortcut=QKeySequence.StandardKey.Save)
+        self._menu_actions["export"] = self._add_menu_action(file_menu, "Export to Excel", self.menu_export, shortcut="Ctrl+E")
+        self._menu_actions["import"] = self._add_menu_action(file_menu, "Import Excel", self.menu_import, shortcut="Ctrl+I")
+        file_menu.addSeparator()
+        self._menu_actions["exit"] = self._add_menu_action(file_menu, "Exit", self.close, shortcut=QKeySequence.StandardKey.Quit)
+
+    def _add_menu_action(self, menu, title, callback, shortcut=None):
+        action = QAction(str(title), self)
+        if shortcut is not None:
+            action.setShortcut(shortcut)
+        action.triggered.connect(callback)
+        menu.addAction(action)
+        return action
+
+    def _send_runtime_command(self, module_name, action, success_message, unavailable_message):
+        manager = self.runtime_managers.get(module_name)
+        if manager is None:
+            self.open_or_raise_module(module_name, restart=False)
+            manager = self.runtime_managers.get(module_name)
+        if manager is None:
+            self.host_ui_adapter.show_warning("Action Unavailable", unavailable_message)
+            return False
+        manager.send_command(action)
+        self.host_ui_adapter.show_toast("File Menu", success_message, duration_ms=2500)
+        return True
+
+    def menu_open(self):
+        self.open_or_raise_module("production_log", restart=False)
+        self._send_runtime_command(
+            "production_log",
+            "show_pending",
+            "Opened Production Log draft workflow.",
+            "Open Draft is unavailable because the Production Log runtime could not be opened.",
+        )
+
+    def menu_save(self):
+        active_module_name = str(self.active_module_name or "").strip()
+        if active_module_name == "production_log":
+            self._send_runtime_command(
+                "production_log",
+                "save_draft",
+                "Sent save request to Production Log.",
+                "Save Draft is unavailable because the Production Log runtime is not available.",
+            )
+            return
+        if active_module_name == "internal_code_editor":
+            self._send_runtime_command(
+                "internal_code_editor",
+                "save_current_file",
+                "Sent save request to Internal Code Editor.",
+                "Save is unavailable because the Internal Code Editor runtime is not available.",
+            )
+            return
+        self.host_ui_adapter.show_warning(
+            "Action Unavailable",
+            "Save Draft is currently implemented for Production Log and Internal Code Editor runtimes only.",
+        )
+
+    def menu_export(self):
+        self._send_runtime_command(
+            "production_log",
+            "export_to_excel",
+            "Sent export request to Production Log.",
+            "Export to Excel is unavailable because the Production Log runtime could not be opened.",
+        )
+
+    def menu_import(self):
+        self._send_runtime_command(
+            "production_log",
+            "import_from_excel_ui",
+            "Sent import request to Production Log.",
+            "Import Excel is unavailable because the Production Log runtime could not be opened.",
+        )
+
     def _module_entry(self, module_name):
         for entry in self.module_catalog:
             if entry["name"] == module_name:
@@ -268,16 +387,39 @@ class PyQt6HostShellView(QMainWindow):
         self.runtime_managers[module_name] = manager
         return manager
 
+    def _stop_runtime_if_non_persistent(self, module_name):
+        if not module_name or self.is_module_persistent(module_name):
+            return
+        manager = self.runtime_managers.get(module_name)
+        if manager is None:
+            return
+        manager.stop_runtime(force=False)
+
+    def _switch_active_module(self, module_name):
+        previous_module = self.active_module_name
+        if previous_module == module_name:
+            return
+        self._stop_runtime_if_non_persistent(previous_module)
+        self.active_module_name = module_name
+        self._notify_navigation_state(
+            "active_module_changed",
+            previous_module=previous_module,
+            active_module=module_name,
+            previous_was_persistent=self.is_module_persistent(previous_module),
+            active_is_persistent=self.is_module_persistent(module_name),
+        )
+
     def open_or_raise_module(self, module_name, restart=False):
         if self._module_entry(module_name) is None:
             return
 
         manager = self._ensure_runtime_manager(module_name)
         manager.ensure_running(force_restart=bool(restart))
-        self.active_module_name = module_name
+        self._switch_active_module(module_name)
         self._refresh_nav_button_states()
         self._refresh_active_module_text()
-        self.status_bar.showMessage(f"Opened runtime for {module_name}.", 3500)
+        self._notify_navigation_state("runtime_opened", module_name=module_name, restart=bool(restart))
+        self.host_ui_adapter.show_toast("PyQt6 Host Shell", f"Opened runtime for {module_name}.", duration_ms=3500)
 
     def _open_active_module(self):
         if self.active_module_name is None:
@@ -292,11 +434,13 @@ class PyQt6HostShellView(QMainWindow):
     def _stop_active_module(self):
         if self.active_module_name is None:
             return
-        manager = self.runtime_managers.get(self.active_module_name)
+        module_name = self.active_module_name
+        manager = self.runtime_managers.get(module_name)
         if manager is None:
             return
         manager.stop_runtime(force=False)
-        self.status_bar.showMessage(f"Closed runtime for {self.active_module_name}.", 3500)
+        self._notify_navigation_state("runtime_closed", module_name=module_name)
+        self.host_ui_adapter.show_toast("PyQt6 Host Shell", f"Closed runtime for {module_name}.", duration_ms=3500)
         self._poll_runtime_state()
 
     def _refresh_nav_button_states(self):
@@ -316,10 +460,11 @@ class PyQt6HostShellView(QMainWindow):
             return
 
         entry = self._module_entry(self.active_module_name) or {"display_name": self.active_module_name}
+        persistence_text = "persistent runtime" if self.is_module_persistent(self.active_module_name) else "non-persistent runtime"
         self.page_title.setText(entry["display_name"])
         self.page_subtitle.setText(
             "This host shell coordinates dedicated module runtimes. "
-            "Use Open/Restart/Close controls to manage each module window."
+            f"Use Open/Restart/Close controls to manage each module window ({persistence_text})."
         )
 
     def _poll_runtime_state(self):
@@ -339,6 +484,10 @@ class PyQt6HostShellView(QMainWindow):
         state = dict(manager.read_state() or {})
         status = str(state.get("status") or ("running" if manager.is_running() else "idle"))
         message = str(state.get("message") or "No runtime message available.")
+
+        if not manager.is_running() and not self.is_module_persistent(self.active_module_name):
+            # Drop completed non-persistent runtime managers so future opens rebuild a clean session payload.
+            self.runtime_managers.pop(self.active_module_name, None)
 
         self.runtime_status_label.setText(f"Runtime Status: {status}")
         self.runtime_message_label.setText(message)

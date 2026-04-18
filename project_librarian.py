@@ -33,7 +33,7 @@ DEFAULT_MCP_TRANSPORT = "streamable-http"
 DEFAULT_MCP_HOST = "127.0.0.1"
 DEFAULT_MCP_PORT = 8765
 DEFAULT_REFRESH_INTERVAL_SECONDS = 30.0
-DEFAULT_EXCEL_WATCH_INTERVAL_SECONDS = 5.0
+DEFAULT_LIBRARY_WATCH_INTERVAL_SECONDS = 5.0
 HTTP_AUTH_ENV_NAME = "PROJECT_LIBRARIAN_TOKEN"
 HTTP_AUTH_COOKIE_NAME = "project_librarian_token"
 HTTP_AUTH_HEADER_NAME = "X-Project-Librarian-Token"
@@ -160,7 +160,7 @@ class LibrarianService:
         refresh_if_missing=True,
         refresh_first=False,
         refresh_interval_seconds=DEFAULT_REFRESH_INTERVAL_SECONDS,
-        excel_watch_interval_seconds=DEFAULT_EXCEL_WATCH_INTERVAL_SECONDS,
+        library_watch_interval_seconds=DEFAULT_LIBRARY_WATCH_INTERVAL_SECONDS,
         start_refresh_worker=True,
     ):
         self.repo_root = Path(repo_root or _repo_root_from_here()).resolve()
@@ -169,15 +169,14 @@ class LibrarianService:
         self._lock = threading.RLock()
         self._stop_event = threading.Event()
         self._refresh_thread = None
-        self._excel_watch_thread = None
-        self._excel_watch_folder = ""
-        self._excel_watch_signature = ""
-        self._excel_watch_file_count = 0
-        self._excel_watch_last_scan_at = None
-        self._excel_watch_last_change_at = None
-        self._excel_watch_last_refresh_at = None
-        self._excel_watch_error = None
-        self.excel_watch_interval_seconds = max(1.0, float(excel_watch_interval_seconds or DEFAULT_EXCEL_WATCH_INTERVAL_SECONDS))
+        self._library_watch_thread = None
+        self._library_watch_signature = ""
+        self._library_watch_file_count = 0
+        self._library_watch_last_scan_at = None
+        self._library_watch_last_change_at = None
+        self._library_watch_last_refresh_at = None
+        self._library_watch_error = None
+        self.library_watch_interval_seconds = max(1.0, float(library_watch_interval_seconds or DEFAULT_LIBRARY_WATCH_INTERVAL_SECONDS))
         self._last_refresh_at = None
         self._last_refresh_error = None
         self._workspace = LibrarianWorkspace.load(
@@ -187,7 +186,7 @@ class LibrarianService:
             refresh_first=refresh_first,
         )
         self._last_refresh_at = _utc_now_text()
-        self.configure_excel_watcher(force_restart=True)
+        self.configure_library_watcher(force_restart=True)
         if start_refresh_worker and self.refresh_interval_seconds > 0:
             self.start_refresh_worker()
 
@@ -206,8 +205,8 @@ class LibrarianService:
         self._stop_event.set()
         if self._refresh_thread is not None and self._refresh_thread.is_alive():
             self._refresh_thread.join(timeout=max(0.1, float(join_timeout or 0.1)))
-        if self._excel_watch_thread is not None and self._excel_watch_thread.is_alive():
-            self._excel_watch_thread.join(timeout=max(0.1, float(join_timeout or 0.1)))
+        if self._library_watch_thread is not None and self._library_watch_thread.is_alive():
+            self._library_watch_thread.join(timeout=max(0.1, float(join_timeout or 0.1)))
 
     def _refresh_loop(self):
         while not self._stop_event.wait(self.refresh_interval_seconds):
@@ -216,92 +215,70 @@ class LibrarianService:
             except Exception as exc:
                 self._last_refresh_error = str(exc)
 
-    def _resolve_excel_watch_folder(self):
-        config = _load_excel_library_config(self.output_dir)
-        folder_text = str(config.get("folder") or "").strip()
-        if not folder_text:
-            return ""
-        try:
-            folder_path = Path(folder_text).expanduser().resolve()
-        except Exception:
-            return ""
-        if not folder_path.is_dir():
-            return ""
-        return str(folder_path)
-
-    def _compute_excel_watch_signature(self, folder_text):
-        folder = Path(folder_text)
+    def _compute_library_watch_signature(self):
         hasher = hashlib.sha1()
         file_count = 0
-        for path in sorted((candidate for candidate in folder.rglob("*") if candidate.is_file() and candidate.suffix.lower() in EXCEL_EXTENSIONS), key=lambda value: str(value.relative_to(folder)).lower()):
+        for path in sorted((candidate for candidate in self.repo_root.rglob("*") if candidate.is_file() and candidate.suffix.lower() in SEARCHABLE_EXTENSIONS and all(part not in candidate.parts for part in EXCLUDED_DIRECTORY_NAMES)), key=lambda value: str(value.relative_to(self.repo_root)).lower()):
             try:
                 stat = path.stat()
             except OSError:
                 continue
-            rel_path = str(path.relative_to(folder)).replace("\\", "/").lower()
+            rel_path = str(path.relative_to(self.repo_root)).replace("\\", "/").lower()
             hasher.update(rel_path.encode("utf-8", errors="ignore"))
             hasher.update(str(int(getattr(stat, "st_mtime_ns", int(stat.st_mtime * 1_000_000_000)))).encode("ascii"))
             hasher.update(str(int(stat.st_size)).encode("ascii"))
             file_count += 1
         return hasher.hexdigest(), file_count
 
-    def _excel_watch_loop(self):
-        while not self._stop_event.wait(self.excel_watch_interval_seconds):
-            folder_text = self._excel_watch_folder
-            if not folder_text:
-                continue
+    def _library_watch_loop(self):
+        while not self._stop_event.wait(self.library_watch_interval_seconds):
             try:
-                signature, file_count = self._compute_excel_watch_signature(folder_text)
-                self._excel_watch_last_scan_at = _utc_now_text()
-                self._excel_watch_file_count = file_count
-                if not self._excel_watch_signature:
-                    self._excel_watch_signature = signature
-                    self._excel_watch_error = None
+                signature, file_count = self._compute_library_watch_signature()
+                self._library_watch_last_scan_at = _utc_now_text()
+                self._library_watch_file_count = file_count
+                if not self._library_watch_signature:
+                    self._library_watch_signature = signature
+                    self._library_watch_error = None
                     continue
-                if signature != self._excel_watch_signature:
-                    self._excel_watch_signature = signature
-                    self._excel_watch_last_change_at = _utc_now_text()
+                if signature != self._library_watch_signature:
+                    self._library_watch_signature = signature
+                    self._library_watch_last_change_at = _utc_now_text()
                     self.refresh()
-                    self._excel_watch_last_refresh_at = self._last_refresh_at
-                self._excel_watch_error = None
+                    self._library_watch_last_refresh_at = self._last_refresh_at
+                self._library_watch_error = None
             except Exception as exc:
-                self._excel_watch_error = str(exc)
+                self._library_watch_error = str(exc)
 
-    def configure_excel_watcher(self, force_restart=False):
-        folder_text = self._resolve_excel_watch_folder()
-        thread_running = bool(self._excel_watch_thread and self._excel_watch_thread.is_alive())
-        if not force_restart and thread_running and folder_text == self._excel_watch_folder:
+    def configure_library_watcher(self, force_restart=False):
+        thread_running = bool(self._library_watch_thread and self._library_watch_thread.is_alive())
+        if not force_restart and thread_running:
             return
-        self._excel_watch_folder = folder_text
-        self._excel_watch_signature = ""
-        self._excel_watch_file_count = 0
-        self._excel_watch_last_scan_at = None
-        self._excel_watch_last_change_at = None
-        self._excel_watch_last_refresh_at = None
-        self._excel_watch_error = None
-        if not folder_text:
-            return
+        self._library_watch_signature = ""
+        self._library_watch_file_count = 0
+        self._library_watch_last_scan_at = None
+        self._library_watch_last_change_at = None
+        self._library_watch_last_refresh_at = None
+        self._library_watch_error = None
         if thread_running:
             return
         self._stop_event.clear()
-        self._excel_watch_thread = threading.Thread(
-            target=self._excel_watch_loop,
-            name="project-librarian-excel-watch",
+        self._library_watch_thread = threading.Thread(
+            target=self._library_watch_loop,
+            name="project-librarian-library-watch",
             daemon=True,
         )
-        self._excel_watch_thread.start()
+        self._library_watch_thread.start()
 
-    def excel_watch_payload(self):
+    def library_watch_payload(self):
         return {
-            "enabled": bool(self._excel_watch_folder),
-            "folder": self._excel_watch_folder,
-            "watcher_running": bool(self._excel_watch_thread and self._excel_watch_thread.is_alive()),
-            "interval_seconds": self.excel_watch_interval_seconds,
-            "last_scan_at": self._excel_watch_last_scan_at,
-            "last_change_at": self._excel_watch_last_change_at,
-            "last_refresh_at": self._excel_watch_last_refresh_at,
-            "tracked_files": self._excel_watch_file_count,
-            "last_error": self._excel_watch_error,
+            "enabled": True,
+            "watcher_running": bool(self._library_watch_thread and self._library_watch_thread.is_alive()),
+            "interval_seconds": self.library_watch_interval_seconds,
+            "last_scan_at": self._library_watch_last_scan_at,
+            "last_change_at": self._library_watch_last_change_at,
+            "last_refresh_at": self._library_watch_last_refresh_at,
+            "tracked_files": self._library_watch_file_count,
+            "last_error": self._library_watch_error,
         }
 
     def _with_workspace(self, callback):
@@ -333,7 +310,7 @@ class LibrarianService:
                 "refresh_worker_running": bool(self._refresh_thread and self._refresh_thread.is_alive()),
                 "last_refresh_at": self._last_refresh_at,
                 "last_refresh_error": self._last_refresh_error,
-                "excel_watcher": self.excel_watch_payload(),
+                "library_watcher": self.library_watch_payload(),
             }
 
         return self._with_workspace(_build)
@@ -2556,7 +2533,9 @@ def _render_dashboard_html(auth_enabled=False, bootstrap_payload=None):
             `).join('');
 
             const workerText = status.refresh_worker_running ? 'running' : 'manual';
-            statusBannerEl.innerHTML = `<strong>${escapeHtml(status.repo_root || '')}</strong> on branch <strong>${escapeHtml(status.branch || 'unknown')}</strong>. Refresh worker: <strong>${escapeHtml(workerText)}</strong> at ${escapeHtml(status.refresh_interval_seconds || 0)}s.`;
+            const watcherText = status.library_watcher?.watcher_running ? 'active' : 'inactive';
+            const watchedFiles = status.library_watcher?.tracked_files || 0;
+            statusBannerEl.innerHTML = `<strong>${escapeHtml(status.repo_root || '')}</strong> on branch <strong>${escapeHtml(status.branch || 'unknown')}</strong>. Refresh worker: <strong>${escapeHtml(workerText)}</strong> at ${escapeHtml(status.refresh_interval_seconds || 0)}s. Library auto-watcher: <strong>${escapeHtml(watcherText)}</strong> · ${escapeHtml(watchedFiles)} tracked.`;
         }
 
         function renderChanges(payload) {

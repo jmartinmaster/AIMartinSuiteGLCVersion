@@ -165,6 +165,28 @@ class ProductionLogQtController:
             reason = str(command_payload.get("reason") or "host_update").strip()
             self.refresh_snapshot(initial=False)
             self.view.set_status(f"Snapshot refreshed after {reason}.")
+        elif action == "show_pending":
+            self.show()
+            self.view.set_status("Pending drafts are listed in the upper table.")
+            self.write_state(status="ready", message="Showed pending drafts in Production Log Qt window.")
+        elif action == "save_draft":
+            self.view.show_info(
+                "Production Log",
+                "Save Draft from the PyQt6 host File menu is not yet wired to the full Qt form workflow. Use the module window controls until parity lands.",
+            )
+            self.write_state(status="ready", message="Save Draft requested from File menu.", dirty=True)
+        elif action == "export_to_excel":
+            self.view.show_info(
+                "Production Log",
+                "Export to Excel from the PyQt6 host File menu is not yet wired to the full Qt form workflow. Use the module window controls until parity lands.",
+            )
+            self.write_state(status="ready", message="Export to Excel requested from File menu.", dirty=True)
+        elif action == "import_from_excel_ui":
+            self.view.show_info(
+                "Production Log",
+                "Import Excel from the PyQt6 host File menu is not yet wired to the full Qt form workflow. Use the module window controls until parity lands.",
+            )
+            self.write_state(status="ready", message="Import Excel requested from File menu.", dirty=True)
         elif action == "host_action_completed":
             action_name = str(command_payload.get("action_name") or "host_action").strip()
             success = bool(command_payload.get("success", True))

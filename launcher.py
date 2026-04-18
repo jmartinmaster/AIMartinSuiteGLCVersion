@@ -229,6 +229,17 @@ def run_application(main_module=None, initial_module_name=None):
     if ui_shell_backend not in {"tk", "pyqt6"}:
         ui_shell_backend = "pyqt6"
 
+    active_shell_backend = "pyqt6" if ui_shell_backend == "pyqt6" and PYQT6_LAUNCHER_SUPPORT else "tk"
+    shell_backend_fallback_reason = None
+    if active_shell_backend != ui_shell_backend:
+        shell_backend_fallback_reason = (
+            f"Requested shell backend '{ui_shell_backend}' is not available in this build; using '{active_shell_backend}'."
+        )
+
+    runtime_settings["ui_shell_backend"] = ui_shell_backend
+    runtime_settings["active_ui_shell_backend"] = active_shell_backend
+    runtime_settings["ui_shell_backend_fallback_reason"] = shell_backend_fallback_reason
+
     if ui_shell_backend == "pyqt6" and PYQT6_LAUNCHER_SUPPORT:
         from app.views.pyqt6_host_shell_view import PyQt6HostShellView
 
@@ -251,7 +262,12 @@ def run_application(main_module=None, initial_module_name=None):
     from app.splash import show_splash_screen
 
     show_splash_screen(app_root, duration=5000, logo_path=resource_path(SPLASH_LOGO_RELATIVE_PATH))
-    dispatcher = Dispatcher(app_root, main_module=main_module, initial_module_name=initial_module_name)
+    dispatcher = Dispatcher(
+        app_root,
+        main_module=main_module,
+        initial_module_name=initial_module_name,
+        runtime_settings_override=runtime_settings,
+    )
 
     previous_sigint_handler = None
     sigint_coordinator = None
