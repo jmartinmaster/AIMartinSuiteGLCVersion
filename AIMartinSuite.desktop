@@ -1,7 +1,11 @@
 [Desktop Entry]
 Type=Application
-Name=AIMartinSuite
-Exec=/home/jamie/Documents/AI-Martin/Security\ version/launch.sh
-Icon=/home/jamie/Documents/AI-Martin/Security version/assets/icons/icon.png
+Version=1.0
+Name=Production Logging Center (GLC)
+Comment=Launch Production Logging Center - GLC Edition
+Exec=/home/jamie/Documents/AI-Martin/AIMartinSuiteGLCVersion/launch.sh
+Path=/home/jamie/Documents/AI-Martin/AIMartinSuiteGLCVersion
+Icon=/home/jamie/Documents/AI-Martin/AIMartinSuiteGLCVersion/assets/icons/icon.png
 Terminal=false
-Categories=Utility;Application;
+Categories=Office;Utility;
+StartupNotify=true

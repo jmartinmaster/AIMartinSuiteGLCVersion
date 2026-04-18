@@ -74,6 +74,7 @@ class PyQt6HostShellView(QMainWindow):
         self.module_registry = ModuleRegistry()
         self.runtime_managers = {}
         self.module_buttons = {}
+        self._last_runtime_event_signatures = {}
         self.module_catalog = self._build_module_catalog()
         self.persistent_module_names = set()
         self._load_persistent_module_names()
@@ -482,6 +483,7 @@ class PyQt6HostShellView(QMainWindow):
             return
 
         state = dict(manager.read_state() or {})
+        self._handle_runtime_event(self.active_module_name, manager, state)
         status = str(state.get("status") or ("running" if manager.is_running() else "idle"))
         message = str(state.get("message") or "No runtime message available.")
 
@@ -492,6 +494,28 @@ class PyQt6HostShellView(QMainWindow):
         self.runtime_status_label.setText(f"Runtime Status: {status}")
         self.runtime_message_label.setText(message)
         self.runtime_state_view.setPlainText(json.dumps(state, indent=2, sort_keys=True))
+
+    def _handle_runtime_event(self, module_name, manager, state):
+        runtime_event = str(state.get("runtime_event") or "").strip().lower()
+        if not runtime_event:
+            return
+
+        event_signature = (runtime_event, state.get("updated_at"))
+        if self._last_runtime_event_signatures.get(module_name) == event_signature:
+            return
+        self._last_runtime_event_signatures[module_name] = event_signature
+
+        if module_name == "production_log" and runtime_event == "open_recovery_requested":
+            self.open_or_raise_module("recovery_viewer", restart=False)
+            manager.send_command(
+                "host_action_completed",
+                {
+                    "action_name": runtime_event,
+                    "success": True,
+                    "message": "Opened Recovery Viewer in the PyQt6 host runtime.",
+                },
+            )
+            manager.send_command("refresh_snapshot", {"reason": runtime_event})
 
     def closeEvent(self, event):
         for manager in list(self.runtime_managers.values()):
