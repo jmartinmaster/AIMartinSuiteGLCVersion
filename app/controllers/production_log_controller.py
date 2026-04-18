@@ -35,6 +35,7 @@ class ProductionLogController:
         self.requested_view_backend = "tk"
         self.resolved_view_backend = "tk"
         self.view_backend_fallback_reason = None
+        self.view_backend_fallback_code = None
         self.model = ProductionLogModel(data_registry=getattr(dispatcher, "external_data_registry", None))
         self._last_runtime_event_timestamp = None
         self.view = None
@@ -42,6 +43,21 @@ class ProductionLogController:
         self.view = create_production_log_view(parent, dispatcher, self, self.model)
         if self.resolved_view_backend == "tk":
             self.update_export_action_state()
+            self._notify_tk_fallback_if_needed()
+
+    def _notify_tk_fallback_if_needed(self):
+        fallback_reason = str(self.view_backend_fallback_reason or "").strip()
+        if not fallback_reason:
+            return
+        fallback_code = str(self.view_backend_fallback_code or "unspecified")
+        notify_user = getattr(self.dispatcher, "notify_user", None)
+        if callable(notify_user):
+            notify_user(
+                "Production Log Backend",
+                f"Using Tk fallback ({fallback_code}): {fallback_reason}",
+                severity="warning",
+                duration_ms=10000,
+            )
 
     def __getattr__(self, attribute_name):
         view = self.__dict__.get("view")
@@ -57,7 +73,7 @@ class ProductionLogController:
         return {
             "window_title": "Production Log - Production Logging Center",
             "title": "Production Log",
-            "subtitle": "Qt sidecar bootstrap for Production Log migration.",
+            "subtitle": "Primary Production Log runtime window powered by PyQt6.",
             "pending_draft_count": len(self.list_pending_drafts()),
             "recovery_snapshot_count": len(self.list_recovery_snapshots()),
             "latest_draft_name": latest_draft_name,

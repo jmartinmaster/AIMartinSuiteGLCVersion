@@ -18,4 +18,9 @@ elif [ -x "venv/bin/python" ]; then
 	PYTHON_BIN="venv/bin/python"
 fi
 
-nohup "$PYTHON_BIN" main.py > /dev/null 2>&1 &
+if [ "${AIMARTIN_LAUNCH_BACKGROUND:-0}" = "1" ]; then
+	nohup "$PYTHON_BIN" main.py "$@" > /dev/null 2>&1 &
+	exit 0
+fi
+
+exec "$PYTHON_BIN" main.py "$@"

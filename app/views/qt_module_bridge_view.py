@@ -85,6 +85,8 @@ class QtModuleBridgeView:
 
     def _poll_state(self):
         state = self.controller.read_runtime_state()
+        if not isinstance(state, dict):
+            state = {}
         if hasattr(self.controller, "handle_runtime_state"):
             try:
                 self.controller.handle_runtime_state(state)
