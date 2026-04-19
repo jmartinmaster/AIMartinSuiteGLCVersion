@@ -13,52 +13,56 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-import json
-import os
-import time
+from ttkbootstrap.constants import INFO, SUCCESS
 
 from app.models.rate_manager_model import RateManagerModel
 from app.views.rate_manager_qt_view import RateManagerQtView
 
 __module_name__ = "Rate Manager Qt Controller"
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 
 class RateManagerQtController:
-    def __init__(self, payload):
-        self.payload = dict(payload or {})
-        self.state_path = self.payload.get("state_path")
-        self.command_path = self.payload.get("command_path")
+    def __init__(self, parent=None, dispatcher=None):
+        self.parent = parent
+        self.dispatcher = dispatcher
         self.model = RateManagerModel()
-        self.view = RateManagerQtView(self, self.payload)
+        self.payload = self._build_view_payload()
+        self.view = RateManagerQtView(self, self.payload, parent_widget=parent)
         self.refresh_table(initial=True)
+        self.view.show()
+
+    def __getattr__(self, attribute_name):
+        view = self.__dict__.get("view")
+        if view is None:
+            raise AttributeError(attribute_name)
+        return getattr(view, attribute_name)
+
+    def _build_view_payload(self):
+        dispatcher = self.dispatcher
+        theme_tokens = dict(getattr(getattr(dispatcher, "view", None), "theme_tokens", {}) or {})
+        return {
+            "window_title": "Rate Manager - Production Logging Center",
+            "title": "Rate Manager",
+            "subtitle": "Manage per-part target rate entries in the shared PyQt6 workspace.",
+            "theme_tokens": theme_tokens,
+        }
+
+    def _sync_shared_data(self):
+        if hasattr(self.dispatcher, "shared_data"):
+            self.dispatcher.shared_data["rates_count"] = len(self.model.rates)
 
     def show(self):
         self.view.show()
         self.view.raise_()
         self.view.activateWindow()
 
-    def write_state(self, status="ready", message="", dirty=False):
-        if not self.state_path:
-            return
-        payload = {
-            "status": status,
-            "dirty": bool(dirty),
-            "message": str(message or ""),
-            "module": "rate_manager",
-            "rate_count": len(self.model.rates),
-            "updated_at": time.time(),
-        }
-        try:
-            with open(self.state_path, "w", encoding="utf-8") as handle:
-                json.dump(payload, handle, indent=2)
-        except Exception:
-            return
-
     def refresh_table(self, initial=False):
         rows = self.model.get_filtered_rates(self.view.get_search_text())
         self.view.refresh_table(rows)
-        self.write_state(status="ready", message="Rate Manager Qt window ready." if initial else "Rate table refreshed.")
+        self._sync_shared_data()
+        if initial:
+            self.view.set_status("Rate Manager ready.")
 
     def on_search_changed(self):
         self.refresh_table()
@@ -79,7 +83,7 @@ class RateManagerQtController:
             self.model.save_edit(new_rate)
             self.view.reset_form()
             self.refresh_table()
-            self.view.show_info("Rate Saved", "Updated target rate.")
+            self.view.show_toast("Rate Saved", "Updated target rate.", INFO)
         except Exception as exc:
             self.view.show_error("Rate Manager", str(exc))
 
@@ -93,7 +97,7 @@ class RateManagerQtController:
             self.model.add_rate(part, rate)
             self.view.reset_form()
             self.refresh_table()
-            self.view.show_info("Rate Added", "Added target rate entry.")
+            self.view.show_toast("Rate Added", "Added target rate entry.", SUCCESS)
         except Exception as exc:
             self.view.show_error("Rate Manager", str(exc))
 
@@ -105,30 +109,23 @@ class RateManagerQtController:
             self.model.delete_rate(part_key)
             self.view.reset_form()
             self.refresh_table()
-            self.view.show_info("Rate Deleted", "Removed target rate entry.")
+            self.view.show_toast("Rate Deleted", "Removed target rate entry.", SUCCESS)
         except Exception as exc:
             self.view.show_error("Rate Manager", str(exc))
 
-    def poll_commands(self):
-        if not self.command_path or not os.path.exists(self.command_path):
-            return
-        try:
-            with open(self.command_path, "r", encoding="utf-8") as handle:
-                payload = json.load(handle)
-        except Exception:
-            payload = {}
-        try:
-            os.remove(self.command_path)
-        except OSError:
-            pass
-
-        action = str(payload.get("action") or "").strip().lower()
-        if action == "raise_window":
-            self.show()
-            self.write_state(status="ready", message="Raised Rate Manager Qt window.")
-        elif action == "close_window":
-            self.handle_close()
-            self.view.close()
+    def apply_theme(self):
+        if self.dispatcher is not None:
+            self.payload["theme_tokens"] = dict(getattr(getattr(self.dispatcher, "view", None), "theme_tokens", {}) or {})
+        self.view.apply_theme(theme_tokens=self.payload.get("theme_tokens") or {})
 
     def handle_close(self):
-        self.write_state(status="closed", message="Rate Manager Qt window closed.")
+        return None
+
+    def on_hide(self):
+        return None
+
+    def on_unload(self):
+        try:
+            self.view.close()
+        except Exception:
+            pass

@@ -13,18 +13,12 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-import json
-import sys
-
-from launcher import create_qt_application
-
 __module_name__ = "Rate Manager Qt View"
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 try:
-    from PyQt6.QtCore import QTimer
+    from PyQt6.QtCore import Qt
     from PyQt6.QtWidgets import (
-        QApplication,
         QHBoxLayout,
         QLabel,
         QLineEdit,
@@ -40,7 +34,6 @@ try:
 
     PYQT6_AVAILABLE = True
 except ImportError:
-    QApplication = None
     QHBoxLayout = None
     QLabel = None
     QLineEdit = None
@@ -52,39 +45,39 @@ except ImportError:
     QTableWidgetItem = None
     QVBoxLayout = None
     QWidget = None
-    QTimer = None
+    Qt = None
     PYQT6_AVAILABLE = False
 
 
-def is_rate_manager_qt_runtime_available():
-    return PYQT6_AVAILABLE
-
-
-def load_rate_manager_qt_session(session_path):
-    with open(session_path, "r", encoding="utf-8") as handle:
-        payload = json.load(handle)
-    if not isinstance(payload, dict):
-        raise ValueError("Rate Manager Qt session payload must be a JSON object.")
-    return payload
-
-
 class RateManagerQtView(QMainWindow):
-    def __init__(self, controller, payload):
+    def __init__(self, controller, payload, parent_widget=None):
         if not PYQT6_AVAILABLE:
             raise RuntimeError("PyQt6 is not installed in the active Python environment.")
-        super().__init__()
+        super().__init__(parent_widget)
         self.controller = controller
         self.payload = dict(payload or {})
+        self.theme_tokens = dict(self.payload.get("theme_tokens") or {})
+        self.embedded = parent_widget is not None
         self._build_ui()
+        self.apply_theme(theme_tokens=self.theme_tokens)
+        if self.embedded:
+            self._attach_to_parent_container(parent_widget)
 
-        self.command_timer = QTimer(self)
-        self.command_timer.setInterval(700)
-        self.command_timer.timeout.connect(self.controller.poll_commands)
-        self.command_timer.start()
+    def _attach_to_parent_container(self, parent_widget):
+        if parent_widget is None:
+            return
+        self.setWindowFlag(Qt.WindowType.Window, False)
+        layout = parent_widget.layout()
+        if layout is None:
+            layout = QVBoxLayout(parent_widget)
+            layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self)
+        self.show()
 
     def _build_ui(self):
         self.setWindowTitle(str(self.payload.get("window_title") or "Rate Manager"))
-        self.resize(1100, 800)
+        if not self.embedded:
+            self.resize(1100, 800)
 
         central_widget = QWidget(self)
         root_layout = QVBoxLayout(central_widget)
@@ -142,7 +135,14 @@ class RateManagerQtView(QMainWindow):
         self.setCentralWidget(central_widget)
         self.status_bar = QStatusBar(self)
         self.setStatusBar(self.status_bar)
-        self.status_bar.showMessage("Rate Manager Qt window ready.", 5000)
+        self.status_bar.showMessage("Rate Manager ready.", 5000)
+
+    def _rebind_button_click(self, button, callback):
+        try:
+            button.clicked.disconnect()
+        except TypeError:
+            pass
+        button.clicked.connect(callback)
 
     def get_search_text(self):
         return self.search_input.text()
@@ -152,7 +152,7 @@ class RateManagerQtView(QMainWindow):
         for row_index, row in enumerate(rows):
             self.table.setItem(row_index, 0, QTableWidgetItem(str(row[0])))
             self.table.setItem(row_index, 1, QTableWidgetItem(str(row[1])))
-        self.status_bar.showMessage(f"Loaded {len(rows)} rate item(s).", 5000)
+        self.set_status(f"Loaded {len(rows)} rate item(s).")
 
     def get_selected_part(self):
         selected_rows = self.table.selectionModel().selectedRows()
@@ -172,11 +172,9 @@ class RateManagerQtView(QMainWindow):
         self.part_input.setEnabled(False)
         self.rate_input.setText(str(rate))
         self.primary_button.setText("Save")
-        self.primary_button.clicked.disconnect()
-        self.primary_button.clicked.connect(self.controller.save_edit)
+        self._rebind_button_click(self.primary_button, self.controller.save_edit)
         self.secondary_button.setText("Cancel")
-        self.secondary_button.clicked.disconnect()
-        self.secondary_button.clicked.connect(self.controller.cancel_edit)
+        self._rebind_button_click(self.secondary_button, self.controller.cancel_edit)
         self.delete_button.setEnabled(False)
 
     def reset_form(self):
@@ -184,12 +182,22 @@ class RateManagerQtView(QMainWindow):
         self.part_input.clear()
         self.rate_input.clear()
         self.primary_button.setText("Add")
-        self.primary_button.clicked.disconnect()
-        self.primary_button.clicked.connect(self.controller.add_rate)
+        self._rebind_button_click(self.primary_button, self.controller.add_rate)
         self.secondary_button.setText("Edit")
-        self.secondary_button.clicked.disconnect()
-        self.secondary_button.clicked.connect(self.controller.enter_edit_mode)
+        self._rebind_button_click(self.secondary_button, self.controller.enter_edit_mode)
         self.delete_button.setEnabled(True)
+
+    def set_status(self, message):
+        self.status_bar.showMessage(str(message), 5000)
+
+    def apply_theme(self, theme_tokens=None):
+        if theme_tokens is not None:
+            self.theme_tokens = dict(theme_tokens or {})
+        style = self.style()
+        if style is not None:
+            style.unpolish(self)
+            style.polish(self)
+        self.update()
 
     def show_error(self, title, message):
         QMessageBox.critical(self, title, message)
@@ -197,32 +205,15 @@ class RateManagerQtView(QMainWindow):
     def show_info(self, title, message):
         QMessageBox.information(self, title, message)
 
+    def show_toast(self, title, message, bootstyle=None):
+        dispatcher = getattr(self.controller, "dispatcher", None)
+        show_toast = getattr(dispatcher, "show_toast", None)
+        if callable(show_toast):
+            show_toast(title, message, bootstyle)
+            self.set_status(message)
+            return
+        self.show_info(title, message)
+
     def closeEvent(self, event):
         self.controller.handle_close()
         super().closeEvent(event)
-
-
-def run_rate_manager_qt_session(session_path):
-    if not PYQT6_AVAILABLE:
-        print("PyQt6 is not installed in the active Python environment.", file=sys.stderr)
-        return 2
-
-    from app.controllers.rate_manager_qt_controller import RateManagerQtController
-
-    session_payload = load_rate_manager_qt_session(session_path)
-    application = create_qt_application(theme_tokens=session_payload.get("theme_tokens") or {})
-    controller = RateManagerQtController(session_payload)
-    controller.show()
-    return application.exec()
-
-
-def main(argv=None):
-    argv = list(argv or sys.argv)
-    if len(argv) < 2:
-        print("Usage: python app/views/rate_manager_qt_view.py <session.json>", file=sys.stderr)
-        return 2
-    return run_rate_manager_qt_session(argv[1])
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
