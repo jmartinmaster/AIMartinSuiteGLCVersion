@@ -13,19 +13,14 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-import json
 import os
-import sys
-
-from launcher import create_qt_application
 
 __module_name__ = "Help Viewer Qt View"
 __version__ = "1.0.0"
 
 try:
-    from PyQt6.QtCore import QSignalBlocker, QTimer
+    from PyQt6.QtCore import QSignalBlocker, Qt
     from PyQt6.QtWidgets import (
-        QApplication,
         QHBoxLayout,
         QLabel,
         QListWidget,
@@ -41,7 +36,7 @@ try:
 
     PYQT6_AVAILABLE = True
 except ImportError:
-    QApplication = None
+    Qt = None
     QHBoxLayout = None
     QLabel = None
     QListWidget = None
@@ -54,40 +49,42 @@ except ImportError:
     QVBoxLayout = None
     QWidget = None
     QSignalBlocker = None
-    QTimer = None
     PYQT6_AVAILABLE = False
 
 
-def is_help_viewer_qt_runtime_available():
-    return PYQT6_AVAILABLE
-
-
-def load_help_viewer_qt_session(session_path):
-    with open(session_path, "r", encoding="utf-8") as handle:
-        payload = json.load(handle)
-    if not isinstance(payload, dict):
-        raise ValueError("Help Viewer Qt session payload must be a JSON object.")
-    return payload
-
-
 class HelpViewerQtView(QMainWindow):
-    def __init__(self, controller, payload):
+    def __init__(self, controller, payload, parent_widget=None):
         if not PYQT6_AVAILABLE:
             raise RuntimeError("PyQt6 is not installed in the active Python environment.")
-        super().__init__()
+        super().__init__(parent_widget)
         self.controller = controller
         self.payload = dict(payload or {})
         self.doc_index = list(self.payload.get("doc_index") or [])
+        self.theme_tokens = dict(self.payload.get("theme_tokens") or {})
+        self.embedded = parent_widget is not None
+        self.active_doc_name = None
+        self.active_doc_path = None
+        self.active_doc_meta_label = ""
+        self.active_sections = []
         self._build_ui()
+        self._attach_to_parent_container(parent_widget)
 
-        self.command_timer = QTimer(self)
-        self.command_timer.setInterval(700)
-        self.command_timer.timeout.connect(self.controller.poll_commands)
-        self.command_timer.start()
+    def _attach_to_parent_container(self, parent_widget):
+        if not self.embedded or parent_widget is None:
+            return
+        if Qt is not None:
+            self.setWindowFlag(Qt.WindowType.Window, False)
+        parent_layout = getattr(parent_widget, "layout", lambda: None)()
+        if parent_layout is not None:
+            parent_layout.addWidget(self)
+        self.show()
 
     def _build_ui(self):
         self.setWindowTitle(str(self.payload.get("window_title") or "Help Viewer"))
-        self.resize(1360, 900)
+        if self.embedded:
+            self.setMinimumSize(0, 0)
+        else:
+            self.resize(1360, 900)
 
         central_widget = QWidget(self)
         root_layout = QVBoxLayout(central_widget)
@@ -176,7 +173,14 @@ class HelpViewerQtView(QMainWindow):
         doc_name = current.text()
         self.controller.show_document(str(doc_name), str(doc_path))
 
-    def show_document(self, doc_name, doc_path, content, meta_label, sections):
+    def show_document(self, doc_name, doc_path, content, meta_label, sections, restore_scroll=None):
+        self.active_doc_name = str(doc_name)
+        self.active_doc_path = str(doc_path)
+        self.active_doc_meta_label = str(meta_label)
+        self.active_sections = [
+            (str(section_name), str(section_path))
+            for section_name, section_path in list(sections or [])
+        ]
         self.doc_title_label.setText(str(doc_name))
         self.doc_meta_label.setText(str(meta_label))
         self.doc_path_label.setText(str(doc_path))
@@ -184,7 +188,8 @@ class HelpViewerQtView(QMainWindow):
             self.doc_browser.setMarkdown(content)
         else:
             self.doc_browser.setPlainText(content)
-        self.doc_browser.verticalScrollBar().setValue(0)
+        target_scroll = 0 if restore_scroll is None else max(0, int(restore_scroll))
+        self.doc_browser.verticalScrollBar().setValue(target_scroll)
 
         blocker = QSignalBlocker(self.section_list)
         self.section_list.clear()
@@ -205,34 +210,27 @@ class HelpViewerQtView(QMainWindow):
         del blocker
         self.status_bar.showMessage(f"Viewing {doc_name}", 5000)
 
+    def get_document_scroll(self):
+        scroll_bar = getattr(self.doc_browser, "verticalScrollBar", lambda: None)()
+        if scroll_bar is None:
+            return 0
+        return int(scroll_bar.value() or 0)
+
+    def apply_theme(self, theme_tokens=None):
+        if theme_tokens is not None:
+            self.theme_tokens = dict(theme_tokens or {})
+        style = self.style()
+        if style is not None:
+            style.unpolish(self)
+            style.polish(self)
+        self.update()
+
     def show_error(self, title, message):
         QMessageBox.critical(self, title, message)
+
+    def show_info(self, title, message):
+        QMessageBox.information(self, title, message)
 
     def closeEvent(self, event):
         self.controller.handle_close()
         super().closeEvent(event)
-
-
-def run_help_viewer_qt_session(session_path):
-    if not PYQT6_AVAILABLE:
-        print("PyQt6 is not installed in the active Python environment.", file=sys.stderr)
-        return 2
-    from app.controllers.help_viewer_qt_controller import HelpViewerQtController
-
-    session_payload = load_help_viewer_qt_session(session_path)
-    application = create_qt_application(theme_tokens=session_payload.get("theme_tokens") or {})
-    controller = HelpViewerQtController(session_payload)
-    controller.show()
-    return application.exec()
-
-
-def main(argv=None):
-    argv = list(argv or sys.argv)
-    if len(argv) < 2:
-        print("Usage: python app/views/help_viewer_qt_view.py <session.json>", file=sys.stderr)
-        return 2
-    return run_help_viewer_qt_session(argv[1])
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

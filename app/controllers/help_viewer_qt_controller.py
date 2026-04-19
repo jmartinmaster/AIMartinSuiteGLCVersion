@@ -13,12 +13,9 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-import json
 import os
-import time
-import webbrowser
 
-from app.controllers.help_viewer_controller import get_doc_group_name, get_document_meta_label, read_help_document
+from app.controllers.help_viewer_controller import DOC_GROUPS, DOC_INDEX, get_doc_group_name, get_document_meta_label, read_help_document
 from app.views.help_viewer_qt_view import HelpViewerQtView
 
 __module_name__ = "Help Viewer Qt Controller"
@@ -26,93 +23,114 @@ __version__ = "1.0.0"
 
 
 class HelpViewerQtController:
-    def __init__(self, payload):
-        self.payload = dict(payload or {})
-        self.state_path = self.payload.get("state_path")
-        self.command_path = self.payload.get("command_path")
+    def __init__(self, parent=None, dispatcher=None):
+        self.parent = parent
+        self.dispatcher = dispatcher
+        self.active_doc_path = None
+        self.payload = self._build_view_payload()
         self.doc_groups = dict(self.payload.get("doc_groups") or {})
         self.doc_index = list(self.payload.get("doc_index") or [])
-        self.active_doc_path = None
-        self.view = HelpViewerQtView(self, self.payload)
+        self.view = HelpViewerQtView(self, self.payload, parent_widget=parent)
         initial_doc = self.payload.get("initial_doc") or (self.doc_index[0][1] if self.doc_index else None)
         if initial_doc:
             self.show_document_by_path(initial_doc)
-        self.write_state(status="ready", message="Help Viewer Qt window ready.")
+        self.view.show()
+
+    def __getattr__(self, attribute_name):
+        view = self.__dict__.get("view")
+        if view is None:
+            raise AttributeError(attribute_name)
+        return getattr(view, attribute_name)
+
+    def _build_view_payload(self):
+        dispatcher = self.dispatcher
+        theme_tokens = dict(getattr(getattr(dispatcher, "view", None), "theme_tokens", {}) or {})
+        return {
+            "window_title": "Help Viewer - Production Logging Center",
+            "title": "Help Center",
+            "subtitle": "Bundled guides, release references, and editable JSON documentation.",
+            "doc_groups": DOC_GROUPS,
+            "doc_index": DOC_INDEX,
+            "initial_doc": self.active_doc_path or (DOC_INDEX[0][1] if DOC_INDEX else None),
+            "theme_tokens": theme_tokens,
+        }
+
+    def _sync_active_document_path(self):
+        if self.active_doc_path:
+            return self.active_doc_path
+        view_active_doc_path = getattr(self.view, "active_doc_path", None)
+        if view_active_doc_path:
+            self.active_doc_path = str(view_active_doc_path)
+        return self.active_doc_path
+
+    def _build_document_context(self, doc_path):
+        group_name = self.get_doc_group(doc_path)
+        sections = list((self.doc_groups.get(group_name) or {}).get("sections") or [])
+        meta_label = get_document_meta_label(doc_path, group_name)
+        return {
+            "group_name": group_name,
+            "sections": sections,
+            "meta_label": meta_label,
+        }
 
     def show(self):
         self.view.show()
         self.view.raise_()
         self.view.activateWindow()
 
-    def write_state(self, status="ready", message="", dirty=False):
-        if not self.state_path:
-            return
-        payload = {
-            "status": status,
-            "dirty": bool(dirty),
-            "message": str(message or ""),
-            "module": "help_viewer",
-            "active_doc_path": self.active_doc_path,
-            "updated_at": time.time(),
-        }
-        try:
-            with open(self.state_path, "w", encoding="utf-8") as handle:
-                json.dump(payload, handle, indent=2)
-        except Exception:
-            return
-
     def get_doc_group(self, doc_path):
         return get_doc_group_name(self.doc_groups, doc_path)
 
-    def show_document(self, doc_name, doc_path):
+    def show_document(self, doc_name, doc_path, restore_scroll=None):
         self.active_doc_path = doc_path
         content = read_help_document(doc_path)
-        sections = list((self.doc_groups.get(self.get_doc_group(doc_path)) or {}).get("sections") or [])
-        self.view.show_document(doc_name, doc_path, content, get_document_meta_label(doc_path, self.get_doc_group(doc_path)), sections)
-        self.write_state(status="ready", message=f"Viewing {doc_name}.")
+        document_context = self._build_document_context(doc_path)
+        self.view.show_document(
+            doc_name,
+            doc_path,
+            content,
+            document_context["meta_label"],
+            document_context["sections"],
+            restore_scroll=restore_scroll,
+        )
 
-    def show_document_by_path(self, doc_path):
+    def show_document_by_path(self, doc_path, restore_scroll=None):
         for doc_name, candidate_path in self.doc_index:
             if candidate_path == doc_path:
-                self.show_document(doc_name, candidate_path)
+                self.show_document(doc_name, candidate_path, restore_scroll=restore_scroll)
                 return
-        self.show_document(os.path.basename(doc_path), doc_path)
+        self.show_document(os.path.basename(doc_path), doc_path, restore_scroll=restore_scroll)
 
     def open_active_document(self):
         if not self.active_doc_path:
             return
-        document_path = self.payload.get("resolved_paths", {}).get(self.active_doc_path)
-        if not document_path or not os.path.exists(document_path):
-            self.view.show_error("Open Document", "The selected help document could not be found.")
+        if self.dispatcher is not None:
+            self.dispatcher.open_help_document(self.active_doc_path)
             return
-        try:
-            if hasattr(os, "startfile"):
-                os.startfile(document_path)
-            else:
-                webbrowser.open(f"file://{document_path}")
-            self.write_state(status="ready", message="Opened active help document.")
-        except Exception as exc:
-            self.view.show_error("Open Document", f"Could not open the selected document:\n{exc}")
-
-    def poll_commands(self):
-        if not self.command_path or not os.path.exists(self.command_path):
-            return
-        try:
-            with open(self.command_path, "r", encoding="utf-8") as handle:
-                payload = json.load(handle)
-        except Exception:
-            payload = {}
-        try:
-            os.remove(self.command_path)
-        except OSError:
-            pass
-        action = str(payload.get("action") or "").strip().lower()
-        if action == "raise_window":
-            self.show()
-            self.write_state(status="ready", message="Raised Help Viewer Qt window.")
-        elif action == "close_window":
-            self.handle_close()
-            self.view.close()
+        self.view.show_error("Open Document", "Help document dispatch is unavailable.")
 
     def handle_close(self):
-        self.write_state(status="closed", message="Help Viewer Qt window closed.")
+        return None
+
+    def apply_theme(self):
+        if self.dispatcher is not None:
+            self.payload["theme_tokens"] = dict(getattr(getattr(self.dispatcher, "view", None), "theme_tokens", {}) or {})
+        active_doc_path = self._sync_active_document_path()
+        document_scroll = None
+        if hasattr(self.view, "get_document_scroll"):
+            document_scroll = self.view.get_document_scroll()
+        if hasattr(self.view, "apply_theme"):
+            self.view.apply_theme(theme_tokens=self.payload.get("theme_tokens") or {})
+        if active_doc_path:
+            self.show_document_by_path(active_doc_path, restore_scroll=document_scroll)
+
+    def on_hide(self):
+        self._sync_active_document_path()
+        return None
+
+    def on_unload(self):
+        self._sync_active_document_path()
+        try:
+            self.view.close()
+        except Exception:
+            pass

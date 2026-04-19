@@ -13,18 +13,12 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-import json
-import sys
-
-from launcher import create_qt_application
-
 __module_name__ = "Recovery Viewer Qt View"
 __version__ = "1.0.0"
 
 try:
-    from PyQt6.QtCore import QTimer
+    from PyQt6.QtCore import Qt
     from PyQt6.QtWidgets import (
-        QApplication,
         QHBoxLayout,
         QLabel,
         QMainWindow,
@@ -39,7 +33,7 @@ try:
 
     PYQT6_AVAILABLE = True
 except ImportError:
-    QApplication = None
+    Qt = None
     QHBoxLayout = None
     QLabel = None
     QMainWindow = object
@@ -50,39 +44,37 @@ except ImportError:
     QTableWidgetItem = None
     QVBoxLayout = None
     QWidget = None
-    QTimer = None
     PYQT6_AVAILABLE = False
 
 
-def is_recovery_viewer_qt_runtime_available():
-    return PYQT6_AVAILABLE
-
-
-def load_recovery_viewer_qt_session(session_path):
-    with open(session_path, "r", encoding="utf-8") as handle:
-        payload = json.load(handle)
-    if not isinstance(payload, dict):
-        raise ValueError("Recovery Viewer Qt session payload must be a JSON object.")
-    return payload
-
-
 class RecoveryViewerQtView(QMainWindow):
-    def __init__(self, controller, payload):
+    def __init__(self, controller, payload, parent_widget=None):
         if not PYQT6_AVAILABLE:
             raise RuntimeError("PyQt6 is not installed in the active Python environment.")
-        super().__init__()
+        super().__init__(parent_widget)
         self.controller = controller
         self.payload = dict(payload or {})
+        self.theme_tokens = dict(self.payload.get("theme_tokens") or {})
+        self.embedded = parent_widget is not None
         self._build_ui()
+        self._attach_to_parent_container(parent_widget)
 
-        self.command_timer = QTimer(self)
-        self.command_timer.setInterval(700)
-        self.command_timer.timeout.connect(self.controller.poll_commands)
-        self.command_timer.start()
+    def _attach_to_parent_container(self, parent_widget):
+        if not self.embedded or parent_widget is None:
+            return
+        if Qt is not None:
+            self.setWindowFlag(Qt.WindowType.Window, False)
+        parent_layout = getattr(parent_widget, "layout", lambda: None)()
+        if parent_layout is not None:
+            parent_layout.addWidget(self)
+        self.show()
 
     def _build_ui(self):
         self.setWindowTitle(str(self.payload.get("window_title") or "Backup / Recovery"))
-        self.resize(1360, 900)
+        if self.embedded:
+            self.setMinimumSize(0, 0)
+        else:
+            self.resize(1360, 900)
 
         central_widget = QWidget(self)
         root_layout = QVBoxLayout(central_widget)
@@ -112,6 +104,10 @@ class RecoveryViewerQtView(QMainWindow):
         restore_button.clicked.connect(self.controller.restore_selected)
         controls_layout.addWidget(restore_button)
 
+        resume_button = QPushButton("Resume Selected Draft")
+        resume_button.clicked.connect(self.controller.resume_selected)
+        controls_layout.addWidget(resume_button)
+
         open_file_button = QPushButton("Open Selected File")
         open_file_button.clicked.connect(self.controller.open_selected_file)
         controls_layout.addWidget(open_file_button)
@@ -136,7 +132,7 @@ class RecoveryViewerQtView(QMainWindow):
         self.setCentralWidget(central_widget)
         self.status_bar = QStatusBar(self)
         self.setStatusBar(self.status_bar)
-        self.status_bar.showMessage("Recovery Viewer Qt window ready.", 5000)
+        self.status_bar.showMessage("Recovery Viewer ready.", 5000)
 
     def refresh_table(self, records):
         self.table.setRowCount(len(records))
@@ -154,8 +150,26 @@ class RecoveryViewerQtView(QMainWindow):
             return None
         return int(selected_rows[0].row())
 
+    def set_selected_index(self, index):
+        self.table.clearSelection()
+        if index is None:
+            return
+        row_index = int(index)
+        if row_index < 0 or row_index >= self.table.rowCount():
+            return
+        self.table.selectRow(row_index)
+
     def set_status(self, message):
         self.status_bar.showMessage(str(message), 5000)
+
+    def apply_theme(self, theme_tokens=None):
+        if theme_tokens is not None:
+            self.theme_tokens = dict(theme_tokens or {})
+        style = self.style()
+        if style is not None:
+            style.unpolish(self)
+            style.polish(self)
+        self.update()
 
     def show_error(self, title, message):
         QMessageBox.critical(self, title, message)
@@ -170,29 +184,3 @@ class RecoveryViewerQtView(QMainWindow):
     def closeEvent(self, event):
         self.controller.handle_close()
         super().closeEvent(event)
-
-
-def run_recovery_viewer_qt_session(session_path):
-    if not PYQT6_AVAILABLE:
-        print("PyQt6 is not installed in the active Python environment.", file=sys.stderr)
-        return 2
-
-    from app.controllers.recovery_viewer_qt_controller import RecoveryViewerQtController
-
-    session_payload = load_recovery_viewer_qt_session(session_path)
-    application = create_qt_application(theme_tokens=session_payload.get("theme_tokens") or {})
-    controller = RecoveryViewerQtController(session_payload)
-    controller.show()
-    return application.exec()
-
-
-def main(argv=None):
-    argv = list(argv or sys.argv)
-    if len(argv) < 2:
-        print("Usage: python app/views/recovery_viewer_qt_view.py <session.json>", file=sys.stderr)
-        return 2
-    return run_recovery_viewer_qt_session(argv[1])
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

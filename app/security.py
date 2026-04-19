@@ -22,6 +22,36 @@ import tkinter as tk
 from datetime import datetime
 from tkinter import messagebox, simpledialog, ttk
 
+try:
+    from PyQt6.QtWidgets import (
+        QApplication,
+        QComboBox,
+        QDialog,
+        QDialogButtonBox,
+        QFormLayout,
+        QInputDialog,
+        QLabel,
+        QLineEdit,
+        QMessageBox,
+        QVBoxLayout,
+        QWidget,
+    )
+
+    PYQT6_AVAILABLE = True
+except ImportError:
+    QApplication = None
+    QComboBox = None
+    QDialog = None
+    QDialogButtonBox = None
+    QFormLayout = None
+    QInputDialog = None
+    QLabel = None
+    QLineEdit = None
+    QMessageBox = None
+    QVBoxLayout = None
+    QWidget = None
+    PYQT6_AVAILABLE = False
+
 from app.app_logging import log_exception
 from app.models.security_model import (
     ACCESS_RIGHTS_BY_KEY,
@@ -37,7 +67,7 @@ from app.models.security_model import (
 from app.utils import ensure_external_directory, external_path
 
 __module_name__ = "Security Blanket"
-__version__ = "2.0.1"
+__version__ = "2.0.2"
 
 
 class Gatekeeper:
@@ -65,6 +95,93 @@ class Gatekeeper:
         temp_root.withdraw()
         return temp_root
 
+    def _is_qt_widget(self, obj):
+        return bool(PYQT6_AVAILABLE and QWidget is not None and isinstance(obj, QWidget))
+
+    def _use_qt_dialogs(self, parent=None):
+        if self._is_qt_widget(parent):
+            return True
+        if not PYQT6_AVAILABLE or QApplication is None:
+            return False
+        return QApplication.instance() is not None
+
+    def _get_qt_parent(self, parent=None):
+        if self._is_qt_widget(parent):
+            return parent
+        if not self._use_qt_dialogs(parent) or QApplication is None:
+            return None
+        application = QApplication.instance()
+        if application is None:
+            return None
+        try:
+            active_window = application.activeWindow()
+        except Exception:
+            active_window = None
+        return active_window if self._is_qt_widget(active_window) else None
+
+    def _get_tk_parent(self, parent=None):
+        return None if self._is_qt_widget(parent) else parent
+
+    def _show_error(self, title, message, parent=None):
+        if self._use_qt_dialogs(parent) and QMessageBox is not None:
+            QMessageBox.critical(self._get_qt_parent(parent), str(title), str(message))
+            return None
+        return messagebox.showerror(title, message, parent=self._get_tk_parent(parent))
+
+    def _show_info(self, title, message, parent=None):
+        if self._use_qt_dialogs(parent) and QMessageBox is not None:
+            QMessageBox.information(self._get_qt_parent(parent), str(title), str(message))
+            return None
+        return messagebox.showinfo(title, message, parent=self._get_tk_parent(parent))
+
+    def _ask_yes_no(self, title, message, parent=None):
+        if self._use_qt_dialogs(parent) and QMessageBox is not None:
+            result = QMessageBox.question(
+                self._get_qt_parent(parent),
+                str(title),
+                str(message),
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            return result == QMessageBox.StandardButton.Yes
+        return bool(messagebox.askyesno(title, message, parent=self._get_tk_parent(parent)))
+
+    def _prompt_text(self, title, prompt, parent=None, initialvalue=""):
+        if self._use_qt_dialogs(parent) and QInputDialog is not None and QLineEdit is not None:
+            value, accepted = QInputDialog.getText(
+                self._get_qt_parent(parent),
+                str(title),
+                str(prompt),
+                QLineEdit.EchoMode.Normal,
+                str(initialvalue or ""),
+            )
+            return str(value) if accepted else None
+        return simpledialog.askstring(
+            title,
+            prompt,
+            initialvalue=initialvalue,
+            parent=self._get_tk_parent(parent),
+        )
+
+    def _build_login_note_text(self, required_right=None, reason=None):
+        note_text = reason or "Choose a vault and enter the password to continue."
+        if required_right and required_right in ACCESS_RIGHTS_BY_KEY:
+            note_text = f"{note_text}\n\nRequired right: {ACCESS_RIGHTS_BY_KEY[required_right].label}"
+        return note_text
+
+    def _get_effective_vault_rights(self, vault_record):
+        return self._merge_role_default_rights(vault_record.role, vault_record.rights)
+
+    def _build_vault_status_text(self, vault_record):
+        effective_rights = self._get_effective_vault_rights(vault_record)
+        rights_text = ", ".join(
+            ACCESS_RIGHTS_BY_KEY[right_key].label
+            for right_key in effective_rights
+            if right_key in ACCESS_RIGHTS_BY_KEY
+        ) or "No rights assigned"
+        password_text = "Password required" if vault_record.password_required else "No password required"
+        return effective_rights, f"Role: {vault_record.role.title()} | {password_text}\nRights: {rights_text}"
+
     def _sanitize_vault_name(self, raw_value):
         text = str(raw_value or "").strip()
         filtered = []
@@ -77,7 +194,15 @@ class Gatekeeper:
         return datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
 
     def _prompt_secret(self, title, prompt, parent=None):
-        return simpledialog.askstring(title, prompt, show="*", parent=parent)
+        if self._use_qt_dialogs(parent) and QInputDialog is not None and QLineEdit is not None:
+            value, accepted = QInputDialog.getText(
+                self._get_qt_parent(parent),
+                str(title),
+                str(prompt),
+                QLineEdit.EchoMode.Password,
+            )
+            return str(value) if accepted else None
+        return simpledialog.askstring(title, prompt, show="*", parent=self._get_tk_parent(parent))
 
     def _ensure_security_settings_directory(self):
         ensure_external_directory(os.path.join("data", "security"))
@@ -406,7 +531,7 @@ class Gatekeeper:
             return None
         second = self._prompt_secret(title, "Re-enter the password:", parent=parent)
         if second != first:
-            messagebox.showerror("Security", "The passwords did not match.", parent=parent)
+            self._show_error("Security", "The passwords did not match.", parent=parent)
             return None
         return first
 
@@ -416,17 +541,17 @@ class Gatekeeper:
         legacy_hash = self._load_legacy_password_hash()
         if not legacy_hash:
             return False
-        vault_name = simpledialog.askstring(
+        vault_name = self._prompt_text(
             "Security Migration",
             "Name the first admin vault for the migrated security system:",
-            initialvalue="admin_1",
             parent=parent,
+            initialvalue="admin_1",
         )
         if vault_name is None:
             return False
         normalized_name = self._sanitize_vault_name(vault_name)
         if not normalized_name:
-            messagebox.showerror("Security Migration", "A valid admin vault name is required.", parent=parent)
+            self._show_error("Security Migration", "A valid admin vault name is required.", parent=parent)
             return False
 
         self._validate_role_limit("admin")
@@ -453,17 +578,17 @@ class Gatekeeper:
             return True
         if os.path.exists(self._legacy_vault_path):
             return self._migrate_legacy_vault_if_needed(parent=parent)
-        if not messagebox.askyesno(
+        if not self._ask_yes_no(
             "Security Setup",
             "No security vaults are configured yet. Create the first admin vault now?",
             parent=parent,
         ):
             return False
-        vault_name = simpledialog.askstring(
+        vault_name = self._prompt_text(
             "Create Admin Vault",
             "Name for the first admin vault:",
-            initialvalue="admin_1",
             parent=parent,
+            initialvalue="admin_1",
         )
         if vault_name is None:
             return False
@@ -478,38 +603,38 @@ class Gatekeeper:
             enabled=True,
         )
         self._set_session_from_vault(vault_record)
-        messagebox.showinfo("Security Setup", f"Created admin vault '{vault_record.vault_name}'.", parent=parent)
+        self._show_info("Security Setup", f"Created admin vault '{vault_record.vault_name}'.", parent=parent)
         return True
 
     def reset_vault(self, parent=None, dispatcher=None):
         if not self.has_admin_session():
             return False
         if not self.has_master_password():
-            messagebox.showinfo("Security", "No security vault is configured, so there is nothing to reset.", parent=parent)
+            self._show_info("Security", "No security vault is configured, so there is nothing to reset.", parent=parent)
             self.logout()
             return False
 
-        if not messagebox.askyesno(
+        if not self._ask_yes_no(
             "Reset Security Storage",
             "This will back up and remove the current security vaults, disable persisted non-secure mode, and end the active admin session. Continue?",
             parent=parent,
         ):
             return False
 
-        confirmation_text = simpledialog.askstring(
+        confirmation_text = self._prompt_text(
             "Reset Security Storage",
             "Type RESET to confirm this destructive action:",
             parent=parent,
         )
         if confirmation_text != "RESET":
-            messagebox.showinfo("Security", "Vault reset cancelled.", parent=parent)
+            self._show_info("Security", "Vault reset cancelled.", parent=parent)
             return False
 
         if not self._confirm_current_password(
             parent=parent,
             prompt="Re-enter the current vault password to authorize the security reset:",
         ):
-            messagebox.showerror("Security", "The current vault password was not confirmed. Security reset cancelled.", parent=parent)
+            self._show_error("Security", "The current vault password was not confirmed. Security reset cancelled.", parent=parent)
             return False
 
         backup_paths = self._archive_existing_vault()
@@ -519,7 +644,7 @@ class Gatekeeper:
             self.logout()
         except Exception as exc:
             log_exception("gatekeeper.reset_vault", exc)
-            messagebox.showerror("Security", f"The security storage could not be reset: {exc}", parent=parent)
+            self._show_error("Security", f"The security storage could not be reset: {exc}", parent=parent)
             return False
 
         if dispatcher is not None:
@@ -528,7 +653,7 @@ class Gatekeeper:
         backup_note = ""
         if backup_paths:
             backup_note = f" Backups were written to {self._vault_backup_directory()}."
-        messagebox.showinfo("Security", f"The security storage was reset successfully.{backup_note}", parent=parent)
+        self._show_info("Security", f"The security storage was reset successfully.{backup_note}", parent=parent)
         return True
 
     def has_admin_session(self):
@@ -565,7 +690,7 @@ class Gatekeeper:
 
         temp_root = None
         prompt_parent = parent
-        if prompt_parent is None:
+        if prompt_parent is None and not self._use_qt_dialogs():
             temp_root = self._create_temp_root()
             prompt_parent = temp_root
 
@@ -584,6 +709,23 @@ class Gatekeeper:
                 temp_root.destroy()
 
     def _prompt_for_vault_login(self, required_right=None, parent=None, reason=None, force_reauth=False, allowed_roles=None):
+        if self._use_qt_dialogs(parent) and QDialog is not None:
+            return self._prompt_for_vault_login_qt(
+                required_right=required_right,
+                parent=parent,
+                reason=reason,
+                force_reauth=force_reauth,
+                allowed_roles=allowed_roles,
+            )
+        return self._prompt_for_vault_login_tk(
+            required_right=required_right,
+            parent=parent,
+            reason=reason,
+            force_reauth=force_reauth,
+            allowed_roles=allowed_roles,
+        )
+
+    def _prompt_for_vault_login_qt(self, required_right=None, parent=None, reason=None, force_reauth=False, allowed_roles=None):
         normalized_roles = {normalize_role(role) for role in (allowed_roles or set())}
         if not force_reauth and self._session and self.has_right(required_right):
             if not normalized_roles or self._session_role in normalized_roles:
@@ -594,7 +736,108 @@ class Gatekeeper:
             if vault.enabled and (not normalized_roles or vault.role in normalized_roles)
         ]
         if not available_vaults:
-            messagebox.showerror("Security", "No enabled vaults are available for this login.", parent=parent)
+            self._show_error("Security", "No enabled vaults are available for this login.", parent=parent)
+            return False
+
+        dialog = QDialog(self._get_qt_parent(parent))
+        dialog.setWindowTitle("Security Access")
+        dialog.setModal(True)
+
+        root_layout = QVBoxLayout(dialog)
+        heading_label = QLabel("Security Access", dialog)
+        heading_label.setStyleSheet("font-weight: 600; font-size: 14px;")
+        root_layout.addWidget(heading_label)
+
+        note_label = QLabel(self._build_login_note_text(required_right=required_right, reason=reason), dialog)
+        note_label.setWordWrap(True)
+        root_layout.addWidget(note_label)
+
+        form_layout = QFormLayout()
+        vault_lookup = {vault.vault_name: vault for vault in available_vaults}
+        vault_combo = QComboBox(dialog)
+        vault_combo.addItems(list(vault_lookup))
+        form_layout.addRow("Vault", vault_combo)
+
+        password_entry = QLineEdit(dialog)
+        password_entry.setEchoMode(QLineEdit.EchoMode.Password)
+        form_layout.addRow("Password", password_entry)
+        root_layout.addLayout(form_layout)
+
+        vault_status_label = QLabel(dialog)
+        vault_status_label.setWordWrap(True)
+        root_layout.addWidget(vault_status_label)
+
+        status_label = QLabel(dialog)
+        status_label.setWordWrap(True)
+        status_label.setStyleSheet("color: #b22222;")
+        root_layout.addWidget(status_label)
+
+        button_box = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel,
+            parent=dialog,
+        )
+        unlock_button = button_box.button(QDialogButtonBox.StandardButton.Ok)
+        if unlock_button is not None:
+            unlock_button.setText("Unlock")
+        button_box.rejected.connect(dialog.reject)
+        root_layout.addWidget(button_box)
+
+        def refresh_vault_note(*_args):
+            selected_vault = vault_lookup.get(vault_combo.currentText())
+            if selected_vault is None:
+                vault_status_label.setText("")
+                password_entry.setText("")
+                password_entry.setEnabled(False)
+                return
+            _effective_rights, status_text = self._build_vault_status_text(selected_vault)
+            vault_status_label.setText(status_text)
+            if selected_vault.password_required:
+                password_entry.setEnabled(True)
+                password_entry.setFocus()
+                password_entry.selectAll()
+            else:
+                password_entry.setText("")
+                password_entry.setEnabled(False)
+
+        def submit_login():
+            selected_vault = vault_lookup.get(vault_combo.currentText())
+            if selected_vault is None:
+                status_label.setText("Choose a vault.")
+                return
+            effective_rights = self._get_effective_vault_rights(selected_vault)
+            if required_right and required_right not in effective_rights:
+                status_label.setText("That vault does not have the required access right.")
+                return
+            if selected_vault.password_required:
+                entered_password = password_entry.text()
+                if not entered_password:
+                    status_label.setText("Enter the vault password.")
+                    return
+                if not self._verify_password(selected_vault, entered_password):
+                    status_label.setText("Incorrect password.")
+                    return
+            self._set_session_from_vault(selected_vault)
+            dialog.accept()
+
+        button_box.accepted.connect(submit_login)
+        password_entry.returnPressed.connect(submit_login)
+        vault_combo.currentTextChanged.connect(refresh_vault_note)
+
+        refresh_vault_note()
+        return dialog.exec() == QDialog.DialogCode.Accepted
+
+    def _prompt_for_vault_login_tk(self, required_right=None, parent=None, reason=None, force_reauth=False, allowed_roles=None):
+        normalized_roles = {normalize_role(role) for role in (allowed_roles or set())}
+        if not force_reauth and self._session and self.has_right(required_right):
+            if not normalized_roles or self._session_role in normalized_roles:
+                return True
+
+        available_vaults = [
+            vault for vault in self.list_vaults()
+            if vault.enabled and (not normalized_roles or vault.role in normalized_roles)
+        ]
+        if not available_vaults:
+            self._show_error("Security", "No enabled vaults are available for this login.", parent=parent)
             return False
 
         result = {"granted": False}
@@ -608,9 +851,7 @@ class Gatekeeper:
         container = tk.Frame(top, padx=16, pady=16)
         container.pack(fill=tk.BOTH, expand=True)
 
-        note_text = reason or "Choose a vault and enter the password to continue."
-        if required_right and required_right in ACCESS_RIGHTS_BY_KEY:
-            note_text = f"{note_text}\n\nRequired right: {ACCESS_RIGHTS_BY_KEY[required_right].label}"
+        note_text = self._build_login_note_text(required_right=required_right, reason=reason)
 
         tk.Label(container, text="Security Access", font=("Segoe UI", 11, "bold")).pack(anchor="w")
         tk.Label(container, text=note_text, justify="left", wraplength=420).pack(anchor="w", pady=(4, 12))
@@ -620,9 +861,6 @@ class Gatekeeper:
         status_var = tk.StringVar(value="")
         vault_status_var = tk.StringVar(value="")
         vault_lookup = {vault.vault_name: vault for vault in available_vaults}
-
-        def get_effective_rights(vault_record):
-            return self._merge_role_default_rights(vault_record.role, vault_record.rights)
 
         vault_row = tk.Frame(container)
         vault_row.pack(fill=tk.X, pady=4)
@@ -644,14 +882,8 @@ class Gatekeeper:
             if selected_vault is None:
                 vault_status_var.set("")
                 return
-            effective_rights = get_effective_rights(selected_vault)
-            rights_text = ", ".join(
-                ACCESS_RIGHTS_BY_KEY[right_key].label
-                for right_key in effective_rights
-                if right_key in ACCESS_RIGHTS_BY_KEY
-            ) or "No rights assigned"
-            password_text = "Password required" if selected_vault.password_required else "No password required"
-            vault_status_var.set(f"Role: {selected_vault.role.title()} | {password_text}\nRights: {rights_text}")
+            _effective_rights, status_text = self._build_vault_status_text(selected_vault)
+            vault_status_var.set(status_text)
             if selected_vault.password_required:
                 password_entry.configure(state=tk.NORMAL)
                 password_entry.focus_set()
@@ -664,7 +896,7 @@ class Gatekeeper:
             if selected_vault is None:
                 status_var.set("Choose a vault.")
                 return
-            effective_rights = get_effective_rights(selected_vault)
+            effective_rights = self._get_effective_vault_rights(selected_vault)
             if required_right and required_right not in effective_rights:
                 status_var.set("That vault does not have the required access right.")
                 return
@@ -707,13 +939,13 @@ class Gatekeeper:
             return False
         vault_record = self._find_vault(self._session.vault_name)
         if vault_record is None or not vault_record.password_required:
-            messagebox.showerror("Security", "The current session vault cannot rotate a password.", parent=parent)
+            self._show_error("Security", "The current session vault cannot rotate a password.", parent=parent)
             return False
         new_password = self._prompt_for_new_password(parent=parent, title="Security Administration")
         if not new_password:
             return False
         self.change_vault_password(vault_record.vault_name, new_password)
-        messagebox.showinfo("Security", "Vault password updated.", parent=parent)
+        self._show_info("Security", "Vault password updated.", parent=parent)
         return True
 
     def open_security_admin_dialog(self, parent=None, dispatcher=None):

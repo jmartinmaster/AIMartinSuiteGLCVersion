@@ -141,21 +141,6 @@ def _run_qt_module_session_from_payload(session_path, session_payload):
     if not module_name:
         raise ValueError("Qt module session payload is missing the 'module' key.")
 
-    if module_name == "about":
-        from app.views.about_qt_view import run_about_qt_session
-
-        return run_about_qt_session(session_path)
-
-    if module_name == "help_viewer":
-        from app.views.help_viewer_qt_view import run_help_viewer_qt_session
-
-        return run_help_viewer_qt_session(session_path)
-
-    if module_name == "recovery_viewer":
-        from app.views.recovery_viewer_qt_view import run_recovery_viewer_qt_session
-
-        return run_recovery_viewer_qt_session(session_path)
-
     if module_name == "layout_manager":
         from app.views.layout_manager_qt_view import run_layout_manager_qt_session
 

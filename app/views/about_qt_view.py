@@ -13,18 +13,12 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-import json
-import sys
-
-from launcher import create_qt_application
-
 __module_name__ = "About Qt View"
 __version__ = "1.0.0"
 
 try:
-    from PyQt6.QtCore import QTimer
+    from PyQt6.QtCore import Qt
     from PyQt6.QtWidgets import (
-        QApplication,
         QGroupBox,
         QHBoxLayout,
         QLabel,
@@ -40,7 +34,7 @@ try:
 
     PYQT6_AVAILABLE = True
 except ImportError:
-    QApplication = None
+    Qt = None
     QGroupBox = None
     QHBoxLayout = None
     QLabel = None
@@ -52,20 +46,7 @@ except ImportError:
     QTableWidgetItem = None
     QVBoxLayout = None
     QWidget = None
-    QTimer = None
     PYQT6_AVAILABLE = False
-
-
-def is_about_qt_runtime_available():
-    return PYQT6_AVAILABLE
-
-
-def load_about_qt_session(session_path):
-    with open(session_path, "r", encoding="utf-8") as handle:
-        payload = json.load(handle)
-    if not isinstance(payload, dict):
-        raise ValueError("About Qt session payload must be a JSON object.")
-    return payload
 
 
 class AboutQtView(QMainWindow):
@@ -78,17 +59,22 @@ class AboutQtView(QMainWindow):
         self.theme_tokens = dict(self.payload.get("theme_tokens") or {})
         self.embedded = parent_widget is not None
         self._build_ui()
+        self._attach_to_parent_container(parent_widget)
 
-        if not self.embedded:
-            self.command_timer = QTimer(self)
-            self.command_timer.setInterval(700)
-            self.command_timer.timeout.connect(self.controller.poll_commands)
-            self.command_timer.start()
+    def _attach_to_parent_container(self, parent_widget):
+        if not self.embedded or parent_widget is None:
+            return
+        if Qt is not None:
+            self.setWindowFlag(Qt.WindowType.Window, False)
+        parent_layout = getattr(parent_widget, "layout", lambda: None)()
+        if parent_layout is not None:
+            parent_layout.addWidget(self)
+        self.show()
 
     def _build_ui(self):
         self.setWindowTitle(str(self.payload.get("window_title") or "About"))
         if self.embedded:
-            self.resize(980, 720)
+            self.setMinimumSize(0, 0)
         else:
             self.resize(980, 720)
 
@@ -143,7 +129,7 @@ class AboutQtView(QMainWindow):
         self.setCentralWidget(central_widget)
         self.status_bar = QStatusBar(self)
         self.setStatusBar(self.status_bar)
-        self.status_bar.showMessage("About Qt window ready.", 5000)
+        self.status_bar.showMessage("About view ready.", 5000)
 
     def _populate_manifest(self, manifest_rows):
         self.manifest_table.setRowCount(len(manifest_rows))
@@ -151,6 +137,18 @@ class AboutQtView(QMainWindow):
             self.manifest_table.setItem(row_index, 0, QTableWidgetItem(str(row.get("display_name") or "Unknown")))
             self.manifest_table.setItem(row_index, 1, QTableWidgetItem(f"v{row.get('version') or 'Unknown'}"))
             self.manifest_table.setItem(row_index, 2, QTableWidgetItem(str(row.get("source_suffix") or "built-in")))
+
+    def refresh_manifest(self, manifest_rows):
+        self._populate_manifest(list(manifest_rows or []))
+
+    def apply_theme(self, theme_tokens=None):
+        if theme_tokens is not None:
+            self.theme_tokens = dict(theme_tokens or {})
+        style = self.style()
+        if style is not None:
+            style.unpolish(self)
+            style.polish(self)
+        self.update()
 
     def show_error(self, title, message):
         QMessageBox.critical(self, title, message)
@@ -161,28 +159,3 @@ class AboutQtView(QMainWindow):
     def closeEvent(self, event):
         self.controller.handle_close()
         super().closeEvent(event)
-
-
-def run_about_qt_session(session_path):
-    if not PYQT6_AVAILABLE:
-        print("PyQt6 is not installed in the active Python environment.", file=sys.stderr)
-        return 2
-    from app.controllers.about_qt_controller import AboutQtController
-
-    session_payload = load_about_qt_session(session_path)
-    application = create_qt_application(theme_tokens=session_payload.get("theme_tokens") or {})
-    controller = AboutQtController(session_payload)
-    controller.show()
-    return application.exec()
-
-
-def main(argv=None):
-    argv = list(argv or sys.argv)
-    if len(argv) < 2:
-        print("Usage: python app/views/about_qt_view.py <session.json>", file=sys.stderr)
-        return 2
-    return run_about_qt_session(argv[1])
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
