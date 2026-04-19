@@ -14,10 +14,14 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 from app.controllers.rate_manager_controller import RateManagerController
+from app.controllers.rate_manager_qt_controller import RateManagerQtController
 
 __module_name__ = "Rate Manager"
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 
 def get_ui(parent, dispatcher):
+    should_use_qt_in_viewport = getattr(dispatcher, "should_use_qt_in_viewport", None)
+    if callable(should_use_qt_in_viewport) and should_use_qt_in_viewport("rate_manager"):
+        return RateManagerQtController(parent=parent, dispatcher=dispatcher)
     return RateManagerController(parent, dispatcher)

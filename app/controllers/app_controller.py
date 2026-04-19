@@ -43,7 +43,7 @@ __version__ = "2.1.5"
 
 ISSUE_REPORT_URL = "https://github.com/jmartinmaster/AIMartinSuiteGLCVersion/issues/new/choose"
 MODULE_PRELOAD_POLL_SECONDS = 1.0
-QT_IN_VIEWPORT_PILOT_MODULES = {"about", "help_viewer", "recovery_viewer"}
+QT_IN_VIEWPORT_PILOT_MODULES = {"about", "help_viewer", "recovery_viewer", "rate_manager"}
 
 SEVERITY_TO_BOOTSTYLE = {
     "info": INFO,
