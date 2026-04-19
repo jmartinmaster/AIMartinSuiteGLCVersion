@@ -13,19 +13,14 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-import json
-import sys
-
-from launcher import create_qt_application
 from app.models.production_log_calculations_model import EDITOR_SECTIONS
 
 __module_name__ = "Production Log Calculations Qt View"
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 try:
-    from PyQt6.QtCore import QTimer
+    from PyQt6.QtCore import Qt
     from PyQt6.QtWidgets import (
-        QApplication,
         QCheckBox,
         QComboBox,
         QFormLayout,
@@ -45,7 +40,6 @@ try:
 
     PYQT6_AVAILABLE = True
 except ImportError:
-    QApplication = None
     QCheckBox = None
     QComboBox = None
     QFormLayout = None
@@ -61,41 +55,41 @@ except ImportError:
     QStatusBar = None
     QVBoxLayout = None
     QWidget = None
-    QTimer = None
+    Qt = None
     PYQT6_AVAILABLE = False
 
 
-def is_production_log_calculations_qt_runtime_available():
-    return PYQT6_AVAILABLE
-
-
-def load_production_log_calculations_qt_session(session_path):
-    with open(session_path, "r", encoding="utf-8") as handle:
-        payload = json.load(handle)
-    if not isinstance(payload, dict):
-        raise ValueError("Production Log Calculations Qt session payload must be a JSON object.")
-    return payload
-
-
 class ProductionLogCalculationsQtView(QMainWindow):
-    def __init__(self, controller, payload):
+    def __init__(self, controller, payload, parent_widget=None):
         if not PYQT6_AVAILABLE:
             raise RuntimeError("PyQt6 is not installed in the active Python environment.")
-        super().__init__()
+        super().__init__(parent_widget)
         self.controller = controller
         self.payload = dict(payload or {})
+        self.theme_tokens = dict(self.payload.get("theme_tokens") or {})
+        self.embedded = parent_widget is not None
         self.form_widgets = {}
         self.choice_maps = {}
         self._build_ui()
+        self.apply_theme(theme_tokens=self.theme_tokens)
+        if self.embedded:
+            self._attach_to_parent_container(parent_widget)
 
-        self.command_timer = QTimer(self)
-        self.command_timer.setInterval(700)
-        self.command_timer.timeout.connect(self.controller.poll_commands)
-        self.command_timer.start()
+    def _attach_to_parent_container(self, parent_widget):
+        if parent_widget is None:
+            return
+        self.setWindowFlag(Qt.WindowType.Window, False)
+        layout = parent_widget.layout()
+        if layout is None:
+            layout = QVBoxLayout(parent_widget)
+            layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self)
+        self.show()
 
     def _build_ui(self):
         self.setWindowTitle(str(self.payload.get("window_title") or "Production Log Calculations"))
-        self.resize(1200, 900)
+        if not self.embedded:
+            self.resize(1200, 900)
 
         central_widget = QWidget(self)
         root_layout = QVBoxLayout(central_widget)
@@ -232,8 +226,17 @@ class ProductionLogCalculationsQtView(QMainWindow):
         for line in list(lines or []):
             self.preview_list.addItem(str(line))
 
-    def set_status(self, message):
+    def set_status(self, message, _bootstyle=None):
         self.status_bar.showMessage(str(message or ""), 6000)
+
+    def apply_theme(self, theme_tokens=None):
+        if theme_tokens is not None:
+            self.theme_tokens = dict(theme_tokens or {})
+        style = self.style()
+        if style is not None:
+            style.unpolish(self)
+            style.polish(self)
+        self.update()
 
     def show_error(self, title, message):
         QMessageBox.critical(self, title, message)
@@ -241,32 +244,15 @@ class ProductionLogCalculationsQtView(QMainWindow):
     def show_info(self, title, message):
         QMessageBox.information(self, title, message)
 
+    def show_toast(self, title, message, bootstyle=None):
+        dispatcher = getattr(self.controller, "dispatcher", None)
+        show_toast = getattr(dispatcher, "show_toast", None)
+        if callable(show_toast):
+            show_toast(title, message, bootstyle)
+            self.set_status(message, bootstyle)
+            return
+        self.show_info(title, message)
+
     def closeEvent(self, event):
         self.controller.handle_close()
         super().closeEvent(event)
-
-
-def run_production_log_calculations_qt_session(session_path):
-    if not PYQT6_AVAILABLE:
-        print("PyQt6 is not installed in the active Python environment.", file=sys.stderr)
-        return 2
-
-    from app.controllers.production_log_calculations_qt_controller import ProductionLogCalculationsQtController
-
-    session_payload = load_production_log_calculations_qt_session(session_path)
-    application = create_qt_application(theme_tokens=session_payload.get("theme_tokens") or {})
-    controller = ProductionLogCalculationsQtController(session_payload)
-    controller.show()
-    return application.exec()
-
-
-def main(argv=None):
-    argv = list(argv or sys.argv)
-    if len(argv) < 2:
-        print("Usage: python app/views/production_log_calculations_qt_view.py <session.json>", file=sys.stderr)
-        return 2
-    return run_production_log_calculations_qt_session(argv[1])
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

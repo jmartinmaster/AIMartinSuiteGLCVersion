@@ -13,86 +13,89 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-import json
-import os
-import time
+from ttkbootstrap.constants import INFO, SUCCESS
 
 from app.models.production_log_calculations_model import ProductionLogCalculationsModel
 from app.views.production_log_calculations_qt_view import ProductionLogCalculationsQtView
 
 __module_name__ = "Production Log Calculations Qt Controller"
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 
 class ProductionLogCalculationsQtController:
-    def __init__(self, payload):
-        self.payload = dict(payload or {})
-        self.state_path = self.payload.get("state_path")
-        self.command_path = self.payload.get("command_path")
+    def __init__(self, parent=None, dispatcher=None):
+        self.parent = parent
+        self.dispatcher = dispatcher
         self.model = ProductionLogCalculationsModel()
-        self.view = ProductionLogCalculationsQtView(self, self.payload)
+        self.payload = self._build_view_payload()
+        self.view = ProductionLogCalculationsQtView(self, self.payload, parent_widget=parent)
         self.load_into_view(initial=True)
+        self.view.show()
+
+    def __getattr__(self, attribute_name):
+        view = self.__dict__.get("view")
+        if view is None:
+            raise AttributeError(attribute_name)
+        return getattr(view, attribute_name)
+
+    def _build_view_payload(self):
+        dispatcher = self.dispatcher
+        theme_tokens = dict(getattr(getattr(dispatcher, "view", None), "theme_tokens", {}) or {})
+        return {
+            "window_title": "Production Log Calculations - Production Logging Center",
+            "title": "Production Log Calculations",
+            "subtitle": (
+                "Developer controls for named formulas and runtime calculation behavior in the shared PyQt6 workspace."
+            ),
+            "theme_tokens": theme_tokens,
+        }
 
     def show(self):
         self.view.show()
         self.view.raise_()
         self.view.activateWindow()
 
-    def write_state(self, status="ready", message="", dirty=False):
-        if not self.state_path:
-            return
-        payload = {
-            "status": status,
-            "dirty": bool(dirty),
-            "message": str(message or ""),
-            "module": "production_log_calculations",
-            "updated_at": time.time(),
-        }
-        try:
-            with open(self.state_path, "w", encoding="utf-8") as handle:
-                json.dump(payload, handle, indent=2)
-        except Exception:
-            return
-
     def load_into_view(self, initial=False):
         settings = self.model.reload_settings()
         self.view.set_form_values(self.model.flatten_settings_for_form(settings))
         self.view.set_preview_lines(self.build_preview_lines(settings))
-        message = "Production Log Calculations Qt window ready." if initial else "Loaded active calculation profile."
-        self.view.set_status(message)
-        self.write_state(status="ready", message=message)
+        message = "Production Log Calculations ready." if initial else "Loaded active calculation profile."
+        self.view.set_status(message, INFO)
 
     def reload_from_disk(self):
         settings = self.model.load_settings_file()
         self.view.set_form_values(self.model.flatten_settings_for_form(settings))
         self.view.set_preview_lines(self.build_preview_lines(settings))
-        self.view.set_status("Reloaded calculation profile from disk.")
-        self.write_state(status="ready", message="Reloaded calculation profile from disk.")
+        self.view.set_status("Reloaded calculation profile from disk.", INFO)
 
     def save_settings(self):
         settings = self.model.update_settings(self.view.get_form_values())
         self.model.save_settings_with_backup()
         self.view.set_form_values(self.model.flatten_settings_for_form(settings))
         self.view.set_preview_lines(self.build_preview_lines(settings))
-        self.view.set_status("Saved developer calculation profile.")
-        self.write_state(status="ready", message="Saved developer calculation profile.")
+        if self.dispatcher is not None:
+            self.dispatcher.notify_production_log_calculation_settings_changed()
+        self.view.set_status("Saved the developer calculation profile and refreshed open Production Log pages.", SUCCESS)
+        self.view.show_toast(
+            "Production Log Calculations",
+            "Saved calculation behavior and refreshed open Production Log pages.",
+            SUCCESS,
+        )
 
     def reset_defaults(self):
         defaults = self.model.get_default_settings()
         self.view.set_form_values(self.model.flatten_settings_for_form(defaults))
         self.view.set_preview_lines(self.build_preview_lines(defaults))
-        self.view.set_status("Loaded defaults into editor. Save to persist.")
-        self.write_state(status="ready", message="Loaded defaults into editor.", dirty=True)
+        self.view.set_status("Restored the default values in the editor. Save to make them active.", INFO)
 
-    def on_form_changed(self):
+    def on_form_changed(self, *_args):
         self.view.set_preview_lines(self.build_preview_lines(self.view.get_form_values()))
-        self.write_state(status="ready", message="Edited calculation profile values.", dirty=True)
 
     def open_production_log(self):
-        self.view.show_info(
-            "Open Production Log",
-            "Open Production Log from the host shell after saving. Direct host navigation from sidecar is not wired yet.",
-        )
+        if self.dispatcher is not None:
+            self.dispatcher.load_module("production_log")
+            return
+        self.view.show_info("Open Production Log", "Host navigation is unavailable.")
 
     def build_preview_lines(self, settings):
         fallback_mode = settings.get("missing_rate_fallback_mode", "header_goal")
@@ -136,26 +139,19 @@ class ProductionLogCalculationsQtController:
             return str(int(numeric_value))
         return f"{numeric_value:.2f}".rstrip("0").rstrip(".")
 
-    def poll_commands(self):
-        if not self.command_path or not os.path.exists(self.command_path):
-            return
-        try:
-            with open(self.command_path, "r", encoding="utf-8") as handle:
-                payload = json.load(handle)
-        except Exception:
-            payload = {}
-        try:
-            os.remove(self.command_path)
-        except OSError:
-            pass
-
-        action = str(payload.get("action") or "").strip().lower()
-        if action == "raise_window":
-            self.show()
-            self.write_state(status="ready", message="Raised Production Log Calculations Qt window.")
-        elif action == "close_window":
-            self.handle_close()
-            self.view.close()
+    def apply_theme(self):
+        if self.dispatcher is not None:
+            self.payload["theme_tokens"] = dict(getattr(getattr(self.dispatcher, "view", None), "theme_tokens", {}) or {})
+        self.view.apply_theme(theme_tokens=self.payload.get("theme_tokens") or {})
 
     def handle_close(self):
-        self.write_state(status="closed", message="Production Log Calculations Qt window closed.")
+        return None
+
+    def on_hide(self):
+        return None
+
+    def on_unload(self):
+        try:
+            self.view.close()
+        except Exception:
+            pass
