@@ -15,9 +15,11 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 import json
 import os
+import sys
 import time
 import webbrowser
 
+from app.utils import local_or_resource_path
 from app.views.about_qt_view import AboutQtView
 
 __module_name__ = "About Qt Controller"
@@ -25,12 +27,103 @@ __version__ = "1.0.0"
 
 
 class AboutQtController:
-    def __init__(self, payload):
-        self.payload = dict(payload or {})
+    def __init__(self, payload=None, parent=None, dispatcher=None):
+        self.parent = parent
+        self.dispatcher = dispatcher
+        self.embedded = parent is not None and dispatcher is not None
+        self.payload = self._build_embedded_payload() if self.embedded else dict(payload or {})
         self.state_path = self.payload.get("state_path")
         self.command_path = self.payload.get("command_path")
-        self.view = AboutQtView(self, self.payload)
-        self.write_state(status="ready", message="About Qt window ready.")
+        self.view = AboutQtView(self, self.payload, parent_widget=parent if self.embedded else None)
+        if self.embedded:
+            self.view.show()
+        else:
+            self.write_state(status="ready", message="About Qt window ready.")
+
+    def __getattr__(self, attribute_name):
+        view = self.__dict__.get("view")
+        if view is None:
+            raise AttributeError(attribute_name)
+        return getattr(view, attribute_name)
+
+    def get_info_text(self):
+        return (
+            "Author: Jamie Martin\n"
+            "License: GNU General Public License v3.0\n"
+            "Location: Ludington, MI\n"
+            "Environment: Windows / Portable Python 3.12"
+        )
+
+    def _iter_manifest_modules(self):
+        dispatcher = self.dispatcher
+        if dispatcher is None:
+            return []
+
+        loaded_modules = getattr(dispatcher, "loaded_modules", {}) or {}
+        yielded_keys = set()
+
+        main_module = loaded_modules.get("main")
+        if main_module is not None:
+            yielded_keys.add("main")
+            yield "main", main_module
+
+        preloaded_module_names = getattr(getattr(dispatcher, "model", None), "preloaded_module_names", set()) or set()
+        ordered_module_names = []
+        try:
+            ordered_module_names.extend(dispatcher.get_user_facing_modules(apply_whitelist=False))
+        except Exception:
+            ordered_module_names.extend(sorted(preloaded_module_names))
+
+        for module_name in ordered_module_names:
+            if module_name in yielded_keys:
+                continue
+            module_obj = loaded_modules.get(module_name)
+            if module_obj is None and module_name in preloaded_module_names:
+                module_obj = sys.modules.get(f"app.{module_name}")
+            if module_obj is None:
+                continue
+            yielded_keys.add(module_name)
+            yield module_name, module_obj
+
+        for module_name, module_obj in loaded_modules.items():
+            if module_name in yielded_keys:
+                continue
+            yielded_keys.add(module_name)
+            yield module_name, module_obj
+
+    def get_manifest_rows(self):
+        dispatcher = self.dispatcher
+        if dispatcher is None:
+            return list(self.payload.get("module_manifest") or [])
+
+        manifest_rows = []
+        for mod_key, mod_obj in self._iter_manifest_modules():
+            display_name = getattr(mod_obj, "__module_name__", mod_key)
+            version = getattr(mod_obj, "__version__", "Unknown")
+            source_suffix = "external" if dispatcher.is_module_loaded_from_external(mod_key, mod_obj) else "built-in"
+            manifest_rows.append(
+                {
+                    "display_name": display_name,
+                    "version": version,
+                    "source_suffix": source_suffix,
+                }
+            )
+        return manifest_rows
+
+    def _build_embedded_payload(self):
+        dispatcher = self.dispatcher
+        theme_tokens = dict(getattr(getattr(dispatcher, "view", None), "theme_tokens", {}) or {})
+        return {
+            "window_title": "About - Production Logging Center",
+            "title": "PRODUCTION LOGGING CENTER",
+            "subtitle": "GLC Edition",
+            "info_text": self.get_info_text(),
+            "module_manifest": self.get_manifest_rows(),
+            "license_path": local_or_resource_path("docs/legal/LICENSE.txt"),
+            "can_repack": False,
+            "footer_text": "Copyright © 2026 Jamie Martin",
+            "theme_tokens": theme_tokens,
+        }
 
     def show(self):
         self.view.show()
@@ -56,6 +149,9 @@ class AboutQtController:
             return
 
     def open_license(self):
+        if self.dispatcher is not None:
+            self.dispatcher.open_help_document("docs/legal/LICENSE.txt")
+            return
         license_path = str(self.payload.get("license_path") or "").strip()
         if not license_path or not os.path.exists(license_path):
             self.view.show_error("License", "License file could not be found.")
@@ -98,3 +194,13 @@ class AboutQtController:
 
     def handle_close(self):
         self.write_state(status="closed", message="About Qt window closed.")
+
+    def on_hide(self):
+        return None
+
+    def on_unload(self):
+        if self.embedded:
+            try:
+                self.view.close()
+            except Exception:
+                pass

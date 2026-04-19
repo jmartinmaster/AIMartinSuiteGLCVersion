@@ -1,0 +1,63 @@
+[
+  {
+    "name": "active_navigation_state",
+    "ok": true,
+    "details": {
+      "startup_module": "help_viewer",
+      "runtime_managers": [
+        "help_viewer"
+      ]
+    }
+  },
+  {
+    "name": "persistent_hide_restore",
+    "ok": false,
+    "error": "Persistent About container was not shown again after restore.",
+    "traceback": "Traceback (most recent call last):\n  File \"C:\\Users\\jamie\\OneDrive\\Personel\\Documents\\AI-Martin\\AIMartinSuiteGLCVersion\\scripts\\validate_pyqt6_phase_gate.py\", line 463, in run_checks\n    details = check_callable(dispatcher, host_shell, event_log)\n  File \"C:\\Users\\jamie\\OneDrive\\Personel\\Documents\\AI-Martin\\AIMartinSuiteGLCVersion\\scripts\\validate_pyqt6_phase_gate.py\", line 298, in check_persistent_hide_restore\n    assert_true(about_container.isVisible(), \"Persistent About container was not shown again after restore.\")\n    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\jamie\\OneDrive\\Personel\\Documents\\AI-Martin\\AIMartinSuiteGLCVersion\\scripts\\validate_pyqt6_phase_gate.py\", line 152, in assert_true\n    raise ValidationError(message)\nValidationError: Persistent About container was not shown again after restore.\n"
+  },
+  {
+    "name": "non_persistent_unload",
+    "ok": false,
+    "error": "'__phase_gate_ephemeral__'",
+    "traceback": "Traceback (most recent call last):\n  File \"C:\\Users\\jamie\\OneDrive\\Personel\\Documents\\AI-Martin\\AIMartinSuiteGLCVersion\\scripts\\validate_pyqt6_phase_gate.py\", line 463, in run_checks\n    details = check_callable(dispatcher, host_shell, event_log)\n  File \"C:\\Users\\jamie\\OneDrive\\Personel\\Documents\\AI-Martin\\AIMartinSuiteGLCVersion\\scripts\\validate_pyqt6_phase_gate.py\", line 313, in check_non_persistent_unload\n    ephemeral_state = event_log[PHASE_GATE_EPHEMERAL]\n                      ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^\nKeyError: '__phase_gate_ephemeral__'\n"
+  },
+  {
+    "name": "theme_application",
+    "ok": false,
+    "error": "'__phase_gate_persistent__'",
+    "traceback": "Traceback (most recent call last):\n  File \"C:\\Users\\jamie\\OneDrive\\Personel\\Documents\\AI-Martin\\AIMartinSuiteGLCVersion\\scripts\\validate_pyqt6_phase_gate.py\", line 463, in run_checks\n    details = check_callable(dispatcher, host_shell, event_log)\n  File \"C:\\Users\\jamie\\OneDrive\\Personel\\Documents\\AI-Martin\\AIMartinSuiteGLCVersion\\scripts\\validate_pyqt6_phase_gate.py\", line 330, in check_theme_application\n    probe_state = event_log[PHASE_GATE_PERSISTENT]\n                  ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^\nKeyError: '__phase_gate_persistent__'\n"
+  },
+  {
+    "name": "active_form_notifications",
+    "ok": false,
+    "error": "'__phase_gate_listener__'",
+    "traceback": "Traceback (most recent call last):\n  File \"C:\\Users\\jamie\\OneDrive\\Personel\\Documents\\AI-Martin\\AIMartinSuiteGLCVersion\\scripts\\validate_pyqt6_phase_gate.py\", line 463, in run_checks\n    details = check_callable(dispatcher, host_shell, event_log)\n  File \"C:\\Users\\jamie\\OneDrive\\Personel\\Documents\\AI-Martin\\AIMartinSuiteGLCVersion\\scripts\\validate_pyqt6_phase_gate.py\", line 371, in check_active_form_notifications\n    listener_state = event_log[PHASE_GATE_LISTENER]\n                     ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^\nKeyError: '__phase_gate_listener__'\n"
+  },
+  {
+    "name": "protected_security_behavior",
+    "ok": true,
+    "details": {
+      "auth_calls": [
+        {
+          "module_name": "layout_manager",
+          "reason": "Unlock Layout Manager to continue.",
+          "force_reauth": false
+        }
+      ],
+      "visible_buttons": [
+        "layout_manager",
+        "rate_manager"
+      ]
+    }
+  },
+  {
+    "name": "mixed_viewport_sidecar_coexistence",
+    "ok": true,
+    "details": {
+      "runtime_managers": [
+        "help_viewer"
+      ],
+      "active_module": "about"
+    }
+  }
+]

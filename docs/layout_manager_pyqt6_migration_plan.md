@@ -1,5 +1,13 @@
 # Layout Manager PyQt6 Migration Plan
 
+> Historical reference only.
+>
+> This document records the earlier Layout Manager migration path, including the sidecar-first integration strategy that produced the current mini-dispatcher and view-contract groundwork.
+>
+> The active migration plan for host-shell and module migration work is [docs/pyqt6_host_migration_master_plan.md](./pyqt6_host_migration_master_plan.md).
+>
+> Do not create additional module-specific migration plans for this effort. Update the master plan instead.
+
 ## Goals
 - Decouple Layout Manager runtime lifecycle from the main Tk dispatcher.
 - Migrate the Layout Manager UI from Tkinter/ttkbootstrap to PyQt6 while preserving model behavior and persisted data contract.

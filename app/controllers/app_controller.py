@@ -14,6 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 import importlib
+import inspect
 import os
 import sys
 import threading
@@ -44,6 +45,7 @@ __version__ = "2.1.5"
 
 ISSUE_REPORT_URL = "https://github.com/jmartinmaster/AIMartinSuiteGLCVersion/issues/new/choose"
 MODULE_PRELOAD_POLL_SECONDS = 1.0
+QT_IN_VIEWPORT_PILOT_MODULES = {"about"}
 
 SEVERITY_TO_BOOTSTYLE = {
     "info": INFO,
@@ -85,6 +87,9 @@ MODULE_API_SURFACE = {
         "open_module_window",
         "open_help_document",
         "import_managed_module",
+        "get_active_form_info",
+        "register_active_form_listener",
+        "unregister_active_form_listener",
         "notify_active_form_changed",
         "notify_production_log_calculation_settings_changed",
     ),
@@ -128,6 +133,7 @@ class Dispatcher:
         initial_module_name=None,
         runtime_settings_override=None,
         host_ui_adapter_factory=None,
+        shell_view_factory=None,
     ):
         self.root = root
         self.main_module = main_module or sys.modules.get("main") or sys.modules.get("__main__")
@@ -168,6 +174,7 @@ class Dispatcher:
         self.active_shell_backend = "tk"
         self.shell_backend_fallback_reason = None
         self.host_ui_adapter_factory = host_ui_adapter_factory
+        self.shell_view_factory = shell_view_factory
         self._refresh_shell_backend_state()
         self.model.window_alpha_supported = self._supports_window_alpha()
         self.model.module_preload_poll_seconds = MODULE_PRELOAD_POLL_SECONDS
@@ -178,8 +185,7 @@ class Dispatcher:
         self.data_request_worker = DataRequestWorker(self._enqueue_on_main_thread, exception_logger=self._log_data_request_error)
         self.data_request_worker.start()
 
-        self.view = AppShellView(self.root, self.update_coordinator)
-        self.view.build()
+        self.view = self._create_shell_view()
         self._sync_view_aliases()
         self.host_ui_adapter = None
         self._switch_active_host_ui_adapter()
@@ -190,6 +196,7 @@ class Dispatcher:
         self._bind_mousewheel()
         self.refresh_update_status_visibility()
         self.load_module(self._resolve_initial_module_name(initial_module_name), use_transition=False)
+        self._resolve_active_form_info(source_instance=self.active_module_instance)
         self.root.after(1200, self.notify_non_secure_mode_state)
         self.root.after(1500, self.notify_external_override_policy_state)
         self.root.after(900, self.prompt_old_executable_cleanup)
@@ -197,18 +204,34 @@ class Dispatcher:
         self.data_request_worker.submit(self.external_data_registry.warm_cache, description="external_data_registry.warm_cache")
         self.root.after(2500, self.schedule_layout_manager_preload)
 
+    def _create_shell_view(self):
+        if callable(self.shell_view_factory):
+            view = self.shell_view_factory(self.root, self.update_coordinator, self)
+        else:
+            view = AppShellView(self.root, self.update_coordinator)
+
+        build = getattr(view, "build", None)
+        if callable(build):
+            build()
+
+        attach_dispatcher = getattr(view, "attach_dispatcher", None)
+        if callable(attach_dispatcher):
+            attach_dispatcher(self)
+
+        return view
+
     def _sync_view_aliases(self):
-        self.main_container = self.view.main_container
-        self.sidebar = self.view.sidebar
-        self.nav_container = self.view.nav_container
-        self.right_container = self.view.right_container
-        self.update_status_frame = self.view.update_status_frame
-        self.update_status_label = self.view.update_status_label
-        self.canvas = self.view.canvas
-        self.scrollbar = self.view.scrollbar
-        self.x_scrollbar = self.view.x_scrollbar
-        self.content_area = self.view.content_area
-        self.canvas_window = self.view.canvas_window
+        self.main_container = getattr(self.view, "main_container", None)
+        self.sidebar = getattr(self.view, "sidebar", None)
+        self.nav_container = getattr(self.view, "nav_container", None)
+        self.right_container = getattr(self.view, "right_container", None)
+        self.update_status_frame = getattr(self.view, "update_status_frame", None)
+        self.update_status_label = getattr(self.view, "update_status_label", None)
+        self.canvas = getattr(self.view, "canvas", None)
+        self.scrollbar = getattr(self.view, "scrollbar", None)
+        self.x_scrollbar = getattr(self.view, "x_scrollbar", None)
+        self.content_area = getattr(self.view, "content_area", None)
+        self.canvas_window = getattr(self.view, "canvas_window", None)
 
     @property
     def modules_path(self):
@@ -255,12 +278,28 @@ class Dispatcher:
         self.model.active_module_name = value
 
     @property
-    def active_module_frame(self):
+    def active_module_container(self):
         return self.model.active_module_frame
+
+    @active_module_container.setter
+    def active_module_container(self, value):
+        self.model.active_module_frame = value
+
+    @property
+    def active_module_frame(self):
+        return self.active_module_container
 
     @active_module_frame.setter
     def active_module_frame(self, value):
-        self.model.active_module_frame = value
+        self.active_module_container = value
+
+    @property
+    def active_form_info(self):
+        return self.model.active_form_info
+
+    @active_form_info.setter
+    def active_form_info(self, value):
+        self.model.active_form_info = dict(value) if isinstance(value, dict) else {}
 
     @property
     def runtime_settings(self):
@@ -273,6 +312,10 @@ class Dispatcher:
     @property
     def runtime_settings_listeners(self):
         return self.model.runtime_settings_listeners
+
+    @property
+    def active_form_listeners(self):
+        return self.model.active_form_listeners
 
     def get_managed_module_names(self):
         return self.module_registry.get_managed_module_names()
@@ -563,14 +606,14 @@ class Dispatcher:
             if keep_active and module_name == active_name:
                 continue
             instance = session.get("instance")
-            frame = session.get("frame")
+            container = self._get_session_container(session)
             if hasattr(instance, "on_unload"):
                 try:
                     instance.on_unload()
                 except Exception as exc:
                     log_exception(f"reset_module_import_state.{module_name}", exc)
-            if frame is not None and frame.winfo_exists():
-                frame.destroy()
+            if self._module_container_exists(container):
+                self._destroy_module_container(container)
             self.persistent_module_instances.pop(module_name, None)
         if not keep_active:
             self.invalidate_managed_module_cache()
@@ -625,11 +668,18 @@ class Dispatcher:
             self.host_ui_adapter.show_error("Report A Problem", f"Could not open the GitHub issue page:\n\n{exc}")
 
     def menu_open(self, event=None):
+        if self.active_shell_backend == "pyqt6" and hasattr(self.view, "menu_open"):
+            self.view.menu_open()
+            self.active_module_name = getattr(self.view, "active_module_name", "production_log") or "production_log"
+            return
         self.load_module("production_log")
         if hasattr(self.active_module_instance, "show_pending"):
             self.active_module_instance.show_pending()
 
     def menu_save(self, event=None):
+        if self.active_shell_backend == "pyqt6" and hasattr(self.view, "menu_save"):
+            self.view.menu_save()
+            return
         if hasattr(self.active_module_instance, "save_draft"):
             self.active_module_instance.save_draft()
         elif hasattr(self.active_module_instance, "save_current_file"):
@@ -638,12 +688,19 @@ class Dispatcher:
             self.show_toast("Action Unavailable", "Save action is not supported on this page.", WARNING)
 
     def menu_export(self, event=None):
+        if self.active_shell_backend == "pyqt6" and hasattr(self.view, "menu_export"):
+            self.view.menu_export()
+            return
         if hasattr(self.active_module_instance, "export_to_excel"):
             self.active_module_instance.export_to_excel()
         else:
             self.show_toast("Action Unavailable", "Export action is not supported on this page.", WARNING)
 
     def menu_import(self, event=None):
+        if self.active_shell_backend == "pyqt6" and hasattr(self.view, "menu_import"):
+            self.view.menu_import()
+            self.active_module_name = getattr(self.view, "active_module_name", "production_log") or "production_log"
+            return
         self.load_module("production_log")
         if hasattr(self.active_module_instance, "import_from_excel_ui"):
             self.active_module_instance.import_from_excel_ui()
@@ -844,11 +901,22 @@ class Dispatcher:
             except Exception as exc:
                 log_exception("notify_production_log_calculation_settings_changed.persistent", exc)
 
-    def notify_active_form_changed(self, source_instance=None):
+    def notify_active_form_changed(self, source_instance=None, active_form_info=None, form_id=None):
         self.invalidate_layout_manager_preload()
         self.schedule_layout_manager_preload(force=True)
+        resolved_active_form_info = self._resolve_active_form_info(
+            source_instance=source_instance,
+            active_form_info=active_form_info,
+            form_id=form_id,
+        )
         seen_instances = set()
         source_instance_id = id(source_instance) if source_instance is not None else None
+
+        for listener in list(self.active_form_listeners):
+            try:
+                self._call_with_active_form_payload(listener, resolved_active_form_info)
+            except Exception as exc:
+                log_exception("notify_active_form_changed.listener", exc)
 
         active_module = self.active_module_instance
         if active_module is not None and hasattr(active_module, "on_active_form_changed"):
@@ -856,7 +924,7 @@ class Dispatcher:
             if active_instance_id != source_instance_id:
                 seen_instances.add(active_instance_id)
                 try:
-                    active_module.on_active_form_changed()
+                    self._call_with_active_form_payload(active_module.on_active_form_changed, resolved_active_form_info)
                 except Exception as exc:
                     log_exception("notify_active_form_changed.active", exc)
 
@@ -871,9 +939,11 @@ class Dispatcher:
                 continue
             seen_instances.add(instance_id)
             try:
-                module_instance.on_active_form_changed()
+                self._call_with_active_form_payload(module_instance.on_active_form_changed, resolved_active_form_info)
             except Exception as exc:
                 log_exception("notify_active_form_changed.persistent", exc)
+
+        return resolved_active_form_info
 
     def get_user_facing_modules(self, apply_whitelist=False):
         whitelist = set(self.runtime_settings.get("module_whitelist", [])) if apply_whitelist else set()
@@ -920,14 +990,14 @@ class Dispatcher:
             if not session:
                 continue
             instance = session.get("instance")
-            frame = session.get("frame")
+            container = self._get_session_container(session)
             if hasattr(instance, "on_unload"):
                 try:
                     instance.on_unload()
                 except Exception as exc:
                     log_exception(f"persistent_module_unload.{module_name}", exc)
-            if frame is not None and frame.winfo_exists():
-                frame.destroy()
+            if self._module_container_exists(container):
+                self._destroy_module_container(container)
 
     def _supports_window_alpha(self):
         try:
@@ -1028,6 +1098,183 @@ class Dispatcher:
             return None
         return self.layout_manager_dispatcher.consume_preload()
 
+    def _can_navigate_away_from_active_module(self):
+        active_module = self.active_module_instance
+        if active_module is not None and hasattr(active_module, "can_navigate_away"):
+            return bool(active_module.can_navigate_away())
+        return True
+
+    def _clear_active_module_state(self):
+        self.active_module_name = None
+        self.active_module_instance = None
+        self.active_module_container = None
+
+    def _deactivate_module_instance(self, module_name, module_instance, module_container):
+        if module_instance is None:
+            return
+
+        if self.is_module_persistent(module_name):
+            if hasattr(module_instance, "on_hide"):
+                module_instance.on_hide()
+            if self._module_container_exists(module_container):
+                self._hide_module_container(module_container)
+            return
+
+        if hasattr(module_instance, "on_unload"):
+            module_instance.on_unload()
+        if self._module_container_exists(module_container):
+            self._destroy_module_container(module_container)
+        self.persistent_module_instances.pop(module_name, None)
+
+    def _reset_module_viewport_for_load(self):
+        self._clear_active_module_state()
+        self._reset_shell_viewport_position()
+
+    def _refresh_active_module_ui(self, module_name):
+        active_module = self.active_module_instance
+        if active_module is not None and hasattr(active_module, "apply_theme"):
+            active_module.apply_theme()
+
+        content_area = getattr(self, "content_area", None)
+        update_idletasks = getattr(content_area, "update_idletasks", None)
+        if callable(update_idletasks):
+            update_idletasks()
+
+        if hasattr(self.view, "set_active_navigation_button"):
+            self.view.set_active_navigation_button(module_name)
+
+    def _set_active_module(self, module_name, module_instance, module_container):
+        self.active_module_name = module_name
+        self.active_module_instance = module_instance
+        self.active_module_container = module_container
+
+    def _restore_cached_module_session(self, module_name, session):
+        cached_container = self._get_session_container(session)
+        self._set_active_module(module_name, session.get("instance"), cached_container)
+        self._show_module_container(cached_container)
+        self._refresh_active_module_ui(module_name)
+        return self.active_module_instance
+
+    def _discard_stale_persistent_module_session(self, module_name, session):
+        stale_instance = session.get("instance")
+        stale_container = self._get_session_container(session)
+        if hasattr(stale_instance, "on_unload"):
+            try:
+                stale_instance.on_unload()
+            except Exception as exc:
+                log_exception(f"persistent_module_stale.{module_name}", exc)
+        if self._module_container_exists(stale_container):
+            self._destroy_module_container(stale_container)
+        self.persistent_module_instances.pop(module_name, None)
+
+    def _try_restore_persistent_module(self, module_name):
+        if not self.is_module_persistent(module_name) or module_name not in self.persistent_module_instances:
+            return None
+
+        session = self.persistent_module_instances[module_name]
+        cached_container = self._get_session_container(session)
+        session_generation = session.get("generation")
+        if session_generation == self.model.managed_source_generation and self._module_container_exists(cached_container):
+            return self._restore_cached_module_session(module_name, session)
+
+        self._discard_stale_persistent_module_session(module_name, session)
+        return None
+
+    def _create_module_container_for_active_viewport(self, module_name=None):
+        if self.active_shell_backend == "pyqt6":
+            create_module_container = getattr(self.view, "create_module_container", None)
+            if callable(create_module_container):
+                return create_module_container(module_name=module_name)
+        return self._create_module_container()
+
+    def should_use_qt_in_viewport(self, module_name):
+        return self.active_shell_backend == "pyqt6" and str(module_name or "").strip() in QT_IN_VIEWPORT_PILOT_MODULES
+
+    def _instantiate_module_in_container(self, module_name, module_container):
+        if module_name == "layout_manager" and self.layout_manager_dispatcher is not None:
+            return self.layout_manager_dispatcher.launch(module_container)
+
+        module = self.import_managed_module(module_name, force_fresh=False)
+        if hasattr(module, "get_ui"):
+            return module.get_ui(module_container, self)
+        return None
+
+    def _finalize_loaded_module(self, module_name, module_instance, module_container):
+        self._set_active_module(module_name, module_instance, module_container)
+        if self.is_module_persistent(module_name):
+            self._register_persistent_module_session(module_name, module_instance, module_container)
+        self._refresh_active_module_ui(module_name)
+        return module_instance
+
+    def _load_module_in_tk_viewport(self, module_name):
+        self._sync_managed_source_signature(force=False)
+        previous_module_name = self.active_module_name
+        previous_module_instance = self.active_module_instance
+        previous_module_container = self.active_module_container
+
+        if not self._can_navigate_away_from_active_module():
+            return None
+
+        self._deactivate_module_instance(previous_module_name, previous_module_instance, previous_module_container)
+        self._reset_module_viewport_for_load()
+
+        restored_instance = self._try_restore_persistent_module(module_name)
+        if restored_instance is not None:
+            return restored_instance
+
+        module_container = self._create_module_container_for_active_viewport(module_name=module_name)
+        module_instance = self._instantiate_module_in_container(module_name, module_container)
+        if module_instance is None:
+            return None
+        return self._finalize_loaded_module(module_name, module_instance, module_container)
+
+    def _load_module_in_qt_viewport(self, module_name):
+        if self.should_use_qt_in_viewport(module_name):
+            self._sync_managed_source_signature(force=False)
+            previous_module_name = self.active_module_name
+            previous_module_instance = self.active_module_instance
+            previous_module_container = self.active_module_container
+
+            if not self._can_navigate_away_from_active_module():
+                return None
+
+            self._deactivate_module_instance(previous_module_name, previous_module_instance, previous_module_container)
+            self._reset_module_viewport_for_load()
+
+            restored_instance = self._try_restore_persistent_module(module_name)
+            if restored_instance is not None:
+                return restored_instance
+
+            module_container = self._create_module_container_for_active_viewport(module_name=module_name)
+            module_instance = self._instantiate_module_in_container(module_name, module_container)
+            if module_instance is None:
+                return None
+            return self._finalize_loaded_module(module_name, module_instance, module_container)
+
+        self._sync_managed_source_signature(force=False)
+        previous_module_name = self.active_module_name
+        previous_module_instance = self.active_module_instance
+        previous_module_container = self.active_module_container
+
+        if not self._can_navigate_away_from_active_module():
+            return None
+
+        self._deactivate_module_instance(previous_module_name, previous_module_instance, previous_module_container)
+        self._reset_module_viewport_for_load()
+
+        open_or_raise = getattr(self.view, "open_or_raise_module", None)
+        if callable(open_or_raise):
+            open_or_raise(module_name, restart=False)
+
+        self._set_active_module(module_name, None, None)
+        self._refresh_active_module_ui(module_name)
+        return None
+
+    def _load_module_in_active_viewport(self, module_name):
+        if self.active_shell_backend == "pyqt6":
+            return self._load_module_in_qt_viewport(module_name)
+        return self._load_module_in_tk_viewport(module_name)
+
     def load_module(self, module_name, use_transition=True, ensure_authorized=True):
         # Tk widget creation stays on the UI thread; worker threads may only enqueue load requests.
         if not self._is_main_thread():
@@ -1056,81 +1303,7 @@ class Dispatcher:
                 return
 
         def perform_load():
-            self._sync_managed_source_signature(force=False)
-            previous_module_name = self.active_module_name
-            previous_module_instance = self.active_module_instance
-            previous_module_frame = self.active_module_frame
-
-            if previous_module_instance is not None and hasattr(previous_module_instance, "can_navigate_away"):
-                if not previous_module_instance.can_navigate_away():
-                    return
-
-            if previous_module_instance is not None:
-                if self.is_module_persistent(previous_module_name):
-                    if hasattr(previous_module_instance, "on_hide"):
-                        previous_module_instance.on_hide()
-                    if previous_module_frame is not None and previous_module_frame.winfo_exists():
-                        previous_module_frame.pack_forget()
-                else:
-                    if hasattr(previous_module_instance, "on_unload"):
-                        previous_module_instance.on_unload()
-                    if previous_module_frame is not None and previous_module_frame.winfo_exists():
-                        previous_module_frame.destroy()
-                    self.persistent_module_instances.pop(previous_module_name, None)
-
-            self.active_module_name = None
-            self.active_module_instance = None
-            self.active_module_frame = None
-            self.canvas.yview_moveto(0)
-
-            if self.is_module_persistent(module_name) and module_name in self.persistent_module_instances:
-                session = self.persistent_module_instances[module_name]
-                cached_frame = session.get("frame")
-                session_generation = session.get("generation")
-                if session_generation == self.model.managed_source_generation and cached_frame is not None and cached_frame.winfo_exists():
-                    self.active_module_name = module_name
-                    self.active_module_instance = session.get("instance")
-                    self.active_module_frame = cached_frame
-                    cached_frame.pack(fill=BOTH, expand=True)
-                    if hasattr(self.active_module_instance, "apply_theme"):
-                        self.active_module_instance.apply_theme()
-                    self.content_area.update_idletasks()
-                    self.view.set_active_navigation_button(module_name)
-                    return
-                stale_instance = session.get("instance")
-                if hasattr(stale_instance, "on_unload"):
-                    try:
-                        stale_instance.on_unload()
-                    except Exception as exc:
-                        log_exception(f"persistent_module_stale.{module_name}", exc)
-                if cached_frame is not None and cached_frame.winfo_exists():
-                    cached_frame.destroy()
-                self.persistent_module_instances.pop(module_name, None)
-
-            module_frame = tb.Frame(self.content_area, style="Martin.Surface.TFrame")
-            module_frame.pack(fill=BOTH, expand=True)
-
-            module_instance = None
-            if module_name == "layout_manager" and self.layout_manager_dispatcher is not None:
-                module_instance = self.layout_manager_dispatcher.launch(module_frame)
-            else:
-                module = self.import_managed_module(module_name, force_fresh=False)
-                if hasattr(module, "get_ui"):
-                    module_instance = module.get_ui(module_frame, self)
-
-            if module_instance is not None:
-                self.active_module_name = module_name
-                self.active_module_instance = module_instance
-                self.active_module_frame = module_frame
-                if hasattr(self.active_module_instance, "apply_theme"):
-                    self.active_module_instance.apply_theme()
-                if self.is_module_persistent(module_name):
-                    self.persistent_module_instances[module_name] = {
-                        "instance": self.active_module_instance,
-                        "frame": module_frame,
-                        "generation": self.model.managed_source_generation,
-                    }
-                self.view.set_active_navigation_button(module_name)
+            return self._load_module_in_active_viewport(module_name)
 
         try:
             if use_transition and self.active_module_name is not None:
@@ -1139,6 +1312,16 @@ class Dispatcher:
                 perform_load()
         except Exception as exc:
             log_exception(f"load_module.{module_name}", exc)
+            if self.active_shell_backend == "pyqt6":
+                placeholder = getattr(self.view, "show_viewport_placeholder", None)
+                if callable(placeholder):
+                    placeholder(
+                        title=f"Failed to Load {self.get_module_display_name(module_name)}",
+                        message=f"The dispatcher hit an exception while loading {module_name} into the PyQt6 shell.",
+                        hint=str(exc),
+                    )
+                self.host_ui_adapter.show_error("Module Load Error", f"Could not load {module_name}: {exc}")
+                return
             tb.Label(self.content_area, text=f"Error loading {module_name}: {exc}", bootstyle=DANGER).pack(pady=20)
 
     def open_module_window(self, module_name, title=None, geometry=None, minsize=None):
@@ -1195,6 +1378,17 @@ class Dispatcher:
                 log_exception("dispatcher.refresh_runtime_settings.listener", exc)
         return self.runtime_settings
 
+    def get_active_form_info(self):
+        return dict(self.active_form_info or {})
+
+    def register_active_form_listener(self, listener):
+        if callable(listener) and listener not in self.active_form_listeners:
+            self.active_form_listeners.append(listener)
+
+    def unregister_active_form_listener(self, listener):
+        if listener in self.active_form_listeners:
+            self.active_form_listeners.remove(listener)
+
     def register_runtime_settings_listener(self, listener):
         if listener not in self.runtime_settings_listeners:
             self.runtime_settings_listeners.append(listener)
@@ -1213,6 +1407,180 @@ class Dispatcher:
 
     def get_setting(self, key, default=None):
         return self.runtime_settings.get(key, default)
+
+    def _get_session_container(self, session):
+        if not isinstance(session, dict):
+            return None
+        return session.get("container") or session.get("frame")
+
+    def _store_session_container(self, session, container):
+        if not isinstance(session, dict):
+            return session
+        session["container"] = container
+        session["frame"] = container
+        return session
+
+    def _module_container_exists(self, container):
+        if container is None:
+            return False
+        winfo_exists = getattr(container, "winfo_exists", None)
+        if callable(winfo_exists):
+            try:
+                return bool(winfo_exists())
+            except Exception:
+                return False
+        return True
+
+    def _hide_module_container(self, container):
+        if container is None:
+            return
+        pack_forget = getattr(container, "pack_forget", None)
+        if callable(pack_forget):
+            pack_forget()
+            return
+        hide = getattr(container, "hide", None)
+        if callable(hide):
+            hide()
+            return
+        set_visible = getattr(container, "setVisible", None)
+        if callable(set_visible):
+            set_visible(False)
+
+    def _show_module_container(self, container):
+        if container is None:
+            return
+        pack = getattr(container, "pack", None)
+        if callable(pack):
+            pack(fill=BOTH, expand=True)
+            return
+        show = getattr(container, "show", None)
+        if callable(show):
+            show()
+            return
+        set_visible = getattr(container, "setVisible", None)
+        if callable(set_visible):
+            set_visible(True)
+
+    def _destroy_module_container(self, container):
+        if container is None:
+            return
+        destroy = getattr(container, "destroy", None)
+        if callable(destroy):
+            destroy()
+            return
+        delete_later = getattr(container, "deleteLater", None)
+        if callable(delete_later):
+            delete_later()
+            return
+        close = getattr(container, "close", None)
+        if callable(close):
+            close()
+
+    def _create_module_container(self):
+        module_container = tb.Frame(self.content_area, style="Martin.Surface.TFrame")
+        module_container.pack(fill=BOTH, expand=True)
+        return module_container
+
+    def _reset_shell_viewport_position(self):
+        if getattr(self, "canvas", None) is None:
+            return
+        try:
+            self.canvas.yview_moveto(0)
+        except Exception:
+            pass
+
+    def _register_persistent_module_session(self, module_name, module_instance, container):
+        session = {
+            "instance": module_instance,
+            "generation": self.model.managed_source_generation,
+        }
+        self._store_session_container(session, container)
+        self.persistent_module_instances[module_name] = session
+
+    def _resolve_active_form_info(self, source_instance=None, active_form_info=None, form_id=None):
+        resolved = dict(active_form_info) if isinstance(active_form_info, dict) else {}
+
+        if not resolved:
+            for candidate in (source_instance, getattr(source_instance, "model", None)):
+                if candidate is None:
+                    continue
+                getter = getattr(candidate, "get_active_form_info", None)
+                if not callable(getter):
+                    continue
+                try:
+                    candidate_info = getter()
+                except Exception as exc:
+                    log_exception("dispatcher.resolve_active_form_info", exc)
+                    continue
+                if isinstance(candidate_info, dict):
+                    resolved = dict(candidate_info)
+                    break
+
+        normalized_form_id = str(form_id).strip() if form_id is not None and str(form_id).strip() else None
+        if normalized_form_id is not None:
+            resolved["id"] = normalized_form_id
+
+        if resolved:
+            self.active_form_info = resolved
+            return dict(self.active_form_info)
+
+        cached = self.active_form_info
+        if isinstance(cached, dict) and cached:
+            fallback = dict(cached)
+            if normalized_form_id is not None:
+                fallback["id"] = normalized_form_id
+            return fallback
+
+        if normalized_form_id is not None:
+            return {"id": normalized_form_id}
+        return {}
+
+    def _call_with_active_form_payload(self, callback, active_form_info):
+        if not callable(callback):
+            return None
+
+        payload = dict(active_form_info or {})
+        raw_form_id = payload.get("id")
+        form_id = str(raw_form_id).strip() if raw_form_id is not None and str(raw_form_id).strip() else None
+
+        try:
+            signature = inspect.signature(callback)
+        except (TypeError, ValueError):
+            return callback()
+
+        parameters = list(signature.parameters.values())
+        accepts_var_keyword = any(parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in parameters)
+        named_parameters = [
+            parameter
+            for parameter in parameters
+            if parameter.kind in (
+                inspect.Parameter.POSITIONAL_ONLY,
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                inspect.Parameter.KEYWORD_ONLY,
+            )
+        ]
+
+        if not named_parameters and not accepts_var_keyword:
+            return callback()
+
+        args = []
+        kwargs = {}
+        parameter_names = [parameter.name for parameter in named_parameters]
+
+        if accepts_var_keyword or "active_form_info" in parameter_names:
+            kwargs["active_form_info"] = payload
+        elif "form_info" in parameter_names:
+            kwargs["form_info"] = payload
+        elif named_parameters and named_parameters[0].kind != inspect.Parameter.KEYWORD_ONLY and parameter_names[0] != "form_id":
+            args.append(payload)
+
+        if form_id is not None:
+            if accepts_var_keyword or "form_id" in parameter_names:
+                kwargs["form_id"] = form_id
+            elif len(named_parameters) > len(args) and named_parameters[len(args)].kind != inspect.Parameter.KEYWORD_ONLY:
+                args.append(form_id)
+
+        return callback(*args, **kwargs)
 
     def _refresh_shell_backend_state(self):
         self.requested_shell_backend = self.get_ui_shell_backend()
@@ -1442,16 +1810,26 @@ class Dispatcher:
 
     def apply_theme(self, theme_name, redraw=False):
         normalized_theme = normalize_theme(theme_name)
-        style = tb.Style.get_instance() or tb.Style()
-        style.theme_use(resolve_base_theme(normalized_theme))
-        apply_readability_overrides(self.root, normalized_theme)
-        self.view.apply_theme()
+        if self.active_shell_backend == "tk":
+            style = tb.Style.get_instance() or tb.Style()
+            style.theme_use(resolve_base_theme(normalized_theme))
+            apply_readability_overrides(self.root, normalized_theme)
+        view_apply_theme = getattr(self.view, "apply_theme", None)
+        if callable(view_apply_theme):
+            try:
+                view_apply_theme(normalized_theme)
+            except TypeError:
+                view_apply_theme()
         if hasattr(self.active_module_instance, "apply_theme"):
             self.active_module_instance.apply_theme()
-        self.root.update_idletasks()
+        update_idletasks = getattr(self.root, "update_idletasks", None)
+        if callable(update_idletasks):
+            update_idletasks()
         return normalized_theme
 
     def _bind_mousewheel(self):
+        if getattr(self, "canvas", None) is None:
+            return
         self.canvas.bind_all("<MouseWheel>", self._on_mousewheel)
         self.canvas.bind_all("<Button-4>", self._on_mousewheel)
         self.canvas.bind_all("<Button-5>", self._on_mousewheel)

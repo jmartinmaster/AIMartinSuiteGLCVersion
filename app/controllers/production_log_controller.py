@@ -65,6 +65,9 @@ class ProductionLogController:
             raise AttributeError(attribute_name)
         return getattr(view, attribute_name)
 
+    def get_active_form_info(self):
+        return dict(self.model.form_registry.get_active_form())
+
     def build_qt_session_payload(self):
         root = self.parent.winfo_toplevel()
         latest_draft = self.get_latest_pending_draft()
@@ -207,7 +210,7 @@ class ProductionLogController:
 
         self.model.form_registry.activate_form(draft_form_id)
         if hasattr(self.dispatcher, "notify_active_form_changed"):
-            self.dispatcher.notify_active_form_changed(source_instance=self)
+            self.dispatcher.notify_active_form_changed(source_instance=self, active_form_info=self.get_active_form_info())
         return {
             "success": True,
             "message": f"Activated form from draft request: {os.path.basename(draft_path)}",
@@ -245,7 +248,9 @@ class ProductionLogController:
         if data is not None:
             self.view.populate_from_data(data, source_path=draft_path, mark_dirty_after_load=mark_dirty_after_load)
 
-    def on_active_form_changed(self):
+    def on_active_form_changed(self, active_form_info=None, form_id=None):
+        _ = active_form_info
+        _ = form_id
         if self._qt_sidecar_active():
             self.open_or_raise_qt_window()
             return
@@ -926,7 +931,7 @@ class ProductionLogController:
             if draft_form_id != self.model.form_id:
                 self.model.form_registry.activate_form(draft_form_id)
                 if hasattr(self.dispatcher, "notify_active_form_changed"):
-                    self.dispatcher.notify_active_form_changed(source_instance=self)
+                    self.dispatcher.notify_active_form_changed(source_instance=self, active_form_info=self.get_active_form_info())
                 self.reload_active_form(data=data, draft_path=draft_path, mark_dirty_after_load=False)
             else:
                 self.view.populate_from_data(data, source_path=draft_path, mark_dirty_after_load=False)

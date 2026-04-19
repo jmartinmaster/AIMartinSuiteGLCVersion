@@ -39,6 +39,8 @@ class AppModel:
     active_module_instance: object = None
     active_module_name: str = None
     active_module_frame: object = None
+    active_form_info: dict = field(default_factory=dict)
+    active_form_listeners: list = field(default_factory=list)
     runtime_settings: dict = field(default_factory=dict)
     window_alpha_supported: bool = False
     transition_duration_ms: int = 360

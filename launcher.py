@@ -250,8 +250,38 @@ def run_application(main_module=None, initial_module_name=None):
             runtime_settings=runtime_settings,
             initial_module_name=initial_module_name,
         )
+        dispatcher = Dispatcher(
+            host_shell,
+            main_module=main_module,
+            initial_module_name=initial_module_name,
+            runtime_settings_override=runtime_settings,
+            host_ui_adapter_factory=lambda backend, _dispatcher: host_shell.host_ui_adapter if backend == "pyqt6" else None,
+            shell_view_factory=lambda root, _update_coordinator, _dispatcher: root,
+        )
+
+        previous_sigint_handler = None
+        sigint_coordinator = None
+        try:
+            previous_sigint_handler = signal.getsignal(signal.SIGINT)
+            sigint_coordinator = _SigintCoordinator(host_shell, dispatcher)
+            signal.signal(signal.SIGINT, sigint_coordinator.handle_signal)
+            sigint_coordinator.start()
+        except (AttributeError, ValueError) as exc:
+            log_exception("launcher.sigint_setup.pyqt6", exc)
+            previous_sigint_handler = None
+            sigint_coordinator = None
+
         host_shell.show()
-        return application.exec()
+        try:
+            return application.exec()
+        finally:
+            if sigint_coordinator is not None:
+                sigint_coordinator.stop()
+            if previous_sigint_handler is not None:
+                try:
+                    signal.signal(signal.SIGINT, previous_sigint_handler)
+                except (AttributeError, ValueError):
+                    pass
 
     apply_windows_app_id()
     app_root = tb.Window(themename=resolve_base_theme(theme_name))
