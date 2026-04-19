@@ -158,7 +158,7 @@ class LayoutManagerController:
 
     def _notify_active_form_changed(self):
         if hasattr(self.dispatcher, "notify_active_form_changed"):
-            self.dispatcher.notify_active_form_changed(source_instance=self)
+            self.dispatcher.notify_active_form_changed(source_instance=self, active_form_info=self.model.get_active_form_info())
 
     def _update_layout(self, config, status_message):
         self.model.validate_config(config)
@@ -320,8 +320,10 @@ class LayoutManagerController:
             return None
         return self.view.on_hide()
 
-    def on_active_form_changed(self):
-        active_form = self.model.get_active_form_info()
+    def on_active_form_changed(self, active_form_info=None, form_id=None):
+        active_form = dict(active_form_info) if isinstance(active_form_info, dict) else self.model.get_active_form_info()
+        if form_id and not active_form.get("id"):
+            active_form["id"] = str(form_id)
         loaded_form = self._get_loaded_form_info()
         loaded_form_id = loaded_form.get("id")
         active_form_id = active_form.get("id")

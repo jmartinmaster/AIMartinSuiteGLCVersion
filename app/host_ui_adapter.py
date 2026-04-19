@@ -139,6 +139,9 @@ class PyQt6HostUiAdapter:
         self.host_window = host_window
 
     def call_later(self, delay_ms, callback):
+        after = getattr(self.host_window, "after", None)
+        if callable(after):
+            return after(delay_ms, callback)
         if not PYQT6_ADAPTER_AVAILABLE:
             return None
         try:
@@ -190,6 +193,9 @@ class PyQt6HostUiAdapter:
             status_bar.showMessage(combined, max(0, int(duration)))
 
     def refresh_update_status_visibility(self):
+        refresh = getattr(self.host_window, "refresh_update_status_visibility", None)
+        if callable(refresh):
+            return refresh()
         return None
 
     def show_error(self, title, message):

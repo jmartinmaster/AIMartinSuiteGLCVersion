@@ -16,21 +16,60 @@
 import ttkbootstrap as tb
 
 
+class ObservableValue:
+    _trace_sequence = 0
+
+    def __init__(self, value=""):
+        self._value = value
+        self._traces = {}
+
+    def get(self):
+        return self._value
+
+    def set(self, value):
+        self._value = value
+        for trace_mode, callback in list(self._traces.values()):
+            try:
+                callback("observable", "", trace_mode)
+            except TypeError:
+                callback()
+
+    def trace_add(self, mode, callback):
+        ObservableValue._trace_sequence += 1
+        callback_name = f"observable_trace_{ObservableValue._trace_sequence}"
+        self._traces[callback_name] = (mode, callback)
+        return callback_name
+
+    def trace_remove(self, mode, callback_name):
+        stored = self._traces.get(callback_name)
+        if stored is None:
+            return
+        stored_mode, _callback = stored
+        if stored_mode == mode:
+            self._traces.pop(callback_name, None)
+
+
+def _create_binding(master, value=""):
+    if hasattr(master, "tk"):
+        return tb.StringVar(master=master, value=value)
+    return ObservableValue(value=value)
+
+
 class UpdateStateBindings:
     def __init__(self, root):
-        self.banner_var = tb.StringVar(master=root, value="Updates idle.")
-        self.status_var = tb.StringVar(master=root, value="Ready to check for updates.")
-        self.branch_var = tb.StringVar(master=root, value="main")
-        self.repo_var = tb.StringVar(master=root, value="Unknown repository")
-        self.target_name_var = tb.StringVar(master=root, value="Dispatcher Core")
-        self.local_version_var = tb.StringVar(master=root, value="Unknown")
-        self.remote_version_var = tb.StringVar(master=root, value="Not checked")
-        self.result_var = tb.StringVar(master=root, value="Pending")
-        self.note_var = tb.StringVar(master=root, value="Run a repository check to compare the packaged release target.")
-        self.advanced_status_var = tb.StringVar(master=root, value="Advanced dev updates are Windows-only on packaged builds; Ubuntu uses the stable package update path.")
-        self.job_phase_var = tb.StringVar(master=root, value="Idle")
-        self.job_detail_var = tb.StringVar(master=root, value="No update job is running.")
-        self.build_runtime_var = tb.StringVar(master=root, value="Build runtime not resolved yet.")
+        self.banner_var = _create_binding(root, value="Updates idle.")
+        self.status_var = _create_binding(root, value="Ready to check for updates.")
+        self.branch_var = _create_binding(root, value="main")
+        self.repo_var = _create_binding(root, value="Unknown repository")
+        self.target_name_var = _create_binding(root, value="Dispatcher Core")
+        self.local_version_var = _create_binding(root, value="Unknown")
+        self.remote_version_var = _create_binding(root, value="Not checked")
+        self.result_var = _create_binding(root, value="Pending")
+        self.note_var = _create_binding(root, value="Run a repository check to compare the packaged release target.")
+        self.advanced_status_var = _create_binding(root, value="Advanced dev updates are Windows-only on packaged builds; Ubuntu uses the stable package update path.")
+        self.job_phase_var = _create_binding(root, value="Idle")
+        self.job_detail_var = _create_binding(root, value="No update job is running.")
+        self.build_runtime_var = _create_binding(root, value="Build runtime not resolved yet.")
 
     def sync_from_model(self, model):
         self.banner_var.set(model.banner_text)

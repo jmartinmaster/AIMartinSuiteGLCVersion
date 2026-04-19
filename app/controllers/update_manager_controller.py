@@ -249,7 +249,9 @@ class UpdateManagerController:
     def on_hide(self):
         return None
 
-    def on_active_form_changed(self):
+    def on_active_form_changed(self, active_form_info=None, form_id=None):
+        _ = active_form_info
+        _ = form_id
         self.module_payload_options = self._discover_payload_options()
         self.handle_module_payload_selection_change()
 

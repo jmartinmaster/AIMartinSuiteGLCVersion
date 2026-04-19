@@ -47,6 +47,12 @@ class RecoveryViewerController:
             raise AttributeError(attribute_name)
         return getattr(view, attribute_name)
 
+    def get_active_form_info(self):
+        getter = getattr(self.dispatcher, "get_active_form_info", None)
+        if callable(getter):
+            return dict(getter() or {})
+        return dict(getattr(getattr(self.dispatcher, "model", None), "active_form_info", {}) or {})
+
     def build_qt_session_payload(self):
         root = self.parent.winfo_toplevel()
         return {
@@ -73,7 +79,9 @@ class RecoveryViewerController:
     def refresh_records(self):
         self.view.refresh_table(self.model.refresh_records())
 
-    def on_active_form_changed(self):
+    def on_active_form_changed(self, active_form_info=None, form_id=None):
+        _ = active_form_info
+        _ = form_id
         self.refresh_records()
 
     def get_selected_record(self):

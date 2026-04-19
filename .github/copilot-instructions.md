@@ -13,7 +13,7 @@
 | **Author / Copyright** | Jamie Martin, 2026 |
 | **License** | GNU GPL v3 |
 | **Language** | Python 3 |
-| **GUI stack** | Tkinter + ttkbootstrap |
+| **GUI stack** | PyQt6 primary host shell; Tkinter + ttkbootstrap transitional during migration |
 | **Entry point** | `main.py` → `launcher.py::run_application()` |
 | **Dispatcher version export** | `launcher.py::__version__` |
 | **Repository** | `jmartinmaster/AIMartinSuiteGLCVersion` |
@@ -33,9 +33,12 @@ AIMartinSuiteGLCVersion/
 │   ├── controllers/         # MVC: controller layer
 │   ├── models/              # MVC: model layer
 │   ├── views/               # MVC: view layer
-│   ├── app_controller.py    # Dispatcher class (shell orchestrator)
+│   ├── app_controller.py    # Dispatcher class (backend-neutral shell orchestrator)
 │   ├── app_model.py         # AppModel dataclass (runtime state)
-│   ├── app_view.py          # AppShellView (sidebar + scrollable canvas shell)
+│   ├── app_view.py          # Transitional Tk AppShellView (legacy shared viewport)
+│   ├── pyqt6_host_shell_view.py # Target primary PyQt6 host shell
+│   ├── host_ui_adapter.py   # Backend host adapter services
+│   ├── qt_module_runtime.py # Temporary sidecar runtime infrastructure
 │   ├── app_identity.py      # App name, EXE naming, version parsing helpers
 │   ├── app_platform.py      # OS-specific helpers (icon, work area, etc.)
 │   ├── security.py / security_service.py / security_model.py
@@ -46,7 +49,7 @@ AIMartinSuiteGLCVersion/
 │   ├── update_state.py      # UpdateCoordinator
 │   └── ...                  # Other service/utility modules
 ├── assets/                  # Icons and image assets
-├── docs/                    # Help Center markdown files
+├── docs/                    # Canonical docs, migration plan, help center markdown files
 ├── templates/               # Excel template(s)
 ├── layout_config.json       # Production Log layout definition
 ├── rates.json               # Rate configuration
@@ -54,6 +57,8 @@ AIMartinSuiteGLCVersion/
 ```
 
 The `app/` directory is flat for service/utility modules. All **dashboard modules** (Production Log, Rate Manager, etc.) follow strict MVC splits inside `app/controllers/`, `app/models/`, and `app/views/`.
+
+The canonical host-migration plan lives at `docs/pyqt6_host_migration_master_plan.md`. Do not create separate migration plans for the same effort.
 
 ---
 
@@ -64,12 +69,13 @@ The `app/` directory is flat for service/utility modules. All **dashboard module
 | Layer | Location | Purpose |
 |-------|----------|---------|
 | **Model** | `app/models/<name>_model.py` | Data, persistence, business logic, no UI imports |
-| **View** | `app/views/<name>_view.py` | Widget construction, layout, theme application, **no business logic** |
-| **Controller** | `app/controllers/<name>_controller.py` | Wires model ↔ view; handles events; orchestrates saves/loads |
+| **View** | `app/views/<name>_view.py`, `app/views/<name>_qt_view.py` | Widget construction, layout, theme application, **no business logic** |
+| **Controller** | `app/controllers/<name>_controller.py`, `app/controllers/<name>_qt_controller.py` | Wires model ↔ view; handles events; orchestrates saves/loads |
 
-- Models **must not** import `tkinter`, `ttkbootstrap`, or any view/controller.
+- Models **must not** import `tkinter`, `ttkbootstrap`, `PyQt6`, or any view/controller.
 - Views **must not** call persistence, file I/O, or business logic directly — delegate to `self.controller`.
-- Controllers receive `parent` (tk widget) and `dispatcher` as constructor arguments.
+- Controllers receive `parent` (Tk widget or Qt widget/container, depending on active backend) and `dispatcher` as constructor arguments.
+- New or migrated UI work should target the in-process PyQt6 host viewport unless temporary Tk compatibility is explicitly required.
 
 ### 3.2 Module Entry Convention
 
@@ -80,7 +86,7 @@ def get_ui(parent, dispatcher):
     return <ModuleNameController>(parent, dispatcher)
 ```
 
-The Dispatcher imports this function dynamically to mount the module into the content area.
+The Dispatcher imports this function dynamically to mount the module into the active backend viewport.
 
 ### 3.3 Naming Convention
 
@@ -88,11 +94,15 @@ The Dispatcher imports this function dynamically to mount the module into the co
 |----------|---------|---------|
 | Module shim | `app/<snake_name>.py` | `app/production_log.py` |
 | Controller | `app/controllers/<snake_name>_controller.py` | `production_log_controller.py` |
+| PyQt6 controller | `app/controllers/<snake_name>_qt_controller.py` | `production_log_qt_controller.py` |
 | Model | `app/models/<snake_name>_model.py` | `production_log_model.py` |
 | View | `app/views/<snake_name>_view.py` | `production_log_view.py` |
+| PyQt6 view | `app/views/<snake_name>_qt_view.py` | `production_log_qt_view.py` |
 | Controller class | `<TitleCase>Controller` | `ProductionLogController` |
+| PyQt6 controller class | `<TitleCase>QtController` | `ProductionLogQtController` |
 | Model class | `<TitleCase>Model` | `ProductionLogModel` |
 | View class | `<TitleCase>View` | `ProductionLogView` |
+| PyQt6 view class | `<TitleCase>QtView` | `ProductionLogQtView` |
 
 ### 3.4 Module Metadata
 
@@ -105,11 +115,23 @@ __version__ = "X.Y.Z"
 
 ### 3.5 Dispatcher Integration
 
-When the Dispatcher loads a module, it calls `get_ui(parent, dispatcher)` and injects the returned controller instance into `AppShellView.content_area`. The controller is responsible for packing its root frame into `parent` using `fill=BOTH, expand=True`.
+When the Dispatcher loads a module, it calls `get_ui(parent, dispatcher)` and injects the returned controller instance into the active host viewport.
 
-Managed module names live in `app/controllers/app_controller.py::MANAGED_MODULE_NAMES`. Add a new module name to that list when creating a new dashboard module.
+- Transitional Tk path: mount into `AppShellView.content_area` and pack the root frame into the Tk parent.
+- Target PyQt6 path: mount into the shared PyQt6 host viewport container and attach the root widget to the Qt parent using the backend-appropriate layout.
+- The Dispatcher must preserve the same lifecycle semantics across both backends: authorization, `can_navigate_away()`, persistent hide, non-persistent unload, cache invalidation, active-module tracking, and `apply_theme()`.
+
+Managed module metadata lives in `app/module_registry.json` and is loaded through `app/module_registry.py::ModuleRegistry`. Register new modules there rather than maintaining hard-coded module lists.
 
 Protected modules (cannot be unloaded while security lock is active): `layout_manager`, `settings_manager`, `rate_manager`, `update_manager`.
+
+### 3.6 Migration Governance
+
+- The active migration plan is `docs/pyqt6_host_migration_master_plan.md`.
+- Do not create mini plans, phase plans, or module-specific execution plans for the same host migration effort.
+- Existing audits and older migration notes are reference inputs only.
+- Sidecars are temporary migration scaffolding only. Do not add new long-term behavior that depends on `QtModuleRuntimeManager` unless the master plan is updated explicitly.
+- New UI work should preserve the master-plan direction: real in-process PyQt6 viewport, full parity, then sidecar removal, then Tk-host removal.
 
 ---
 
@@ -117,12 +139,16 @@ Protected modules (cannot be unloaded while security lock is active): `layout_ma
 
 ### 4.1 Overview (`app/theme_manager.py`)
 
-The ThemeManager is the **single source of truth** for all colors, fonts, and named ttk styles in the application. Never hardcode color hex values or font tuples in views or controllers. Always read from theme tokens.
+The ThemeManager is the **single source of truth** for colors, fonts, and visual semantics across both backends. Never hardcode color hex values or font tuples in views or controllers. Always read from theme tokens.
 
 ```python
 from app.theme_manager import get_theme_tokens
-tokens = get_theme_tokens(root=self.root)  # reads cached tokens from root
+tokens = get_theme_tokens(root=self.root)  # Tk views
+# or
+tokens = get_theme_tokens(theme_name=self.theme_name)  # Qt views / host shell
 ```
+
+For the PyQt6 shell, use the ThemeManager's Qt helpers such as `get_qt_palette()` and `get_qt_stylesheet()` to translate the same semantic tokens into Qt presentation.
 
 ### 4.2 Theme Presets
 
@@ -246,16 +272,14 @@ Global overrides applied by `apply_readability_overrides()`:
 self.apply_theme()
 
 def apply_theme(self):
-    tokens = getattr(self.root, "_martin_theme_tokens", None) or {}
-    # Reassign styles to all styled widgets
-    self.main_frame.configure(style="Martin.Content.TFrame")
-    # For raw tk.Canvas, apply canvas_bg directly:
-    self.canvas.configure(background=tokens.get("canvas_bg", "#edf1f4"))
+   tokens = getattr(self.root, "_martin_theme_tokens", None) or {}
+   # Tk views reassign Martin.* styles and any raw widget colors.
+   # Qt views map the same tokens to palette or stylesheet values.
 ```
 
 **Theme change (live swap via Settings Manager):**
 
-The Dispatcher calls `apply_readability_overrides(root, new_theme_name)` first, then calls `apply_theme()` on every loaded module view. Each view's `apply_theme()` method must re-apply all `Martin.*` styles and any canvas/raw-tk backgrounds from `root._martin_theme_tokens`.
+The Dispatcher calls the backend-appropriate theme refresh path first, then calls `apply_theme()` on every loaded module view. Each view's `apply_theme()` method must re-apply the correct backend presentation from the same semantic token set.
 
 **Token lookup pattern:**
 
@@ -268,36 +292,34 @@ fg = tokens["surface_fg"]
 accent = tokens["accent"]
 ```
 
-**Never** call `tb.Style.get_instance().colors.<attribute>` directly in views. All color decisions must go through the token dict.
+**Never** call `tb.Style.get_instance().colors.<attribute>` directly in views. All color decisions must go through the token dict, then through the appropriate Tk or Qt presentation layer.
 
 ---
 
 ## 5. AppShell Layout Rules
 
-The application shell (`AppShellView`) uses a fixed two-column layout:
+The target application shell uses a fixed two-column layout with a shared central viewport. The PyQt6 host shell is the primary target. The Tk shell remains transitional during migration.
 
 ```
 ┌──────────────────────────────────────────────────┐
-│  Martin.App.TFrame (root container)               │
+│  PyQt6 Host Shell / transitional Tk shell         │
 │ ┌─────────────────┐ ┌──────────────────────────┐ │
-│ │ Martin.Sidebar  │ │ Martin.Content.TFrame     │ │
-│ │ .TFrame         │ │ ┌──────────────────────┐  │ │
-│ │ width=184px     │ │ │ Martin.Status.TFrame  │  │ │
-│ │ padding=(8,14,  │ │ │ (update banner, TOP)  │  │ │
-│ │   8,12)         │ │ └──────────────────────┘  │ │
-│ │                 │ │ ┌── tk.Canvas ──────────┐  │ │
-│ │ [LOGGING CENTER]│ │ │ content_area (Frame)  │  │ │
-│ │  (title label)  │ │ │ ← modules mount here  │  │ │
-│ │                 │ │ └───────────────────────┘  │ │
-│ │ [Nav buttons]   │ │  Scrollbar (V + H)         │ │
+│ │ Sidebar         │ │ ┌──────────────────────┐  │ │
+│ │ width=184px     │ │ │ Status banner        │  │ │
+│ │ fixed nav       │ │ └──────────────────────┘  │ │
+│ │ groups          │ │ ┌──────────────────────┐  │ │
+│ │                 │ │ │ Shared module        │  │ │
+│ │ [Nav buttons]   │ │ │ viewport             │  │ │
+│ │                 │ │ │ ← modules mount here │  │ │
+│ │                 │ │ └──────────────────────┘  │ │
 │ └─────────────────┘ └──────────────────────────┘ │
 └──────────────────────────────────────────────────┘
 ```
 
 - Sidebar is fixed at **184 px**, `pack_propagate(False)`.
-- Content canvas stretches to fill remaining width and height.
-- Module views are packed into `parent` (which is `content_area`) using `fill=BOTH, expand=True`.
-- The update-status banner is conditionally shown/hidden; it mounts `side=TOP` above the canvas.
+- The shared viewport stretches to fill remaining width and height.
+- Module views attach to the active backend parent container supplied by the Dispatcher.
+- The update-status banner is conditionally shown or hidden at the top of the active shell layout.
 - Do not add widgets directly to `root` — always work through the shell structure.
 
 ---
@@ -312,36 +334,45 @@ When adding a **new dashboard module**, follow this sequence exactly:
    - All data loading, validation, and persistence methods
    - `__module_name__` and `__version__` at module level
 
-2. **View** — `app/views/<name>_view.py`
+2. **PyQt6 View** — `app/views/<name>_qt_view.py` for new or migrated shared-viewport work
    - GPL header
    - `from app.theme_manager import get_theme_tokens`
-   - `class <Name>View:` — `__init__(self, parent, dispatcher, controller)`
+   - `class <Name>QtView:` — `__init__(self, parent, dispatcher, controller)` or equivalent backend-appropriate signature
    - `self.controller.view = self` at top of `__init__`
    - `self.setup_ui()` at end of `__init__`
-   - `def setup_ui(self):` — build all widgets using `Martin.*` styles
-   - `def apply_theme(self):` — reassign all styles and canvas backgrounds from `root._martin_theme_tokens`
+   - `def setup_ui(self):` — build all widgets from semantic theme tokens, Qt palette, and Qt stylesheet helpers
+   - `def apply_theme(self):` — reapply theme tokens to the Qt widget tree
    - No file I/O, no business logic
 
-3. **Controller** — `app/controllers/<name>_controller.py`
+3. **Transitional Tk View** — `app/views/<name>_view.py` only if temporary compatibility is still required
+   - Follow the same MVC rules
+   - Treat Tk views as temporary compatibility work during host migration, not as the forward target
+
+4. **Controller** — `app/controllers/<name>_controller.py`
    - GPL header
    - `class <Name>Controller:` — `__init__(self, parent, dispatcher)`
-   - Instantiate model → instantiate view
+   - Instantiate model → instantiate the active backend view
    - `def __getattr__(self, attribute_name):` — delegate to `self.view` for Dispatcher compatibility
    - Wire event handlers between view callbacks and model methods
    - Expose `apply_theme(self)` that calls `self.view.apply_theme()`
 
-4. **Module shim** — `app/<name>.py`
+5. **Module shim** — `app/<name>.py`
    - GPL header
    - `__module_name__` and `__version__`
    - `def get_ui(parent, dispatcher): return <Name>Controller(parent, dispatcher)`
 
-5. **Register** — add `"<name>"` to `MANAGED_MODULE_NAMES` in `app/controllers/app_controller.py`
+6. **Register** — add module metadata to `app/module_registry.json`
+   - Configure navigation visibility, group, persistence, protection, launcher visibility, and default-initial behavior through the registry
 
-6. **Navigation** — if user-visible, add `("<Display Name>", "<name>")` to the navigation items list in the Dispatcher's `get_navigation_modules()` method.
+7. **Navigation** — if user-visible, verify it appears through `ModuleRegistry`-driven navigation and backend host loading
+
+8. **Migration Discipline** — if the module change affects host migration sequence, update `docs/pyqt6_host_migration_master_plan.md` in the same change
 
 ---
 
 ## 7. Aesthetic Design Rules
+
+These rules define the visual intent across both backends. Transitional Tk views use `Martin.*` styles directly. PyQt6 views must produce the same visual outcome from the same semantic token set via palette and stylesheet application.
 
 ### 7.1 Layout and Spacing
 
@@ -434,7 +465,7 @@ Canvas:       #081219  (deepest navy)
 ## 10. Update Coordinator and Banner
 
 - `app/update_state.py::UpdateCoordinator` manages the top-of-shell status banner.
-- The banner mounts above the canvas (`side=TOP`) and hides itself when `update_coordinator.active` is `False`.
+- The banner mounts at the top of the active shell viewport layout and hides itself when `update_coordinator.active` is `False`.
 - Banner bootstyle is driven by `update_coordinator.banner_bootstyle` (e.g., `INFO`, `SUCCESS`, `WARNING`).
 - Module views must not manipulate the banner directly — route through the `dispatcher`.
 
@@ -444,14 +475,15 @@ Canvas:       #081219  (deepest navy)
 
 - **No bare `except:`** — always catch specific exception types or `except Exception as exc:` at minimum.
 - **No business logic in views** — if a view method needs data, it calls `self.controller.<method>()`.
-- **No UI imports in models** — `tkinter`, `ttkbootstrap`, or any view are forbidden in model files.
+- **No UI imports in models** — `tkinter`, `ttkbootstrap`, `PyQt6`, or any view are forbidden in model files.
 - **Atomic writes** for all JSON saves — use `persistence.write_json_with_backup()`.
-- **Thread safety** — UI updates must be scheduled on the main thread via `root.after(0, callback)` or `root.after(delay_ms, callback)`.
+- **Thread safety** — UI updates must be scheduled on the active shell's main thread through the Dispatcher or host UI adapter. Do not update Tk or Qt widgets from worker threads.
 - **f-strings** preferred over `.format()` or `%` formatting.
 - **snake_case** for variables and functions; **PascalCase** for classes.
 - **GPL header** in every `.py` file under `app/`.
 - **`__module_name__`** and **`__version__`** at module level in every dashboard shim, view, and controller.
-- Do not use `from ttkbootstrap.constants import *` in new files — import only what is needed.
+- Do not use wildcard constant imports in new files — import only what is needed.
+- Do not introduce new sidecar-only flows or bridge-view dependencies without explicitly updating the master migration plan.
 
 ---
 
@@ -462,7 +494,7 @@ To add a new custom theme preset:
 1. Add the theme key and base ttkbootstrap theme name to `THEME_PRESETS` in `theme_manager.py`.
 2. Add the human-readable label to `READABLE_THEMES`.
 3. Add a full token block `if normalized == "<new_key>":` inside `_build_theme_tokens()`, defining **all 35+ token keys** listed in Section 4.3. Every key must be present.
-4. Test with `apply_readability_overrides(root, "<new_key>")` and verify all `Martin.*` styles render correctly.
+4. Test both presentation layers: Tk compatibility via `apply_readability_overrides(root, "<new_key>")` and PyQt6 presentation via `get_qt_palette()` and `get_qt_stylesheet()`.
 
 Extending an existing ttkbootstrap theme without a custom preset: the `_build_theme_tokens()` fallback branch handles unknown themes using `style.colors` — this path provides reasonable defaults but lacks the hand-tuned industrial palette.
 
@@ -488,62 +520,47 @@ Extending an existing ttkbootstrap theme without a custom preset: the `_build_th
 When starting a new coding session on this repository, confirm:
 
 1. ✅ `app/theme_manager.py` is loaded into context — color tokens and `Martin.*` style names are available.
-2. ✅ The MVC tripling (`controllers/`, `models/`, `views/`) is understood.
+2. ✅ The PyQt6 host shell is the primary architecture target and the Tk shell is transitional only.
 3. ✅ The GPL header is required on every new `.py` file.
-4. ✅ `get_theme_tokens(root=self.root)` is the correct way to read color tokens in a view.
+4. ✅ `get_theme_tokens(...)`, `get_qt_palette()`, and `get_qt_stylesheet()` are the correct way to derive backend presentation from semantic theme tokens.
 5. ✅ `write_json_with_backup()` is the correct way to persist JSON configuration files.
-6. ✅ New modules must be registered in `MANAGED_MODULE_NAMES` and `get_ui()` must be the public entry point.
+6. ✅ New modules must be registered in `app/module_registry.json` and `get_ui()` remains the public module entry point.
+7. ✅ `docs/pyqt6_host_migration_master_plan.md` is the only active migration plan and no mini plans should be created for this effort.
 
 ---
 
-## 15. Local AI Parallel Smoke-Test Rule
+## 15. Validation Workflow
 
-When a local AI delegate is available, use it by default for launch and smoke-test reporting while continuing the next implementation step.
+Documentation and implementation changes must keep validation guidance current. Use the best available validation path in the current workspace rather than assuming optional local AI tooling exists.
 
-### 15.1 Availability Check
+### 15.1 Preferred Validation Order
 
-Treat local AI delegation as available when all of the following are true:
+For substantive changes, use this order:
 
-- `scripts/local_ai_smoke_test.sh` exists.
-- `scripts/qwen_delegate.sh` exists and is executable.
-- `ollama` is installed and the requested model is present locally.
+1. Run fast file-level validation such as `python -m py_compile` for touched Python files.
+2. Use available workspace tasks such as `Validate Changed UI Modules` where they fit the touched surface.
+3. Run direct manual smoke validation for shell startup and affected module flows.
+4. If local AI smoke helpers exist in a future workspace snapshot, they may be used as an optional enhancement rather than a required baseline.
 
-If any of those conditions fail, state the limitation briefly and fall back to direct local validation.
+### 15.2 Current Workspace Reality
 
-### 15.2 Required Workflow
+- This workspace currently exposes validation tasks through VS Code tasks.
+- Do not assume `scripts/local_ai_smoke_test.sh` or `scripts/qwen_delegate.sh` exist unless verified in the current tree.
+- If optional helper scripts are absent, state that briefly and continue with direct validation.
 
-For substantive application changes, do this in order:
+### 15.3 PyQt6 Host Migration Validation Expectations
 
-1. Start `bash scripts/local_ai_smoke_test.sh` in the background with a concrete task label, the launch command, and any immediately useful smoke commands.
-2. Continue the main implementation task while the background smoke test runs.
-3. When the smoke-test report completes, read the generated transcript and delegated review.
-4. Add each concrete failure or regression risk to the todo list as a separate item.
-5. Fix the highest-value items first.
-6. Rerun `scripts/local_ai_smoke_test.sh` after fixes and update the todo list based on the retest result.
+For PyQt6 host migration work, verify:
 
-### 15.3 Standard Commands
-
-Default launch command:
-
-```bash
-/home/jamie/Documents/AI-Martin/AIMartinSuiteGLCVersion/.venv/bin/python main.py
-```
-
-Preferred smoke-test helper pattern:
-
-```bash
-bash scripts/local_ai_smoke_test.sh \
-   --task "short change summary" \
-   --launch "/home/jamie/Documents/AI-Martin/AIMartinSuiteGLCVersion/.venv/bin/python main.py" \
-   --smoke "/home/jamie/Documents/AI-Martin/AIMartinSuiteGLCVersion/.venv/bin/python -m py_compile <touched files>" \
-   --context docs/ai-delegation/<context-file>.md
-```
-
-Run it in a background terminal whenever you can keep working productively in parallel.
+1. The active shell backend starts successfully.
+2. The shared viewport and navigation render correctly for the active backend.
+3. Theme changes propagate correctly.
+4. Migrated in-viewport modules and temporary unmigrated sidecar modules can coexist safely during the migration window.
+5. Protected-module and security-lock behavior remains correct.
 
 ### 15.4 Reporting Requirements
 
-- Surface the delegated report path in the response when it materially informed the result.
-- Distinguish between raw command failures and local-AI interpretation.
-- Do not close related todo items until the retest passes or the remaining issue is explicitly accepted as a known limitation.
-- If the delegated smoke test fails to run, note that separately instead of pretending the app was smoke-tested.
+- State what validation path was actually used.
+- Distinguish between direct local validation, workspace-task validation, and any optional delegated review.
+- Do not claim smoke coverage that was not run.
+- Keep the master migration plan and repo instructions aligned with the validated architecture state.

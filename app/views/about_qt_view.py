@@ -69,23 +69,28 @@ def load_about_qt_session(session_path):
 
 
 class AboutQtView(QMainWindow):
-    def __init__(self, controller, payload):
+    def __init__(self, controller, payload, parent_widget=None):
         if not PYQT6_AVAILABLE:
             raise RuntimeError("PyQt6 is not installed in the active Python environment.")
-        super().__init__()
+        super().__init__(parent_widget)
         self.controller = controller
         self.payload = dict(payload or {})
         self.theme_tokens = dict(self.payload.get("theme_tokens") or {})
+        self.embedded = parent_widget is not None
         self._build_ui()
 
-        self.command_timer = QTimer(self)
-        self.command_timer.setInterval(700)
-        self.command_timer.timeout.connect(self.controller.poll_commands)
-        self.command_timer.start()
+        if not self.embedded:
+            self.command_timer = QTimer(self)
+            self.command_timer.setInterval(700)
+            self.command_timer.timeout.connect(self.controller.poll_commands)
+            self.command_timer.start()
 
     def _build_ui(self):
         self.setWindowTitle(str(self.payload.get("window_title") or "About"))
-        self.resize(980, 720)
+        if self.embedded:
+            self.resize(980, 720)
+        else:
+            self.resize(980, 720)
 
         central_widget = QWidget(self)
         root_layout = QVBoxLayout(central_widget)
