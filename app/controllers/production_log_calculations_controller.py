@@ -16,26 +16,19 @@
 from ttkbootstrap.constants import INFO, SUCCESS
 
 from app.models.production_log_calculations_model import ProductionLogCalculationsModel
-from app.qt_module_runtime import QtModuleRuntimeManager
-from app.views.production_log_calculations_view_factory import create_production_log_calculations_view
+from app.views.production_log_calculations_view import ProductionLogCalculationsView
 
 __module_name__ = "Production Log Calculations"
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 
 class ProductionLogCalculationsController:
     def __init__(self, parent, dispatcher):
         self.parent = parent
         self.dispatcher = dispatcher
-        self.requested_view_backend = "qt"
-        self.resolved_view_backend = "tk"
-        self.view_backend_fallback_reason = None
         self.model = ProductionLogCalculationsModel()
-        self.view = None
-        self.runtime_manager = QtModuleRuntimeManager("production_log_calculations", self.build_qt_session_payload)
-        self.view = create_production_log_calculations_view(parent, dispatcher, self)
-        if self.resolved_view_backend == "tk":
-            self.load_into_view()
+        self.view = ProductionLogCalculationsView(parent, dispatcher, self)
+        self.load_into_view()
 
     def get_editor_sections(self):
         return self.model.get_editor_sections()
@@ -45,29 +38,6 @@ class ProductionLogCalculationsController:
         if view is None:
             raise AttributeError(attribute_name)
         return getattr(view, attribute_name)
-
-    def build_qt_session_payload(self):
-        root = self.parent.winfo_toplevel()
-        return {
-            "window_title": "Production Log Calculations - Production Logging Center",
-            "title": "Production Log Calculations",
-            "subtitle": (
-                "Developer controls for named formulas and runtime calculation behavior in a dedicated PyQt6 window."
-            ),
-            "theme_tokens": dict(getattr(root, "_martin_theme_tokens", {}) or {}),
-        }
-
-    def open_or_raise_qt_window(self):
-        self.runtime_manager.ensure_running(force_restart=False)
-
-    def restart_qt_window(self):
-        self.runtime_manager.ensure_running(force_restart=True)
-
-    def stop_qt_window(self):
-        self.runtime_manager.stop_runtime(force=False)
-
-    def read_runtime_state(self):
-        return self.runtime_manager.read_state()
 
     def load_into_view(self):
         settings = self.model.reload_settings()
@@ -149,12 +119,18 @@ class ProductionLogCalculationsController:
         return f"{numeric_value:.2f}".rstrip("0").rstrip(".")
 
     def apply_theme(self):
-        if self.resolved_view_backend == "tk":
-            self.view.apply_theme()
+        apply_theme = getattr(self.view, "apply_theme", None)
+        if callable(apply_theme):
+            apply_theme()
 
     def on_hide(self):
+        on_hide = getattr(self.view, "on_hide", None)
+        if callable(on_hide):
+            return on_hide()
         return None
 
     def on_unload(self):
-        if self.resolved_view_backend == "qt":
-            self.stop_qt_window()
+        on_unload = getattr(self.view, "on_unload", None)
+        if callable(on_unload):
+            return on_unload()
+        return None

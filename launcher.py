@@ -146,11 +146,6 @@ def _run_qt_module_session_from_payload(session_path, session_payload):
 
         return run_layout_manager_qt_session(session_path)
 
-    if module_name == "production_log_calculations":
-        from app.views.production_log_calculations_qt_view import run_production_log_calculations_qt_session
-
-        return run_production_log_calculations_qt_session(session_path)
-
     if module_name == "production_log":
         from app.views.production_log_qt_view import run_production_log_qt_session
 

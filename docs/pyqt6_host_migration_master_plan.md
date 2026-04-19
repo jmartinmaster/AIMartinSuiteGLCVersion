@@ -269,8 +269,8 @@ Section 5E: Shared Boundary Validation
 
 ### Phase 6: Medium-Complexity Module Migration
 Recommended order:
-1. Rate Manager
-2. Production Log Calculations
+1. Rate Manager - Completed, Confirmed
+2. Production Log Calculations - Completed, Confirmed
 3. Developer Admin
 4. Security Admin
 5. Update Manager
@@ -278,6 +278,19 @@ Recommended order:
 Rules:
 1. Each migrated module must ship with parity for the same user-facing behavior and controller/model responsibilities as its Tk counterpart.
 2. No reduced-function Qt versions are acceptable.
+3. Every Qt viewport migration must explicitly support embedded mode when a viewport parent is supplied: attach the view to the parent container layout, clear top-level window behavior, and do not treat controller routing alone as sufficient.
+
+Section 6A: Rate Manager Migration
+1. Remove module-local runtime-manager, bridge-view, and JSON IPC/session entrypoint code from `rate_manager` while preserving search/filter behavior, shared-data publication, and add/edit/delete parity with the Tk path.
+2. Enable Rate Manager in the shared PyQt6 viewport and validate the default non-persistent lifecycle so it reloads cleanly without creating a sidecar runtime.
+3. Status: COMPLETED.
+4. Validation: `py_compile` passed for `app/rate_manager.py`, `app/controllers/app_controller.py`, `app/controllers/rate_manager_controller.py`, `app/controllers/rate_manager_qt_controller.py`, `app/views/rate_manager_qt_view.py`, `launcher.py`, and `scripts/validate_pyqt6_phase_gate.py`; `scripts/validate_module_loads.py rate_manager production_log help_viewer` passed; `scripts/validate_pyqt6_phase_gate.py` passed with the new `rate_manager_viewport_load` check covering embedded-mode load, shared-data sync, and clean reload behavior.
+
+Section 6B: Production Log Calculations Migration
+1. Remove module-local runtime-manager, bridge-view, and JSON IPC/session entrypoint code from `production_log_calculations` while preserving live preview updates, save/reload/defaults behavior, and the developer-facing formula editor parity from the Tk path.
+2. Enable Production Log Calculations in the shared PyQt6 viewport and preserve the host callbacks that save the active profile, notify open Production Log instances about changed calculation settings, publish host toasts, and navigate directly into Production Log.
+3. Status: COMPLETED.
+4. Validation: `py_compile` passed for `app/production_log_calculations.py`, `app/controllers/app_controller.py`, `app/controllers/production_log_calculations_controller.py`, `app/controllers/production_log_calculations_qt_controller.py`, `app/views/production_log_calculations_qt_view.py`, `launcher.py`, and `scripts/validate_pyqt6_phase_gate.py`; `scripts/validate_module_loads.py production_log rate_manager help_viewer` passed; `scripts/validate_pyqt6_phase_gate.py` passed with the new `production_log_calculations_viewport_load` check covering embedded-mode load, preview refresh, save notifications, host toast publication, host navigation, and clean reload behavior.
 
 ### Phase 7: Highest-Risk Module Migration
 Recommended order:
