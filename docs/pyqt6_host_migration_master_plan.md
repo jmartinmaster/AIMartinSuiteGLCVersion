@@ -271,9 +271,10 @@ Section 5E: Shared Boundary Validation
 Recommended order:
 1. Rate Manager - Completed, Confirmed
 2. Production Log Calculations - Completed, Confirmed
-3. Developer Admin
-4. Security Admin
-5. Update Manager
+3. Developer Admin - Completed, Confirmed
+4. Security Admin - Completed, Confirmed
+5. Update Manager - Completed, Confirmed
+
 
 Rules:
 1. Each migrated module must ship with parity for the same user-facing behavior and controller/model responsibilities as its Tk counterpart.
@@ -291,6 +292,12 @@ Section 6B: Production Log Calculations Migration
 2. Enable Production Log Calculations in the shared PyQt6 viewport and preserve the host callbacks that save the active profile, notify open Production Log instances about changed calculation settings, publish host toasts, and navigate directly into Production Log.
 3. Status: COMPLETED.
 4. Validation: `py_compile` passed for `app/production_log_calculations.py`, `app/controllers/app_controller.py`, `app/controllers/production_log_calculations_controller.py`, `app/controllers/production_log_calculations_qt_controller.py`, `app/views/production_log_calculations_qt_view.py`, `launcher.py`, and `scripts/validate_pyqt6_phase_gate.py`; `scripts/validate_module_loads.py production_log rate_manager help_viewer` passed; `scripts/validate_pyqt6_phase_gate.py` passed with the new `production_log_calculations_viewport_load` check covering embedded-mode load, preview refresh, save notifications, host toast publication, host navigation, and clean reload behavior.
+
+Section 6C: Developer Admin, Security Admin, and Update Manager Migration
+1. Migrate `developer_admin` and `security_admin` into the shared PyQt6 viewport through the shared Settings Manager Qt stack while preserving section-mode behavior, runtime settings refresh, external override policy application, security-session refresh, and default non-persistent reload semantics.
+2. Migrate `update_manager` into the shared PyQt6 viewport as an in-process Qt controller/view pair that reuses the host Update Manager behavior directly, preserves stable-update, payload-restore, documentation-restore, and advanced-source actions, and keeps the registry-defined always-persistent lifecycle.
+3. Status: COMPLETED.
+4. Validation: `py_compile` passed for `app/developer_admin.py`, `app/security_admin.py`, `app/update_manager.py`, `app/controllers/app_controller.py`, `app/controllers/settings_manager_qt_controller.py`, `app/views/settings_manager_qt_view.py`, `app/controllers/update_manager_controller.py`, `app/controllers/update_manager_qt_controller.py`, `app/views/update_manager_qt_view.py`, `launcher.py`, and `scripts/validate_pyqt6_phase_gate.py`; `scripts/validate_module_loads.py update_manager production_log` passed; `scripts/validate_pyqt6_phase_gate.py` passed with the `admin_modules_viewport_load` and `update_manager_viewport_load` checks covering embedded-mode load, host callback behavior, persistence semantics, and clean reload behavior.
 
 ### Phase 7: Highest-Risk Module Migration
 Recommended order:

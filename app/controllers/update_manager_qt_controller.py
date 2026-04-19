@@ -13,69 +13,191 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-import json
 import os
-import sys
-import time
 
-from app.app_identity import format_versioned_deb_name, format_versioned_exe_name
-from app.app_platform import get_platform_update_artifact_label
-from app.models.update_manager_model import UpdateManagerModel
+from app.controllers.update_manager_controller import UpdateManagerController
 from app.views.update_manager_qt_view import UpdateManagerQtView
 
 __module_name__ = "Update Manager Qt Controller"
-__version__ = "1.3.0"
+__version__ = "1.4.0"
 
 
-class UpdateManagerQtController:
-    def __init__(self, payload):
-        self.payload = dict(payload or {})
-        self.state_path = self.payload.get("state_path")
-        self.command_path = self.payload.get("command_path")
-        self.configured_repo_url = self.payload.get("configured_repo_url")
-        self.module_payload_options = list(self.payload.get("module_payload_options") or [])
-        self.documentation_payload_count = int(self.payload.get("documentation_payload_count") or 0)
-        self.advanced_dev_updates_enabled = bool(self.payload.get("advanced_dev_updates_enabled", False))
-        self.source_job_phase = str(self.payload.get("source_job_phase") or "idle")
-        self.source_job_detail = str(self.payload.get("source_job_detail") or "No update job is running.")
-        self.source_recovery_available = bool(self.payload.get("source_recovery_available", False))
-        self.source_build_log_path = str(self.payload.get("source_build_log_path") or "")
-        self.model = UpdateManagerModel()
-        self.stable_artifact_kind = str(self.payload.get("stable_artifact_kind") or "exe")
-        self.stable_artifact_label = str(self.payload.get("stable_artifact_label") or get_platform_update_artifact_label())
-        self.branch_name = "Unknown"
-        self.remote_info = {}
-        self.local_manifest = []
-        self.comparison_rows = []
-        self.job_phase = "Idle"
-        self.job_detail = "No update job is running."
-        self.selected_payload_key = ""
-        self.view = UpdateManagerQtView(self, self.payload)
-        self._initialize_payload_selection()
-        self.refresh_snapshot(initial=True)
+class SimpleVar:
+    def __init__(self, value="", on_change=None):
+        self._value = value
+        self._on_change = on_change
 
-    def _initialize_payload_selection(self):
-        default_option = next((option for option in self.module_payload_options if option.get("key") == "about"), None)
+    def get(self):
+        return self._value
+
+    def set(self, value):
+        self._value = value
+        if callable(self._on_change):
+            self._on_change()
+
+
+class UpdateManagerQtController(UpdateManagerController):
+    def __init__(self, parent=None, dispatcher=None):
+        self.parent = parent
+        self.dispatcher = dispatcher
+        self.requested_view_backend = "qt"
+        self.resolved_view_backend = "qt"
+        self.view_backend_fallback_reason = None
+        self.runtime_manager = None
+        self._last_runtime_event_timestamp = None
+        self._runtime_listener_registered = False
+        self.view = None
+        self._view_ready = False
+        self.model = self._create_model()
+        self.coordinator = self.dispatcher.update_coordinator
+        self.branch_name = self.coordinator.branch_name or self.model.detect_branch_name()
+        configured_repo_url = self.dispatcher.get_setting("update_repository_url", None)
+        self.remote_info = self.coordinator.remote_info if self.coordinator.remote_info.get("display") != "Unknown repository" else self.model.detect_remote_info(preferred_url=configured_repo_url)
+        self.local_manifest = self.coordinator.local_manifest
+        self.comparison_rows = self.coordinator.comparison_rows
+        self.status_var = self._create_var(self.coordinator.status_var.get() if hasattr(self.coordinator.status_var, "get") else "")
+        self.branch_var = self._create_var(self.coordinator.branch_var.get() if hasattr(self.coordinator.branch_var, "get") else "")
+        self.repo_var = self._create_var(self.coordinator.repo_var.get() if hasattr(self.coordinator.repo_var, "get") else "")
+        self.target_name_var = self._create_var(self.coordinator.target_name_var.get() if hasattr(self.coordinator.target_name_var, "get") else "")
+        self.local_version_var = self._create_var(self.coordinator.local_version_var.get() if hasattr(self.coordinator.local_version_var, "get") else "")
+        self.remote_version_var = self._create_var(self.coordinator.remote_version_var.get() if hasattr(self.coordinator.remote_version_var, "get") else "")
+        self.result_var = self._create_var(self.coordinator.result_var.get() if hasattr(self.coordinator.result_var, "get") else "")
+        self.note_var = self._create_var(self.coordinator.note_var.get() if hasattr(self.coordinator.note_var, "get") else "")
+        self.job_phase_var = self._create_var(self.coordinator.job_phase_var.get() if hasattr(self.coordinator.job_phase_var, "get") else "")
+        self.job_detail_var = self._create_var(self.coordinator.job_detail_var.get() if hasattr(self.coordinator.job_detail_var, "get") else "")
+        self.stable_artifact_kind = self._discover_stable_artifact_kind()
+        self.stable_artifact_label = self._discover_stable_artifact_label()
+        self.module_payload_options = self._discover_payload_options()
+        self.documentation_payload_options = self.model.discover_documentation_payload_options()
+        default_option = next((option for option in self.module_payload_options if option["key"] == "about"), None)
         if default_option is None and self.module_payload_options:
             default_option = self.module_payload_options[0]
-        self.selected_payload_key = str((default_option or {}).get("key") or "")
+        self.module_payload_selection_var = self._create_var(default_option["display"] if default_option else "No module payloads available")
+        self.module_payload_name_var = self._create_var(default_option["module_name"] if default_option else "No payload selected")
+        self.module_payload_path_var = self._create_var(default_option["relative_path"] if default_option else "Payload updates are not available.")
+        self.module_payload_local_version_var = self._create_var("Unknown")
+        self.module_payload_remote_version_var = self._create_var("Not checked")
+        self.module_payload_status_var = self._create_var("Pending")
+        self.module_payload_note_var = self._create_var(self._payload_boundary_note("Select a payload to compare against the repository."))
+        self.module_payload_in_progress = False
+        self.documentation_payload_tracked_var = self._create_var(f"{len(self.documentation_payload_options)} tracked file(s)")
+        self.documentation_payload_remote_state_var = self._create_var("Not checked")
+        self.documentation_payload_status_var = self._create_var("Pending")
+        self.documentation_payload_note_var = self._create_var("Documentation restores are grouped into one action so bundled help files can be refreshed without choosing individual documents.")
+        self.documentation_payload_in_progress = False
+        self.container = None
+        self.coordinator.branch_name = self.branch_name
+        self.coordinator.remote_info = self.remote_info
+        self.branch_var.set(self.branch_name or "Unknown")
+        self.repo_var.set(self.remote_info.get("display", "Unknown repository"))
+        payload = self._build_view_payload()
+        self.view = UpdateManagerQtView(self, payload, parent_widget=parent)
+        self._view_ready = True
+        if hasattr(self.dispatcher, "register_runtime_settings_listener"):
+            self.dispatcher.register_runtime_settings_listener(self._handle_runtime_settings_change)
+            self._runtime_listener_registered = True
+        self.refresh_local_manifest()
+        self.refresh_summary()
+        self.refresh_module_payload_summary()
+        if not self._updates_configured():
+            self.refresh_documentation_payload_summary(
+                remote_state="Not configured",
+                status="Unavailable",
+                note=self._update_configuration_note(),
+            )
+        else:
+            self.refresh_documentation_payload_summary(
+                remote_state="Not checked",
+                status="Pending",
+                note="Check and apply grouped documentation restores from the repository.",
+            )
+        self._render_from_state()
+        self.view.show()
 
-    def _stable_artifact_noun(self, plural=False):
-        if self.stable_artifact_kind == "exe":
-            return "executables" if plural else "executable"
-        if self.stable_artifact_kind == "deb":
-            return "packages" if plural else "package"
-        return "artifacts" if plural else "artifact"
+    def __getattr__(self, attribute_name):
+        view = self.__dict__.get("view")
+        if view is None:
+            raise AttributeError(attribute_name)
+        return getattr(view, attribute_name)
 
-    def _stable_artifact_status_label(self):
-        if self.stable_artifact_kind in {"exe", "deb"}:
-            return self.stable_artifact_kind.upper()
-        return "release"
+    def _create_model(self):
+        return self.model if hasattr(self, "model") else type(self).mro()[1].__dict__.get("model", None) or self.__class__.__mro__[1].__dict__.get("model", None) or __import__("app.models.update_manager_model", fromlist=["UpdateManagerModel"]).UpdateManagerModel(data_registry=getattr(self.dispatcher, "external_data_registry", None))
 
-    def _stable_artifact_name_for_version(self, version_text):
-        if self.stable_artifact_kind == "deb":
-            return format_versioned_deb_name(version_text)
-        return format_versioned_exe_name(version_text)
+    def _create_var(self, value=""):
+        return SimpleVar(value=value, on_change=self._render_from_state)
+
+    def _render_from_state(self):
+        if not self._view_ready or self.view is None:
+            return
+        selected_option = self._get_selected_module_payload_option()
+        selected_key = str((selected_option or {}).get("key") or "")
+        snapshot = {
+            "repository": self.repo_var.get() or "Unknown repository",
+            "branch": self.branch_var.get() or "Unknown",
+            "stable_artifact": self.stable_artifact_label,
+            "updates_configured": "Yes" if self._updates_configured() else "No",
+            "local_version": self.local_version_var.get() or "Unknown",
+            "remote_version": self.remote_version_var.get() or "Not checked",
+            "status": self.result_var.get() or "Pending",
+            "job_phase": self.job_phase_var.get() or "Idle",
+            "job_detail": self.job_detail_var.get() or "No update job is running.",
+            "summary_note": self.note_var.get() or "Run a repository check to compare the packaged release target.",
+            "configuration_note": self._update_configuration_note(),
+            "module_payloads": str(len(self.module_payload_options or [])),
+            "module_payload_selected": self.module_payload_name_var.get() or "No payload selected",
+            "module_payload_path": self.module_payload_path_var.get() or "Payload updates are not available.",
+            "documentation_payloads": self.documentation_payload_tracked_var.get() or "0 tracked file(s)",
+            "documentation_remote_state": self.documentation_payload_remote_state_var.get() or "Not checked",
+            "documentation_status": self.documentation_payload_status_var.get() or "Pending",
+            "documentation_note": self.documentation_payload_note_var.get() or "Check and apply grouped documentation restores from the repository.",
+            "advanced_channel_enabled": "Yes" if bool(self.dispatcher.get_setting("enable_advanced_dev_updates", False)) else "No",
+            "advanced_source_phase": str(self.coordinator.job_phase or "idle"),
+            "advanced_source_detail": str(self.coordinator.job_detail or "No update job is running."),
+            "advanced_recovery_available": "Yes" if self._has_recoverable_source_job() else "No",
+            "advanced_build_log": str(self.coordinator.source_build_log_path or "Not available"),
+            "note": "Embedded Qt viewport: stable, module payload, documentation payload, and advanced source operations now run in-process through the host dispatcher.",
+        }
+        self.view.render_snapshot(snapshot)
+        self.view.set_module_payload_options(self.module_payload_options, selected_key)
+
+    def _build_view_payload(self):
+        theme_tokens = dict(getattr(getattr(self.dispatcher, "view", None), "theme_tokens", {}) or {})
+        return {
+            "window_title": "Update Manager - Production Logging Center",
+            "title": "Update Manager",
+            "subtitle": "Manage stable releases, payload restores, and advanced source updates in the shared PyQt6 workspace.",
+            "theme_tokens": theme_tokens,
+        }
+
+    def _discover_stable_artifact_kind(self):
+        return self.coordinator.stable_artifact_kind if hasattr(self.coordinator, "stable_artifact_kind") and self.coordinator.stable_artifact_kind else getattr(type(self), "stable_artifact_kind", None) or __import__("app.app_platform", fromlist=["get_platform_update_artifact_kind"]).get_platform_update_artifact_kind()
+
+    def _discover_stable_artifact_label(self):
+        return self.coordinator.stable_artifact_label if hasattr(self.coordinator, "stable_artifact_label") and self.coordinator.stable_artifact_label else __import__("app.app_platform", fromlist=["get_platform_update_artifact_label"]).get_platform_update_artifact_label()
+
+    def _show_error_dialog(self, title, message):
+        self.view.show_error(title, message)
+
+    def _ask_yes_no_dialog(self, title, message):
+        return self.view.ask_yes_no(title, message)
+
+    def on_payload_selection_changed(self, payload_key):
+        payload_key = str(payload_key or "").strip().lower()
+        for option in self.module_payload_options:
+            if str(option.get("key") or "").strip().lower() == payload_key:
+                self.module_payload_selection_var.set(option.get("display", self.module_payload_selection_var.get()))
+                self.handle_module_payload_selection_change()
+                return
+
+    def refresh_snapshot(self, initial=False):
+        self.refresh_local_manifest()
+        self.refresh_summary()
+        self.refresh_module_payload_summary()
+        self._render_from_state()
+        return None
+
+    def apply_theme(self):
+        self.view.apply_theme(theme_tokens=self._build_view_payload().get("theme_tokens") or {})
 
     def show(self):
         self.view.show()
@@ -83,274 +205,27 @@ class UpdateManagerQtController:
         self.view.activateWindow()
 
     def write_state(self, status="ready", message="", dirty=False, runtime_event=None, metadata=None):
-        if not self.state_path:
-            return
-        payload = {
-            "status": status,
-            "dirty": bool(dirty),
-            "message": str(message or ""),
-            "module": "update_manager",
-            "updated_at": time.time(),
-        }
-        if runtime_event:
-            payload["runtime_event"] = str(runtime_event)
-        if isinstance(metadata, dict):
-            payload.update(metadata)
-        try:
-            with open(self.state_path, "w", encoding="utf-8") as handle:
-                json.dump(payload, handle, indent=2)
-        except Exception:
-            return
-
-    def _refresh_local_manifest(self):
-        dispatcher_module = sys.modules.get("main") or sys.modules.get("__main__")
-        self.local_manifest = self.model.build_local_manifest(dispatcher_module)
-
-    def _refresh_remote_target(self):
-        self.branch_name = self.model.detect_branch_name() or "Unknown"
-        self.remote_info = self.model.detect_remote_info(preferred_url=self.configured_repo_url)
-
-    def _updates_configured(self):
-        return self.model.remote_updates_available(self.remote_info, self.branch_name)
-
-    def _latest_row(self):
-        return self.comparison_rows[0] if self.comparison_rows else None
-
-    def refresh_snapshot(self, initial=False):
-        self._refresh_remote_target()
-        self._refresh_local_manifest()
-        configured = self._updates_configured()
-        row = self._latest_row()
-        local_version = (self.local_manifest[0].get("local_version") if self.local_manifest else "Unknown")
-        remote_version = row.get("remote_version", "Not checked") if row else "Not checked"
-        status_text = row.get("status", "Pending") if row else ("Pending" if configured else "Unavailable")
-
-        note_text = self.model.update_configuration_note(self.remote_info)
-        if configured:
-            if row and row.get("update_available"):
-                note_text = f"A newer stable {self._stable_artifact_noun()} target is available from the repository branch."
-            elif row:
-                note_text = f"No newer stable {self._stable_artifact_noun()} target is available right now."
-            else:
-                note_text = "Run a repository check to compare the packaged release target."
-
-        snapshot = {
-            "repository": self.remote_info.get("display", "Unknown repository"),
-            "branch": self.branch_name,
-            "stable_artifact": self.stable_artifact_label,
-            "updates_configured": "Yes" if configured else "No",
-            "local_version": local_version,
-            "remote_version": remote_version,
-            "status": status_text,
-            "job_phase": self.job_phase,
-            "job_detail": self.job_detail,
-            "configuration_note": self.model.update_configuration_note(self.remote_info),
-            "module_payloads": str(len(self.model.discover_module_payload_options(None))),
-            "documentation_payloads": str(self.documentation_payload_count),
-            "documentation_remote_state": "Not checked",
-            "documentation_status": "Pending",
-            "documentation_note": "Check and apply grouped documentation restores from the repository.",
-            "advanced_channel_enabled": "Yes" if self.advanced_dev_updates_enabled else "No",
-            "advanced_source_phase": self.source_job_phase,
-            "advanced_source_detail": self.source_job_detail,
-            "advanced_recovery_available": "Yes" if self.source_recovery_available else "No",
-            "advanced_build_log": self.source_build_log_path or "Not available",
-            "note": (
-                "Slice 4 Qt sidecar: stable, module payload, documentation payload, and advanced source operations are available via host runtime requests."
-            ),
-            "summary_note": note_text,
-        }
-        selected_option = self._get_selected_payload_option()
-        snapshot["module_payload_selected"] = selected_option.get("module_name") if selected_option else "No payload selected"
-        snapshot["module_payload_path"] = selected_option.get("relative_path") if selected_option else "Payload updates are not available."
-        self.view.render_snapshot(snapshot)
-        self.view.set_module_payload_options(self.module_payload_options, self.selected_payload_key)
-        message = "Update Manager Qt window ready." if initial else "Refreshed Update Manager snapshot."
-        self.write_state(status="ready", message=message)
-
-    def _get_selected_payload_option(self):
-        selected_key = str(self.selected_payload_key or "").strip().lower()
-        if not selected_key:
-            return None
-        for option in self.module_payload_options:
-            if str(option.get("key") or "").strip().lower() == selected_key:
-                return option
-        return None
-
-    def on_payload_selection_changed(self, payload_key):
-        self.selected_payload_key = str(payload_key or "").strip()
-        option = self._get_selected_payload_option()
-        if option:
-            self.write_state(status="ready", message=f"Selected payload: {option.get('module_name', self.selected_payload_key)}.", dirty=True)
-
-    def request_check_module_payload(self):
-        option = self._get_selected_payload_option()
-        if option is None:
-            self.view.show_info("Update Manager", "No module payload is selected.")
-            return
-        self.write_state(
-            status="ready",
-            message=f"Requested payload check for {option.get('module_name')}.",
-            runtime_event="check_module_payload_requested",
-            metadata={"payload_key": self.selected_payload_key},
-        )
-        self.view.show_info("Update Manager", "Module payload check was requested in the host runtime.")
-
-    def request_apply_module_payload(self):
-        option = self._get_selected_payload_option()
-        if option is None:
-            self.view.show_info("Update Manager", "No module payload is selected.")
-            return
-        self.write_state(
-            status="ready",
-            message=f"Requested payload install for {option.get('module_name')}.",
-            runtime_event="apply_module_payload_requested",
-            metadata={"payload_key": self.selected_payload_key},
-        )
-        self.view.show_info("Update Manager", "Module payload install was requested in the host runtime.")
-
-    def request_apply_all_module_payloads(self):
-        self.write_state(
-            status="ready",
-            message="Requested install for all available module payload updates.",
-            runtime_event="apply_all_module_payload_updates_requested",
-        )
-        self.view.show_info("Update Manager", "Bulk module payload install was requested in the host runtime.")
-
-    def request_check_documentation_payload_updates(self):
-        self.write_state(
-            status="ready",
-            message="Requested documentation payload check.",
-            runtime_event="check_documentation_payload_updates_requested",
-        )
-        self.view.show_info("Update Manager", "Documentation restore check was requested in the host runtime.")
-
-    def request_apply_documentation_payload_updates(self):
-        self.write_state(
-            status="ready",
-            message="Requested grouped documentation payload restore.",
-            runtime_event="apply_documentation_payload_updates_requested",
-        )
-        self.view.show_info("Update Manager", "Documentation restore install was requested in the host runtime.")
-
-    def request_start_advanced_source_update(self):
-        self.write_state(
-            status="ready",
-            message="Requested advanced source update start.",
-            runtime_event="start_advanced_source_update_requested",
-        )
-        self.view.show_info("Update Manager", "Advanced source update start was requested in the host runtime.")
-
-    def request_retry_source_job(self):
-        self.write_state(
-            status="ready",
-            message="Requested retry for source update job.",
-            runtime_event="retry_source_job_requested",
-        )
-        self.view.show_info("Update Manager", "Source update retry was requested in the host runtime.")
-
-    def request_cleanup_source_job(self):
-        self.write_state(
-            status="ready",
-            message="Requested cleanup for source update job artifacts.",
-            runtime_event="cleanup_source_job_requested",
-        )
-        self.view.show_info("Update Manager", "Source update cleanup was requested in the host runtime.")
-
-    def request_open_source_build_log(self):
-        self.write_state(
-            status="ready",
-            message="Requested open source build log.",
-            runtime_event="open_source_build_log_requested",
-        )
-        self.view.show_info("Update Manager", "Open source build log request was sent to the host runtime.")
-
-    def check_repository(self):
-        self.job_phase = "Checking"
-        self.job_detail = f"Checking the repository for newer stable {self._stable_artifact_noun(plural=True)}."
-        self.refresh_snapshot(initial=False)
-
-        if not self._updates_configured():
-            self.comparison_rows = []
-            self.job_phase = "Idle"
-            self.job_detail = self.model.update_configuration_note(self.remote_info)
-            self.refresh_snapshot(initial=False)
-            return
-
-        try:
-            self.comparison_rows = self.model.build_stable_update_rows(
-                self.local_manifest,
-                self.remote_info,
-                self.branch_name,
-                self.stable_artifact_kind,
-                self._stable_artifact_name_for_version,
-                self._stable_artifact_status_label(),
-            )
-        except Exception as exc:
-            self.job_phase = "Failed"
-            self.job_detail = f"Repository check failed: {exc}"
-            self.refresh_snapshot(initial=False)
-            self.view.show_error("Update Manager", f"Could not check repository updates:\n{exc}")
-            return
-
-        available_count = sum(1 for row in self.comparison_rows if row.get("update_available"))
-        if available_count:
-            self.job_phase = "Ready"
-            self.job_detail = f"{available_count} stable {self._stable_artifact_noun(plural=True)} are ready."
-        else:
-            self.job_phase = "Idle"
-            self.job_detail = f"No stable {self._stable_artifact_noun(plural=True)} are ready."
-        self.refresh_snapshot(initial=False)
-
-    def request_apply_stable_updates(self):
-        if not self.comparison_rows:
-            self.check_repository()
-
-        update_rows = [row for row in self.comparison_rows if row.get("update_available")]
-        if not update_rows:
-            self.view.show_info("Update Manager", f"No stable {self._stable_artifact_noun(plural=True)} are available to apply.")
-            return
-
-        self.job_phase = "Applying"
-        self.job_detail = f"Requested stable {self._stable_artifact_noun()} apply in the host runtime."
-        self.refresh_snapshot(initial=False)
-        self.write_state(
-            status="ready",
-            message="Requested stable update apply from Qt sidecar.",
-            runtime_event="apply_stable_updates_requested",
-            metadata={
-                "remote_version": str(update_rows[0].get("remote_version") or "Unknown"),
-                "stable_artifact_label": self.stable_artifact_label,
-            },
-        )
-        self.view.show_info(
-            "Update Manager",
-            (
-                "Stable update apply was requested. The host runtime handles download/installer launch, "
-                "and may close the app when handoff begins."
-            ),
-        )
+        _ = status
+        _ = message
+        _ = dirty
+        _ = runtime_event
+        _ = metadata
+        self._render_from_state()
 
     def poll_commands(self):
-        if not self.command_path or not os.path.exists(self.command_path):
-            return
-        try:
-            with open(self.command_path, "r", encoding="utf-8") as handle:
-                payload = json.load(handle)
-        except Exception:
-            payload = {}
-        try:
-            os.remove(self.command_path)
-        except OSError:
-            pass
-
-        action = str(payload.get("action") or "").strip().lower()
-        if action == "raise_window":
-            self.show()
-            self.write_state(status="ready", message="Raised Update Manager Qt window.")
-        elif action == "close_window":
-            self.handle_close()
-            self.view.close()
+        return None
 
     def handle_close(self):
-        self.write_state(status="closed", message="Update Manager Qt window closed.")
+        return None
+
+    def on_hide(self):
+        return None
+
+    def on_unload(self):
+        if self._runtime_listener_registered:
+            self.dispatcher.unregister_runtime_settings_listener(self._handle_runtime_settings_change)
+            self._runtime_listener_registered = False
+        try:
+            self.view.close()
+        except Exception:
+            pass

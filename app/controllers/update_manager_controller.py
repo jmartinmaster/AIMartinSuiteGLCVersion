@@ -39,6 +39,12 @@ DANGER = "danger"
 class UpdateManagerController:
     SUCCESS_BANNER_AUTOHIDE_MS = 5000
 
+    def _show_error_dialog(self, title, message):
+        Messagebox.show_error(str(message), str(title))
+
+    def _ask_yes_no_dialog(self, title, message):
+        return bool(messagebox.askyesno(str(title), str(message)))
+
     def __init__(self, parent, dispatcher):
         self.parent = parent
         self.dispatcher = dispatcher
@@ -395,7 +401,7 @@ class UpdateManagerController:
         try:
             os.startfile(log_path)
         except Exception as exc:
-            Messagebox.show_error(f"Could not open the source build log:\n\n{exc}", "Build Log Error")
+            self._show_error_dialog("Build Log Error", f"Could not open the source build log:\n\n{exc}")
 
     def cleanup_source_job(self):
         if self.coordinator.download_in_progress or self.coordinator.source_job_in_progress:
@@ -403,7 +409,7 @@ class UpdateManagerController:
             return
 
         if self.coordinator.source_root_dir and os.path.isdir(self.coordinator.source_root_dir):
-            if not messagebox.askyesno(
+            if not self._ask_yes_no_dialog(
                 "Cleanup Source Job",
                 (
                     "A recovered staged source tree is still present for this advanced update.\n\n"
@@ -573,7 +579,7 @@ class UpdateManagerController:
             )
             self.dispatcher.set_update_status("Documentation restore completed with errors.", WARNING, active=True, mode="module")
             failure_lines = [f"{item['option']['module_name']}: {item['error']}" for item in failed_items]
-            Messagebox.show_error("Could not restore all documentation files:\n\n" + "\n".join(failure_lines), "Documentation Restore Error")
+            self._show_error_dialog("Documentation Restore Error", "Could not restore all documentation files:\n\n" + "\n".join(failure_lines))
             if installed_count:
                 self.dispatcher.show_toast("Update Manager", f"Installed {installed_count} documentation file(s), but {failed_count} failed.", WARNING)
             return
@@ -606,7 +612,7 @@ class UpdateManagerController:
             option=option,
         )
         self.dispatcher.set_update_status(f"{option['module_name']} payload install failed.", DANGER, active=True, mode="module")
-        Messagebox.show_error(f"Could not install the {option['module_name']} payload:\n\n{exc}", "Module Payload Error")
+        self._show_error_dialog("Module Payload Error", f"Could not install the {option['module_name']} payload:\n\n{exc}")
 
     def _install_documentation_payload_option(self, option, remote_text=None):
         return self.model.install_documentation_payload(option, self.remote_info, self.branch_name, remote_text=remote_text)
@@ -752,7 +758,7 @@ class UpdateManagerController:
             self.status_var.set(f"Installed {installed_count} payload(s). {failed_count} failed.")
             self.dispatcher.set_update_status("Module payload bulk install completed with errors.", WARNING, active=True, mode="module")
             failure_lines = [f"{item['option']['module_name']}: {item['error']}" for item in failed_items]
-            Messagebox.show_error("Could not install all available payloads:\n\n" + "\n".join(failure_lines), "Bulk Module Payload Error")
+            self._show_error_dialog("Bulk Module Payload Error", "Could not install all available payloads:\n\n" + "\n".join(failure_lines))
             if installed_count:
                 self.dispatcher.show_toast("Update Manager", f"Installed {installed_count} payload(s), but {failed_count} failed.", WARNING)
             return
@@ -867,7 +873,7 @@ class UpdateManagerController:
             try:
                 handoff_result = self.model.launch_ubuntu_package_install(downloaded_path, target_version=remote_version)
             except Exception as exc:
-                Messagebox.show_error(f"The updated package was downloaded but the Ubuntu installer could not be started:\n\n{exc}", "Install Error")
+                self._show_error_dialog("Install Error", f"The updated package was downloaded but the Ubuntu installer could not be started:\n\n{exc}")
                 self.status_var.set("Update package downloaded, but Ubuntu could not start the installer.")
                 self.coordinator.set_job_phase("failed", "Stable update package downloaded, but starting the Ubuntu installer failed.", mode="stable")
                 self.dispatcher.set_update_status("Stable update package downloaded, but Ubuntu could not start the installer.", DANGER, active=True, mode="stable")
@@ -891,7 +897,7 @@ class UpdateManagerController:
         try:
             os.startfile(downloaded_path)
         except Exception as exc:
-            Messagebox.show_error(f"The updated {self._stable_artifact_noun()} was downloaded but could not be launched:\n\n{exc}", "Launch Error")
+            self._show_error_dialog("Launch Error", f"The updated {self._stable_artifact_noun()} was downloaded but could not be launched:\n\n{exc}")
             self.status_var.set(f"{self.stable_artifact_label} downloaded, but it could not be launched.")
             self.coordinator.set_job_phase("failed", f"Stable {self._stable_artifact_noun()} downloaded, but launching it failed.", mode="stable")
             self.dispatcher.set_update_status(f"Stable {self._stable_artifact_noun()} downloaded, but launching it failed.", DANGER, active=True, mode="stable")
@@ -911,7 +917,7 @@ class UpdateManagerController:
         self.status_var.set(f"{self.stable_artifact_label} update download failed.")
         self.coordinator.set_job_phase("failed", f"Stable {self._stable_artifact_noun()} update download failed.", mode="stable")
         self.dispatcher.set_update_status(f"Stable {self._stable_artifact_noun()} update download failed.", DANGER, active=True, mode="stable")
-        Messagebox.show_error(f"Could not download the updated {self._stable_artifact_noun()}:\n\n{exc}", "Update Error")
+        self._show_error_dialog("Update Error", f"Could not download the updated {self._stable_artifact_noun()}:\n\n{exc}")
 
     def _resolve_download_directory(self):
         return self.model.resolve_download_directory()
@@ -1182,10 +1188,7 @@ class UpdateManagerController:
                 f"Download {target_name} to {download_directory} and start the Ubuntu package update?\n\n"
                 "If a matching Ubuntu package source is already configured, the updater will prefer that apt upgrade path. Otherwise it will install the downloaded DEB directly while this source session stays open."
             )
-        if not messagebox.askyesno(
-            "Download And Apply Update",
-            prompt_text,
-        ):
+        if not self._ask_yes_no_dialog("Download And Apply Update", prompt_text):
             return
 
         self.coordinator.download_in_progress = True

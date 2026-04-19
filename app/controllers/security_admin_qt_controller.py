@@ -16,8 +16,12 @@
 from app.controllers.settings_manager_qt_controller import SettingsManagerQtController
 
 __module_name__ = "Security Admin Qt Controller"
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 
 class SecurityAdminQtController(SettingsManagerQtController):
-    pass
+    def __init__(self, payload=None, parent=None, dispatcher=None):
+        self.module_name = "security_admin"
+        self.module_title = "Security Admin"
+        self.section_mode = "security_admin"
+        super().__init__(payload=payload, parent=parent, dispatcher=dispatcher)

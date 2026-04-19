@@ -1,0 +1,163 @@
+[
+  {
+    "name": "active_navigation_state",
+    "ok": true,
+    "details": {
+      "active_module": "help_viewer",
+      "controller_class": "HelpViewerQtController",
+      "runtime_managers": []
+    }
+  },
+  {
+    "name": "help_viewer_viewport_restore",
+    "ok": true,
+    "details": {
+      "active_doc_path": "docs/help/layout_config.md",
+      "document_scroll": 0,
+      "persistent_modules": [
+        "about",
+        "help_viewer"
+      ]
+    }
+  },
+  {
+    "name": "recovery_viewer_viewport_restore",
+    "ok": true,
+    "details": {
+      "selected_record_key": [
+        "snapshot",
+        "C:/phase-gate/history/phase-gate-snapshot.json",
+        "phase-gate-draft.json"
+      ],
+      "persistent_modules": [
+        "about",
+        "help_viewer",
+        "recovery_viewer"
+      ]
+    }
+  },
+  {
+    "name": "recovery_viewer_active_form_refresh",
+    "ok": true,
+    "details": {
+      "refresh_calls": 1,
+      "persistent_modules": [
+        "about",
+        "help_viewer",
+        "recovery_viewer"
+      ]
+    }
+  },
+  {
+    "name": "rate_manager_viewport_load",
+    "ok": true,
+    "details": {
+      "initial_search_text": "phase-gate-rate-filter",
+      "reloaded_search_text": "",
+      "rates_count": 302,
+      "persistent_modules": [
+        "about",
+        "help_viewer",
+        "recovery_viewer"
+      ]
+    }
+  },
+  {
+    "name": "production_log_calculations_viewport_load",
+    "ok": true,
+    "details": {
+      "preview_line_count": 17,
+      "toast_calls": 1,
+      "notification_calls": 1,
+      "navigation_calls": 1,
+      "persistent_modules": [
+        "about",
+        "help_viewer",
+        "recovery_viewer"
+      ]
+    }
+  },
+  {
+    "name": "admin_modules_viewport_load",
+    "ok": false,
+    "error": "Developer Admin save did not push the expected override-trust value.",
+    "traceback": "Traceback (most recent call last):\n  File \"C:\\Users\\jamie\\OneDrive\\Personel\\Documents\\AI-Martin\\AIMartinSuiteGLCVersion\\scripts\\validate_pyqt6_phase_gate.py\", line 898, in run_checks\n    details = check_callable(dispatcher, host_shell, event_log)\n  File \"C:\\Users\\jamie\\OneDrive\\Personel\\Documents\\AI-Martin\\AIMartinSuiteGLCVersion\\scripts\\validate_pyqt6_phase_gate.py\", line 593, in check_admin_modules_viewport_load\n    assert_true(trust_calls and trust_calls[-1] is expected_trust, \"Developer Admin save did not push the expected override-trust value.\")\n    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\jamie\\OneDrive\\Personel\\Documents\\AI-Martin\\AIMartinSuiteGLCVersion\\scripts\\validate_pyqt6_phase_gate.py\", line 155, in assert_true\n    raise ValidationError(message)\nValidationError: Developer Admin save did not push the expected override-trust value.\n"
+  },
+  {
+    "name": "update_manager_viewport_load",
+    "ok": false,
+    "error": "Update Manager was cached unexpectedly during unload validation.",
+    "traceback": "Traceback (most recent call last):\n  File \"C:\\Users\\jamie\\OneDrive\\Personel\\Documents\\AI-Martin\\AIMartinSuiteGLCVersion\\scripts\\validate_pyqt6_phase_gate.py\", line 898, in run_checks\n    details = check_callable(dispatcher, host_shell, event_log)\n  File \"C:\\Users\\jamie\\OneDrive\\Personel\\Documents\\AI-Martin\\AIMartinSuiteGLCVersion\\scripts\\validate_pyqt6_phase_gate.py\", line 678, in check_update_manager_viewport_load\n    assert_true(\"update_manager\" not in dispatcher.persistent_module_instances, \"Update Manager was cached unexpectedly during unload validation.\")\n    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\jamie\\OneDrive\\Personel\\Documents\\AI-Martin\\AIMartinSuiteGLCVersion\\scripts\\validate_pyqt6_phase_gate.py\", line 155, in assert_true\n    raise ValidationError(message)\nValidationError: Update Manager was cached unexpectedly during unload validation.\n"
+  },
+  {
+    "name": "persistent_hide_restore",
+    "ok": true,
+    "details": {
+      "hide_calls": 1,
+      "persistent_modules": [
+        "__phase_gate_persistent__",
+        "about",
+        "help_viewer",
+        "recovery_viewer",
+        "update_manager"
+      ]
+    }
+  },
+  {
+    "name": "non_persistent_unload",
+    "ok": true,
+    "details": {
+      "unload_calls": 1,
+      "persistent_modules": [
+        "__phase_gate_persistent__",
+        "about",
+        "help_viewer",
+        "recovery_viewer",
+        "update_manager"
+      ]
+    }
+  },
+  {
+    "name": "theme_application",
+    "ok": true,
+    "details": {
+      "theme_name": "martin_modern_light",
+      "apply_theme_calls": 4
+    }
+  },
+  {
+    "name": "active_form_notifications",
+    "ok": true,
+    "details": {
+      "external_listener_events": 1,
+      "hidden_listener_events": 1
+    }
+  },
+  {
+    "name": "protected_security_behavior",
+    "ok": true,
+    "details": {
+      "auth_calls": [
+        {
+          "module_name": "layout_manager",
+          "reason": "Unlock Layout Manager to continue.",
+          "force_reauth": false
+        }
+      ],
+      "visible_buttons": [
+        "layout_manager",
+        "rate_manager"
+      ]
+    }
+  },
+  {
+    "name": "mixed_viewport_sidecar_coexistence",
+    "ok": true,
+    "details": {
+      "runtime_managers": [
+        "production_log"
+      ],
+      "active_module": "recovery_viewer"
+    }
+  }
+]

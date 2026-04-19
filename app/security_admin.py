@@ -14,10 +14,14 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 from app.controllers.security_admin_controller import SecurityAdminController
+from app.controllers.security_admin_qt_controller import SecurityAdminQtController
 
 __module_name__ = "Security Admin"
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 
 def get_ui(parent, dispatcher):
+    should_use_qt_in_viewport = getattr(dispatcher, "should_use_qt_in_viewport", None)
+    if callable(should_use_qt_in_viewport) and should_use_qt_in_viewport("security_admin"):
+        return SecurityAdminQtController(parent=parent, dispatcher=dispatcher)
     return SecurityAdminController(parent, dispatcher)

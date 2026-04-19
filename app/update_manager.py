@@ -14,10 +14,14 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 from app.controllers.update_manager_controller import UpdateManagerController
+from app.controllers.update_manager_qt_controller import UpdateManagerQtController
 
 __module_name__ = "Update Manager"
-__version__ = "2.1.5"
+__version__ = "2.1.6"
 
 
 def get_ui(parent, dispatcher):
+    should_use_qt_in_viewport = getattr(dispatcher, "should_use_qt_in_viewport", None)
+    if callable(should_use_qt_in_viewport) and should_use_qt_in_viewport("update_manager"):
+        return UpdateManagerQtController(parent=parent, dispatcher=dispatcher)
     return UpdateManagerController(parent, dispatcher)

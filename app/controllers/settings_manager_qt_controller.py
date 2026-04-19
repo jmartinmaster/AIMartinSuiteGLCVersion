@@ -17,20 +17,24 @@ import json
 import os
 import time
 
-from app.downtime_codes import DEFAULT_DT_CODE_MAP
+from app.downtime_codes import DEFAULT_DT_CODE_MAP, clear_downtime_code_cache
 from app.models.security_model import ACCESS_RIGHTS, ROLE_DEFAULT_RIGHTS, ROLE_LIMITS, normalize_role, role_requires_password
 from app.security import gatekeeper
-from app.theme_manager import get_theme_label
+from app.theme_manager import get_theme_label, get_theme_names, normalize_theme
 from app.models.settings_manager_model import SettingsManagerModel
 from app.views.settings_manager_qt_view import SettingsManagerQtView
 
 __module_name__ = "Settings Manager Qt Controller"
-__version__ = "1.4.0"
+__version__ = "1.5.0"
 
 
 class SettingsManagerQtController:
-    def __init__(self, payload):
-        self.payload = dict(payload or {})
+    def __init__(self, payload=None, parent=None, dispatcher=None):
+        payload = dict(payload or {}) if isinstance(payload, dict) else {}
+        self.parent = parent
+        self.dispatcher = dispatcher
+        self.embedded = dispatcher is not None
+        self.payload = payload if not self.embedded else self._build_view_payload()
         self.module_name = str(self.payload.get("module_name") or self.payload.get("module") or "settings_manager")
         self.module_title = str(self.payload.get("title") or "Settings Manager")
         self.section_mode = str(self.payload.get("section_mode") or "full")
@@ -45,8 +49,66 @@ class SettingsManagerQtController:
             [item.get("module_name") for item in self.navigation_modules],
             [item.get("module_name") for item in self.persistable_modules],
         )
-        self.view = SettingsManagerQtView(self, self.payload)
+        self._security_listener_registered = False
+        self.view = SettingsManagerQtView(self, self.payload, parent_widget=parent)
+        if self.embedded and hasattr(self.dispatcher, "add_security_session_listener"):
+            self.dispatcher.add_security_session_listener(self.on_security_session_changed)
+            self._security_listener_registered = True
         self.refresh_snapshot(initial=True)
+        if self.embedded:
+            self.view.show()
+
+    def __getattr__(self, attribute_name):
+        view = self.__dict__.get("view")
+        if view is None:
+            raise AttributeError(attribute_name)
+        return getattr(view, attribute_name)
+
+    def _build_view_payload(self):
+        navigation_modules = list(self.dispatcher.get_navigation_modules()) if self.dispatcher is not None else []
+        persistable_modules = list(self.dispatcher.get_persistable_modules()) if self.dispatcher is not None else []
+        section_label = {
+            "developer_admin": "Developer administration",
+            "security_admin": "Security administration",
+        }.get(self.section_mode if hasattr(self, "section_mode") else str((self.payload or {}).get("section_mode") or "full"), "Settings administration")
+        theme_tokens = dict(getattr(getattr(self.dispatcher, "view", None), "theme_tokens", {}) or {}) if self.dispatcher is not None else {}
+        return {
+            "window_title": f"{self.module_title if hasattr(self, 'module_title') else str((self.payload or {}).get('title') or 'Settings Manager')} - Production Logging Center",
+            "title": self.module_title if hasattr(self, "module_title") else str((self.payload or {}).get("title") or "Settings Manager"),
+            "subtitle": f"Qt viewport editor for {section_label.lower()}.",
+            "module_name": self.module_name if hasattr(self, "module_name") else str((self.payload or {}).get("module_name") or "settings_manager"),
+            "section_mode": self.section_mode if hasattr(self, "section_mode") else str((self.payload or {}).get("section_mode") or "full"),
+            "theme_options": [{"key": theme_name, "label": get_theme_label(theme_name)} for theme_name in get_theme_names()],
+            "navigation_modules": [
+                {
+                    "display_name": display_name,
+                    "module_name": module_name,
+                }
+                for display_name, module_name in navigation_modules
+            ],
+            "persistable_modules": [
+                {
+                    "display_name": display_name,
+                    "module_name": module_name,
+                }
+                for display_name, module_name in persistable_modules
+            ],
+            "theme_tokens": theme_tokens,
+            "external_modules_status": self._resolve_external_modules_status(),
+        }
+
+    def _resolve_external_modules_status(self):
+        dispatcher = self.dispatcher
+        if dispatcher is None:
+            return self.external_modules_status or ""
+        if not dispatcher.has_external_modules_directory():
+            return "External module overrides are unavailable until override files exist next to the app."
+        module_names = dispatcher.get_external_module_override_names()
+        if module_names:
+            if dispatcher.is_external_module_override_trust_enabled():
+                return f"External overrides are trusted and active. Available overrides: {', '.join(module_names)}"
+            return f"External overrides exist but are inactive until an admin enables override trust. Available files: {', '.join(module_names)}"
+        return "Override-capable application folder detected. No module override files were found, so bundled modules stay in use."
 
     def show(self):
         self.view.show()
@@ -75,6 +137,17 @@ class SettingsManagerQtController:
 
     def refresh_snapshot(self, initial=False):
         self.model.settings = self.model.load_settings()
+        if self.embedded:
+            self.theme_options = [{"key": theme_name, "label": get_theme_label(theme_name)} for theme_name in get_theme_names()]
+            self.navigation_modules = [
+                {"display_name": display_name, "module_name": module_name}
+                for display_name, module_name in self.dispatcher.get_navigation_modules()
+            ]
+            self.persistable_modules = [
+                {"display_name": display_name, "module_name": module_name}
+                for display_name, module_name in self.dispatcher.get_persistable_modules()
+            ]
+            self.external_modules_status = self._resolve_external_modules_status()
         self.model.set_valid_modules(
             [item.get("module_name") for item in self.navigation_modules],
             [item.get("module_name") for item in self.persistable_modules],
@@ -115,6 +188,9 @@ class SettingsManagerQtController:
         self.view.configure_developer_admin_tools(self.get_developer_admin_settings_state())
         message = f"{self.module_title} Qt window ready." if initial else f"Refreshed {self.module_title} snapshot."
         self.write_state(status="ready", message=message)
+
+    def on_security_session_changed(self, _event_name=None):
+        self.refresh_snapshot(initial=False)
 
     def on_form_changed(self):
         self.write_state(status="ready", message="Edited settings fields.", dirty=True)
@@ -405,6 +481,28 @@ class SettingsManagerQtController:
         self._write_saved_runtime_state("Saved developer settings successfully.", metadata=metadata)
         self.refresh_snapshot(initial=False)
 
+    def _apply_saved_runtime_effects(self, metadata):
+        if not self.embedded or self.dispatcher is None:
+            return
+        clear_downtime_code_cache()
+        requested_theme = normalize_theme((metadata or {}).get("applied_theme", self.model.saved_theme))
+        applied_theme = self.dispatcher.apply_theme(requested_theme)
+        self.model.load_settings()
+        self.model.preview_theme = applied_theme
+        if bool((metadata or {}).get("refresh_runtime_settings", True)):
+            self.dispatcher.refresh_runtime_settings()
+        if bool((metadata or {}).get("apply_external_override_policy_change", False)):
+            try:
+                self.dispatcher.apply_external_override_policy_change()
+            except Exception:
+                pass
+        active_module = getattr(self.dispatcher, "active_module_instance", None)
+        if bool((metadata or {}).get("refresh_downtime_codes", True)) and hasattr(active_module, "refresh_downtime_codes"):
+            try:
+                active_module.refresh_downtime_codes()
+            except Exception:
+                pass
+
     def _write_saved_runtime_state(self, message, metadata=None):
         base_metadata = {
             "applied_theme": str(self.model.saved_theme or ""),
@@ -413,6 +511,10 @@ class SettingsManagerQtController:
         }
         if isinstance(metadata, dict):
             base_metadata.update(metadata)
+        if self.embedded:
+            self._apply_saved_runtime_effects(base_metadata)
+            self.write_state(status="ready", message=str(message or "Saved settings successfully."), dirty=False)
+            return
         self.write_state(
             status="ready",
             message=str(message or "Saved settings successfully."),
@@ -422,6 +524,8 @@ class SettingsManagerQtController:
         )
 
     def poll_commands(self):
+        if self.embedded:
+            return
         if not self.command_path or not os.path.exists(self.command_path):
             return
         try:
@@ -443,4 +547,23 @@ class SettingsManagerQtController:
             self.view.close()
 
     def handle_close(self):
+        if self.embedded:
+            return None
         self.write_state(status="closed", message="Settings Manager Qt window closed.")
+
+    def apply_theme(self):
+        if self.dispatcher is not None:
+            self.payload["theme_tokens"] = dict(getattr(getattr(self.dispatcher, "view", None), "theme_tokens", {}) or {})
+        self.view.apply_theme(theme_tokens=self.payload.get("theme_tokens") or {})
+
+    def on_hide(self):
+        return None
+
+    def on_unload(self):
+        if self._security_listener_registered and hasattr(self.dispatcher, "remove_security_session_listener"):
+            self.dispatcher.remove_security_session_listener(self.on_security_session_changed)
+            self._security_listener_registered = False
+        try:
+            self.view.close()
+        except Exception:
+            pass

@@ -93,12 +93,14 @@ def load_settings_manager_qt_session(session_path):
 
 
 class SettingsManagerQtView(QMainWindow):
-    def __init__(self, controller, payload):
+    def __init__(self, controller, payload, parent_widget=None):
         if not PYQT6_AVAILABLE:
             raise RuntimeError("PyQt6 is not installed in the active Python environment.")
-        super().__init__()
+        super().__init__(parent_widget)
         self.controller = controller
         self.payload = dict(payload or {})
+        self.theme_tokens = dict(self.payload.get("theme_tokens") or {})
+        self.embedded = parent_widget is not None
         self.value_labels = {}
         self.theme_combo = None
         self.export_directory_input = None
@@ -133,11 +135,26 @@ class SettingsManagerQtView(QMainWindow):
         self.developer_status_label = None
         self._suspend_change_signal = False
         self._build_ui()
+        self.apply_theme(theme_tokens=self.theme_tokens)
+        if self.embedded:
+            self._attach_to_parent_container(parent_widget)
 
-        self.command_timer = QTimer(self)
-        self.command_timer.setInterval(700)
-        self.command_timer.timeout.connect(self.controller.poll_commands)
-        self.command_timer.start()
+        if not self.embedded:
+            self.command_timer = QTimer(self)
+            self.command_timer.setInterval(700)
+            self.command_timer.timeout.connect(self.controller.poll_commands)
+            self.command_timer.start()
+
+    def _attach_to_parent_container(self, parent_widget):
+        if parent_widget is None:
+            return
+        self.setWindowFlag(Qt.WindowType.Window, False)
+        layout = parent_widget.layout()
+        if layout is None:
+            layout = QVBoxLayout(parent_widget)
+            layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self)
+        self.show()
 
     def _build_ui(self):
         self.setWindowTitle(str(self.payload.get("window_title") or "Settings Manager"))
@@ -687,7 +704,20 @@ class SettingsManagerQtView(QMainWindow):
 
     def show_toast(self, title, message, _bootstyle=None):
         combined = f"{title}: {message}" if title else str(message or "")
+        dispatcher = getattr(self.controller, "dispatcher", None)
+        show_toast = getattr(dispatcher, "show_toast", None)
+        if callable(show_toast):
+            show_toast(title, message, _bootstyle)
         self.status_bar.showMessage(combined, 5000)
+
+    def apply_theme(self, theme_tokens=None):
+        if theme_tokens is not None:
+            self.theme_tokens = dict(theme_tokens or {})
+        style = self.style()
+        if style is not None:
+            style.unpolish(self)
+            style.polish(self)
+        self.update()
 
     def show_error(self, title, message):
         QMessageBox.critical(self, title, message)
