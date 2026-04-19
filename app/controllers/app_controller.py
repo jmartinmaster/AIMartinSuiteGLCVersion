@@ -18,12 +18,10 @@ import inspect
 import os
 import sys
 import threading
-import time
-import tkinter as tk
 import webbrowser
 
 import ttkbootstrap as tb
-from ttkbootstrap.constants import BOTH, BOTTOM, DANGER, INFO, LEFT, RIGHT, SUCCESS, WARNING, X
+from ttkbootstrap.constants import BOTTOM, DANGER, INFO, LEFT, RIGHT, SUCCESS, WARNING, X
 from ttkbootstrap.widgets import ToastNotification
 
 from app.app_logging import log_exception
@@ -45,7 +43,7 @@ __version__ = "2.1.5"
 
 ISSUE_REPORT_URL = "https://github.com/jmartinmaster/AIMartinSuiteGLCVersion/issues/new/choose"
 MODULE_PRELOAD_POLL_SECONDS = 1.0
-QT_IN_VIEWPORT_PILOT_MODULES = {"about"}
+QT_IN_VIEWPORT_PILOT_MODULES = {"about", "help_viewer", "recovery_viewer"}
 
 SEVERITY_TO_BOOTSTYLE = {
     "info": INFO,
@@ -86,6 +84,8 @@ MODULE_API_SURFACE = {
     "module_runtime": (
         "open_module_window",
         "open_help_document",
+        "send_module_runtime_command",
+        "open_production_log_draft",
         "import_managed_module",
         "get_active_form_info",
         "register_active_form_listener",
@@ -176,7 +176,6 @@ class Dispatcher:
         self.host_ui_adapter_factory = host_ui_adapter_factory
         self.shell_view_factory = shell_view_factory
         self._refresh_shell_backend_state()
-        self.model.window_alpha_supported = self._supports_window_alpha()
         self.model.module_preload_poll_seconds = MODULE_PRELOAD_POLL_SECONDS
         self.update_coordinator = UpdateCoordinator(self.root)
         self.layout_manager_dispatcher = LayoutManagerMiniDispatcher(self)
@@ -197,12 +196,12 @@ class Dispatcher:
         self.refresh_update_status_visibility()
         self.load_module(self._resolve_initial_module_name(initial_module_name), use_transition=False)
         self._resolve_active_form_info(source_instance=self.active_module_instance)
-        self.root.after(1200, self.notify_non_secure_mode_state)
-        self.root.after(1500, self.notify_external_override_policy_state)
-        self.root.after(900, self.prompt_old_executable_cleanup)
-        self.root.after(1800, self.check_for_available_module_updates)
+        self.call_later(1200, self.notify_non_secure_mode_state)
+        self.call_later(1500, self.notify_external_override_policy_state)
+        self.call_later(900, self.prompt_old_executable_cleanup)
+        self.call_later(1800, self.check_for_available_module_updates)
         self.data_request_worker.submit(self.external_data_registry.warm_cache, description="external_data_registry.warm_cache")
-        self.root.after(2500, self.schedule_layout_manager_preload)
+        self.call_later(2500, self.schedule_layout_manager_preload)
 
     def _create_shell_view(self):
         if callable(self.shell_view_factory):
@@ -765,7 +764,7 @@ class Dispatcher:
                 return
         except Exception:
             return
-        self.root.after(0, lambda: self._broadcast_security_session_change(event_name))
+        self.call_later(0, lambda: self._broadcast_security_session_change(event_name))
 
     def _broadcast_security_session_change(self, event_name):
         self.refresh_navigation()
@@ -999,23 +998,6 @@ class Dispatcher:
             if self._module_container_exists(container):
                 self._destroy_module_container(container)
 
-    def _supports_window_alpha(self):
-        try:
-            current_alpha = float(self.root.attributes("-alpha"))
-            self.root.attributes("-alpha", current_alpha)
-            return True
-        except Exception:
-            return False
-
-    def _set_window_alpha(self, alpha_value):
-        if not self.model.window_alpha_supported:
-            return
-        try:
-            self.root.attributes("-alpha", alpha_value)
-        except Exception as exc:
-            self.model.window_alpha_supported = False
-            log_exception("set_window_alpha", exc)
-
     def _run_window_transition(self, action):
         if (
             not self.model.window_alpha_supported
@@ -1026,31 +1008,13 @@ class Dispatcher:
             return action()
 
         self.model.transition_in_progress = True
-        steps = 6
-        half_duration = max(0.12, self.model.transition_duration_ms / 2000)
-        step_delay = half_duration / steps
-        alpha_values = [1.0 - ((1.0 - self.model.transition_min_alpha) * (index + 1) / steps) for index in range(steps)]
-
         try:
-            for alpha_value in alpha_values:
-                self._set_window_alpha(alpha_value)
-                self.root.update_idletasks()
-                self.root.update()
-                time.sleep(step_delay)
-
-            result = action()
-
-            for alpha_value in reversed(alpha_values[:-1]):
-                self._set_window_alpha(alpha_value)
-                self.root.update_idletasks()
-                self.root.update()
-                time.sleep(step_delay)
-
-            self._set_window_alpha(1.0)
-            self.root.update_idletasks()
-            return result
+            return self.host_ui_adapter.run_window_transition(
+                action,
+                duration_ms=self.model.transition_duration_ms,
+                min_alpha=self.model.transition_min_alpha,
+            )
         finally:
-            self._set_window_alpha(1.0)
             self.model.transition_in_progress = False
 
     def _is_main_thread(self):
@@ -1060,7 +1024,7 @@ class Dispatcher:
         if self._is_main_thread():
             return callback()
         try:
-            self.root.after(0, callback)
+            self.run_on_main_thread(callback)
         except Exception as exc:
             log_exception("dispatcher.enqueue_on_main_thread", exc)
         return None
@@ -1135,10 +1099,7 @@ class Dispatcher:
         if active_module is not None and hasattr(active_module, "apply_theme"):
             active_module.apply_theme()
 
-        content_area = getattr(self, "content_area", None)
-        update_idletasks = getattr(content_area, "update_idletasks", None)
-        if callable(update_idletasks):
-            update_idletasks()
+        self.host_ui_adapter.refresh_viewport_appearance()
 
         if hasattr(self.view, "set_active_navigation_button"):
             self.view.set_active_navigation_button(module_name)
@@ -1181,11 +1142,54 @@ class Dispatcher:
         return None
 
     def _create_module_container_for_active_viewport(self, module_name=None):
-        if self.active_shell_backend == "pyqt6":
-            create_module_container = getattr(self.view, "create_module_container", None)
-            if callable(create_module_container):
-                return create_module_container(module_name=module_name)
-        return self._create_module_container()
+        return self.host_ui_adapter.create_module_container(self.content_area, module_name=module_name)
+
+    def _prepare_module_viewport_load(self):
+        self._sync_managed_source_signature(force=False)
+        if not self._can_navigate_away_from_active_module():
+            return False
+
+        self._deactivate_module_instance(
+            self.active_module_name,
+            self.active_module_instance,
+            self.active_module_container,
+        )
+        self._reset_module_viewport_for_load()
+        return True
+
+    def _load_module_in_shared_viewport(self, module_name):
+        if not self._prepare_module_viewport_load():
+            return None
+
+        restored_instance = self._try_restore_persistent_module(module_name)
+        if restored_instance is not None:
+            return restored_instance
+
+        module_container = self._create_module_container_for_active_viewport(module_name=module_name)
+        module_instance = self._instantiate_module_in_container(module_name, module_container)
+        if module_instance is None:
+            return None
+        return self._finalize_loaded_module(module_name, module_instance, module_container)
+
+    def _launch_module_in_external_shell_surface(self, module_name, restart=False):
+        open_or_raise = getattr(self.view, "open_or_raise_module", None)
+        if not callable(open_or_raise):
+            return False
+
+        launch_result = open_or_raise(module_name, restart=restart)
+        return launch_result is not False
+
+    def _finalize_external_module_load(self, module_name):
+        self._set_active_module(module_name, None, None)
+        self._refresh_active_module_ui(module_name)
+        return None
+
+    def _load_module_in_qt_sidecar_fallback(self, module_name):
+        if not self._prepare_module_viewport_load():
+            return None
+        if not self._launch_module_in_external_shell_surface(module_name, restart=False):
+            return None
+        return self._finalize_external_module_load(module_name)
 
     def should_use_qt_in_viewport(self, module_name):
         return self.active_shell_backend == "pyqt6" and str(module_name or "").strip() in QT_IN_VIEWPORT_PILOT_MODULES
@@ -1207,68 +1211,12 @@ class Dispatcher:
         return module_instance
 
     def _load_module_in_tk_viewport(self, module_name):
-        self._sync_managed_source_signature(force=False)
-        previous_module_name = self.active_module_name
-        previous_module_instance = self.active_module_instance
-        previous_module_container = self.active_module_container
-
-        if not self._can_navigate_away_from_active_module():
-            return None
-
-        self._deactivate_module_instance(previous_module_name, previous_module_instance, previous_module_container)
-        self._reset_module_viewport_for_load()
-
-        restored_instance = self._try_restore_persistent_module(module_name)
-        if restored_instance is not None:
-            return restored_instance
-
-        module_container = self._create_module_container_for_active_viewport(module_name=module_name)
-        module_instance = self._instantiate_module_in_container(module_name, module_container)
-        if module_instance is None:
-            return None
-        return self._finalize_loaded_module(module_name, module_instance, module_container)
+        return self._load_module_in_shared_viewport(module_name)
 
     def _load_module_in_qt_viewport(self, module_name):
         if self.should_use_qt_in_viewport(module_name):
-            self._sync_managed_source_signature(force=False)
-            previous_module_name = self.active_module_name
-            previous_module_instance = self.active_module_instance
-            previous_module_container = self.active_module_container
-
-            if not self._can_navigate_away_from_active_module():
-                return None
-
-            self._deactivate_module_instance(previous_module_name, previous_module_instance, previous_module_container)
-            self._reset_module_viewport_for_load()
-
-            restored_instance = self._try_restore_persistent_module(module_name)
-            if restored_instance is not None:
-                return restored_instance
-
-            module_container = self._create_module_container_for_active_viewport(module_name=module_name)
-            module_instance = self._instantiate_module_in_container(module_name, module_container)
-            if module_instance is None:
-                return None
-            return self._finalize_loaded_module(module_name, module_instance, module_container)
-
-        self._sync_managed_source_signature(force=False)
-        previous_module_name = self.active_module_name
-        previous_module_instance = self.active_module_instance
-        previous_module_container = self.active_module_container
-
-        if not self._can_navigate_away_from_active_module():
-            return None
-
-        self._deactivate_module_instance(previous_module_name, previous_module_instance, previous_module_container)
-        self._reset_module_viewport_for_load()
-
-        open_or_raise = getattr(self.view, "open_or_raise_module", None)
-        if callable(open_or_raise):
-            open_or_raise(module_name, restart=False)
-
-        self._set_active_module(module_name, None, None)
-        self._refresh_active_module_ui(module_name)
-        return None
+            return self._load_module_in_shared_viewport(module_name)
+        return self._load_module_in_qt_sidecar_fallback(module_name)
 
     def _load_module_in_active_viewport(self, module_name):
         if self.active_shell_backend == "pyqt6":
@@ -1358,6 +1306,61 @@ class Dispatcher:
         except Exception as exc:
             self.host_ui_adapter.show_error("Help Document Error", f"Could not open help document: {exc}")
 
+    def send_module_runtime_command(self, module_name, action, payload=None, restart=False):
+        if self.active_shell_backend != "pyqt6":
+            return False
+
+        open_or_raise = getattr(self.view, "open_or_raise_module", None)
+        runtime_managers = getattr(self.view, "runtime_managers", None)
+        is_dispatcher_viewport_module = getattr(self.view, "_is_dispatcher_viewport_module", None)
+        if not callable(open_or_raise) or not isinstance(runtime_managers, dict):
+            return False
+        if callable(is_dispatcher_viewport_module) and is_dispatcher_viewport_module(module_name):
+            return False
+
+        if open_or_raise(module_name, restart=bool(restart)) is False:
+            return False
+
+        manager = runtime_managers.get(module_name)
+        if manager is None:
+            return False
+
+        command_payload = dict(payload or {}) if isinstance(payload, dict) else None
+        manager.send_command(action, command_payload)
+        return True
+
+    def open_production_log_draft(self, draft_path):
+        draft_path = str(draft_path or "").strip()
+        if not draft_path:
+            self.host_ui_adapter.show_warning("Production Log", "No draft path was provided.")
+            return False
+
+        if self.active_shell_backend == "pyqt6" and not self.should_use_qt_in_viewport("production_log"):
+            self.load_module("production_log", use_transition=False, ensure_authorized=False)
+            if self.send_module_runtime_command(
+                "production_log",
+                "load_draft_path",
+                {"draft_path": draft_path},
+                restart=False,
+            ):
+                return True
+            self.host_ui_adapter.show_warning(
+                "Production Log",
+                "Could not open the Production Log runtime for the requested draft.",
+            )
+            return False
+
+        self.load_module("production_log", use_transition=False, ensure_authorized=False)
+        active_module = self.active_module_instance
+        if active_module is not None and hasattr(active_module, "load_draft_path"):
+            return bool(active_module.load_draft_path(draft_path))
+
+        self.host_ui_adapter.show_warning(
+            "Production Log",
+            "The active Production Log session could not accept the requested draft.",
+        )
+        return False
+
     def load_runtime_settings(self):
         valid_navigation_modules = self.get_user_facing_modules(apply_whitelist=False)
         valid_persistent_modules = [module_name for _display_name, module_name in self.get_persistable_modules()]
@@ -1421,73 +1424,22 @@ class Dispatcher:
         return session
 
     def _module_container_exists(self, container):
-        if container is None:
-            return False
-        winfo_exists = getattr(container, "winfo_exists", None)
-        if callable(winfo_exists):
-            try:
-                return bool(winfo_exists())
-            except Exception:
-                return False
-        return True
+        return bool(self.host_ui_adapter.container_exists(container))
 
     def _hide_module_container(self, container):
-        if container is None:
-            return
-        pack_forget = getattr(container, "pack_forget", None)
-        if callable(pack_forget):
-            pack_forget()
-            return
-        hide = getattr(container, "hide", None)
-        if callable(hide):
-            hide()
-            return
-        set_visible = getattr(container, "setVisible", None)
-        if callable(set_visible):
-            set_visible(False)
+        self.host_ui_adapter.hide_module_container(container)
 
     def _show_module_container(self, container):
-        if container is None:
-            return
-        pack = getattr(container, "pack", None)
-        if callable(pack):
-            pack(fill=BOTH, expand=True)
-            return
-        show = getattr(container, "show", None)
-        if callable(show):
-            show()
-            return
-        set_visible = getattr(container, "setVisible", None)
-        if callable(set_visible):
-            set_visible(True)
+        self.host_ui_adapter.show_module_container(container)
 
     def _destroy_module_container(self, container):
-        if container is None:
-            return
-        destroy = getattr(container, "destroy", None)
-        if callable(destroy):
-            destroy()
-            return
-        delete_later = getattr(container, "deleteLater", None)
-        if callable(delete_later):
-            delete_later()
-            return
-        close = getattr(container, "close", None)
-        if callable(close):
-            close()
+        self.host_ui_adapter.destroy_module_container(container)
 
     def _create_module_container(self):
-        module_container = tb.Frame(self.content_area, style="Martin.Surface.TFrame")
-        module_container.pack(fill=BOTH, expand=True)
-        return module_container
+        return self.host_ui_adapter.create_module_container(self.content_area)
 
     def _reset_shell_viewport_position(self):
-        if getattr(self, "canvas", None) is None:
-            return
-        try:
-            self.canvas.yview_moveto(0)
-        except Exception:
-            pass
+        self.host_ui_adapter.reset_shell_viewport_position()
 
     def _register_persistent_module_session(self, module_name, module_instance, container):
         session = {
@@ -1607,10 +1559,12 @@ class Dispatcher:
             adapter = self.host_ui_adapter_factory(self.active_shell_backend, self)
             if adapter is not None:
                 self.host_ui_adapter = adapter
+                self.model.window_alpha_supported = bool(self.host_ui_adapter.supports_window_transition())
                 return
 
         if self.active_shell_backend == "tk":
             self.host_ui_adapter = TkHostUiAdapter(self, toast_factory=ToastNotification)
+            self.model.window_alpha_supported = bool(self.host_ui_adapter.supports_window_transition())
             return
 
         if self.active_shell_backend != "tk" and self.shell_backend_fallback_reason is None:
@@ -1618,6 +1572,7 @@ class Dispatcher:
                 f"Host adapter for backend '{self.active_shell_backend}' is not available in Dispatcher; using 'tk'."
             )
         self.host_ui_adapter = TkHostUiAdapter(self, toast_factory=ToastNotification)
+        self.model.window_alpha_supported = bool(self.host_ui_adapter.supports_window_transition())
 
     def get_ui_shell_backend(self):
         backend = str(self.runtime_settings.get("ui_shell_backend", "pyqt6") or "pyqt6").strip().lower()
@@ -1664,10 +1619,10 @@ class Dispatcher:
                         data_registry=getattr(self, "external_data_registry", None)
                     ).scan_available_module_payload_updates(self)
             except Exception as exc:
-                self.root.after(0, lambda error=exc: self._finish_module_update_check(error=error))
+                self.run_on_main_thread(lambda error=exc: self._finish_module_update_check(error=error))
                 return
 
-            self.root.after(0, lambda result=scan_result: self._finish_module_update_check(result=result))
+            self.run_on_main_thread(lambda result=scan_result: self._finish_module_update_check(result=result))
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -1736,10 +1691,7 @@ class Dispatcher:
     def _cancel_scheduled_update_status_clear(self):
         if self._update_status_clear_after_id is None:
             return
-        try:
-            self.root.after_cancel(self._update_status_clear_after_id)
-        except Exception:
-            pass
+        self.host_ui_adapter.cancel_call_later(self._update_status_clear_after_id)
         self._update_status_clear_after_id = None
 
     def set_update_status(self, message, bootstyle=INFO, active=True, mode=None):
@@ -1776,10 +1728,7 @@ class Dispatcher:
             self.update_coordinator.clear_banner()
             self.refresh_update_status_visibility()
 
-        try:
-            self._update_status_clear_after_id = self.root.after(delay_ms, clear_if_alive)
-        except Exception:
-            self._update_status_clear_after_id = None
+        self._update_status_clear_after_id = self.call_later(delay_ms, clear_if_alive)
 
     def prompt_old_executable_cleanup(self):
         obsolete_executables = self.model.get_obsolete_local_executables(os.path.abspath(sys.executable), self.dispatcher_version)

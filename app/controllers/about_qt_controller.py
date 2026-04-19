@@ -13,13 +13,8 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-import json
-import os
 import sys
-import time
-import webbrowser
 
-from app.utils import local_or_resource_path
 from app.views.about_qt_view import AboutQtView
 
 __module_name__ = "About Qt Controller"
@@ -27,18 +22,12 @@ __version__ = "1.0.0"
 
 
 class AboutQtController:
-    def __init__(self, payload=None, parent=None, dispatcher=None):
+    def __init__(self, parent=None, dispatcher=None):
         self.parent = parent
         self.dispatcher = dispatcher
-        self.embedded = parent is not None and dispatcher is not None
-        self.payload = self._build_embedded_payload() if self.embedded else dict(payload or {})
-        self.state_path = self.payload.get("state_path")
-        self.command_path = self.payload.get("command_path")
-        self.view = AboutQtView(self, self.payload, parent_widget=parent if self.embedded else None)
-        if self.embedded:
-            self.view.show()
-        else:
-            self.write_state(status="ready", message="About Qt window ready.")
+        self.payload = self._build_view_payload()
+        self.view = AboutQtView(self, self.payload, parent_widget=parent)
+        self.view.show()
 
     def __getattr__(self, attribute_name):
         view = self.__dict__.get("view")
@@ -94,7 +83,7 @@ class AboutQtController:
     def get_manifest_rows(self):
         dispatcher = self.dispatcher
         if dispatcher is None:
-            return list(self.payload.get("module_manifest") or [])
+            return []
 
         manifest_rows = []
         for mod_key, mod_obj in self._iter_manifest_modules():
@@ -110,7 +99,7 @@ class AboutQtController:
             )
         return manifest_rows
 
-    def _build_embedded_payload(self):
+    def _build_view_payload(self):
         dispatcher = self.dispatcher
         theme_tokens = dict(getattr(getattr(dispatcher, "view", None), "theme_tokens", {}) or {})
         return {
@@ -119,51 +108,23 @@ class AboutQtController:
             "subtitle": "GLC Edition",
             "info_text": self.get_info_text(),
             "module_manifest": self.get_manifest_rows(),
-            "license_path": local_or_resource_path("docs/legal/LICENSE.txt"),
             "can_repack": False,
             "footer_text": "Copyright © 2026 Jamie Martin",
             "theme_tokens": theme_tokens,
         }
 
     def show(self):
+        if hasattr(self.view, "refresh_manifest"):
+            self.view.refresh_manifest(self.get_manifest_rows())
         self.view.show()
         self.view.raise_()
         self.view.activateWindow()
-
-    def write_state(self, status="ready", message="", dirty=False):
-        state_path = self.state_path
-        if not state_path:
-            return
-        payload = {
-            "status": status,
-            "dirty": bool(dirty),
-            "message": str(message or ""),
-            "module": "about",
-            "updated_at": time.time(),
-            "window_title": self.payload.get("window_title") or "About",
-        }
-        try:
-            with open(state_path, "w", encoding="utf-8") as handle:
-                json.dump(payload, handle, indent=2)
-        except Exception:
-            return
 
     def open_license(self):
         if self.dispatcher is not None:
             self.dispatcher.open_help_document("docs/legal/LICENSE.txt")
             return
-        license_path = str(self.payload.get("license_path") or "").strip()
-        if not license_path or not os.path.exists(license_path):
-            self.view.show_error("License", "License file could not be found.")
-            return
-        try:
-            if hasattr(os, "startfile"):
-                os.startfile(license_path)
-            else:
-                webbrowser.open(f"file://{license_path}")
-            self.write_state(status="ready", message="Opened license document.")
-        except Exception as exc:
-            self.view.show_error("License", f"Could not open the license file:\n{exc}")
+        self.view.show_error("License", "Help document dispatch is unavailable.")
 
     def request_repack(self):
         self.view.show_info(
@@ -171,36 +132,22 @@ class AboutQtController:
             "Suite repacking is still handled by the Tk host shell in this migration phase.",
         )
 
-    def poll_commands(self):
-        command_path = self.command_path
-        if not command_path or not os.path.exists(command_path):
-            return
-        try:
-            with open(command_path, "r", encoding="utf-8") as handle:
-                payload = json.load(handle)
-        except Exception:
-            payload = {}
-        try:
-            os.remove(command_path)
-        except OSError:
-            pass
-        action = str(payload.get("action") or "").strip().lower()
-        if action == "raise_window":
-            self.show()
-            self.write_state(status="ready", message="Raised About Qt window.")
-        elif action == "close_window":
-            self.handle_close()
-            self.view.close()
+    def apply_theme(self):
+        if self.dispatcher is not None:
+            self.payload["theme_tokens"] = dict(getattr(getattr(self.dispatcher, "view", None), "theme_tokens", {}) or {})
+        if hasattr(self.view, "refresh_manifest"):
+            self.view.refresh_manifest(self.get_manifest_rows())
+        if hasattr(self.view, "apply_theme"):
+            self.view.apply_theme(theme_tokens=self.payload.get("theme_tokens") or {})
 
     def handle_close(self):
-        self.write_state(status="closed", message="About Qt window closed.")
+        return None
 
     def on_hide(self):
         return None
 
     def on_unload(self):
-        if self.embedded:
-            try:
-                self.view.close()
-            except Exception:
-                pass
+        try:
+            self.view.close()
+        except Exception:
+            pass

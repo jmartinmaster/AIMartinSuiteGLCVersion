@@ -455,6 +455,16 @@ class ProductionLogQtController:
             self.write_state(status="ready", message="Opened pending draft dialog.")
             return
 
+        if action == "load_draft_path":
+            draft_path = str(command_payload.get("draft_path") or "").strip()
+            self.show()
+            if not draft_path:
+                self.view.show_info("Production Log", "No draft path was provided.")
+                return
+            if self.load_draft_path(draft_path):
+                self.write_state(status="ready", message=f"Loaded draft {os.path.basename(draft_path)} from host request.")
+            return
+
         if action == "save_draft":
             self.save_draft()
             return

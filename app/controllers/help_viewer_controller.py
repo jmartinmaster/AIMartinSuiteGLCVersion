@@ -15,10 +15,8 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 import os
 
-from app.qt_module_runtime import QtModuleRuntimeManager
-from app.utils import local_or_resource_path
-from app.views.help_viewer_view_factory import create_help_viewer_view
 from app.views.help_viewer_view import HelpViewerView
+from app.utils import local_or_resource_path
 
 __module_name__ = "Help Viewer"
 __version__ = "1.1.0"
@@ -80,15 +78,10 @@ class HelpViewerController:
     def __init__(self, parent, dispatcher):
         self.parent = parent
         self.dispatcher = dispatcher
-        self.view = None
         self.doc_groups = DOC_GROUPS
         self.doc_index = DOC_INDEX
-        self.requested_view_backend = "qt"
-        self.resolved_view_backend = "tk"
-        self.view_backend_fallback_reason = None
         self.active_doc_path = None
-        self.runtime_manager = QtModuleRuntimeManager("help_viewer", self.build_qt_session_payload)
-        self.view = create_help_viewer_view(parent, dispatcher, self)
+        self.view = HelpViewerView(parent, dispatcher, self)
 
     def __getattr__(self, attribute_name):
         view = self.__dict__.get("view")
@@ -111,37 +104,14 @@ class HelpViewerController:
         if target_path:
             self.dispatcher.open_help_document(target_path)
 
-    def build_qt_session_payload(self):
-        root = self.parent.winfo_toplevel()
-        resolved_paths = {}
-        for _doc_name, doc_path in self.doc_index:
-            resolved_paths[doc_path] = local_or_resource_path(doc_path)
-        return {
-            "window_title": "Help Viewer - Production Logging Center",
-            "title": "Help Center",
-            "subtitle": "Bundled guides, release references, and editable JSON documentation.",
-            "doc_groups": self.doc_groups,
-            "doc_index": self.doc_index,
-            "resolved_paths": resolved_paths,
-            "initial_doc": self.doc_index[0][1] if self.doc_index else None,
-            "theme_tokens": dict(getattr(root, "_martin_theme_tokens", {}) or {}),
-        }
-
-    def open_or_raise_qt_window(self):
-        self.runtime_manager.ensure_running(force_restart=False)
-
-    def restart_qt_window(self):
-        self.runtime_manager.ensure_running(force_restart=True)
-
-    def stop_qt_window(self):
-        self.runtime_manager.stop_runtime(force=False)
-
-    def read_runtime_state(self):
-        return self.runtime_manager.read_state()
-
     def on_hide(self):
+        on_hide = getattr(self.view, "on_hide", None)
+        if callable(on_hide):
+            return on_hide()
         return None
 
     def on_unload(self):
-        if self.resolved_view_backend == "qt":
-            self.stop_qt_window()
+        on_unload = getattr(self.view, "on_unload", None)
+        if callable(on_unload):
+            return on_unload()
+        return None

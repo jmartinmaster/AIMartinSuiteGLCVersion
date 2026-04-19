@@ -20,8 +20,7 @@ from tkinter import messagebox
 from ttkbootstrap.constants import INFO, SUCCESS
 
 from app.models.recovery_viewer_model import RecoveryViewerModel
-from app.qt_module_runtime import QtModuleRuntimeManager
-from app.views.recovery_viewer_view_factory import create_recovery_viewer_view
+from app.views.recovery_viewer_view import RecoveryViewerView
 
 __module_name__ = "Recovery Viewer"
 __version__ = "1.1.0"
@@ -31,15 +30,9 @@ class RecoveryViewerController:
     def __init__(self, parent, dispatcher):
         self.parent = parent
         self.dispatcher = dispatcher
-        self.requested_view_backend = "qt"
-        self.resolved_view_backend = "tk"
-        self.view_backend_fallback_reason = None
         self.model = RecoveryViewerModel(data_registry=getattr(dispatcher, "external_data_registry", None))
-        self.view = None
-        self.runtime_manager = QtModuleRuntimeManager("recovery_viewer", self.build_qt_session_payload)
-        self.view = create_recovery_viewer_view(parent, dispatcher, self)
-        if self.resolved_view_backend == "tk":
-            self.refresh_records()
+        self.view = RecoveryViewerView(parent, dispatcher, self)
+        self.refresh_records()
 
     def __getattr__(self, attribute_name):
         view = self.__dict__.get("view")
@@ -52,29 +45,6 @@ class RecoveryViewerController:
         if callable(getter):
             return dict(getter() or {})
         return dict(getattr(getattr(self.dispatcher, "model", None), "active_form_info", {}) or {})
-
-    def build_qt_session_payload(self):
-        root = self.parent.winfo_toplevel()
-        return {
-            "window_title": "Backup / Recovery - Production Logging Center",
-            "title": "Backup / Recovery",
-            "subtitle": (
-                "Browse pending drafts, recovery snapshots, and backup artifacts in a dedicated PyQt6 window."
-            ),
-            "theme_tokens": dict(getattr(root, "_martin_theme_tokens", {}) or {}),
-        }
-
-    def open_or_raise_qt_window(self):
-        self.runtime_manager.ensure_running(force_restart=False)
-
-    def restart_qt_window(self):
-        self.runtime_manager.ensure_running(force_restart=True)
-
-    def stop_qt_window(self):
-        self.runtime_manager.stop_runtime(force=False)
-
-    def read_runtime_state(self):
-        return self.runtime_manager.read_state()
 
     def refresh_records(self):
         self.view.refresh_table(self.model.refresh_records())
@@ -126,9 +96,7 @@ class RecoveryViewerController:
         else:
             draft_path = record["path"]
 
-        self.dispatcher.load_module("production_log")
-        if hasattr(self.dispatcher.active_module_instance, "load_draft_path"):
-            self.dispatcher.active_module_instance.load_draft_path(draft_path)
+        if bool(getattr(self.dispatcher, "open_production_log_draft", lambda _path: False)(draft_path)):
             self.view.set_status(f"Loaded {os.path.basename(draft_path)} into Production Log.")
 
     def restore_selected(self):
@@ -169,9 +137,8 @@ class RecoveryViewerController:
             restored_path = self.model.restore_snapshot_as_draft(record)
             self.refresh_records()
             if prompt_to_open and messagebox.askyesno("Open Restored Draft", "Draft snapshot restored. Open it in Production Log now?"):
-                self.dispatcher.load_module("production_log")
-                if hasattr(self.dispatcher.active_module_instance, "load_draft_path"):
-                    self.dispatcher.active_module_instance.load_draft_path(restored_path)
+                if not bool(getattr(self.dispatcher, "open_production_log_draft", lambda _path: False)(restored_path)):
+                    self.view.show_error("Restore Error", "The restored draft could not be opened in Production Log.")
             else:
                 self.view.show_toast("Restore Complete", f"Restored draft snapshot to {record['restore_target']}.", SUCCESS)
             return restored_path
@@ -180,8 +147,13 @@ class RecoveryViewerController:
             return None
 
     def on_hide(self):
+        on_hide = getattr(self.view, "on_hide", None)
+        if callable(on_hide):
+            return on_hide()
         return None
 
     def on_unload(self):
-        if self.resolved_view_backend == "qt":
-            self.stop_qt_window()
+        on_unload = getattr(self.view, "on_unload", None)
+        if callable(on_unload):
+            return on_unload()
+        return None

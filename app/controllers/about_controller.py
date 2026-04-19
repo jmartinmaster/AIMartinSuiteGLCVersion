@@ -18,9 +18,7 @@ import subprocess
 import sys
 from tkinter import messagebox
 
-from app.qt_module_runtime import QtModuleRuntimeManager
-from app.utils import local_or_resource_path
-from app.views.about_view_factory import create_about_view
+from app.views.about_view import AboutView
 
 __module_name__ = "About System"
 __version__ = "1.1.0"
@@ -30,12 +28,7 @@ class AboutController:
     def __init__(self, parent, dispatcher):
         self.parent = parent
         self.dispatcher = dispatcher
-        self.view = None
-        self.requested_view_backend = "qt"
-        self.resolved_view_backend = "tk"
-        self.view_backend_fallback_reason = None
-        self.runtime_manager = QtModuleRuntimeManager("about", self.build_qt_session_payload)
-        self.view = create_about_view(parent, dispatcher, self)
+        self.view = AboutView(parent, dispatcher, self)
 
     def __getattr__(self, attribute_name):
         view = self.__dict__.get("view")
@@ -68,33 +61,6 @@ class AboutController:
                 }
             )
         return manifest_rows
-
-    def build_qt_session_payload(self):
-        root = self.parent.winfo_toplevel()
-        license_path = local_or_resource_path("docs/legal/LICENSE.txt")
-        return {
-            "window_title": "About - Production Logging Center",
-            "title": "PRODUCTION LOGGING CENTER",
-            "subtitle": "GLC Edition",
-            "info_text": self.get_info_text(),
-            "module_manifest": self.get_manifest_rows(),
-            "license_path": license_path,
-            "can_repack": False,
-            "footer_text": "Copyright © 2026 Jamie Martin",
-            "theme_tokens": dict(getattr(root, "_martin_theme_tokens", {}) or {}),
-        }
-
-    def open_or_raise_qt_window(self):
-        self.runtime_manager.ensure_running(force_restart=False)
-
-    def restart_qt_window(self):
-        self.runtime_manager.ensure_running(force_restart=True)
-
-    def stop_qt_window(self):
-        self.runtime_manager.stop_runtime(force=False)
-
-    def read_runtime_state(self):
-        return self.runtime_manager.read_state()
 
     def _iter_manifest_modules(self):
         loaded_modules = getattr(self.dispatcher, "loaded_modules", {}) or {}
@@ -142,11 +108,16 @@ class AboutController:
         return bool(getattr(sys, "frozen", False))
 
     def on_hide(self):
+        on_hide = getattr(self.view, "on_hide", None)
+        if callable(on_hide):
+            return on_hide()
         return None
 
     def on_unload(self):
-        if self.resolved_view_backend == "qt":
-            self.stop_qt_window()
+        on_unload = getattr(self.view, "on_unload", None)
+        if callable(on_unload):
+            return on_unload()
+        return None
 
     def confirm_repack(self):
         message = "This will compile a new executable with your current settings.\n\nThe app will close, build, and restart automatically.\n\nProceed?"
