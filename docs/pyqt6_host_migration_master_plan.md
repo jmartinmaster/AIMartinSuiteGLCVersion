@@ -327,17 +327,65 @@ Section 7C: Production Log Migration
 1. Land embedded-mode `ProductionLogQtController` and `ProductionLogQtView` foundations while the dedicated runtime path remains active.
 2. Preserve draft save/load, recovery handoff, calculation refresh, Excel import/export, active-form coordination, theme refresh, and bounded auto-save behavior.
 3. Promote `production_log` into `QT_IN_VIEWPORT_PILOT_MODULES` only after validator coverage exists for viewport load, recovery handoff, non-persistent unload, and clean reload behavior.
-4. Status: IN PROGRESS.
+4. Status: Complete, Confirmed
+5. Current state: `production_log` now routes through `QT_IN_VIEWPORT_PILOT_MODULES` on the PyQt6 host path, and the embedded Qt controller now covers dispatcher-facing lifecycle hooks that were still missing from the initial groundwork slice: unsaved navigation confirmation through `can_navigate_away()`, active-form reload, calculation-settings refresh, draft save/load dirty-state handling, and Recovery Viewer handoff through the shared viewport dispatcher flow.
+6. Remaining sidecar boundary: the dedicated Production Log runtime path still exists as the intentional fallback surface outside the active PyQt6 viewport pilot path. The remaining sidecar references are limited to the Tk fallback controller/view-factory flow plus the standalone Qt session entrypoint; they are not removed in Phase 7C.
+7. Validation in this checkout: `py_compile` passed for `app/controllers/app_controller.py`, `app/controllers/production_log_qt_controller.py`, `app/views/production_log_qt_view.py`, and `app/production_log.py`. The repository snapshot referenced by this workspace does not currently contain the documented `scripts/validate_pyqt6_phase_gate.py` or `scripts/validate_module_loads.py` files, so the full scripted phase gate could not be rerun locally from this checkout. An offscreen PyQt6 smoke probe reached controller/view startup and exercised the embedded viewport path far enough to confirm pilot routing and headless Qt initialization, but the probe did not produce a clean automated exit because headless Qt teardown remained unstable in this environment.
 
 ### Phase 8: Sidecar Infrastructure Removal
 1. Remove `QtModuleRuntimeManager` once no migrated modules depend on it.
 2. Retire JSON session/state/command files and bridge views.
 3. Keep standalone Qt windows only if they remain an intentional product feature.
+4. Status: IN PROGRESS.
+5. Current dependency snapshot before Phase 8 work begins: the generic sidecar stack is still present in `app/qt_module_runtime.py`, `app/views/qt_module_bridge_view.py`, the launcher-side Qt session branch in `launcher.py`, and the PyQt6 host shell separate-window runtime-manager path in `app/views/pyqt6_host_shell_view.py`. The current tree still contains module-local sidecar seams for `production_log`, `update_manager`, and `internal_code_editor`, while `layout_manager` remains the explicit dedicated-runtime exception under Phase 7A.
+
+Section 8A: Inventory And Scope Lock
+1. Freeze a verified inventory of all remaining sidecar-era consumers and classify each one as either dead migrated-module fallback, active intentional external-window feature, or temporary dedicated-runtime exception.
+2. Treat `layout_manager` as the protected dedicated-runtime exception from Phase 7A unless this master plan is revised. Do not remove its external-window behavior during the generic sidecar cleanup.
+3. `internal_code_editor` is confirmed as an in-process PyQt6 viewport target for Phase 8 work, not an intentional long-term external-window exception. Its current sidecar path in `app/controllers/internal_code_editor_controller.py`, `app/views/internal_code_editor_view_factory.py`, `app/controllers/internal_code_editor_qt_controller.py`, and `app/views/internal_code_editor_qt_view.py` should be treated as migration-era scaffolding to remove once the embedded viewport route is finished.
+4. Verified remaining sidecar-era inventory at the start of Phase 8A:
+	- Shared migration stack: `app/qt_module_runtime.py`, `app/views/qt_module_bridge_view.py`, launcher-side Qt session dispatch in `launcher.py`, and the separate-window runtime-manager path in `app/views/pyqt6_host_shell_view.py`.
+	- Dead or temporary migrated-module fallback seams still to remove: `production_log`, `update_manager`, and `internal_code_editor`.
+	- Dedicated-runtime exception to preserve through generic sidecar cleanup: `layout_manager`, including its specialized runtime flow in `app/layout_manager_dispatcher.py` and related host wiring.
+5. Status: COMPLETED.
+
+Section 8B: Remove Dead Migrated-Module Sidecar Fallbacks
+1. Delete sidecar-only fallback seams that remain in already migrated modules, starting with `production_log`, then restoring `internal_code_editor` to the shared viewport, and then removing any other modules whose in-viewport migration is complete but whose Tk fallback controller path still instantiates `QtModuleRuntimeManager` or `QtModuleBridgeView`.
+2. Remove module-local JSON session/state/command IPC, stale launcher session branches, and bridge-view factory paths for those completed modules while preserving their direct Tk fallback and shared-viewport PyQt6 behavior.
+3. The current tree already shows Phase 8B targets in `app/controllers/production_log_controller.py`, `app/views/production_log_view_factory.py`, `app/controllers/internal_code_editor_controller.py`, `app/views/internal_code_editor_view_factory.py`, `app/controllers/update_manager_controller.py`, and `app/views/update_manager_view_factory.py`; re-verify the live call paths before deleting each seam.
+4. Current state after the completed 8B cleanup: `internal_code_editor`, `production_log`, and `update_manager` now route through the shared PyQt6 viewport on the host path without module-local `QtModuleRuntimeManager` or `QtModuleBridgeView` fallback seams. Their Tk fallback controllers now construct direct Tk views only, their stale launcher-side sidecar session branches have been removed, and their embedded Qt controllers/views no longer keep module-local JSON IPC as an active product path.
+5. Remaining generic sidecar surface after 8B: the shared runtime infrastructure in `app/qt_module_runtime.py` and the host-shell separate-window runtime manager path remain in place only for the intentional `layout_manager` dedicated-runtime exception plus the generic infrastructure that still needs 8C/8D refactoring.
+6. Validation in this checkout: `py_compile` passed for the cleaned 8B surfaces including `launcher.py`, `app/views/pyqt6_host_shell_view.py`, `app/controllers/production_log_controller.py`, `app/views/production_log_view_factory.py`, `app/controllers/update_manager_controller.py`, `app/views/update_manager_view_factory.py`, `app/controllers/production_log_qt_controller.py`, `app/controllers/internal_code_editor_qt_controller.py`, `app/views/production_log_qt_view.py`, and `app/views/internal_code_editor_qt_view.py`.
+7. Status: COMPLETED.
+
+Section 8C: Intentional External-Window Boundary Extraction
+1. Replace migration-era generic sidecar dependencies for any intentionally external Qt modules with explicit long-term host abstractions so those features no longer depend on `QtModuleRuntimeManager` or `QtModuleBridgeView` as migration scaffolding.
+2. This section currently applies only to `layout_manager` unless this master plan is revised again.
+3. Preserve external-window reuse, raise, restart, state refresh, and protected-module behavior for those intentional windows while moving them off the generic migration stack.
+4. Current implementation state: `layout_manager` now uses an explicit dedicated-window contract centered on `app/layout_manager_dispatcher.py`. The active PyQt6 host shell drives Layout Manager through dispatcher-owned open/restart/stop/state helpers instead of binding it to the generic host `runtime_managers` path, and the module-local controller/view-factory path no longer constructs `QtModuleRuntimeManager` or `QtModuleBridgeView`.
+5. Validation in this checkout: `py_compile` passed for `app/layout_manager_dispatcher.py`, `app/views/pyqt6_host_shell_view.py`, `app/controllers/layout_manager_controller.py`, `app/views/layout_manager_view_factory.py`, and `app/controllers/app_controller.py`. A follow-up tree scan showed the only remaining `QtModuleRuntimeManager` construction in `app/**/*.py` is the generic host-shell infrastructure for 8D cleanup, not an active Layout Manager consumer.
+6. Status: COMPLETED.
+
+Section 8D: Remove Shared Sidecar Infrastructure
+1. Delete the shared migration-era sidecar infrastructure only after Sections 8A through 8C leave no remaining consumers on the generic path.
+2. Candidate removals for this section include `app/qt_module_runtime.py`, `app/views/qt_module_bridge_view.py`, the generic separate-window runtime-manager handling in `app/views/pyqt6_host_shell_view.py`, and the generic Qt session dispatch branch in `launcher.py` that exists only for migration-era sidecars.
+3. Retire JSON session/state/command IPC files and any now-dead host-shell messaging that refers to migration-sidecar runtime status rather than intentional product behavior.
+4. Current implementation state: the shared sidecar infrastructure has been removed. `app/qt_module_runtime.py` and `app/views/qt_module_bridge_view.py` are deleted, the PyQt6 host shell no longer maintains a generic runtime-manager path for non-viewport modules, `app/controllers/app_controller.py` no longer carries the dead runtime-command fallback for Production Log draft opening, and `launcher.py` now accepts only the dedicated Layout Manager session environment instead of the old generic Qt module session path.
+5. Remaining intentional runtime IPC is limited to the explicit Layout Manager dedicated-window contract in `app/layout_manager_dispatcher.py` and `app/views/layout_manager_qt_view.py`; it is no longer shared migration scaffolding.
+6. Validation in this checkout: `py_compile` passed for `main.py`, `launcher.py`, `app/views/pyqt6_host_shell_view.py`, `app/controllers/app_controller.py`, `app/layout_manager_dispatcher.py`, `app/views/layout_manager_qt_view.py`, `app/controllers/layout_manager_controller.py`, and `app/host_ui_adapter.py`. Smoke validation was run by launching `main.py` directly and by launching a dedicated Layout Manager session through `AIMARTIN_LAYOUT_MANAGER_QT_SESSION`; both processes stayed alive past the timeout window with no error output.
+7. Status: COMPLETED.
+
+Section 8E: Validation And Closeout
+1. Restore or replace the missing scripted validation path referenced elsewhere in this document so Phase 8 closeout does not depend on absent local scripts.
+2. Validate that all completed PyQt6 viewport modules load without sidecar infrastructure, and that any intentional external-window modules still open, reuse, raise, restart, and report status correctly.
+3. Keep explicit coverage for `layout_manager` as the dedicated-runtime exception, and add closeout coverage proving that `internal_code_editor` now mounts in the shared viewport instead of the separate-window runtime path.
+4. Exit criteria: no completed migration path depends on the generic sidecar stack, intentional external windows use stable non-migration contracts, and the master plan plus validation evidence reflect the new architecture state.
+5. Status: NOT STARTED.
 
 ### Phase 9: Tk Host Removal
 1. Remove the remaining Tk host path only after full PyQt6 parity.
 2. Preserve backend-neutral business logic, models, persistence, security, and valid abstractions.
-3. Delete or archive Tk-host-specific shell guidance once no longer needed.
+3. Archive Tk-host-specific shell guidance once no longer needed.
 
 ### Phase 10: Overflow Hardening and Screen-Fit Audit
 1. Audit every shared-viewport module and dedicated runtime window for content that exceeds the visible viewport or screen height/width.

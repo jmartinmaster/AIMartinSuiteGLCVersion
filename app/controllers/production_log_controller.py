@@ -15,12 +15,10 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 import os
 import sys
-import time
 import tkinter as tk
 import webbrowser
 
 from app.models.production_log_model import ProductionLogModel
-from app.qt_module_runtime import QtModuleRuntimeManager
 from app.views.production_log_view import ProductionLogView, __version__ as PRODUCTION_LOG_VERSION
 from app.views.production_log_view_factory import create_production_log_view
 
@@ -37,27 +35,9 @@ class ProductionLogController:
         self.view_backend_fallback_reason = None
         self.view_backend_fallback_code = None
         self.model = ProductionLogModel(data_registry=getattr(dispatcher, "external_data_registry", None))
-        self._last_runtime_event_timestamp = None
         self.view = None
-        self.runtime_manager = QtModuleRuntimeManager("production_log", self.build_qt_session_payload)
         self.view = create_production_log_view(parent, dispatcher, self, self.model)
-        if self.resolved_view_backend == "tk":
-            self.update_export_action_state()
-            self._notify_tk_fallback_if_needed()
-
-    def _notify_tk_fallback_if_needed(self):
-        fallback_reason = str(self.view_backend_fallback_reason or "").strip()
-        if not fallback_reason:
-            return
-        fallback_code = str(self.view_backend_fallback_code or "unspecified")
-        notify_user = getattr(self.dispatcher, "notify_user", None)
-        if callable(notify_user):
-            notify_user(
-                "Production Log Backend",
-                f"Using Tk fallback ({fallback_code}): {fallback_reason}",
-                severity="warning",
-                duration_ms=10000,
-            )
+        self.update_export_action_state()
 
     def __getattr__(self, attribute_name):
         view = self.__dict__.get("view")
@@ -68,168 +48,14 @@ class ProductionLogController:
     def get_active_form_info(self):
         return dict(self.model.form_registry.get_active_form())
 
-    def build_qt_session_payload(self):
-        root = self.parent.winfo_toplevel()
-        latest_draft = self.get_latest_pending_draft()
-        latest_draft_name = os.path.basename(str((latest_draft or {}).get("path") or "")).strip()
-        latest_draft_name = latest_draft_name or "None"
-        return {
-            "window_title": "Production Log - Production Logging Center",
-            "title": "Production Log",
-            "subtitle": "Primary Production Log runtime window powered by PyQt6.",
-            "pending_draft_count": len(self.list_pending_drafts()),
-            "recovery_snapshot_count": len(self.list_recovery_snapshots()),
-            "latest_draft_name": latest_draft_name,
-            "dt_code_count": len(self.model.dt_codes or []),
-            "updated_at": time.time(),
-            "theme_tokens": dict(getattr(root, "_martin_theme_tokens", {}) or {}),
-        }
-
-    def open_or_raise_qt_window(self):
-        self.runtime_manager.ensure_running(force_restart=False)
-
-    def restart_qt_window(self):
-        self.runtime_manager.ensure_running(force_restart=True)
-
-    def stop_qt_window(self):
-        self.runtime_manager.stop_runtime(force=False)
-
-    def read_runtime_state(self):
-        return self.runtime_manager.read_state()
-
-    def handle_runtime_state(self, state):
-        if self.resolved_view_backend != "qt":
-            return
-        if not isinstance(state, dict):
-            return
-
-        runtime_event = str(state.get("runtime_event") or "").strip().lower()
-        if runtime_event not in {"load_draft_requested", "open_recovery_requested", "restore_snapshot_requested"}:
-            return
-
-        event_timestamp = state.get("updated_at")
-        if event_timestamp == self._last_runtime_event_timestamp:
-            return
-        self._last_runtime_event_timestamp = event_timestamp
-
-        if runtime_event == "load_draft_requested":
-            draft_path = str(state.get("draft_path") or "").strip()
-            if not draft_path:
-                self.runtime_manager.send_command(
-                    "host_action_completed",
-                    {
-                        "action_name": "load_draft_requested",
-                        "success": False,
-                        "message": "No draft path was provided by the sidecar request.",
-                    },
-                )
-                return
-            if not os.path.exists(draft_path):
-                self.runtime_manager.send_command(
-                    "host_action_completed",
-                    {
-                        "action_name": "load_draft_requested",
-                        "success": False,
-                        "message": f"Draft was not found: {os.path.basename(draft_path)}",
-                    },
-                )
-                return
-            load_result = self._handle_runtime_load_draft_request(draft_path)
-            self.runtime_manager.send_command(
-                "host_action_completed",
-                {
-                    "action_name": "load_draft_requested",
-                    "success": bool(load_result.get("success")),
-                    "message": str(load_result.get("message") or "Host processed load draft request."),
-                },
-            )
-            self.runtime_manager.send_command("refresh_snapshot", {"reason": "load_draft_requested"})
-            return
-
-        if runtime_event == "open_recovery_requested":
-            self.open_recovery_viewer()
-            self.runtime_manager.send_command(
-                "host_action_completed",
-                {
-                    "action_name": "open_recovery_requested",
-                    "success": True,
-                    "message": "Opened Recovery Viewer in host runtime.",
-                },
-            )
-            self.runtime_manager.send_command("refresh_snapshot", {"reason": "open_recovery_requested"})
-            return
-
-        if runtime_event == "restore_snapshot_requested":
-            snapshot_path = str(state.get("snapshot_path") or "").strip()
-            if not snapshot_path:
-                self.runtime_manager.send_command(
-                    "host_action_completed",
-                    {
-                        "action_name": "restore_snapshot_requested",
-                        "success": False,
-                        "message": "No recovery snapshot path was provided by the sidecar request.",
-                    },
-                )
-                return
-            if not os.path.exists(snapshot_path):
-                self.runtime_manager.send_command(
-                    "host_action_completed",
-                    {
-                        "action_name": "restore_snapshot_requested",
-                        "success": False,
-                        "message": f"Recovery snapshot not found: {os.path.basename(snapshot_path)}",
-                    },
-                )
-                return
-            restore_result = self._handle_runtime_load_draft_request(snapshot_path)
-            self.runtime_manager.send_command(
-                "host_action_completed",
-                {
-                    "action_name": "restore_snapshot_requested",
-                    "success": bool(restore_result.get("success")),
-                    "message": str(restore_result.get("message") or "Host processed recovery snapshot restore request."),
-                },
-            )
-            self.runtime_manager.send_command("refresh_snapshot", {"reason": "restore_snapshot_requested"})
-
-    def _handle_runtime_load_draft_request(self, draft_path):
-        try:
-            data = self.model.load_json(draft_path)
-        except Exception:
-            return {
-                "success": False,
-                "message": f"Failed to load draft: {os.path.basename(draft_path)}",
-            }
-
-        draft_form_id = self.model.resolve_draft_form_id(data.get("meta", {}))
-        if draft_form_id == self.model.form_id:
-            return {
-                "success": True,
-                "message": f"Draft is already on the active form: {os.path.basename(draft_path)}",
-            }
-
-        self.model.form_registry.activate_form(draft_form_id)
-        if hasattr(self.dispatcher, "notify_active_form_changed"):
-            self.dispatcher.notify_active_form_changed(source_instance=self, active_form_info=self.get_active_form_info())
-        return {
-            "success": True,
-            "message": f"Activated form from draft request: {os.path.basename(draft_path)}",
-        }
-
-    def _qt_sidecar_active(self):
-        return self.resolved_view_backend == "qt"
-
     def on_hide(self):
         return None
 
     def on_unload(self):
-        if self.resolved_view_backend == "qt":
-            self.stop_qt_window()
+        if self.view is not None and hasattr(self.view, "on_unload"):
+            self.view.on_unload()
 
     def reload_active_form(self, data=None, draft_path=None, mark_dirty_after_load=False):
-        if self._qt_sidecar_active():
-            self.open_or_raise_qt_window()
-            return
         if self.view is not None and hasattr(self.view, "on_unload"):
             try:
                 self.view.on_unload()
@@ -251,9 +77,6 @@ class ProductionLogController:
     def on_active_form_changed(self, active_form_info=None, form_id=None):
         _ = active_form_info
         _ = form_id
-        if self._qt_sidecar_active():
-            self.open_or_raise_qt_window()
-            return
         try:
             if self.view is not None and self.view.has_unsaved_changes:
                 data = self.view.collect_ui_data()
@@ -264,17 +87,12 @@ class ProductionLogController:
         self.reload_active_form()
 
     def on_calculation_settings_changed(self):
-        if self._qt_sidecar_active():
-            self.open_or_raise_qt_window()
-            return
         self.model.refresh_calculation_settings()
         self.view.apply_calculation_settings(mark_dirty=False)
         self.update_row_math()
         self.calculate_metrics()
 
     def auto_save(self):
-        if self._qt_sidecar_active():
-            return
         if self.view.has_unsaved_changes:
             self.save_draft(is_auto=True)
 
@@ -317,9 +135,6 @@ class ProductionLogController:
                 if backup_info.get("versioned_backup_path"):
                     message += " A recovery snapshot of the previous draft was stored in data/pending/history."
                 self.view.show_toast("Draft Saved", message, "success")
-
-            if self._qt_sidecar_active():
-                self.runtime_manager.send_command("refresh_snapshot")
         except Exception as exc:
             self.view.show_error("Draft Save Error", f"Could not save draft: {exc}")
 
@@ -331,9 +146,6 @@ class ProductionLogController:
             self.view.show_toast("Refresh View", "No previous draft found to reload.", "info")
 
     def refresh_downtime_codes(self):
-        if self._qt_sidecar_active():
-            self.open_or_raise_qt_window()
-            return
         self.view.dt_codes = self.model.refresh_downtime_codes()
         for row in self.get_rows("downtime"):
             code_widget = self.view.get_row_widget(row, "downtime", "downtime_code", fallback_id="code")
@@ -913,13 +725,8 @@ class ProductionLogController:
         if self.view.current_draft_path == draft_path:
             self.view.current_draft_path = None
         self.view.update_recovery_ui()
-        if self._qt_sidecar_active():
-            self.runtime_manager.send_command("refresh_snapshot")
 
     def load_draft_path(self, draft_path, window=None):
-        if self._qt_sidecar_active():
-            self.open_or_raise_qt_window()
-            return
         self._load_draft_path_internal(draft_path, window=window, prompt_discard=True)
 
     def _load_draft_path_internal(self, draft_path, window=None, prompt_discard=True):

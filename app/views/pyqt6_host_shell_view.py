@@ -15,11 +15,9 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 import json
 import re
-from functools import partial
 from types import SimpleNamespace
 
 from app.module_registry import ModuleRegistry
-from app.qt_module_runtime import QtModuleRuntimeManager
 from app.theme_manager import get_qt_palette, get_qt_stylesheet, get_theme_tokens, normalize_theme
 from app.host_ui_adapter import PyQt6HostUiAdapter
 
@@ -79,9 +77,7 @@ class PyQt6HostShellView(QMainWindow):
         self.theme_tokens = get_theme_tokens(theme_name=self.theme_name)
         self.base_window_title = "Production Logging Center"
         self.module_registry = ModuleRegistry()
-        self.runtime_managers = {}
         self.module_buttons = {}
-        self._last_runtime_event_signatures = {}
         self.module_catalog = self._build_module_catalog()
         self.persistent_module_names = set()
         self._load_persistent_module_names()
@@ -902,16 +898,12 @@ class PyQt6HostShellView(QMainWindow):
 
     def _refresh_session_controls(self, session_mode="idle"):
         has_active_module = bool(self.active_module_name)
-        is_sidecar = session_mode == "sidecar"
-        show_window_actions = has_active_module and is_sidecar
+        show_window_actions = has_active_module and session_mode == "dedicated_window"
 
         if self.module_session_hint_label is not None:
             self.module_session_hint_label.setVisible(show_window_actions)
-            self.module_session_hint_label.setText(
-                "This module currently works in its own window. The shell keeps its window status and actions available here."
-                if show_window_actions
-                else ""
-            )
+            hint_text = "This module intentionally uses its own dedicated window. The shell keeps its window status and actions available here." if show_window_actions else ""
+            self.module_session_hint_label.setText(hint_text)
         if self.session_action_frame is not None:
             self.session_action_frame.setVisible(show_window_actions)
 
@@ -947,65 +939,79 @@ class PyQt6HostShellView(QMainWindow):
         menu.addAction(action)
         return action
 
-    def _send_runtime_command(self, module_name, action, success_message, unavailable_message):
-        manager = self.runtime_managers.get(module_name)
-        if manager is None:
-            self.open_or_raise_module(module_name, restart=False)
-            manager = self.runtime_managers.get(module_name)
-        if manager is None:
-            self.host_ui_adapter.show_warning("Action Unavailable", unavailable_message)
+    def _invoke_viewport_module_action(self, module_name, action_name, unavailable_message, ensure_loaded=False):
+        if not self._is_dispatcher_viewport_module(module_name) or self.dispatcher is None:
             return False
-        manager.send_command(action)
-        self.host_ui_adapter.show_toast("File Menu", success_message, duration_ms=2500)
+        if ensure_loaded:
+            self.open_or_raise_module(module_name, restart=False)
+        module_instance = getattr(self.dispatcher, "active_module_instance", None)
+        active_module_name = str(getattr(self.dispatcher, "active_module_name", "") or "")
+        if active_module_name != str(module_name or ""):
+            if ensure_loaded:
+                self.host_ui_adapter.show_warning("Action Unavailable", unavailable_message)
+                return True
+            return False
+        action = getattr(module_instance, action_name, None)
+        if not callable(action):
+            self.host_ui_adapter.show_warning("Action Unavailable", unavailable_message)
+            return True
+        action()
         return True
 
     def menu_open(self):
-        self.open_or_raise_module("production_log", restart=False)
-        self._send_runtime_command(
+        if self._invoke_viewport_module_action(
             "production_log",
             "show_pending",
-            "Opened Production Log draft workflow.",
-            "Open Draft is unavailable because the Production Log runtime could not be opened.",
-        )
+            "Open Draft is unavailable because the Production Log viewport is not available.",
+            ensure_loaded=True,
+        ):
+            return
+        self.host_ui_adapter.show_warning("Action Unavailable", "Open Draft is unavailable because the Production Log viewport could not be loaded.")
 
     def menu_save(self):
         active_module_name = str(self.active_module_name or "").strip()
         if active_module_name == "production_log":
-            self._send_runtime_command(
+            if self._invoke_viewport_module_action(
                 "production_log",
                 "save_draft",
-                "Sent save request to Production Log.",
-                "Save Draft is unavailable because the Production Log runtime is not available.",
-            )
+                "Save Draft is unavailable because the Production Log viewport is not available.",
+            ):
+                return
+            self.host_ui_adapter.show_warning("Action Unavailable", "Save Draft is unavailable because the Production Log viewport is not available.")
             return
         if active_module_name == "internal_code_editor":
-            self._send_runtime_command(
+            if self._invoke_viewport_module_action(
                 "internal_code_editor",
                 "save_current_file",
-                "Sent save request to Internal Code Editor.",
-                "Save is unavailable because the Internal Code Editor runtime is not available.",
-            )
+                "Save is unavailable because the Internal Code Editor viewport is not available.",
+            ):
+                return
+            self.host_ui_adapter.show_warning("Action Unavailable", "Save is unavailable because the Internal Code Editor viewport is not available.")
             return
         self.host_ui_adapter.show_warning(
             "Action Unavailable",
-            "Save Draft is currently implemented for Production Log and Internal Code Editor runtimes only.",
+            "Save is currently implemented for the active Production Log or Internal Code Editor viewport.",
         )
 
     def menu_export(self):
-        self._send_runtime_command(
+        if self._invoke_viewport_module_action(
             "production_log",
             "export_to_excel",
-            "Sent export request to Production Log.",
-            "Export to Excel is unavailable because the Production Log runtime could not be opened.",
-        )
+            "Export to Excel is unavailable because the Production Log viewport is not available.",
+            ensure_loaded=True,
+        ):
+            return
+        self.host_ui_adapter.show_warning("Action Unavailable", "Export to Excel is unavailable because the Production Log viewport could not be loaded.")
 
     def menu_import(self):
-        self._send_runtime_command(
+        if self._invoke_viewport_module_action(
             "production_log",
             "import_from_excel_ui",
-            "Sent import request to Production Log.",
-            "Import Excel is unavailable because the Production Log runtime could not be opened.",
-        )
+            "Import Excel is unavailable because the Production Log viewport is not available.",
+            ensure_loaded=True,
+        ):
+            return
+        self.host_ui_adapter.show_warning("Action Unavailable", "Import Excel is unavailable because the Production Log viewport could not be loaded.")
 
     def _module_entry(self, module_name):
         for entry in self.module_catalog:
@@ -1021,55 +1027,22 @@ class PyQt6HostShellView(QMainWindow):
             return False
         return bool(should_use_qt_in_viewport(module_name))
 
-    def _build_qt_session_payload(self, module_name):
-        entry = self._module_entry(module_name) or {"display_name": module_name.replace("_", " ").title()}
-        display_name = str(entry["display_name"])
-        payload = {
-            "window_title": f"{display_name} - {self.base_window_title}",
-            "title": display_name,
-            "subtitle": f"Opened from {self.base_window_title} for {display_name}.",
-            "module_name": module_name,
-            "theme_tokens": dict(self.theme_tokens),
-        }
+    def _get_layout_manager_runtime_dispatcher(self):
+        if self.dispatcher is None:
+            return None
+        return getattr(self.dispatcher, "layout_manager_dispatcher", None)
 
-        if module_name in {"settings_manager", "developer_admin", "security_admin"}:
-            section_mode = "full"
-            if module_name == "developer_admin":
-                section_mode = "developer_admin"
-            elif module_name == "security_admin":
-                section_mode = "security_admin"
-
-            payload["section_mode"] = section_mode
-            payload["navigation_modules"] = [
-                {
-                    "display_name": item["display_name"],
-                    "module_name": item["name"],
-                }
-                for item in self.module_catalog
-            ]
-            payload["persistable_modules"] = list(payload["navigation_modules"])
-
-        return payload
-
-    def _ensure_runtime_manager(self, module_name):
-        manager = self.runtime_managers.get(module_name)
-        if manager is not None:
-            return manager
-
-        manager = QtModuleRuntimeManager(
-            module_name,
-            payload_builder=partial(self._build_qt_session_payload, module_name),
-        )
-        self.runtime_managers[module_name] = manager
-        return manager
+    def _uses_dedicated_window_contract(self, module_name):
+        return str(module_name or "").strip() == "layout_manager" and self._get_layout_manager_runtime_dispatcher() is not None
 
     def _stop_runtime_if_non_persistent(self, module_name):
         if not module_name or self.is_module_persistent(module_name):
             return
-        manager = self.runtime_managers.get(module_name)
-        if manager is None:
-            return
-        manager.stop_runtime(force=False)
+        if self._uses_dedicated_window_contract(module_name):
+            dedicated_runtime = self._get_layout_manager_runtime_dispatcher()
+            if dedicated_runtime is not None:
+                dedicated_runtime.stop_window()
+        return
 
     def _switch_active_module(self, module_name):
         previous_module = self.active_module_name
@@ -1093,18 +1066,24 @@ class PyQt6HostShellView(QMainWindow):
             self.dispatcher.load_module(module_name, use_transition=False)
             return True
 
-        # Layout Manager intentionally falls through to this dedicated external
-        # runtime path. Do not promote it into the shared viewport without a
-        # deliberate architecture change plus updated validation/docs.
-        manager = self._ensure_runtime_manager(module_name)
-        manager.ensure_running(force_restart=bool(restart))
-        self._switch_active_module(module_name)
-        self._refresh_nav_button_states()
-        self._refresh_active_module_text()
-        self._notify_navigation_state("runtime_opened", module_name=module_name, restart=bool(restart))
-        display_name = self._display_name_for_module(module_name) or module_name
-        self.host_ui_adapter.show_toast(self.base_window_title, f"Opened {display_name} in a separate window.", duration_ms=3500)
-        return True
+        if self._uses_dedicated_window_contract(module_name):
+            dedicated_runtime = self._get_layout_manager_runtime_dispatcher()
+            if dedicated_runtime is None:
+                return False
+            dedicated_runtime.open_or_raise_window(restart=bool(restart))
+            self._switch_active_module(module_name)
+            self._refresh_nav_button_states()
+            self._refresh_active_module_text()
+            self._notify_navigation_state("runtime_opened", module_name=module_name, restart=bool(restart))
+            display_name = self._display_name_for_module(module_name) or module_name
+            self.host_ui_adapter.show_toast(self.base_window_title, f"Opened {display_name} in its dedicated window.", duration_ms=3500)
+            return True
+
+        self.host_ui_adapter.show_warning(
+            "Action Unavailable",
+            f"{self._display_name_for_module(module_name) or module_name} does not expose a dedicated window contract on the active PyQt6 shell.",
+        )
+        return False
 
     def _open_active_module(self):
         if self.active_module_name is None:
@@ -1130,14 +1109,20 @@ class PyQt6HostShellView(QMainWindow):
             )
             return
         module_name = self.active_module_name
-        manager = self.runtime_managers.get(module_name)
-        if manager is None:
+        if self._uses_dedicated_window_contract(module_name):
+            dedicated_runtime = self._get_layout_manager_runtime_dispatcher()
+            if dedicated_runtime is None:
+                return
+            dedicated_runtime.stop_window()
+            self._notify_navigation_state("runtime_closed", module_name=module_name)
+            display_name = self._display_name_for_module(module_name) or module_name
+            self.host_ui_adapter.show_toast(self.base_window_title, f"Closed the dedicated window for {display_name}.", duration_ms=3500)
+            self._poll_runtime_state()
             return
-        manager.stop_runtime(force=False)
-        self._notify_navigation_state("runtime_closed", module_name=module_name)
-        display_name = self._display_name_for_module(module_name) or module_name
-        self.host_ui_adapter.show_toast(self.base_window_title, f"Closed the separate window for {display_name}.", duration_ms=3500)
-        self._poll_runtime_state()
+        self.host_ui_adapter.show_warning(
+            "Action Unavailable",
+            f"{self._display_name_for_module(module_name) or module_name} does not have a dedicated window to close on the active PyQt6 shell.",
+        )
 
     def _refresh_nav_button_states(self):
         for module_name, button in self.module_buttons.items():
@@ -1182,24 +1167,38 @@ class PyQt6HostShellView(QMainWindow):
             )
             return
 
-        persistence_text = "reusable window" if self.is_module_persistent(self.active_module_name) else "separate window"
+        if self._uses_dedicated_window_contract(self.active_module_name):
+            persistence_text = "reusable dedicated window" if self.is_module_persistent(self.active_module_name) else "dedicated window"
+            self._set_module_session_context(
+                title=display_name,
+                route_text="Location: dedicated window",
+                message=f"{display_name} intentionally opens in its dedicated window.",
+                state_payload={
+                    "module": self.active_module_name,
+                    "status": "dedicated_window",
+                    "window_mode": "dedicated_window",
+                    "host_contract": "layout_manager_dispatcher",
+                    "persistence": persistence_text,
+                },
+                session_mode="dedicated_window",
+            )
+            if not self._viewport_has_content():
+                self.show_viewport_placeholder(
+                    title="Main Workspace",
+                    message=f"{display_name} intentionally runs in its dedicated window.",
+                    hint="This workspace stays available for modules that load directly inside the shell.",
+                )
+            return
         self._set_module_session_context(
             title=display_name,
-            route_text="Location: separate window",
-            message=f"{display_name} currently opens in a separate window.",
+            route_text="Location: unavailable",
+            message=f"{display_name} is not mapped to the shared viewport or a dedicated window contract.",
             state_payload={
                 "module": self.active_module_name,
-                "status": "separate_window",
-                "persistence": persistence_text,
+                "status": "unavailable",
             },
-            session_mode="sidecar",
+            session_mode="idle",
         )
-        if not self._viewport_has_content():
-            self.show_viewport_placeholder(
-                title="Main Workspace",
-                message=f"{display_name} is currently open in a separate window.",
-                hint="This workspace stays available for modules that load directly inside the shell.",
-            )
 
     def _poll_runtime_state(self):
         if self.active_module_name is None:
@@ -1228,70 +1227,36 @@ class PyQt6HostShellView(QMainWindow):
             )
             return
 
-        manager = self.runtime_managers.get(self.active_module_name)
-        if manager is None:
+        if self._uses_dedicated_window_contract(self.active_module_name):
+            dedicated_runtime = self._get_layout_manager_runtime_dispatcher()
+            if dedicated_runtime is None:
+                return
+            state = dedicated_runtime.build_host_runtime_state()
+            status = str(state.get("status") or "idle")
+            message = str(state.get("message") or "No dedicated-window status is available.")
             entry = self._module_entry(self.active_module_name) or {"display_name": self.active_module_name}
             display_name = str(entry["display_name"])
             self._set_module_session_context(
                 title=display_name,
-                route_text="Location: separate window",
-                message=f"{display_name} is not reporting separate-window status yet.",
-                state_payload={},
-                session_mode="sidecar",
+                route_text=f"Location: dedicated window ({status})",
+                message=message,
+                state_payload=state,
+                session_mode="dedicated_window",
             )
             return
-
-        state = dict(manager.read_state() or {})
-        self._handle_runtime_event(self.active_module_name, manager, state)
-        status = str(state.get("status") or ("running" if manager.is_running() else "idle"))
-        message = str(state.get("message") or "No runtime message available.")
-
-        if not manager.is_running() and not self.is_module_persistent(self.active_module_name):
-            # Drop completed non-persistent runtime managers so future opens rebuild a clean session payload.
-            self.runtime_managers.pop(self.active_module_name, None)
-
         entry = self._module_entry(self.active_module_name) or {"display_name": self.active_module_name}
         display_name = str(entry["display_name"])
         self._set_module_session_context(
             title=display_name,
-            route_text=f"Location: separate window ({status})",
-            message=message,
-            state_payload=state,
-            session_mode="sidecar",
+            route_text="Location: unavailable",
+            message=f"{display_name} is not mapped to the shared viewport or a dedicated window contract.",
+            state_payload={
+                "module": self.active_module_name,
+                "status": "unavailable",
+            },
+            session_mode="idle",
         )
-
-    def _handle_runtime_event(self, module_name, manager, state):
-        runtime_event = str(state.get("runtime_event") or "").strip().lower()
-        if not runtime_event:
-            return
-
-        event_signature = (runtime_event, state.get("updated_at"))
-        if self._last_runtime_event_signatures.get(module_name) == event_signature:
-            return
-        self._last_runtime_event_signatures[module_name] = event_signature
-
-        if module_name == "production_log" and runtime_event == "open_recovery_requested":
-            self.open_or_raise_module("recovery_viewer", restart=False)
-            recovery_instance = None
-            if self._is_dispatcher_viewport_module("recovery_viewer") and self.dispatcher is not None:
-                recovery_instance = getattr(self.dispatcher, "active_module_instance", None)
-                if recovery_instance is not None and hasattr(recovery_instance, "refresh_records"):
-                    try:
-                        recovery_instance.refresh_records()
-                    except Exception:
-                        pass
-            manager.send_command(
-                "host_action_completed",
-                {
-                    "action_name": runtime_event,
-                    "success": True,
-                    "message": "Opened Recovery Viewer in the PyQt6 host runtime.",
-                },
-            )
-            recovery_manager = self.runtime_managers.get("recovery_viewer")
-            if recovery_manager is not None:
-                recovery_manager.send_command("refresh_snapshot", {"reason": runtime_event})
-
+        
     def closeEvent(self, event):
         if self._window_close_callback is not None and not self._closing_via_dispatcher:
             callback = self._window_close_callback
@@ -1299,9 +1264,10 @@ class PyQt6HostShellView(QMainWindow):
             event.ignore()
             return
 
-        for manager in list(self.runtime_managers.values()):
+        dedicated_runtime = self._get_layout_manager_runtime_dispatcher()
+        if dedicated_runtime is not None:
             try:
-                manager.stop_runtime(force=False)
+                dedicated_runtime.stop_window()
             except Exception:
                 pass
         super().closeEvent(event)

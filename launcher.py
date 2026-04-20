@@ -49,7 +49,6 @@ from app.app_platform import SPLASH_LOGO_RELATIVE_PATH, apply_app_icon, apply_wi
 __module_name__ = "Dispatcher Core"
 __version__ = "2.2.0"
 LAYOUT_MANAGER_QT_SESSION_ENV = "AIMARTIN_LAYOUT_MANAGER_QT_SESSION"
-QT_MODULE_SESSION_ENV = "AIMARTIN_QT_MODULE_SESSION"
 
 
 class _SigintCoordinator:
@@ -128,35 +127,19 @@ def create_qt_application(theme_name=None, theme_tokens=None):
     return application
 
 
-def _load_qt_module_session_payload(session_path):
+def _load_layout_manager_qt_session_payload(session_path):
     with open(session_path, "r", encoding="utf-8") as session_file:
         payload = json.load(session_file)
     if not isinstance(payload, dict):
-        raise ValueError("Qt module session payload must be a JSON object.")
+        raise ValueError("Layout Manager Qt session payload must be a JSON object.")
     return payload
 
 
-def _run_qt_module_session_from_payload(session_path, session_payload):
-    module_name = str(session_payload.get("module") or "").strip()
-    if not module_name:
-        raise ValueError("Qt module session payload is missing the 'module' key.")
+def _run_layout_manager_qt_session(session_path, session_payload):
+    _ = session_payload
+    from app.views.layout_manager_qt_view import run_layout_manager_qt_session
 
-    if module_name == "layout_manager":
-        from app.views.layout_manager_qt_view import run_layout_manager_qt_session
-
-        return run_layout_manager_qt_session(session_path)
-
-    if module_name == "production_log":
-        from app.views.production_log_qt_view import run_production_log_qt_session
-
-        return run_production_log_qt_session(session_path)
-
-    if module_name == "internal_code_editor":
-        from app.views.internal_code_editor_qt_view import run_internal_code_editor_qt_session
-
-        return run_internal_code_editor_qt_session(session_path)
-
-    raise ValueError(f"Unsupported Qt module session: {module_name}")
+    return run_layout_manager_qt_session(session_path)
 
 
 def run_application(main_module=None, initial_module_name=None):
@@ -279,20 +262,15 @@ def run_application(main_module=None, initial_module_name=None):
 
 
 def run_special_mode_from_environment():
-    session_path = os.environ.get(QT_MODULE_SESSION_ENV, "").strip()
-    if session_path:
-        session_payload = _load_qt_module_session_payload(session_path)
-        return _run_qt_module_session_from_payload(session_path, session_payload)
-
     session_path = os.environ.get(LAYOUT_MANAGER_QT_SESSION_ENV, "").strip()
     if not session_path:
         return None
 
-    session_payload = _load_qt_module_session_payload(session_path)
+    session_payload = _load_layout_manager_qt_session_payload(session_path)
     if not session_payload.get("module"):
         session_payload["module"] = "layout_manager"
 
-    return _run_qt_module_session_from_payload(session_path, session_payload)
+    return _run_layout_manager_qt_session(session_path, session_payload)
 
 
 def build_argument_parser():

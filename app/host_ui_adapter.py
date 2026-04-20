@@ -24,7 +24,7 @@ __module_name__ = "Host UI Adapter"
 __version__ = "0.1.0"
 
 try:
-    from PyQt6.QtCore import QEvent, QObject, QTimer
+    from PyQt6.QtCore import QEvent, QObject, QTimer, pyqtSignal
     from PyQt6.QtWidgets import QMessageBox
 
     PYQT6_ADAPTER_AVAILABLE = True
@@ -32,6 +32,7 @@ except ImportError:
     QEvent = None
     QObject = None
     QTimer = None
+    pyqtSignal = None
     QMessageBox = None
     PYQT6_ADAPTER_AVAILABLE = False
 
@@ -72,6 +73,32 @@ class _QtMouseWheelForwarder(QObject if QObject is not None else object):
         scroll_bar.setValue(scroll_bar.value() + (direction * base_step * 3 * steps))
         event.accept()
         return True
+
+
+class _QtMainThreadInvoker(QObject if QObject is not None else object):
+    if pyqtSignal is not None:
+        invoke_callback = pyqtSignal(object)
+        invoke_delayed_callback = pyqtSignal(int, object)
+
+    def __init__(self, parent=None):
+        if QObject is not None:
+            super().__init__(parent)
+        if pyqtSignal is not None:
+            self.invoke_callback.connect(self._invoke_callback)
+            self.invoke_delayed_callback.connect(self._invoke_delayed_callback)
+
+    def _invoke_callback(self, callback):
+        if callable(callback):
+            callback()
+
+    def _invoke_delayed_callback(self, delay_ms, callback):
+        if not callable(callback):
+            return
+        try:
+            delay_ms = int(delay_ms)
+        except Exception:
+            delay_ms = 0
+        QTimer.singleShot(max(0, delay_ms), callback)
 
 
 class TkHostUiAdapter:
@@ -311,17 +338,22 @@ class PyQt6HostUiAdapter:
     def __init__(self, host_window):
         self.host_window = host_window
         self._wheel_forwarders = []
+        self._main_thread_invoker = _QtMainThreadInvoker(host_window) if PYQT6_ADAPTER_AVAILABLE else None
 
     def call_later(self, delay_ms, callback):
-        after = getattr(self.host_window, "after", None)
-        if callable(after):
-            return after(delay_ms, callback)
         if not PYQT6_ADAPTER_AVAILABLE:
             return None
         try:
             delay_ms = int(delay_ms)
         except Exception:
             delay_ms = 0
+        invoker = self._main_thread_invoker
+        if invoker is not None and pyqtSignal is not None:
+            if delay_ms <= 0:
+                invoker.invoke_callback.emit(callback)
+            else:
+                invoker.invoke_delayed_callback.emit(delay_ms, callback)
+            return None
         QTimer.singleShot(max(0, delay_ms), callback)
         return None
 

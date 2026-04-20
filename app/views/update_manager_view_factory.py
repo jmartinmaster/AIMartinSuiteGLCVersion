@@ -13,8 +13,6 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-from app.views.qt_module_bridge_view import QtModuleBridgeView
-from app.views.update_manager_qt_view import is_update_manager_qt_runtime_available
 from app.views.update_manager_view import UpdateManagerView
 
 __module_name__ = "Update Manager View Factory"
@@ -22,26 +20,8 @@ __version__ = "1.0.0"
 
 
 def create_update_manager_view(parent, controller):
-    dispatcher = getattr(controller, "dispatcher", None)
-    controller.requested_view_backend = "qt" if bool(getattr(dispatcher, "is_pyqt6_shell_requested", lambda: False)()) else "tk"
+    _ = getattr(controller, "dispatcher", None)
+    controller.requested_view_backend = "tk"
     controller.resolved_view_backend = "tk"
     controller.view_backend_fallback_reason = None
-    if controller.requested_view_backend == "qt" and is_update_manager_qt_runtime_available():
-        controller.resolved_view_backend = "qt"
-        return QtModuleBridgeView(
-            parent,
-            controller.dispatcher,
-            controller,
-            {
-                "title": "Update Manager Qt Runtime",
-                "subtitle": (
-                    "Update Manager is now running in a dedicated PyQt6 window using staged migration slices. "
-                    "Use the controls below to raise or restart the sidecar window."
-                ),
-                "initial_status": "Launching Update Manager Qt window...",
-            },
-        )
-
-    if controller.requested_view_backend == "qt":
-        controller.view_backend_fallback_reason = "PyQt6 is not installed; using the Tk Update Manager."
     return UpdateManagerView(parent, controller)

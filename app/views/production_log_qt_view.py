@@ -13,10 +13,6 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-import json
-import sys
-
-from launcher import create_qt_application
 from app.theme_manager import get_qt_palette, get_qt_stylesheet
 
 __module_name__ = "Production Log Qt View"
@@ -76,14 +72,6 @@ def is_production_log_qt_runtime_available():
     return PYQT6_AVAILABLE
 
 
-def load_production_log_qt_session(session_path):
-    with open(session_path, "r", encoding="utf-8") as handle:
-        payload = json.load(handle)
-    if not isinstance(payload, dict):
-        raise ValueError("Production Log Qt session payload must be a JSON object.")
-    return payload
-
-
 class ProductionLogQtView(QMainWindow):
     def __init__(self, controller, payload, header_fields, production_fields, downtime_fields, parent_widget=None):
         if not PYQT6_AVAILABLE:
@@ -97,6 +85,10 @@ class ProductionLogQtView(QMainWindow):
         self.production_fields = list(production_fields or [])
         self.downtime_fields = list(downtime_fields or [])
         self.header_widgets = {}
+        self.has_unsaved_changes = False
+        self.last_saved_signature = None
+        self.last_export_path = None
+        self._suspend_dirty_tracking = False
         self._build_ui()
         self.apply_theme(theme_tokens=self.theme_tokens)
         if self.embedded:
@@ -354,6 +346,8 @@ class ProductionLogQtView(QMainWindow):
             pass
 
     def _queue_live_recalculate(self, *_args):
+        if not self._suspend_dirty_tracking:
+            self.mark_dirty()
         if self._live_recalculate_timer.isActive():
             self._live_recalculate_timer.stop()
         self._live_recalculate_timer.start()
@@ -458,12 +452,18 @@ class ProductionLogQtView(QMainWindow):
 
     def set_form_data(self, header_payload, production_rows, downtime_rows):
         header_payload = dict(header_payload or {})
+        self._suspend_dirty_tracking = True
         for field_id, widget in self.header_widgets.items():
             widget.blockSignals(True)
             widget.setText(str(header_payload.get(field_id, "")))
             widget.blockSignals(False)
         self._set_table_rows(self.production_table, self.production_fields, list(production_rows or []))
         self._set_table_rows(self.downtime_table, self.downtime_fields, list(downtime_rows or []))
+        if self.production_table.rowCount() == 0:
+            self._append_row(self.production_table, self.production_fields)
+        if self.downtime_table.rowCount() == 0:
+            self._append_row(self.downtime_table, self.downtime_fields)
+        self._suspend_dirty_tracking = False
 
     def set_form_name(self, form_name):
         self.form_name_label.setText(f"Active Form: {str(form_name or '--')}")
@@ -476,21 +476,27 @@ class ProductionLogQtView(QMainWindow):
 
     def _add_production_row(self):
         self._append_row(self.production_table, self.production_fields)
+        self.mark_dirty()
 
     def _remove_selected_production_row(self):
         selected_rows = self.production_table.selectionModel().selectedRows()
         if not selected_rows:
             return
         self.production_table.removeRow(int(selected_rows[0].row()))
+        self.mark_dirty()
+        self._queue_live_recalculate()
 
     def _add_downtime_row(self):
         self._append_row(self.downtime_table, self.downtime_fields)
+        self.mark_dirty()
 
     def _remove_selected_downtime_row(self):
         selected_rows = self.downtime_table.selectionModel().selectedRows()
         if not selected_rows:
             return
         self.downtime_table.removeRow(int(selected_rows[0].row()))
+        self.mark_dirty()
+        self._queue_live_recalculate()
 
     def show_pending_dialog(self, pending_drafts):
         dialog = QDialog(self)
@@ -620,6 +626,29 @@ class ProductionLogQtView(QMainWindow):
     def show_info(self, title, message):
         QMessageBox.information(self, title, message)
 
+    def show_toast(self, title, message, bootstyle=None):
+        dispatcher = getattr(self.controller, "dispatcher", None)
+        show_toast = getattr(dispatcher, "show_toast", None)
+        if callable(show_toast):
+            show_toast(title, message, bootstyle)
+            self.set_status(message)
+            return
+        self.show_info(title, message)
+
+    def mark_dirty(self):
+        self.has_unsaved_changes = True
+
+    def mark_clean(self, data=None):
+        serializer = getattr(self.controller, "serialize_ui_data", None)
+        if callable(serializer):
+            self.last_saved_signature = serializer(data or self.collect_form_data())
+        self.has_unsaved_changes = False
+
+    def confirm_discard_unsaved_changes(self):
+        if not self.has_unsaved_changes:
+            return True
+        return self.ask_yes_no("Unsaved Changes", "You have unsaved changes in the current session. Continue and discard them?")
+
     def ask_yes_no(self, title, message):
         return QMessageBox.question(
             self,
@@ -635,29 +664,3 @@ class ProductionLogQtView(QMainWindow):
     def closeEvent(self, event):
         self.controller.handle_close()
         super().closeEvent(event)
-
-
-def run_production_log_qt_session(session_path):
-    if not PYQT6_AVAILABLE:
-        print("PyQt6 is not installed in the active Python environment.", file=sys.stderr)
-        return 2
-
-    from app.controllers.production_log_qt_controller import ProductionLogQtController
-
-    session_payload = load_production_log_qt_session(session_path)
-    application = create_qt_application(theme_tokens=session_payload.get("theme_tokens") or {})
-    controller = ProductionLogQtController(session_payload)
-    controller.show()
-    return application.exec()
-
-
-def main(argv=None):
-    argv = list(argv or sys.argv)
-    if len(argv) < 2:
-        print("Usage: python app/views/production_log_qt_view.py <session.json>", file=sys.stderr)
-        return 2
-    return run_production_log_qt_session(argv[1])
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

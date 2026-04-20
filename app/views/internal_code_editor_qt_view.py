@@ -13,16 +13,13 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-import json
-import sys
-
-from launcher import create_qt_application
+from app.theme_manager import get_qt_palette, get_qt_stylesheet
 
 __module_name__ = "Internal Code Editor Qt View"
 __version__ = "1.0.0"
 
 try:
-    from PyQt6.QtCore import QSignalBlocker, QTimer
+    from PyQt6.QtCore import QSignalBlocker, QTimer, Qt
     from PyQt6.QtWidgets import (
         QApplication,
         QComboBox,
@@ -60,6 +57,7 @@ except ImportError:
     QWidget = None
     QSignalBlocker = None
     QTimer = None
+    Qt = None
     PYQT6_AVAILABLE = False
 
 
@@ -67,33 +65,45 @@ def is_internal_code_editor_qt_runtime_available():
     return PYQT6_AVAILABLE
 
 
-def load_internal_code_editor_qt_session(session_path):
-    with open(session_path, "r", encoding="utf-8") as handle:
-        payload = json.load(handle)
-    if not isinstance(payload, dict):
-        raise ValueError("Internal Code Editor Qt session payload must be a JSON object.")
-    return payload
-
-
 class InternalCodeEditorQtView(QMainWindow):
-    def __init__(self, controller, payload):
+    def __init__(self, controller, payload, parent_widget=None):
         if not PYQT6_AVAILABLE:
             raise RuntimeError("PyQt6 is not installed in the active Python environment.")
-        super().__init__()
+        super().__init__(parent_widget)
         self.controller = controller
         self.payload = dict(payload or {})
+        self.theme_tokens = dict(self.payload.get("theme_tokens") or {})
+        self.embedded = parent_widget is not None
         self.file_options = {}
         self.definition_entries = {}
         self._build_ui()
+        self.apply_theme(theme_tokens=self.theme_tokens)
+        if self.embedded:
+            self._attach_to_parent_container(parent_widget)
 
-        self.command_timer = QTimer(self)
-        self.command_timer.setInterval(700)
-        self.command_timer.timeout.connect(self.controller.poll_commands)
-        self.command_timer.start()
+        if not self.embedded:
+            self.command_timer = QTimer(self)
+            self.command_timer.setInterval(700)
+            self.command_timer.timeout.connect(self.controller.poll_commands)
+            self.command_timer.start()
+
+    def _attach_to_parent_container(self, parent_widget):
+        if parent_widget is None:
+            return
+        self.setWindowFlag(Qt.WindowType.Window, False)
+        layout = parent_widget.layout()
+        if layout is None:
+            layout = QVBoxLayout(parent_widget)
+            layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self)
+        self.show()
 
     def _build_ui(self):
         self.setWindowTitle(str(self.payload.get("window_title") or "Internal Code Editor"))
-        self.resize(1360, 900)
+        if self.embedded:
+            self.setMinimumSize(0, 0)
+        else:
+            self.resize(1360, 900)
 
         central_widget = QWidget(self)
         root_layout = QVBoxLayout(central_widget)
@@ -171,6 +181,14 @@ class InternalCodeEditorQtView(QMainWindow):
         self.status_bar = QStatusBar(self)
         self.setStatusBar(self.status_bar)
         self.status_bar.showMessage("Internal Code Editor Qt window ready.", 5000)
+
+    def apply_theme(self, theme_tokens=None):
+        if isinstance(theme_tokens, dict):
+            self.theme_tokens = dict(theme_tokens)
+        self.setStyleSheet(get_qt_stylesheet(theme_tokens=self.theme_tokens))
+        application = QApplication.instance()
+        if application is not None:
+            application.setPalette(get_qt_palette(theme_tokens=self.theme_tokens))
 
     def set_file_options(self, entries, selected_key):
         self.file_options = {entry["label"]: entry["key"] for entry in entries}
@@ -278,6 +296,18 @@ class InternalCodeEditorQtView(QMainWindow):
     def update_status(self, message):
         self.status_bar.showMessage(str(message or ""), 6000)
 
+    def show_info(self, title, message):
+        QMessageBox.information(self, title, message)
+
+    def show_toast(self, title, message):
+        dispatcher = getattr(self.controller, "dispatcher", None)
+        show_toast = getattr(dispatcher, "show_toast", None)
+        if callable(show_toast):
+            show_toast(title, message)
+            self.update_status(message)
+            return
+        self.show_info(title, message)
+
     def show_error(self, title, message):
         QMessageBox.critical(self, title, message)
 
@@ -294,29 +324,3 @@ class InternalCodeEditorQtView(QMainWindow):
     def closeEvent(self, event):
         self.controller.handle_close()
         super().closeEvent(event)
-
-
-def run_internal_code_editor_qt_session(session_path):
-    if not PYQT6_AVAILABLE:
-        print("PyQt6 is not installed in the active Python environment.", file=sys.stderr)
-        return 2
-
-    from app.controllers.internal_code_editor_qt_controller import InternalCodeEditorQtController
-
-    session_payload = load_internal_code_editor_qt_session(session_path)
-    application = create_qt_application(theme_tokens=session_payload.get("theme_tokens") or {})
-    controller = InternalCodeEditorQtController(session_payload)
-    controller.show()
-    return application.exec()
-
-
-def main(argv=None):
-    argv = list(argv or sys.argv)
-    if len(argv) < 2:
-        print("Usage: python app/views/internal_code_editor_qt_view.py <session.json>", file=sys.stderr)
-        return 2
-    return run_internal_code_editor_qt_session(argv[1])
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

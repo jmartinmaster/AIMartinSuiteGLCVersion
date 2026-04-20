@@ -20,7 +20,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from launcher import QT_MODULE_SESSION_ENV, create_qt_application
+from launcher import create_qt_application
 from app.theme_manager import get_qt_palette, get_qt_stylesheet
 
 __module_name__ = "Layout Manager Qt View"
@@ -486,7 +486,6 @@ def launch_layout_manager_qt_probe(payload):
     )
     env = os.environ.copy()
     env[LAYOUT_MANAGER_QT_SESSION_ENV] = str(session_path)
-    env[QT_MODULE_SESSION_ENV] = str(session_path)
     command = [sys.executable] if getattr(sys, "frozen", False) else [sys.executable, str(REPO_ROOT / "main.py")]
     subprocess.Popen(command, cwd=str(REPO_ROOT), env=env, close_fds=True)
 

@@ -243,16 +243,13 @@ class LayoutManagerQtBridge:
             pass
 
     def open_or_raise(self):
-        self.runtime_manager.ensure_running(force_restart=False)
+        self.mini_dispatcher.open_or_raise_window(restart=False)
 
     def reload_from_disk(self):
-        if self.runtime_manager.is_running():
-            self.runtime_manager.send_command("reload_from_disk")
-            return
-        self.runtime_manager.ensure_running(force_restart=False)
+        self.mini_dispatcher.request_reload_from_disk()
 
     def restart_runtime(self):
-        self.runtime_manager.ensure_running(force_restart=True)
+        self.mini_dispatcher.open_or_raise_window(restart=True)
 
     def can_navigate_away(self):
         return True
@@ -282,6 +279,53 @@ class LayoutManagerMiniDispatcher:
     def __init__(self, host_dispatcher):
         self.host_dispatcher = host_dispatcher
         self.runtime_manager = LayoutManagerQtRuntimeManager(self)
+
+    def is_runtime_running(self):
+        return self.runtime_manager.is_running()
+
+    def open_or_raise_window(self, restart=False):
+        self.schedule_preload(force=bool(restart))
+        self.runtime_manager.ensure_running(force_restart=bool(restart))
+
+    def request_reload_from_disk(self):
+        if self.runtime_manager.is_running():
+            self.runtime_manager.send_command("reload_from_disk")
+            return
+        self.open_or_raise_window(restart=False)
+
+    def stop_window(self):
+        self.runtime_manager.stop_runtime(force=False)
+
+    def read_runtime_state(self):
+        return dict(self.runtime_manager.read_state() or {})
+
+    def handle_runtime_state(self, state):
+        if not isinstance(state, dict):
+            return
+        status = str(state.get("status") or "").strip().lower()
+        if status == "closed":
+            self.schedule_preload(force=True)
+
+    def build_host_runtime_state(self):
+        state = self.read_runtime_state()
+        self.handle_runtime_state(state)
+        status = str(state.get("status") or ("running" if self.is_runtime_running() else "idle")).strip().lower() or "idle"
+        message = str(state.get("message") or "").strip()
+        if not message:
+            if status == "running":
+                message = "Layout Manager dedicated window is running."
+            elif status == "launching":
+                message = "Launching Layout Manager dedicated window."
+            elif status == "closed":
+                message = "Layout Manager dedicated window is closed."
+            else:
+                message = "Layout Manager dedicated window is idle."
+        state["module"] = "layout_manager"
+        state["window_mode"] = "dedicated_window"
+        state["host_contract"] = "layout_manager_dispatcher"
+        state["status"] = status
+        state["message"] = message
+        return state
 
     def preload_module_bundle(self, force_fresh=False):
         host = self.host_dispatcher
@@ -369,12 +413,11 @@ class LayoutManagerMiniDispatcher:
             return payload
 
     def launch(self, parent):
-        # This bridge remains historical/non-canonical scaffolding for cases
-        # where Layout Manager is mounted from a container-backed flow. Even on
-        # this path, keep the heavy editor on its dedicated runtime window.
+        # Layout Manager intentionally keeps its heavy editor in a dedicated Qt
+        # window while the shell surface exposes status and lifecycle controls.
         self.schedule_preload(force=False)
-        self.runtime_manager.ensure_running(force_restart=False)
+        self.open_or_raise_window(restart=False)
         return LayoutManagerQtBridge(parent, self)
 
     def shutdown(self):
-        self.runtime_manager.stop_runtime(force=False)
+        self.stop_window()

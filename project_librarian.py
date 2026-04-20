@@ -17,7 +17,9 @@ from pathlib import Path
 
 from symbol_index import DEFAULT_OUTPUT_DIR as SYMBOL_INDEX_OUTPUT_DIR, JSON_OUTPUT_NAME as SYMBOL_INDEX_JSON_NAME, SymbolIndexError, generate_symbol_index
 
-
+#
+#Librarian server launch command: python project_librarian.py mcp-server --transport streamable-http --host 127.0.0.1 --port 8765
+#
 DEFAULT_OUTPUT_DIR = Path("build") / "project-librarian"
 SNAPSHOT_NAME = "librarian-snapshot.json"
 HISTORY_NAME = "change-history.jsonl"

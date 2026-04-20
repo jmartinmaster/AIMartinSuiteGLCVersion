@@ -13,6 +13,10 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
+import os
+import sys
+from pathlib import Path
+
 import ttkbootstrap as tb
 
 try:
@@ -46,6 +50,56 @@ READABLE_THEMES = {
     "darkly": "Darkly - balanced dark",
     "superhero": "Superhero - high-contrast dark",
 }
+
+
+def _find_tcl_component_path(component_prefix):
+    preferred_names = []
+    if component_prefix == "tcl":
+        preferred_names = ["tcl8.6", "tcl8.7", "tcl8"]
+        marker_name = "init.tcl"
+    else:
+        preferred_names = ["tk8.6", "tk8.7", "tk8"]
+        marker_name = "tk.tcl"
+
+    search_roots = []
+    for prefix_value in (getattr(sys, "base_prefix", None), sys.prefix):
+        if not prefix_value:
+            continue
+        candidate_root = Path(prefix_value) / "tcl"
+        if candidate_root not in search_roots:
+            search_roots.append(candidate_root)
+
+    for search_root in search_roots:
+        if not search_root.is_dir():
+            continue
+
+        for preferred_name in preferred_names:
+            preferred_path = search_root / preferred_name
+            if (preferred_path / marker_name).is_file():
+                return str(preferred_path)
+
+        for child_path in sorted(search_root.iterdir()):
+            if not child_path.is_dir():
+                continue
+            if not child_path.name.lower().startswith(component_prefix):
+                continue
+            if (child_path / marker_name).is_file():
+                return str(child_path)
+
+    return None
+
+
+def _ensure_tcl_tk_environment():
+    if os.environ.get("TCL_LIBRARY") and os.environ.get("TK_LIBRARY"):
+        return
+
+    tcl_library = _find_tcl_component_path("tcl")
+    tk_library = _find_tcl_component_path("tk")
+
+    if tcl_library and not os.environ.get("TCL_LIBRARY"):
+        os.environ["TCL_LIBRARY"] = tcl_library
+    if tk_library and not os.environ.get("TK_LIBRARY"):
+        os.environ["TK_LIBRARY"] = tk_library
 
 
 def get_theme_names():
@@ -509,6 +563,8 @@ def get_theme_tokens(theme_name=None, root=None):
             return cached_tokens
         if theme_name is None and active_theme:
             theme_name = active_theme
+
+    _ensure_tcl_tk_environment()
 
     style = tb.Style.get_instance()
     if style is None:

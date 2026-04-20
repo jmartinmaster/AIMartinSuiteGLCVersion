@@ -13,7 +13,6 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-import json
 import os
 import time
 import webbrowser
@@ -32,8 +31,6 @@ class ProductionLogQtController:
         self.dispatcher = dispatcher
         self.embedded = dispatcher is not None
         self.payload = dict(payload)
-        self.state_path = self.payload.get("state_path")
-        self.command_path = self.payload.get("command_path")
         self.model = ProductionLogModel(data_registry=getattr(dispatcher, "external_data_registry", None))
         self.layout_config = self.model.load_layout_config()
         self.header_fields = self.model.get_section_field_configs("header", config=self.layout_config)
@@ -42,19 +39,11 @@ class ProductionLogQtController:
         self.pending_drafts = []
         self.recovery_snapshots = []
         self.current_draft_path = None
+        self.balance_state = self.model.normalize_balance_state()
         self.auto_save_interval_ms = max(60000, int(getattr(self.model, "auto_save_interval", 300000) or 300000))
         if self.embedded:
             self.payload = self._build_view_payload()
-            self.state_path = None
-            self.command_path = None
-        self.view = ProductionLogQtView(
-            self,
-            self.payload,
-            self.header_fields,
-            self.production_fields,
-            self.downtime_fields,
-            parent_widget=parent,
-        )
+        self._create_view()
         self._initialize_form()
         self.refresh_draft_lists(initial=True)
         self.calculate_metrics()
@@ -85,6 +74,55 @@ class ProductionLogQtController:
             "theme_tokens": theme_tokens,
         }
 
+    def _create_view(self):
+        self.view = ProductionLogQtView(
+            self,
+            self.payload,
+            self.header_fields,
+            self.production_fields,
+            self.downtime_fields,
+            parent_widget=self.parent,
+        )
+
+    def _dispose_view(self):
+        view = self.__dict__.get("view")
+        if view is None:
+            return
+        try:
+            view.hide()
+        except Exception:
+            pass
+        try:
+            if self.embedded:
+                view.setParent(None)
+        except Exception:
+            pass
+        try:
+            view.deleteLater()
+        except Exception:
+            pass
+
+    def _reload_layout_fields(self):
+        self.layout_config = self.model.load_layout_config()
+        self.header_fields = self.model.get_section_field_configs("header", config=self.layout_config)
+        self.production_fields = self.model.get_section_field_configs("production", config=self.layout_config)
+        self.downtime_fields = self.model.get_section_field_configs("downtime", config=self.layout_config)
+
+    def _rebuild_view_payload(self):
+        if self.embedded:
+            self.payload = self._build_view_payload()
+            return
+        self.payload["theme_tokens"] = dict(self.payload.get("theme_tokens") or {})
+
+    def get_active_form_info(self):
+        return dict(self.model.form_registry.get_active_form())
+
+    def serialize_ui_data(self, data=None):
+        payload = dict(data or self.collect_ui_data())
+        if "balance_state" not in payload:
+            payload["balance_state"] = dict(self.balance_state or {})
+        return self.model.serialize_ui_data(payload)
+
     def show(self):
         self.view.show()
         self.view.raise_()
@@ -92,7 +130,10 @@ class ProductionLogQtController:
 
     def _initialize_form(self):
         self.view.set_form_name(self.model.get_active_form_name())
-        self.view.set_form_data(self._default_header_payload(), [], [])
+        self.balance_state = self.model.normalize_balance_state()
+        self.current_draft_path = None
+        self.view.set_form_data(self._default_header_payload(), [{}], [{}])
+        self.view.mark_clean(self.collect_ui_data())
         self.view.set_status("Production Log Qt editor ready.")
 
     def _default_header_payload(self):
@@ -105,32 +146,12 @@ class ProductionLogQtController:
         return payload
 
     def write_state(self, status="ready", message="", dirty=False, runtime_event=None, metadata=None):
-        if not self.state_path:
-            return
-        latest_name = "None"
-        if self.pending_drafts:
-            latest_name = str(self.pending_drafts[0].get("filename") or "None")
-        payload = {
-            "status": status,
-            "dirty": bool(dirty),
-            "message": str(message or ""),
-            "module": "production_log",
-            "pending_draft_count": len(self.pending_drafts),
-            "recovery_snapshot_count": len(self.recovery_snapshots),
-            "latest_draft_name": latest_name,
-            "dt_code_count": len(self.model.dt_codes or []),
-            "form_name": self.model.get_active_form_name(),
-            "updated_at": time.time(),
-        }
-        if runtime_event:
-            payload["runtime_event"] = str(runtime_event)
-        if isinstance(metadata, dict):
-            payload.update(metadata)
-        try:
-            with open(self.state_path, "w", encoding="utf-8") as handle:
-                json.dump(payload, handle, indent=2)
-        except Exception:
-            return
+        _ = status
+        _ = message
+        _ = dirty
+        _ = runtime_event
+        _ = metadata
+        return None
 
     def refresh_draft_lists(self, initial=False):
         self.pending_drafts = self.model.list_pending_drafts()
@@ -145,11 +166,18 @@ class ProductionLogQtController:
         self.write_state(status="ready", message=message)
 
     def collect_ui_data(self):
-        return self.view.collect_form_data()
+        data = self.view.collect_form_data()
+        data["balance_state"] = dict(self.balance_state or {})
+        return data
+
+    def can_navigate_away(self):
+        return self.view.confirm_discard_unsaved_changes()
 
     def save_draft(self, is_auto=False):
         self.calculate_metrics(silent=is_auto)
         data = self.collect_ui_data()
+        if is_auto and not self.view.has_unsaved_changes:
+            return
         if self.model.is_form_blank(data):
             if not is_auto:
                 self.view.show_info("Production Log", "Enter data before saving a draft.")
@@ -161,23 +189,54 @@ class ProductionLogQtController:
                 self.view.show_error("Draft Save Error", f"Could not save draft:\n{exc}")
             return
 
+        self.current_draft_path = draft_path
         self.refresh_draft_lists(initial=False)
+        self.view.mark_clean(data)
         if is_auto:
             self.write_state(status="ready", message=f"Auto-saved draft {os.path.basename(draft_path)}.")
             return
-        self.view.set_status(f"Draft saved: {os.path.basename(draft_path)}")
+        self.view.show_toast("Draft Saved", f"Saved draft {os.path.basename(draft_path)}.")
         self.write_state(status="ready", message=f"Saved draft {os.path.basename(draft_path)}.")
 
     def auto_save(self):
-        self.save_draft(is_auto=True)
+        if self.view.has_unsaved_changes:
+            self.save_draft(is_auto=True)
 
-    def load_draft_path(self, draft_path):
+    def _apply_loaded_payload(self, payload, draft_path=None, mark_dirty_after_load=False):
+        payload = dict(payload or {})
+        self.balance_state = self.model.normalize_balance_state(payload.get("balance_state"))
+        self.current_draft_path = draft_path
+        production_rows = list(payload.get("production") or []) or [{}]
+        downtime_rows = list(payload.get("downtime") or []) or [{}]
+        self.view.set_form_name(self.model.get_active_form_name())
+        self.view.set_form_data(payload.get("header") or {}, production_rows, downtime_rows)
+        if mark_dirty_after_load:
+            self.view.mark_dirty()
+        else:
+            self.view.mark_clean(self.collect_ui_data())
+
+    def reload_active_form(self, data=None, draft_path=None, mark_dirty_after_load=False):
+        self.model = ProductionLogModel(data_registry=getattr(self.dispatcher, "external_data_registry", None))
+        self._reload_layout_fields()
+        self._rebuild_view_payload()
+        self._dispose_view()
+        self._create_view()
+        if data is None:
+            self._initialize_form()
+        else:
+            self._apply_loaded_payload(data, draft_path=draft_path, mark_dirty_after_load=mark_dirty_after_load)
+        self.refresh_draft_lists(initial=True)
+        self.calculate_metrics(silent=True)
+
+    def load_draft_path(self, draft_path, prompt_discard=True):
         draft_path = str(draft_path or "").strip()
         if not draft_path:
             self.view.show_info("Production Log", "No draft path was provided.")
             return False
         if not os.path.exists(draft_path):
             self.view.show_error("Production Log", f"Draft not found:\n{draft_path}")
+            return False
+        if prompt_discard and not self.view.confirm_discard_unsaved_changes():
             return False
 
         try:
@@ -186,27 +245,22 @@ class ProductionLogQtController:
             self.view.show_error("Production Log", f"Could not load draft:\n{exc}")
             return False
 
-        self.view.set_form_data(
-            payload.get("header") or {},
-            payload.get("production") or [],
-            payload.get("downtime") or [],
-        )
-        self.current_draft_path = draft_path
+        draft_form_id = self.model.resolve_draft_form_id(payload.get("meta", {}))
+        if draft_form_id != self.model.form_id:
+            self.model.form_registry.activate_form(draft_form_id)
+            if hasattr(self.dispatcher, "notify_active_form_changed"):
+                self.dispatcher.notify_active_form_changed(source_instance=self, active_form_info=self.get_active_form_info())
+            self.reload_active_form(data=payload, draft_path=draft_path, mark_dirty_after_load=False)
+            self.view.set_status(f"Loaded {os.path.basename(draft_path)}")
+            self.write_state(status="ready", message=f"Loaded draft {os.path.basename(draft_path)}.")
+            return True
+
+        self._apply_loaded_payload(payload, draft_path=draft_path, mark_dirty_after_load=False)
         self.calculate_metrics()
         self.refresh_draft_lists(initial=False)
         self.view.set_status(f"Loaded {os.path.basename(draft_path)}")
         self.write_state(status="ready", message=f"Loaded draft {os.path.basename(draft_path)}.")
         return True
-
-    def refresh_view(self):
-        self.resume_latest_draft()
-
-    def resume_latest_draft(self):
-        latest = self.model.get_latest_pending_draft()
-        if not latest:
-            self.view.show_info("Resume Latest", "No pending drafts are available.")
-            return
-        self.load_draft_path(str(latest.get("path") or ""))
 
     def delete_draft_file(self, draft_path):
         draft_path = str(draft_path or "").strip()
@@ -230,6 +284,57 @@ class ProductionLogQtController:
         self.write_state(status="ready", message=f"Deleted draft {os.path.basename(draft_path)}.")
         return True
 
+    def refresh_view(self):
+        self.resume_latest_draft()
+
+    def resume_latest_draft(self):
+        latest = self.model.get_latest_pending_draft()
+        if not latest:
+            self.view.show_info("Resume Latest", "No pending drafts are available.")
+            return
+        self.load_draft_path(str(latest.get("path") or ""))
+
+    def open_pending_dialog(self):
+        self.refresh_draft_lists(initial=False)
+        self.view.show_pending_dialog(self.pending_drafts)
+
+    def show_pending(self):
+        self.open_pending_dialog()
+
+    def open_recovery_dialog(self):
+        self.refresh_draft_lists(initial=False)
+        self.view.show_recovery_dialog(self.recovery_snapshots)
+
+    def open_recovery_viewer(self):
+        if self.dispatcher is None:
+            return None
+        self.dispatcher.load_module("recovery_viewer", use_transition=False, ensure_authorized=False)
+        recovery_instance = getattr(self.dispatcher, "active_module_instance", None)
+        if recovery_instance is not None and hasattr(recovery_instance, "refresh_records"):
+            try:
+                recovery_instance.refresh_records()
+            except Exception:
+                pass
+        return None
+
+    def _open_path(self, path):
+        if not path:
+            return
+        try:
+            if hasattr(os, "startfile"):
+                os.startfile(path)
+            else:
+                webbrowser.open(f"file://{path}")
+            self.view.set_status(f"Opened {os.path.basename(path)}")
+        except Exception as exc:
+            self.view.show_error("Production Log", f"Could not open path:\n{exc}")
+
+    def open_pending_folder(self):
+        self._open_path(self.model.get_pending_dir())
+
+    def open_recovery_folder(self):
+        self._open_path(self.model.get_pending_history_dir())
+
     def delete_current_draft(self):
         draft_path = str(self.current_draft_path or "").strip()
         if not draft_path:
@@ -251,56 +356,10 @@ class ProductionLogQtController:
                 message=f"Restored snapshot to form: {os.path.basename(str(snapshot_path or ''))}",
             )
 
-    def open_pending_dialog(self):
-        self.refresh_draft_lists(initial=False)
-        self.view.show_pending_dialog(self.pending_drafts)
-
-    def show_pending(self):
-        self.open_pending_dialog()
-
-    def open_recovery_dialog(self):
-        self.refresh_draft_lists(initial=False)
-        self.view.show_recovery_dialog(self.recovery_snapshots)
-
-    def open_recovery_viewer(self):
-        if self.embedded and self.dispatcher is not None:
-            self.dispatcher.load_module("recovery_viewer", use_transition=False, ensure_authorized=False)
-            return
-        self.request_open_recovery(snapshot_path=None)
-
-    def _open_path(self, path):
-        if not path:
-            return
-        try:
-            if hasattr(os, "startfile"):
-                os.startfile(path)
-            else:
-                webbrowser.open(f"file://{path}")
-            self.view.set_status(f"Opened {os.path.basename(path)}")
-        except Exception as exc:
-            self.view.show_error("Production Log", f"Could not open path:\n{exc}")
-
-    def open_pending_folder(self):
-        self._open_path(self.model.get_pending_dir())
-
-    def open_recovery_folder(self):
-        self._open_path(self.model.get_pending_history_dir())
-
     def request_open_recovery(self, snapshot_path=None):
-        if self.embedded and self.dispatcher is not None:
-            self.dispatcher.load_module("recovery_viewer", use_transition=False, ensure_authorized=False)
-            return
-        metadata = {}
-        snapshot_path = str(snapshot_path or "").strip()
-        if snapshot_path:
-            metadata["snapshot_path"] = snapshot_path
-        self.write_state(
-            status="ready",
-            message="Requested host recovery viewer.",
-            dirty=True,
-            runtime_event="open_recovery_requested",
-            metadata=metadata,
-        )
+        _ = snapshot_path
+        self.open_recovery_viewer()
+        return None
 
     def _header_value_by_role(self, header_payload, role_name, fallback_id=None, default=""):
         return self.model.get_header_value_by_role(
@@ -413,6 +472,7 @@ class ProductionLogQtController:
             production_total_minutes,
             downtime_total_minutes,
         )
+        self.balance_state["displayed_ghost_minutes"] = int(ghost_minutes)
         efficiency = self.model.calculate_efficiency(total_molds, hours_value, goal_value)
         self.view.set_metrics(efficiency, ghost_minutes)
         if not silent:
@@ -442,91 +502,24 @@ class ProductionLogQtController:
         file_path = self.view.ask_import_file_path()
         if not file_path:
             return
+        if not self.view.confirm_discard_unsaved_changes():
+            return
         try:
             data = self.model.data_handler.import_from_excel(
                 file_path,
                 calculation_settings=self.model.get_calculation_settings_copy(),
             )
-            self.view.set_form_data(
-                data.get("header") or {},
-                data.get("production") or [],
-                data.get("downtime") or [],
-            )
+            self.balance_state = self.model.normalize_balance_state()
+            self.current_draft_path = None
+            self._apply_loaded_payload(data, draft_path=None, mark_dirty_after_load=True)
             self.calculate_metrics()
-            self.view.set_status("Imported workbook into Production Log.")
+            self.view.show_toast("Import Complete", "Imported workbook into Production Log.")
             self._show_data_handler_warnings("import")
         except Exception as exc:
             self.view.show_error("Import Error", f"Failed to import Excel:\n{exc}")
 
     def poll_commands(self):
-        if not self.command_path or not os.path.exists(self.command_path):
-            return
-
-        try:
-            with open(self.command_path, "r", encoding="utf-8") as handle:
-                payload = json.load(handle)
-        except Exception:
-            payload = {}
-
-        try:
-            os.remove(self.command_path)
-        except OSError:
-            pass
-
-        action = str(payload.get("action") or "").strip().lower()
-        command_payload = payload if isinstance(payload, dict) else {}
-
-        if action == "raise_window":
-            self.show()
-            self.write_state(status="ready", message="Raised Production Log Qt window.")
-            return
-
-        if action == "close_window":
-            self.handle_close()
-            self.view.close()
-            return
-
-        if action == "refresh_snapshot":
-            self.refresh_draft_lists(initial=False)
-            return
-
-        if action == "show_pending":
-            self.show()
-            self.open_pending_dialog()
-            self.write_state(status="ready", message="Opened pending draft dialog.")
-            return
-
-        if action == "load_draft_path":
-            draft_path = str(command_payload.get("draft_path") or "").strip()
-            self.show()
-            if not draft_path:
-                self.view.show_info("Production Log", "No draft path was provided.")
-                return
-            if self.load_draft_path(draft_path):
-                self.write_state(status="ready", message=f"Loaded draft {os.path.basename(draft_path)} from host request.")
-            return
-
-        if action == "save_draft":
-            self.save_draft()
-            return
-
-        if action == "calculate_all":
-            self.calculate_metrics()
-            return
-
-        if action == "export_to_excel":
-            self.export_to_excel()
-            return
-
-        if action == "import_from_excel_ui":
-            self.import_from_excel_ui()
-            return
-
-        if action == "host_action_completed":
-            action_name = str(command_payload.get("action_name") or "host_action").strip()
-            message = str(command_payload.get("message") or "Host action completed.")
-            self.view.set_status(f"{action_name}: {message}")
-            self.write_state(status="ready", message=f"Received host completion for {action_name}.")
+        return None
 
     def handle_close(self):
         if self.embedded:
@@ -537,6 +530,21 @@ class ProductionLogQtController:
         if self.dispatcher is not None:
             self.payload["theme_tokens"] = dict(getattr(getattr(self.dispatcher, "view", None), "theme_tokens", {}) or {})
         self.view.apply_theme(theme_tokens=self.payload.get("theme_tokens") or {})
+
+    def on_active_form_changed(self, active_form_info=None, form_id=None):
+        _ = active_form_info
+        _ = form_id
+        try:
+            if self.view.has_unsaved_changes and not self.model.is_form_blank(self.collect_ui_data()):
+                self.save_draft(is_auto=True)
+        except Exception:
+            pass
+        self.reload_active_form()
+
+    def on_calculation_settings_changed(self):
+        self.model.refresh_calculation_settings()
+        self.calculate_metrics(silent=True)
+        self.view.set_status("Calculation settings refreshed.")
 
     def on_hide(self):
         return None

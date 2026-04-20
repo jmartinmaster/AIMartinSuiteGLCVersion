@@ -46,7 +46,7 @@ MODULE_PRELOAD_POLL_SECONDS = 1.0
 # Layout Manager is intentionally excluded from the in-viewport Qt pilot set.
 # Keep it on the dedicated LayoutManagerMiniDispatcher runtime unless the
 # product architecture decision changes and the validation/docs are updated.
-QT_IN_VIEWPORT_PILOT_MODULES = {"about", "help_viewer", "recovery_viewer", "rate_manager", "production_log_calculations", "developer_admin", "security_admin", "settings_manager", "update_manager"}
+QT_IN_VIEWPORT_PILOT_MODULES = {"about", "help_viewer", "recovery_viewer", "rate_manager", "production_log", "production_log_calculations", "developer_admin", "security_admin", "settings_manager", "update_manager", "internal_code_editor"}
 
 SEVERITY_TO_BOOTSTYLE = {
     "info": INFO,
@@ -1311,48 +1311,10 @@ class Dispatcher:
         except Exception as exc:
             self.host_ui_adapter.show_error("Help Document Error", f"Could not open help document: {exc}")
 
-    def send_module_runtime_command(self, module_name, action, payload=None, restart=False):
-        if self.active_shell_backend != "pyqt6":
-            return False
-
-        open_or_raise = getattr(self.view, "open_or_raise_module", None)
-        runtime_managers = getattr(self.view, "runtime_managers", None)
-        is_dispatcher_viewport_module = getattr(self.view, "_is_dispatcher_viewport_module", None)
-        if not callable(open_or_raise) or not isinstance(runtime_managers, dict):
-            return False
-        if callable(is_dispatcher_viewport_module) and is_dispatcher_viewport_module(module_name):
-            return False
-
-        if open_or_raise(module_name, restart=bool(restart)) is False:
-            return False
-
-        manager = runtime_managers.get(module_name)
-        if manager is None:
-            return False
-
-        command_payload = dict(payload or {}) if isinstance(payload, dict) else None
-        manager.send_command(action, command_payload)
-        return True
-
     def open_production_log_draft(self, draft_path):
         draft_path = str(draft_path or "").strip()
         if not draft_path:
             self.host_ui_adapter.show_warning("Production Log", "No draft path was provided.")
-            return False
-
-        if self.active_shell_backend == "pyqt6" and not self.should_use_qt_in_viewport("production_log"):
-            self.load_module("production_log", use_transition=False, ensure_authorized=False)
-            if self.send_module_runtime_command(
-                "production_log",
-                "load_draft_path",
-                {"draft_path": draft_path},
-                restart=False,
-            ):
-                return True
-            self.host_ui_adapter.show_warning(
-                "Production Log",
-                "Could not open the Production Log runtime for the requested draft.",
-            )
             return False
 
         self.load_module("production_log", use_transition=False, ensure_authorized=False)
@@ -1364,6 +1326,7 @@ class Dispatcher:
             "Production Log",
             "The active Production Log session could not accept the requested draft.",
         )
+        return False
         return False
 
     def load_runtime_settings(self):

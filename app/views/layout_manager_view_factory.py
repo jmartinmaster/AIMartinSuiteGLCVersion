@@ -19,7 +19,6 @@ from typing import Callable
 from app.views.layout_manager_qt_view import is_layout_manager_qt_runtime_available
 from app.views.layout_manager_view import LayoutManagerView
 from app.views.layout_manager_view_contract import LayoutManagerViewContract
-from app.views.qt_module_bridge_view import QtModuleBridgeView
 
 __module_name__ = "Layout Manager View Factory"
 __version__ = "1.0.1"
@@ -50,22 +49,11 @@ def create_layout_manager_view(parent, dispatcher, controller):
         if not is_layout_manager_qt_runtime_available():
             controller.view_backend_fallback_reason = "PyQt6 is not installed; using the Tk layout manager view."
         else:
-            controller.resolved_view_backend = "qt"
-            # The Qt backend for Layout Manager is a dedicated runtime window,
-            # not a shared-viewport pilot surface.
-            return QtModuleBridgeView(
-                parent,
-                dispatcher,
-                controller,
-                {
-                    "title": "Layout Manager Qt Runtime",
-                    "subtitle": (
-                        "Layout Manager intentionally runs in a dedicated PyQt6 window so its editor and preview "
-                        "work stay off the shared host viewport. Use the controls below to raise or restart the "
-                        "sidecar window."
-                    ),
-                    "initial_status": "Launching Layout Manager Qt window...",
-                },
-            )
+            layout_manager_dispatcher = getattr(dispatcher, "layout_manager_dispatcher", None)
+            if layout_manager_dispatcher is None:
+                controller.view_backend_fallback_reason = "Layout Manager Qt runtime is unavailable; using the Tk layout manager view."
+            else:
+                controller.resolved_view_backend = "qt"
+                return layout_manager_dispatcher.launch(parent)
 
     return LayoutManagerView(parent, dispatcher, controller)

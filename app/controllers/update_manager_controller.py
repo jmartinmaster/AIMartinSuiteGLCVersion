@@ -24,7 +24,6 @@ from ttkbootstrap.dialogs import Messagebox
 from app.app_identity import format_versioned_deb_name, format_versioned_exe_name
 from app.app_platform import get_platform_update_artifact_kind, get_platform_update_artifact_label, is_windows_runtime
 from app.models.update_manager_model import UpdateManagerModel
-from app.qt_module_runtime import QtModuleRuntimeManager
 from app.views.update_manager_view_factory import create_update_manager_view
 
 __module_name__ = "Update Manager"
@@ -48,11 +47,9 @@ class UpdateManagerController:
     def __init__(self, parent, dispatcher):
         self.parent = parent
         self.dispatcher = dispatcher
-        self.requested_view_backend = "qt"
+        self.requested_view_backend = "tk"
         self.resolved_view_backend = "tk"
         self.view_backend_fallback_reason = None
-        self.runtime_manager = QtModuleRuntimeManager("update_manager", self.build_qt_session_payload)
-        self._last_runtime_event_timestamp = None
         self.view = None
         self._runtime_listener_registered = False
         self.model = UpdateManagerModel(data_registry=getattr(dispatcher, "external_data_registry", None))
@@ -98,12 +95,11 @@ class UpdateManagerController:
         self.branch_var.set(self.branch_name or "Unknown")
         self.repo_var.set(self.remote_info.get("display", "Unknown repository"))
         self.view = create_update_manager_view(parent, self)
-        if self.resolved_view_backend == "tk":
-            self.dispatcher.register_runtime_settings_listener(self._handle_runtime_settings_change)
-            self._runtime_listener_registered = True
-            self.refresh_local_manifest()
-            self.refresh_summary()
-            self.refresh_module_payload_summary()
+        self.dispatcher.register_runtime_settings_listener(self._handle_runtime_settings_change)
+        self._runtime_listener_registered = True
+        self.refresh_local_manifest()
+        self.refresh_summary()
+        self.refresh_module_payload_summary()
 
     def _stable_artifact_noun(self, plural=False):
         if self.stable_artifact_kind == "exe":
@@ -125,44 +121,6 @@ class UpdateManagerController:
     def _payload_boundary_note(self, prefix_text):
         return f"{prefix_text} Dispatcher Core (launcher.py) remains on the stable {self.stable_artifact_label} update boundary."
 
-    def build_qt_session_payload(self):
-        root = self.parent.winfo_toplevel()
-        configured_repo_url = self.dispatcher.get_setting("update_repository_url", None)
-        source_recovery_available = bool(any([
-            self.coordinator.source_archive_path,
-            self.coordinator.source_stage_dir,
-            self.coordinator.source_extract_dir,
-            self.coordinator.source_root_dir,
-            self.coordinator.source_build_log_path,
-            self.coordinator.source_built_exe_path,
-            self.coordinator.mode == "advanced",
-        ]))
-        return {
-            "window_title": "Update Manager - Production Logging Center",
-            "title": "Update Manager",
-            "subtitle": "Qt sidecar bootstrap view for staged Update Manager migration.",
-            "configured_repo_url": configured_repo_url,
-            "stable_artifact_kind": self.stable_artifact_kind,
-            "stable_artifact_label": self.stable_artifact_label,
-            "module_payload_options": [
-                {
-                    "key": option.get("key"),
-                    "display": option.get("display"),
-                    "module_name": option.get("module_name"),
-                    "relative_path": option.get("relative_path"),
-                }
-                for option in (self.module_payload_options or [])
-                if option.get("key")
-            ],
-            "documentation_payload_count": len(self.documentation_payload_options or []),
-            "advanced_dev_updates_enabled": bool(self.dispatcher.get_setting("enable_advanced_dev_updates", False)),
-            "source_job_phase": str(self.coordinator.job_phase or "idle"),
-            "source_job_detail": str(self.coordinator.job_detail or "No update job is running."),
-            "source_recovery_available": source_recovery_available,
-            "source_build_log_path": str(self.coordinator.source_build_log_path or ""),
-            "theme_tokens": dict(getattr(root, "_martin_theme_tokens", {}) or {}),
-        }
-
     def _select_module_payload_option_by_key(self, payload_key):
         payload_key = str(payload_key or "").strip().lower()
         if not payload_key:
@@ -173,79 +131,6 @@ class UpdateManagerController:
                 self.handle_module_payload_selection_change()
                 return True
         return False
-
-    def open_or_raise_qt_window(self):
-        self.runtime_manager.ensure_running(force_restart=False)
-
-    def restart_qt_window(self):
-        self.runtime_manager.ensure_running(force_restart=True)
-
-    def stop_qt_window(self):
-        self.runtime_manager.stop_runtime(force=False)
-
-    def read_runtime_state(self):
-        return self.runtime_manager.read_state()
-
-    def handle_runtime_state(self, state):
-        if self.resolved_view_backend != "qt":
-            return
-        if not isinstance(state, dict):
-            return
-
-        runtime_event = str(state.get("runtime_event") or "").strip().lower()
-        if runtime_event not in {
-            "apply_stable_updates_requested",
-            "check_module_payload_requested",
-            "apply_module_payload_requested",
-            "apply_all_module_payload_updates_requested",
-            "check_documentation_payload_updates_requested",
-            "apply_documentation_payload_updates_requested",
-            "start_advanced_source_update_requested",
-            "retry_source_job_requested",
-            "cleanup_source_job_requested",
-            "open_source_build_log_requested",
-        }:
-            return
-
-        event_timestamp = state.get("updated_at")
-        if event_timestamp == self._last_runtime_event_timestamp:
-            return
-        self._last_runtime_event_timestamp = event_timestamp
-
-        if runtime_event == "apply_stable_updates_requested":
-            self.apply_updates()
-            return
-
-        payload_key = state.get("payload_key")
-        self._select_module_payload_option_by_key(payload_key)
-
-        if runtime_event == "check_module_payload_requested":
-            self.check_module_payload_update()
-            return
-        if runtime_event == "apply_module_payload_requested":
-            self.apply_module_payload_update()
-            return
-        if runtime_event == "apply_all_module_payload_updates_requested":
-            self.apply_all_module_payload_updates()
-            return
-        if runtime_event == "check_documentation_payload_updates_requested":
-            self.check_documentation_payload_updates()
-            return
-        if runtime_event == "apply_documentation_payload_updates_requested":
-            self.apply_documentation_payload_updates()
-            return
-        if runtime_event == "start_advanced_source_update_requested":
-            self.start_advanced_dev_update()
-            return
-        if runtime_event == "retry_source_job_requested":
-            self.retry_source_job()
-            return
-        if runtime_event == "cleanup_source_job_requested":
-            self.cleanup_source_job()
-            return
-        if runtime_event == "open_source_build_log_requested":
-            self.open_source_build_log()
-            return
 
     def mount(self, parent):
         self.parent = parent
@@ -265,8 +150,6 @@ class UpdateManagerController:
         if self._runtime_listener_registered:
             self.dispatcher.unregister_runtime_settings_listener(self._handle_runtime_settings_change)
             self._runtime_listener_registered = False
-        if self.resolved_view_backend == "qt":
-            self.stop_qt_window()
         return None
 
     def _handle_runtime_settings_change(self, _settings):
@@ -1247,7 +1130,7 @@ class UpdateManagerController:
         self._begin_executable_download(update_rows[0])
 
     def setup_ui(self):
-        if self.resolved_view_backend == "tk" and self.view is not None:
+        if self.view is not None:
             self.view.setup_ui()
             self.container = self.view.container
 

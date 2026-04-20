@@ -16,7 +16,6 @@
 from ttkbootstrap.constants import DANGER, INFO, SECONDARY, SUCCESS
 
 from app.models.layout_manager_model import LayoutManagerModel
-from app.qt_module_runtime import QtModuleRuntimeManager
 from app.theme_manager import get_theme_tokens
 from app.views.layout_manager_qt_view import launch_layout_manager_qt_probe
 from app.views.layout_manager_view_contract import LayoutManagerViewContract
@@ -38,7 +37,8 @@ class LayoutManagerController:
         self.resolved_view_backend = "tk"
         self.view_backend_fallback_reason = None
         self._last_runtime_change_token = None
-        self.runtime_manager = QtModuleRuntimeManager("layout_manager", self.build_qt_session_payload)
+        layout_manager_dispatcher = getattr(self.dispatcher, "layout_manager_dispatcher", None)
+        self.runtime_manager = getattr(layout_manager_dispatcher, "runtime_manager", None)
         self.view_factory = view_factory or create_layout_manager_view
         self.view: LayoutManagerViewContract = self.view_factory(parent, dispatcher, self)
         if self.resolved_view_backend == "qt":
@@ -71,15 +71,23 @@ class LayoutManagerController:
         }
 
     def open_or_raise_qt_window(self):
+        if self.runtime_manager is None:
+            return
         self.runtime_manager.ensure_running(force_restart=False)
 
     def restart_qt_window(self):
+        if self.runtime_manager is None:
+            return
         self.runtime_manager.ensure_running(force_restart=True)
 
     def stop_qt_window(self):
+        if self.runtime_manager is None:
+            return
         self.runtime_manager.stop_runtime(force=False)
 
     def read_runtime_state(self):
+        if self.runtime_manager is None:
+            return {}
         return self.runtime_manager.read_state()
 
     def handle_runtime_state(self, state):
