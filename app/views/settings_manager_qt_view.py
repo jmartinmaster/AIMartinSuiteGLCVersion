@@ -13,16 +13,11 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-import json
-import sys
-
-from launcher import create_qt_application
-
 __module_name__ = "Settings Manager Qt View"
-__version__ = "1.4.0"
+__version__ = "1.5.1"
 
 try:
-    from PyQt6.QtCore import QTimer, Qt
+    from PyQt6.QtCore import Qt
     from PyQt6.QtWidgets import (
         QAbstractItemView,
         QApplication,
@@ -76,22 +71,7 @@ except ImportError:
     Qt = None
     QVBoxLayout = None
     QWidget = None
-    QTimer = None
     PYQT6_AVAILABLE = False
-
-
-def is_settings_manager_qt_runtime_available():
-    return PYQT6_AVAILABLE
-
-
-def load_settings_manager_qt_session(session_path):
-    with open(session_path, "r", encoding="utf-8") as handle:
-        payload = json.load(handle)
-    if not isinstance(payload, dict):
-        raise ValueError("Settings Manager Qt session payload must be a JSON object.")
-    return payload
-
-
 class SettingsManagerQtView(QMainWindow):
     def __init__(self, controller, payload, parent_widget=None):
         if not PYQT6_AVAILABLE:
@@ -138,12 +118,6 @@ class SettingsManagerQtView(QMainWindow):
         self.apply_theme(theme_tokens=self.theme_tokens)
         if self.embedded:
             self._attach_to_parent_container(parent_widget)
-
-        if not self.embedded:
-            self.command_timer = QTimer(self)
-            self.command_timer.setInterval(700)
-            self.command_timer.timeout.connect(self.controller.poll_commands)
-            self.command_timer.start()
 
     def _attach_to_parent_container(self, parent_widget):
         if parent_widget is None:
@@ -728,29 +702,3 @@ class SettingsManagerQtView(QMainWindow):
     def closeEvent(self, event):
         self.controller.handle_close()
         super().closeEvent(event)
-
-
-def run_settings_manager_qt_session(session_path):
-    if not PYQT6_AVAILABLE:
-        print("PyQt6 is not installed in the active Python environment.", file=sys.stderr)
-        return 2
-
-    from app.controllers.settings_manager_qt_controller import SettingsManagerQtController
-
-    session_payload = load_settings_manager_qt_session(session_path)
-    application = create_qt_application(theme_tokens=session_payload.get("theme_tokens") or {})
-    controller = SettingsManagerQtController(session_payload)
-    controller.show()
-    return application.exec()
-
-
-def main(argv=None):
-    argv = list(argv or sys.argv)
-    if len(argv) < 2:
-        print("Usage: python app/views/settings_manager_qt_view.py <session.json>", file=sys.stderr)
-        return 2
-    return run_settings_manager_qt_session(argv[1])
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

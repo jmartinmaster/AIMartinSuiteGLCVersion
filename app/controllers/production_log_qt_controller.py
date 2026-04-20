@@ -22,15 +22,19 @@ from app.models.production_log_model import ProductionLogModel
 from app.views.production_log_qt_view import ProductionLogQtView
 
 __module_name__ = "Production Log Qt Controller"
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 
 
 class ProductionLogQtController:
-    def __init__(self, payload):
-        self.payload = dict(payload or {})
+    def __init__(self, payload=None, parent=None, dispatcher=None):
+        payload = dict(payload or {}) if isinstance(payload, dict) else {}
+        self.parent = parent
+        self.dispatcher = dispatcher
+        self.embedded = dispatcher is not None
+        self.payload = dict(payload)
         self.state_path = self.payload.get("state_path")
         self.command_path = self.payload.get("command_path")
-        self.model = ProductionLogModel()
+        self.model = ProductionLogModel(data_registry=getattr(dispatcher, "external_data_registry", None))
         self.layout_config = self.model.load_layout_config()
         self.header_fields = self.model.get_section_field_configs("header", config=self.layout_config)
         self.production_fields = self.model.get_section_field_configs("production", config=self.layout_config)
@@ -39,16 +43,47 @@ class ProductionLogQtController:
         self.recovery_snapshots = []
         self.current_draft_path = None
         self.auto_save_interval_ms = max(60000, int(getattr(self.model, "auto_save_interval", 300000) or 300000))
+        if self.embedded:
+            self.payload = self._build_view_payload()
+            self.state_path = None
+            self.command_path = None
         self.view = ProductionLogQtView(
             self,
             self.payload,
             self.header_fields,
             self.production_fields,
             self.downtime_fields,
+            parent_widget=parent,
         )
         self._initialize_form()
         self.refresh_draft_lists(initial=True)
         self.calculate_metrics()
+        if self.embedded:
+            self.view.show()
+
+    def __getattr__(self, attribute_name):
+        view = self.__dict__.get("view")
+        if view is None:
+            raise AttributeError(attribute_name)
+        return getattr(view, attribute_name)
+
+    def _build_view_payload(self):
+        dispatcher = self.dispatcher
+        theme_tokens = dict(getattr(getattr(dispatcher, "view", None), "theme_tokens", {}) or {})
+        pending_drafts = self.model.list_pending_drafts()
+        recovery_snapshots = self.model.list_recovery_snapshots()
+        latest_draft_name = str(pending_drafts[0].get("filename") or "None") if pending_drafts else "None"
+        return {
+            "window_title": "Production Log - Production Logging Center",
+            "title": "Production Log",
+            "subtitle": "Primary Production Log editor for the shared PyQt6 workspace.",
+            "pending_draft_count": len(pending_drafts),
+            "recovery_snapshot_count": len(recovery_snapshots),
+            "latest_draft_name": latest_draft_name,
+            "dt_code_count": len(self.model.dt_codes or []),
+            "updated_at": time.time(),
+            "theme_tokens": theme_tokens,
+        }
 
     def show(self):
         self.view.show()
@@ -103,7 +138,7 @@ class ProductionLogQtController:
         latest_name = self.pending_drafts[0].get("filename") if self.pending_drafts else "None"
         self.view.set_draft_status(len(self.pending_drafts), len(self.recovery_snapshots), latest_name)
         if initial:
-            message = "Production Log Qt editor ready."
+            message = "Production Log viewport ready." if self.embedded else "Production Log Qt editor ready."
         else:
             message = "Draft and recovery lists refreshed."
             self.view.set_status(message)
@@ -228,6 +263,9 @@ class ProductionLogQtController:
         self.view.show_recovery_dialog(self.recovery_snapshots)
 
     def open_recovery_viewer(self):
+        if self.embedded and self.dispatcher is not None:
+            self.dispatcher.load_module("recovery_viewer", use_transition=False, ensure_authorized=False)
+            return
         self.request_open_recovery(snapshot_path=None)
 
     def _open_path(self, path):
@@ -249,6 +287,9 @@ class ProductionLogQtController:
         self._open_path(self.model.get_pending_history_dir())
 
     def request_open_recovery(self, snapshot_path=None):
+        if self.embedded and self.dispatcher is not None:
+            self.dispatcher.load_module("recovery_viewer", use_transition=False, ensure_authorized=False)
+            return
         metadata = {}
         snapshot_path = str(snapshot_path or "").strip()
         if snapshot_path:
@@ -488,4 +529,20 @@ class ProductionLogQtController:
             self.write_state(status="ready", message=f"Received host completion for {action_name}.")
 
     def handle_close(self):
+        if self.embedded:
+            return None
         self.write_state(status="closed", message="Production Log Qt window closed.")
+
+    def apply_theme(self):
+        if self.dispatcher is not None:
+            self.payload["theme_tokens"] = dict(getattr(getattr(self.dispatcher, "view", None), "theme_tokens", {}) or {})
+        self.view.apply_theme(theme_tokens=self.payload.get("theme_tokens") or {})
+
+    def on_hide(self):
+        return None
+
+    def on_unload(self):
+        try:
+            self.view.close()
+        except Exception:
+            pass

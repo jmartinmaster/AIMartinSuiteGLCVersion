@@ -24,7 +24,7 @@ from launcher import QT_MODULE_SESSION_ENV, create_qt_application
 from app.theme_manager import get_qt_palette, get_qt_stylesheet
 
 __module_name__ = "Layout Manager Qt View"
-__version__ = "0.3.0"
+__version__ = "0.3.1"
 LAYOUT_MANAGER_QT_SESSION_ENV = "AIMARTIN_LAYOUT_MANAGER_QT_SESSION"
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -43,6 +43,7 @@ try:
         QMessageBox,
         QPlainTextEdit,
         QPushButton,
+        QScrollArea,
         QSplitter,
         QStatusBar,
         QTableWidget,
@@ -69,6 +70,7 @@ except ImportError:
     QMessageBox = None
     QPlainTextEdit = None
     QPushButton = None
+    QScrollArea = None
     QSplitter = None
     QStatusBar = None
     QTableWidget = None
@@ -105,14 +107,46 @@ class LayoutManagerQtView(QMainWindow):
         self.command_timer.timeout.connect(self.controller.poll_commands)
         self.command_timer.start()
 
+    def _available_screen_geometry(self):
+        window_handle = self.windowHandle()
+        screen = window_handle.screen() if window_handle is not None else None
+        if screen is None and hasattr(self, "screen"):
+            try:
+                screen = self.screen()
+            except Exception:
+                screen = None
+        application = QApplication.instance()
+        if screen is None and application is not None:
+            screen = application.primaryScreen()
+        return screen.availableGeometry() if screen is not None else None
+
+    def _fit_window_to_screen(self, requested_width, requested_height, padding=48):
+        geometry = self._available_screen_geometry()
+        if geometry is None:
+            self.resize(requested_width, requested_height)
+            return
+        max_width = max(820, geometry.width() - int(padding))
+        max_height = max(620, geometry.height() - int(padding))
+        self.resize(min(int(requested_width), max_width), min(int(requested_height), max_height))
+
     def _build_ui(self):
         self.setWindowTitle("Layout Manager Qt")
-        self.resize(1440, 920)
+        self._fit_window_to_screen(1440, 920)
 
         central_widget = QWidget(self)
         root_layout = QVBoxLayout(central_widget)
-        root_layout.setContentsMargins(18, 18, 18, 18)
-        root_layout.setSpacing(12)
+        root_layout.setContentsMargins(0, 0, 0, 0)
+
+        scroll_area = QScrollArea(central_widget)
+        scroll_area.setWidgetResizable(True)
+        self.content_scroll_area = scroll_area
+        root_layout.addWidget(scroll_area, 1)
+
+        scroll_content = QWidget(scroll_area)
+        scroll_content.setMinimumWidth(1320)
+        content_layout = QVBoxLayout(scroll_content)
+        content_layout.setContentsMargins(18, 18, 18, 18)
+        content_layout.setSpacing(12)
 
         header_layout = QGridLayout()
         header_layout.setHorizontalSpacing(18)
@@ -129,7 +163,7 @@ class LayoutManagerQtView(QMainWindow):
         header_layout.addWidget(self.form_name_label, 1, 0)
         header_layout.addWidget(self.source_path_label, 1, 1)
         header_layout.addWidget(self.reason_label, 2, 0, 1, 2)
-        root_layout.addLayout(header_layout)
+        content_layout.addLayout(header_layout)
 
         form_row = QHBoxLayout()
         form_row.setSpacing(8)
@@ -158,7 +192,7 @@ class LayoutManagerQtView(QMainWindow):
         delete_button.clicked.connect(self.controller.delete_form)
         form_row.addWidget(delete_button)
         form_row.addStretch(1)
-        root_layout.addLayout(form_row)
+        content_layout.addLayout(form_row)
 
         action_row = QHBoxLayout()
         action_row.setSpacing(8)
@@ -173,11 +207,14 @@ class LayoutManagerQtView(QMainWindow):
             button.clicked.connect(callback)
             action_row.addWidget(button)
         action_row.addStretch(1)
-        root_layout.addLayout(action_row)
+        content_layout.addLayout(action_row)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.setChildrenCollapsible(False)
+        splitter.setMinimumHeight(620)
 
         editor_panel = QWidget()
+        editor_panel.setMinimumWidth(680)
         editor_layout = QVBoxLayout(editor_panel)
         editor_layout.setContentsMargins(0, 0, 0, 0)
         editor_layout.setSpacing(8)
@@ -190,6 +227,7 @@ class LayoutManagerQtView(QMainWindow):
         splitter.addWidget(editor_panel)
 
         details_panel = QWidget()
+        details_panel.setMinimumWidth(520)
         details_layout = QVBoxLayout(details_panel)
         details_layout.setContentsMargins(0, 0, 0, 0)
         details_layout.setSpacing(8)
@@ -241,7 +279,10 @@ class LayoutManagerQtView(QMainWindow):
         details_layout.addWidget(self.tabs)
         splitter.addWidget(details_panel)
         splitter.setSizes([780, 620])
-        root_layout.addWidget(splitter, 1)
+        content_layout.addWidget(splitter, 1)
+
+        content_layout.addStretch(1)
+        scroll_area.setWidget(scroll_content)
 
         self.setCentralWidget(central_widget)
         self.status_bar = QStatusBar(self)

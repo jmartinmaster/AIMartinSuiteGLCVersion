@@ -39,11 +39,14 @@ from app.update_state import UpdateCoordinator
 from app.host_ui_adapter import TkHostUiAdapter
 
 __module_name__ = "Dispatcher Core"
-__version__ = "2.1.5"
+__version__ = "2.1.6"
 
 ISSUE_REPORT_URL = "https://github.com/jmartinmaster/AIMartinSuiteGLCVersion/issues/new/choose"
 MODULE_PRELOAD_POLL_SECONDS = 1.0
-QT_IN_VIEWPORT_PILOT_MODULES = {"about", "help_viewer", "recovery_viewer", "rate_manager", "production_log_calculations", "developer_admin", "security_admin", "update_manager"}
+# Layout Manager is intentionally excluded from the in-viewport Qt pilot set.
+# Keep it on the dedicated LayoutManagerMiniDispatcher runtime unless the
+# product architecture decision changes and the validation/docs are updated.
+QT_IN_VIEWPORT_PILOT_MODULES = {"about", "help_viewer", "recovery_viewer", "rate_manager", "production_log_calculations", "developer_admin", "security_admin", "settings_manager", "update_manager"}
 
 SEVERITY_TO_BOOTSTYLE = {
     "info": INFO,
@@ -1196,6 +1199,8 @@ class Dispatcher:
 
     def _instantiate_module_in_container(self, module_name, module_container):
         if module_name == "layout_manager" and self.layout_manager_dispatcher is not None:
+            # Layout Manager keeps its own Qt runtime to isolate the heavy editor,
+            # preview, and form-management workload from the shared host viewport.
             return self.layout_manager_dispatcher.launch(module_container)
 
         module = self.import_managed_module(module_name, force_fresh=False)

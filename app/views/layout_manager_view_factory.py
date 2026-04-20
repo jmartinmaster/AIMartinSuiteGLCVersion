@@ -22,7 +22,7 @@ from app.views.layout_manager_view_contract import LayoutManagerViewContract
 from app.views.qt_module_bridge_view import QtModuleBridgeView
 
 __module_name__ = "Layout Manager View Factory"
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 
 LayoutManagerViewFactory = Callable[[object, object, object], LayoutManagerViewContract]
 
@@ -51,6 +51,8 @@ def create_layout_manager_view(parent, dispatcher, controller):
             controller.view_backend_fallback_reason = "PyQt6 is not installed; using the Tk layout manager view."
         else:
             controller.resolved_view_backend = "qt"
+            # The Qt backend for Layout Manager is a dedicated runtime window,
+            # not a shared-viewport pilot surface.
             return QtModuleBridgeView(
                 parent,
                 dispatcher,
@@ -58,8 +60,9 @@ def create_layout_manager_view(parent, dispatcher, controller):
                 {
                     "title": "Layout Manager Qt Runtime",
                     "subtitle": (
-                        "Layout Manager now runs in a dedicated PyQt6 window using the same session contract "
-                        "as other migrated modules. Use the controls below to raise or restart the sidecar window."
+                        "Layout Manager intentionally runs in a dedicated PyQt6 window so its editor and preview "
+                        "work stay off the shared host viewport. Use the controls below to raise or restart the "
+                        "sidecar window."
                     ),
                     "initial_status": "Launching Layout Manager Qt window...",
                 },

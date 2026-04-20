@@ -301,13 +301,33 @@ Section 6C: Developer Admin, Security Admin, and Update Manager Migration
 
 ### Phase 7: Highest-Risk Module Migration
 Recommended order:
-1. Layout Manager
-2. Settings Manager
+1. Layout Manager - dedicated runtime decision required before any viewport work
+2. Settings Manager - Completed, Confirmed
 3. Production Log
 
 Rules:
 1. These modules require dedicated parity checklists before sidecar removal.
 2. They must preserve protected-module behavior, theme propagation, persistence, and cross-module coordination.
+3. Layout Manager is an explicit exception: keep it on the dedicated external PyQt6 runtime path and do not add it to `QT_IN_VIEWPORT_PILOT_MODULES` unless this plan is revised.
+4. The rationale for that exception is workload isolation: the Layout Manager editor, preview, preload, and form-management flows should not be moved into the shared host viewport thread casually.
+
+Section 7A: Layout Manager Dedicated Runtime Rule
+1. Keep `layout_manager` on the dedicated external PyQt6 runtime path under the host shell instead of routing it through the shared in-process viewport loader.
+2. Do not add `layout_manager` to `QT_IN_VIEWPORT_PILOT_MODULES` or introduce a normal in-process viewport controller path without revising this plan first.
+3. Preserve protected-module visibility, dedicated-runtime reuse across navigation, preload invalidation, and external-window raise/restart flows.
+4. Validation: `scripts/validate_pyqt6_phase_gate.py` must keep a dedicated `layout_manager_dedicated_runtime` check that proves Layout Manager stays external, reuses its runtime manager across navigation, and is not promoted into the shared viewport.
+
+Section 7B: Settings Manager Migration
+1. Route `settings_manager` into the shared PyQt6 viewport as an in-process `SettingsManagerQtController` and `SettingsManagerQtView`, preserving the full settings surface, theme save/preview flow, downtime-code editing, security-admin and developer-admin coordination, and the default non-persistent reload lifecycle.
+2. Remove the module-local Settings Manager sidecar path by deleting the `QtModuleRuntimeManager`/bridge-view routing from the Tk fallback controller path, removing the Settings Manager launcher session branch, and pruning the dead standalone Qt session entrypoints from the shared Qt view.
+3. Status: COMPLETED.
+4. Validation: `py_compile` passed for `app/settings_manager.py`, `app/controllers/app_controller.py`, `app/controllers/settings_manager_controller.py`, `app/controllers/settings_manager_qt_controller.py`, `app/views/settings_manager_view.py`, `app/views/settings_manager_qt_view.py`, `app/views/settings_manager_view_factory.py`, `launcher.py`, and `scripts/validate_pyqt6_phase_gate.py`; `scripts/validate_module_loads.py settings_manager production_log` passed; `scripts/validate_pyqt6_phase_gate.py` passed with the new `settings_manager_viewport_load` check covering embedded-mode load, host save callbacks, non-persistent unload, and clean reload behavior.
+
+Section 7C: Production Log Migration
+1. Land embedded-mode `ProductionLogQtController` and `ProductionLogQtView` foundations while the dedicated runtime path remains active.
+2. Preserve draft save/load, recovery handoff, calculation refresh, Excel import/export, active-form coordination, theme refresh, and bounded auto-save behavior.
+3. Promote `production_log` into `QT_IN_VIEWPORT_PILOT_MODULES` only after validator coverage exists for viewport load, recovery handoff, non-persistent unload, and clean reload behavior.
+4. Status: IN PROGRESS.
 
 ### Phase 8: Sidecar Infrastructure Removal
 1. Remove `QtModuleRuntimeManager` once no migrated modules depend on it.
@@ -319,7 +339,13 @@ Rules:
 2. Preserve backend-neutral business logic, models, persistence, security, and valid abstractions.
 3. Delete or archive Tk-host-specific shell guidance once no longer needed.
 
-### Phase 10: Documentation Finalization
+### Phase 10: Overflow Hardening and Screen-Fit Audit
+1. Audit every shared-viewport module and dedicated runtime window for content that exceeds the visible viewport or screen height/width.
+2. Replace layout compression with scrollable containers so large forms, editors, tables, and preview surfaces stay readable instead of shrinking their internals.
+3. Clamp standalone PyQt6 window sizes and major dialogs to the available screen geometry before showing them.
+4. Treat `layout_manager`, `settings_manager`, and `production_log` as required validation targets because their current Qt surfaces are the most likely to exceed available space.
+
+### Phase 11: Documentation Finalization
 1. Keep `.github/copilot-instructions.md` aligned with the target PyQt6-first architecture.
 2. Mark older module-specific migration plans as historical or absorb their remaining useful content into canonical docs.
 3. Ensure future implementation work follows this plan instead of creating local planning sprawl.
@@ -327,13 +353,14 @@ Rules:
 ## Verification
 1. Canonical docs agree that PyQt6 host shell is primary, sidecars are temporary, Tk host is transitional, and reduced-function Qt modules are out of scope.
 2. `Dispatcher.load_module()` behavior is mirrored on the Qt side for authorization, lifecycle hooks, caching, active-form notifications, theme application, and active navigation state.
-3. Pilot modules render inside the shared Qt viewport rather than opening separate top-level windows.
+3. Pilot modules render inside the shared Qt viewport rather than opening separate top-level windows, except for intentional dedicated-runtime modules such as `layout_manager`.
 4. Live theme switching updates active and cached in-process Qt modules correctly.
 5. Protected-module and security-lock behavior remains correct during migration.
 6. Mixed-backend sessions remain stable during the migration window.
 7. Migrated modules avoid blocking the Qt main thread or move heavy work off-thread safely.
 8. Before sidecar removal, confirm no migrated module still depends on sidecar-only infrastructure.
-9. Before Tk-host removal, confirm all user-facing modules have full PyQt6 parity and pass manual regression.
+9. Shared-viewport modules and dedicated runtime windows use scrollable surfaces and screen-fit sizing instead of compressing unreadable internals.
+10. Before Tk-host removal, confirm all user-facing modules have full PyQt6 parity and pass manual regression.
 
 ## Related Documents
 - Historical reference: `docs/layout_manager_pyqt6_migration_plan.md`

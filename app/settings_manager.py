@@ -14,10 +14,14 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 from app.controllers.settings_manager_controller import SettingsManagerController
+from app.controllers.settings_manager_qt_controller import SettingsManagerQtController
 
 __module_name__ = "Settings Manager"
-__version__ = "1.0.2"
+__version__ = "1.1.0"
 
 
 def get_ui(parent, dispatcher):
+    should_use_qt_in_viewport = getattr(dispatcher, "should_use_qt_in_viewport", None)
+    if callable(should_use_qt_in_viewport) and should_use_qt_in_viewport("settings_manager"):
+        return SettingsManagerQtController(parent=parent, dispatcher=dispatcher)
     return SettingsManagerController(parent, dispatcher)

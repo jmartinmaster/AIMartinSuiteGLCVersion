@@ -17,9 +17,10 @@ import json
 import sys
 
 from launcher import create_qt_application
+from app.theme_manager import get_qt_palette, get_qt_stylesheet
 
 __module_name__ = "Production Log Qt View"
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 
 try:
     from PyQt6.QtCore import QTimer, Qt
@@ -37,6 +38,7 @@ try:
         QMainWindow,
         QMessageBox,
         QPushButton,
+        QScrollArea,
         QStatusBar,
         QTableWidget,
         QTableWidgetItem,
@@ -59,12 +61,14 @@ except ImportError:
     QMainWindow = object
     QMessageBox = None
     QPushButton = None
+    QScrollArea = None
     QStatusBar = None
     QTableWidget = None
     QTableWidgetItem = None
     QVBoxLayout = None
     QWidget = None
     QTimer = None
+    Qt = None
     PYQT6_AVAILABLE = False
 
 
@@ -81,23 +85,29 @@ def load_production_log_qt_session(session_path):
 
 
 class ProductionLogQtView(QMainWindow):
-    def __init__(self, controller, payload, header_fields, production_fields, downtime_fields):
+    def __init__(self, controller, payload, header_fields, production_fields, downtime_fields, parent_widget=None):
         if not PYQT6_AVAILABLE:
             raise RuntimeError("PyQt6 is not installed in the active Python environment.")
-        super().__init__()
+        super().__init__(parent_widget)
         self.controller = controller
         self.payload = dict(payload or {})
+        self.theme_tokens = dict(self.payload.get("theme_tokens") or {})
+        self.embedded = parent_widget is not None
         self.header_fields = list(header_fields or [])
         self.production_fields = list(production_fields or [])
         self.downtime_fields = list(downtime_fields or [])
         self.header_widgets = {}
         self._build_ui()
+        self.apply_theme(theme_tokens=self.theme_tokens)
+        if self.embedded:
+            self._attach_to_parent_container(parent_widget)
         self._wire_live_edit_handlers()
 
-        self.command_timer = QTimer(self)
-        self.command_timer.setInterval(700)
-        self.command_timer.timeout.connect(self.controller.poll_commands)
-        self.command_timer.start()
+        if not self.embedded:
+            self.command_timer = QTimer(self)
+            self.command_timer.setInterval(700)
+            self.command_timer.timeout.connect(self.controller.poll_commands)
+            self.command_timer.start()
 
         self.auto_save_timer = QTimer(self)
         self.auto_save_timer.setInterval(int(getattr(self.controller, "auto_save_interval_ms", 300000) or 300000))
@@ -109,26 +119,73 @@ class ProductionLogQtView(QMainWindow):
         self._live_recalculate_timer.setInterval(300)
         self._live_recalculate_timer.timeout.connect(self._run_live_recalculate)
 
+    def _attach_to_parent_container(self, parent_widget):
+        if parent_widget is None:
+            return
+        self.setWindowFlag(Qt.WindowType.Window, False)
+        layout = parent_widget.layout()
+        if layout is None:
+            layout = QVBoxLayout(parent_widget)
+            layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self)
+        self.show()
+
+    def _available_screen_geometry(self, widget=None):
+        target = widget or self
+        window_handle = getattr(target, "windowHandle", lambda: None)()
+        screen = window_handle.screen() if window_handle is not None else None
+        if screen is None and hasattr(target, "screen"):
+            try:
+                screen = target.screen()
+            except Exception:
+                screen = None
+        application = QApplication.instance()
+        if screen is None and application is not None:
+            screen = application.primaryScreen()
+        return screen.availableGeometry() if screen is not None else None
+
+    def _fit_window_to_screen(self, widget, requested_width, requested_height, padding=48):
+        geometry = self._available_screen_geometry(widget)
+        if geometry is None:
+            widget.resize(requested_width, requested_height)
+            return
+        max_width = max(720, geometry.width() - int(padding))
+        max_height = max(540, geometry.height() - int(padding))
+        widget.resize(min(int(requested_width), max_width), min(int(requested_height), max_height))
+
     def _build_ui(self):
         self.setWindowTitle(str(self.payload.get("window_title") or "Production Log"))
-        self.resize(1240, 840)
+        if self.embedded:
+            self.setMinimumSize(0, 0)
+        else:
+            self._fit_window_to_screen(self, 1240, 840)
 
         central_widget = QWidget(self)
         root_layout = QVBoxLayout(central_widget)
-        root_layout.setContentsMargins(18, 18, 18, 18)
-        root_layout.setSpacing(12)
+        root_layout.setContentsMargins(0, 0, 0, 0)
+
+        scroll_area = QScrollArea(central_widget)
+        scroll_area.setWidgetResizable(True)
+        self.content_scroll_area = scroll_area
+        root_layout.addWidget(scroll_area, 1)
+
+        scroll_content = QWidget(scroll_area)
+        scroll_content.setMinimumWidth(1120)
+        content_layout = QVBoxLayout(scroll_content)
+        content_layout.setContentsMargins(18, 18, 18, 18)
+        content_layout.setSpacing(12)
 
         title_label = QLabel(str(self.payload.get("title") or "Production Log"))
         title_label.setObjectName("pageTitle")
-        root_layout.addWidget(title_label)
+        content_layout.addWidget(title_label)
 
         subtitle_label = QLabel(str(self.payload.get("subtitle") or "PyQt6 Production Log editor"))
         subtitle_label.setObjectName("mutedLabel")
         subtitle_label.setWordWrap(True)
-        root_layout.addWidget(subtitle_label)
+        content_layout.addWidget(subtitle_label)
 
         self.form_name_label = QLabel("Active Form: --")
-        root_layout.addWidget(self.form_name_label)
+        content_layout.addWidget(self.form_name_label)
 
         header_group = QGroupBox("Header", central_widget)
         header_layout = QGridLayout(header_group)
@@ -162,7 +219,7 @@ class ProductionLogQtView(QMainWindow):
                 header_layout.setColumnStretch(column_index, 1)
             else:
                 header_layout.setColumnStretch(column_index, 0)
-        root_layout.addWidget(header_group)
+        content_layout.addWidget(header_group)
 
         controls_layout = QHBoxLayout()
 
@@ -203,20 +260,21 @@ class ProductionLogQtView(QMainWindow):
         controls_layout.addWidget(open_recovery_button)
 
         controls_layout.addStretch(1)
-        root_layout.addLayout(controls_layout)
+        content_layout.addLayout(controls_layout)
 
         production_title = QLabel("Production Rows")
         production_title.setObjectName("sectionTitle")
-        root_layout.addWidget(production_title)
+        content_layout.addWidget(production_title)
 
         self.production_table = QTableWidget()
+        self.production_table.setMinimumHeight(260)
         self.production_table.setColumnCount(len(self.production_fields))
         self.production_table.setHorizontalHeaderLabels(self._field_labels(self.production_fields))
         self.production_table.horizontalHeader().setStretchLastSection(True)
         self.production_table.verticalHeader().setVisible(False)
         self.production_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.production_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        root_layout.addWidget(self.production_table)
+        content_layout.addWidget(self.production_table)
 
         production_actions = QHBoxLayout()
         add_production_button = QPushButton("Add Production Row")
@@ -226,20 +284,21 @@ class ProductionLogQtView(QMainWindow):
         remove_production_button.clicked.connect(self._remove_selected_production_row)
         production_actions.addWidget(remove_production_button)
         production_actions.addStretch(1)
-        root_layout.addLayout(production_actions)
+        content_layout.addLayout(production_actions)
 
         downtime_title = QLabel("Downtime Rows")
         downtime_title.setObjectName("sectionTitle")
-        root_layout.addWidget(downtime_title)
+        content_layout.addWidget(downtime_title)
 
         self.downtime_table = QTableWidget()
+        self.downtime_table.setMinimumHeight(240)
         self.downtime_table.setColumnCount(len(self.downtime_fields))
         self.downtime_table.setHorizontalHeaderLabels(self._field_labels(self.downtime_fields))
         self.downtime_table.horizontalHeader().setStretchLastSection(True)
         self.downtime_table.verticalHeader().setVisible(False)
         self.downtime_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.downtime_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        root_layout.addWidget(self.downtime_table)
+        content_layout.addWidget(self.downtime_table)
 
         downtime_actions = QHBoxLayout()
         add_downtime_button = QPushButton("Add Downtime Row")
@@ -249,11 +308,11 @@ class ProductionLogQtView(QMainWindow):
         remove_downtime_button.clicked.connect(self._remove_selected_downtime_row)
         downtime_actions.addWidget(remove_downtime_button)
         downtime_actions.addStretch(1)
-        root_layout.addLayout(downtime_actions)
+        content_layout.addLayout(downtime_actions)
 
         self.draft_status_label = QLabel("Drafts: 0 | Recovery: 0 | Latest: None")
         self.draft_status_label.setObjectName("mutedLabel")
-        root_layout.addWidget(self.draft_status_label)
+        content_layout.addWidget(self.draft_status_label)
 
         metrics_layout = QHBoxLayout()
         self.efficiency_label = QLabel("EFF%: 0.00")
@@ -261,12 +320,23 @@ class ProductionLogQtView(QMainWindow):
         metrics_layout.addWidget(self.efficiency_label)
         metrics_layout.addWidget(self.ghost_label)
         metrics_layout.addStretch(1)
-        root_layout.addLayout(metrics_layout)
+        content_layout.addLayout(metrics_layout)
+
+        content_layout.addStretch(1)
+        scroll_area.setWidget(scroll_content)
 
         self.setCentralWidget(central_widget)
         self.status_bar = QStatusBar(self)
         self.setStatusBar(self.status_bar)
         self.status_bar.showMessage("Production Log Qt window ready.", 5000)
+
+    def apply_theme(self, theme_tokens=None):
+        if isinstance(theme_tokens, dict):
+            self.theme_tokens = dict(theme_tokens)
+        self.setStyleSheet(get_qt_stylesheet(theme_tokens=self.theme_tokens))
+        application = QApplication.instance()
+        if application is not None:
+            application.setPalette(get_qt_palette(theme_tokens=self.theme_tokens))
 
     def _wire_live_edit_handlers(self):
         for widget in self.header_widgets.values():
@@ -425,7 +495,7 @@ class ProductionLogQtView(QMainWindow):
     def show_pending_dialog(self, pending_drafts):
         dialog = QDialog(self)
         dialog.setWindowTitle("Pending Drafts")
-        dialog.resize(900, 420)
+        self._fit_window_to_screen(dialog, 900, 420)
         layout = QVBoxLayout(dialog)
 
         table = QTableWidget(dialog)
@@ -488,7 +558,7 @@ class ProductionLogQtView(QMainWindow):
     def show_recovery_dialog(self, recovery_snapshots):
         dialog = QDialog(self)
         dialog.setWindowTitle("Recovery Snapshots")
-        dialog.resize(900, 440)
+        self._fit_window_to_screen(dialog, 900, 440)
         layout = QVBoxLayout(dialog)
 
         table = QTableWidget(dialog)

@@ -66,6 +66,9 @@ class SettingsManagerView:
         self.downtime_code_rows = []
         self.setup_ui()
 
+    def apply_theme(self):
+        return None
+
     def setup_ui(self):
         self.content_frame = tb.Frame(self.parent, padding=20)
         self.content_frame.pack(fill=BOTH, expand=True)

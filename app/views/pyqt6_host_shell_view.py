@@ -24,7 +24,7 @@ from app.theme_manager import get_qt_palette, get_qt_stylesheet, get_theme_token
 from app.host_ui_adapter import PyQt6HostUiAdapter
 
 __module_name__ = "PyQt6 Host Shell"
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 try:
     from PyQt6.QtCore import QTimer
@@ -1093,6 +1093,9 @@ class PyQt6HostShellView(QMainWindow):
             self.dispatcher.load_module(module_name, use_transition=False)
             return True
 
+        # Layout Manager intentionally falls through to this dedicated external
+        # runtime path. Do not promote it into the shared viewport without a
+        # deliberate architecture change plus updated validation/docs.
         manager = self._ensure_runtime_manager(module_name)
         manager.ensure_running(force_restart=bool(restart))
         self._switch_active_module(module_name)

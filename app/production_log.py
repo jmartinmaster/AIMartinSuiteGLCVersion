@@ -14,10 +14,14 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 from app.controllers.production_log_controller import ProductionLogController
+from app.controllers.production_log_qt_controller import ProductionLogQtController
 
 __module_name__ = "Production Log"
-__version__ = "1.2.7"
+__version__ = "1.3.0"
 
 
 def get_ui(parent, dispatcher):
+    should_use_qt_in_viewport = getattr(dispatcher, "should_use_qt_in_viewport", None)
+    if callable(should_use_qt_in_viewport) and should_use_qt_in_viewport("production_log"):
+        return ProductionLogQtController(parent=parent, dispatcher=dispatcher)
     return ProductionLogController(parent, dispatcher)

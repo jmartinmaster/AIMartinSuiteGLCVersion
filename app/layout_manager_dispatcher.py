@@ -29,7 +29,7 @@ import ttkbootstrap as tb
 from app.app_logging import log_exception
 
 __module_name__ = "Layout Manager Mini Dispatcher"
-__version__ = "1.1.0"
+__version__ = "1.1.1"
 LAYOUT_MANAGER_QT_SESSION_ENV = "AIMARTIN_LAYOUT_MANAGER_QT_SESSION"
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -369,6 +369,9 @@ class LayoutManagerMiniDispatcher:
             return payload
 
     def launch(self, parent):
+        # This bridge remains historical/non-canonical scaffolding for cases
+        # where Layout Manager is mounted from a container-backed flow. Even on
+        # this path, keep the heavy editor on its dedicated runtime window.
         self.schedule_preload(force=False)
         self.runtime_manager.ensure_running(force_restart=False)
         return LayoutManagerQtBridge(parent, self)

@@ -13,10 +13,6 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-import json
-import os
-import time
-
 from app.downtime_codes import DEFAULT_DT_CODE_MAP, clear_downtime_code_cache
 from app.models.security_model import ACCESS_RIGHTS, ROLE_DEFAULT_RIGHTS, ROLE_LIMITS, normalize_role, role_requires_password
 from app.security import gatekeeper
@@ -25,7 +21,7 @@ from app.models.settings_manager_model import SettingsManagerModel
 from app.views.settings_manager_qt_view import SettingsManagerQtView
 
 __module_name__ = "Settings Manager Qt Controller"
-__version__ = "1.5.0"
+__version__ = "1.6.0"
 
 
 class SettingsManagerQtController:
@@ -34,12 +30,11 @@ class SettingsManagerQtController:
         self.parent = parent
         self.dispatcher = dispatcher
         self.embedded = dispatcher is not None
-        self.payload = payload if not self.embedded else self._build_view_payload()
-        self.module_name = str(self.payload.get("module_name") or self.payload.get("module") or "settings_manager")
-        self.module_title = str(self.payload.get("title") or "Settings Manager")
-        self.section_mode = str(self.payload.get("section_mode") or "full")
-        self.state_path = self.payload.get("state_path")
-        self.command_path = self.payload.get("command_path")
+        self.payload = dict(payload)
+        self.module_name = str(payload.get("module_name") or payload.get("module") or getattr(self, "module_name", "settings_manager"))
+        self.module_title = str(payload.get("title") or getattr(self, "module_title", "Settings Manager"))
+        self.section_mode = str(payload.get("section_mode") or getattr(self, "section_mode", "full"))
+        self.payload = self._build_view_payload() if self.embedded else dict(payload)
         self.theme_options = list(self.payload.get("theme_options") or [])
         self.navigation_modules = list(self.payload.get("navigation_modules") or [])
         self.persistable_modules = list(self.payload.get("persistable_modules") or [])
@@ -70,14 +65,14 @@ class SettingsManagerQtController:
         section_label = {
             "developer_admin": "Developer administration",
             "security_admin": "Security administration",
-        }.get(self.section_mode if hasattr(self, "section_mode") else str((self.payload or {}).get("section_mode") or "full"), "Settings administration")
+        }.get(self.section_mode, "Settings administration")
         theme_tokens = dict(getattr(getattr(self.dispatcher, "view", None), "theme_tokens", {}) or {}) if self.dispatcher is not None else {}
         return {
-            "window_title": f"{self.module_title if hasattr(self, 'module_title') else str((self.payload or {}).get('title') or 'Settings Manager')} - Production Logging Center",
-            "title": self.module_title if hasattr(self, "module_title") else str((self.payload or {}).get("title") or "Settings Manager"),
+            "window_title": f"{self.module_title} - Production Logging Center",
+            "title": self.module_title,
             "subtitle": f"Qt viewport editor for {section_label.lower()}.",
-            "module_name": self.module_name if hasattr(self, "module_name") else str((self.payload or {}).get("module_name") or "settings_manager"),
-            "section_mode": self.section_mode if hasattr(self, "section_mode") else str((self.payload or {}).get("section_mode") or "full"),
+            "module_name": self.module_name,
+            "section_mode": self.section_mode,
             "theme_options": [{"key": theme_name, "label": get_theme_label(theme_name)} for theme_name in get_theme_names()],
             "navigation_modules": [
                 {
@@ -114,26 +109,6 @@ class SettingsManagerQtController:
         self.view.show()
         self.view.raise_()
         self.view.activateWindow()
-
-    def write_state(self, status="ready", message="", dirty=False, runtime_event=None, metadata=None):
-        if not self.state_path:
-            return
-        payload = {
-            "status": status,
-            "dirty": bool(dirty),
-            "message": str(message or ""),
-            "module": self.module_name,
-            "updated_at": time.time(),
-        }
-        if runtime_event:
-            payload["runtime_event"] = str(runtime_event)
-        if isinstance(metadata, dict):
-            payload.update(metadata)
-        try:
-            with open(self.state_path, "w", encoding="utf-8") as handle:
-                json.dump(payload, handle, indent=2)
-        except Exception:
-            return
 
     def refresh_snapshot(self, initial=False):
         self.model.settings = self.model.load_settings()
@@ -175,7 +150,7 @@ class SettingsManagerQtController:
             "persistent_modules": ", ".join(persistent_modules) if persistent_modules else "Disabled",
             "external_override_trust": "Enabled" if gatekeeper.is_external_module_override_trust_enabled() else "Disabled",
             "section_mode": self.section_mode,
-            "note": "Slice 4 Qt sidecar: core settings, downtime codes, security administration, and developer tools are editable and persisted.",
+            "note": "PyQt6 viewport editor: core settings, downtime codes, security administration, and developer tools are editable and persisted.",
         }
         self.view.set_editable_settings(
             self.model.get_settings_copy(),
@@ -186,14 +161,14 @@ class SettingsManagerQtController:
         self.view.render_snapshot(snapshot)
         self.view.configure_security_admin_panel(self.get_security_admin_state())
         self.view.configure_developer_admin_tools(self.get_developer_admin_settings_state())
-        message = f"{self.module_title} Qt window ready." if initial else f"Refreshed {self.module_title} snapshot."
-        self.write_state(status="ready", message=message)
+        if initial:
+            self.view.status_bar.showMessage(f"{self.module_title} viewport ready.", 4000)
 
     def on_security_session_changed(self, _event_name=None):
         self.refresh_snapshot(initial=False)
 
     def on_form_changed(self):
-        self.write_state(status="ready", message="Edited settings fields.", dirty=True)
+        return None
 
     def save_settings(self):
         form_values = self.view.get_form_values()
@@ -211,7 +186,6 @@ class SettingsManagerQtController:
             backup_info = self.model.save_settings_with_backup()
         except Exception as exc:
             self.view.show_error("Settings Manager", f"Could not save settings:\n{exc}")
-            self.write_state(status="ready", message=f"Save failed: {exc}", dirty=True)
             return
 
         self.refresh_snapshot(initial=False)
@@ -238,11 +212,9 @@ class SettingsManagerQtController:
             backup_info = self.model.save_settings_with_backup()
         except ValueError as exc:
             self.view.show_error("Downtime Codes", str(exc))
-            self.write_state(status="ready", message=f"Invalid downtime codes: {exc}", dirty=True)
             return
         except Exception as exc:
             self.view.show_error("Downtime Codes", f"Could not save downtime codes:\n{exc}")
-            self.write_state(status="ready", message=f"Downtime save failed: {exc}", dirty=True)
             return
 
         self.refresh_snapshot(initial=False)
@@ -350,7 +322,6 @@ class SettingsManagerQtController:
             existing_name=existing_name,
         )
         self.view.show_toast("Security", f"Saved vault {vault_name}.")
-        self.write_state(status="ready", message="Saved security vault.", dirty=False)
         return self.get_security_admin_state()
 
     def delete_selected_security_vault(self):
@@ -377,7 +348,6 @@ class SettingsManagerQtController:
             return None
         gatekeeper.delete_vault(vault_name)
         self.view.show_toast("Security", f"Deleted vault {vault_name}.")
-        self.write_state(status="ready", message="Deleted security vault.", dirty=False)
         return self.get_security_admin_state()
 
     def rotate_selected_security_vault_password(self):
@@ -405,7 +375,6 @@ class SettingsManagerQtController:
             return None
         gatekeeper.change_vault_password(vault_name, password)
         self.view.show_toast("Security", f"Updated password for {vault_name}.")
-        self.write_state(status="ready", message="Rotated vault password.", dirty=False)
         return self.get_security_admin_state()
 
     def save_current_security_mode(self):
@@ -440,7 +409,6 @@ class SettingsManagerQtController:
             else "Non-secure mode is disabled. Protected modules are locked again."
         )
         self.view.show_toast("Security", message)
-        self.write_state(status="ready", message="Updated security mode.", dirty=False)
         return self.get_security_admin_state()
 
     def get_developer_admin_settings_state(self):
@@ -482,7 +450,7 @@ class SettingsManagerQtController:
         self.refresh_snapshot(initial=False)
 
     def _apply_saved_runtime_effects(self, metadata):
-        if not self.embedded or self.dispatcher is None:
+        if self.dispatcher is None:
             return
         clear_downtime_code_cache()
         requested_theme = normalize_theme((metadata or {}).get("applied_theme", self.model.saved_theme))
@@ -511,45 +479,10 @@ class SettingsManagerQtController:
         }
         if isinstance(metadata, dict):
             base_metadata.update(metadata)
-        if self.embedded:
-            self._apply_saved_runtime_effects(base_metadata)
-            self.write_state(status="ready", message=str(message or "Saved settings successfully."), dirty=False)
-            return
-        self.write_state(
-            status="ready",
-            message=str(message or "Saved settings successfully."),
-            dirty=False,
-            runtime_event="settings_saved",
-            metadata=base_metadata,
-        )
-
-    def poll_commands(self):
-        if self.embedded:
-            return
-        if not self.command_path or not os.path.exists(self.command_path):
-            return
-        try:
-            with open(self.command_path, "r", encoding="utf-8") as handle:
-                payload = json.load(handle)
-        except Exception:
-            payload = {}
-        try:
-            os.remove(self.command_path)
-        except OSError:
-            pass
-
-        action = str(payload.get("action") or "").strip().lower()
-        if action == "raise_window":
-            self.show()
-            self.write_state(status="ready", message="Raised Settings Manager Qt window.")
-        elif action == "close_window":
-            self.handle_close()
-            self.view.close()
+        self._apply_saved_runtime_effects(base_metadata)
 
     def handle_close(self):
-        if self.embedded:
-            return None
-        self.write_state(status="closed", message="Settings Manager Qt window closed.")
+        return None
 
     def apply_theme(self):
         if self.dispatcher is not None:
