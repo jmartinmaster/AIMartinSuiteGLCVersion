@@ -13,17 +13,9 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-import os
-import tkinter as tk
-from tkinter import messagebox
-from tkinter import simpledialog
-from tkinter import ttk
+from app.tk_runtime_removed import raise_tk_runtime_removed
 
-import ttkbootstrap as tb
-from ttkbootstrap.constants import BOTH, DANGER, END, EW, HORIZONTAL, INFO, LEFT, NE, NONE, NS, NSEW, NW, PRIMARY, RIGHT, SECONDARY, SUCCESS, VERTICAL, W, X, Y
-from ttkbootstrap.dialogs import Messagebox
-
-from app.app_logging import log_error
+raise_tk_runtime_removed("app/views/layout_manager_view.py")
 
 __module_name__ = "Layout Manager"
 __version__ = "1.1.0"

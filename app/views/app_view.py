@@ -13,14 +13,17 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-import tkinter as tk
+from app.tk_runtime_removed import raise_tk_runtime_removed
 
-import ttkbootstrap as tb
-from ttkbootstrap.constants import BOTH, BOTTOM, HORIZONTAL, LEFT, RIGHT, TOP, VERTICAL, W, X, Y
+raise_tk_runtime_removed("app/views/app_view.py")
 
 __module_name__ = "Application Shell"
 __version__ = "2.1.5"
 
+# DEPRECATED (Phase 9): Tk host shell view.
+# This file is scheduled for removal as part of Phase 9 (Tk Host Removal).
+# Keep this file until the PyQt6-only runbook checks and smoke tests complete.
+# See docs/phase9_runbook.md for the phased checklist and safe removal steps.
 
 class AppShellView:
     def __init__(self, root, update_coordinator):

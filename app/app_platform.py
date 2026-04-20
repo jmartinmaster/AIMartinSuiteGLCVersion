@@ -18,9 +18,13 @@ import sys
 import ctypes
 import subprocess
 from ctypes import wintypes
-from tkinter import PhotoImage
 
 from PIL import Image
+
+try:
+    from PyQt6.QtGui import QIcon
+except ImportError:
+    QIcon = None
 
 from app.app_identity import LEGACY_EXE_NAME, normalize_version, parse_version, parse_versioned_exe_name
 from app.app_logging import log_exception
@@ -224,17 +228,40 @@ def convert_png_to_ico(png_paths, output_ico_path):
         return False
 
 
+def resolve_app_icon_path(preferred_path=None):
+    candidate_paths = []
+    if preferred_path:
+        candidate_paths.append(str(preferred_path))
+    candidate_paths.append(APP_ICON_RELATIVE_PATH)
+    candidate_paths.extend(APP_ICON_IMAGE_RELATIVE_PATHS)
+    candidate_paths.extend(APP_ICON_SOURCE_RELATIVE_PATHS)
+
+    for candidate in candidate_paths:
+        resolved_candidate = candidate if os.path.exists(candidate) else resource_path(candidate)
+        if os.path.exists(resolved_candidate):
+            return resolved_candidate
+    return None
+
+
 def apply_app_icon(window, icon_path=APP_ICON_SOURCE_RELATIVE_PATHS[0]):
-    try:
-        resolved_icon_path = icon_path if os.path.exists(icon_path) else resource_path(icon_path)
-        if os.path.exists(resolved_icon_path):
-            try:
-                icon_image = PhotoImage(file=resolved_icon_path)
-                window.iconphoto(False, icon_image)
-                window._martin_icon_image = icon_image
-            except Exception as exc:
-                print(f"Failed to apply icon using iconphoto: {exc}")
-        else:
-            print(f"Icon file not found: {icon_path}")
-    except Exception as exc:
-        print(f"Failed to apply icon: {exc}")
+    resolved_icon_path = resolve_app_icon_path(icon_path)
+    if not resolved_icon_path:
+        log_exception("apply_app_icon", f"Icon file not found: {icon_path}")
+        return False
+
+    if QIcon is None:
+        raise RuntimeError("PyQt6 is required to apply the live app icon. The legacy Tk icon loader was removed in Phase 9.")
+
+    icon = QIcon(resolved_icon_path)
+    if icon.isNull():
+        log_exception("apply_app_icon", f"Failed to load icon from {resolved_icon_path}")
+        return False
+
+    set_window_icon = getattr(window, "setWindowIcon", None)
+    if callable(set_window_icon):
+        set_window_icon(icon)
+        return True
+
+    raise RuntimeError(
+        "apply_app_icon only supports PyQt6 application/window targets in the live Phase 9 runtime."
+    )

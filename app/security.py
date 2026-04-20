@@ -18,39 +18,27 @@ import json
 import os
 import secrets
 import shutil
-import tkinter as tk
 from datetime import datetime
-from tkinter import messagebox, simpledialog, ttk
 
-try:
-    from PyQt6.QtWidgets import (
-        QApplication,
-        QComboBox,
-        QDialog,
-        QDialogButtonBox,
-        QFormLayout,
-        QInputDialog,
-        QLabel,
-        QLineEdit,
-        QMessageBox,
-        QVBoxLayout,
-        QWidget,
-    )
+from PyQt6.QtWidgets import (
+    QApplication,
+    QComboBox,
+    QDialog,
+    QDialogButtonBox,
+    QFormLayout,
+    QInputDialog,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QVBoxLayout,
+    QWidget,
+)
 
-    PYQT6_AVAILABLE = True
-except ImportError:
-    QApplication = None
-    QComboBox = None
-    QDialog = None
-    QDialogButtonBox = None
-    QFormLayout = None
-    QInputDialog = None
-    QLabel = None
-    QLineEdit = None
-    QMessageBox = None
-    QVBoxLayout = None
-    QWidget = None
-    PYQT6_AVAILABLE = False
+PYQT6_AVAILABLE = True
+tk = None
+messagebox = None
+simpledialog = None
+ttk = None
 
 from app.app_logging import log_exception
 from app.models.security_model import (
@@ -91,9 +79,7 @@ class Gatekeeper:
         return ensure_external_directory(os.path.join("data", "security", "backups", "vaults"))
 
     def _create_temp_root(self):
-        temp_root = tk.Tk()
-        temp_root.withdraw()
-        return temp_root
+        raise RuntimeError("Tk security dialogs were removed in Phase 9. Use the PyQt6 shell runtime.")
 
     def _is_qt_widget(self, obj):
         return bool(PYQT6_AVAILABLE and QWidget is not None and isinstance(obj, QWidget))
@@ -120,19 +106,20 @@ class Gatekeeper:
         return active_window if self._is_qt_widget(active_window) else None
 
     def _get_tk_parent(self, parent=None):
-        return None if self._is_qt_widget(parent) else parent
+        _ = parent
+        return None
 
     def _show_error(self, title, message, parent=None):
         if self._use_qt_dialogs(parent) and QMessageBox is not None:
             QMessageBox.critical(self._get_qt_parent(parent), str(title), str(message))
             return None
-        return messagebox.showerror(title, message, parent=self._get_tk_parent(parent))
+        raise RuntimeError("PyQt6 dialogs are unavailable and the Tk security fallback was removed in Phase 9.")
 
     def _show_info(self, title, message, parent=None):
         if self._use_qt_dialogs(parent) and QMessageBox is not None:
             QMessageBox.information(self._get_qt_parent(parent), str(title), str(message))
             return None
-        return messagebox.showinfo(title, message, parent=self._get_tk_parent(parent))
+        raise RuntimeError("PyQt6 dialogs are unavailable and the Tk security fallback was removed in Phase 9.")
 
     def _ask_yes_no(self, title, message, parent=None):
         if self._use_qt_dialogs(parent) and QMessageBox is not None:
@@ -144,7 +131,7 @@ class Gatekeeper:
                 QMessageBox.StandardButton.No,
             )
             return result == QMessageBox.StandardButton.Yes
-        return bool(messagebox.askyesno(title, message, parent=self._get_tk_parent(parent)))
+        raise RuntimeError("PyQt6 dialogs are unavailable and the Tk security fallback was removed in Phase 9.")
 
     def _prompt_text(self, title, prompt, parent=None, initialvalue=""):
         if self._use_qt_dialogs(parent) and QInputDialog is not None and QLineEdit is not None:
@@ -156,12 +143,7 @@ class Gatekeeper:
                 str(initialvalue or ""),
             )
             return str(value) if accepted else None
-        return simpledialog.askstring(
-            title,
-            prompt,
-            initialvalue=initialvalue,
-            parent=self._get_tk_parent(parent),
-        )
+        raise RuntimeError("PyQt6 dialogs are unavailable and the Tk security fallback was removed in Phase 9.")
 
     def _build_login_note_text(self, required_right=None, reason=None):
         note_text = reason or "Choose a vault and enter the password to continue."
@@ -202,7 +184,7 @@ class Gatekeeper:
                 QLineEdit.EchoMode.Password,
             )
             return str(value) if accepted else None
-        return simpledialog.askstring(title, prompt, show="*", parent=self._get_tk_parent(parent))
+        raise RuntimeError("PyQt6 dialogs are unavailable and the Tk security fallback was removed in Phase 9.")
 
     def _ensure_security_settings_directory(self):
         ensure_external_directory(os.path.join("data", "security"))
@@ -688,25 +670,19 @@ class Gatekeeper:
             if not normalized_roles or self._session_role in normalized_roles:
                 return True
 
-        temp_root = None
         prompt_parent = parent
-        if prompt_parent is None and not self._use_qt_dialogs():
-            temp_root = self._create_temp_root()
-            prompt_parent = temp_root
+        if not self._use_qt_dialogs(prompt_parent):
+            raise RuntimeError("Security authentication requires the PyQt6 host runtime. The Tk fallback was removed in Phase 9.")
 
-        try:
-            if not self._ensure_bootstrap_vault(parent=prompt_parent):
-                return False
-            return self._prompt_for_vault_login(
-                required_right=required_right,
-                parent=prompt_parent,
-                reason=reason,
-                force_reauth=force_reauth,
-                allowed_roles=normalized_roles,
-            )
-        finally:
-            if temp_root is not None:
-                temp_root.destroy()
+        if not self._ensure_bootstrap_vault(parent=prompt_parent):
+            return False
+        return self._prompt_for_vault_login(
+            required_right=required_right,
+            parent=prompt_parent,
+            reason=reason,
+            force_reauth=force_reauth,
+            allowed_roles=normalized_roles,
+        )
 
     def _prompt_for_vault_login(self, required_right=None, parent=None, reason=None, force_reauth=False, allowed_roles=None):
         if self._use_qt_dialogs(parent) and QDialog is not None:
@@ -717,13 +693,7 @@ class Gatekeeper:
                 force_reauth=force_reauth,
                 allowed_roles=allowed_roles,
             )
-        return self._prompt_for_vault_login_tk(
-            required_right=required_right,
-            parent=parent,
-            reason=reason,
-            force_reauth=force_reauth,
-            allowed_roles=allowed_roles,
-        )
+        raise RuntimeError("Security authentication requires the PyQt6 host runtime. The Tk fallback was removed in Phase 9.")
 
     def _prompt_for_vault_login_qt(self, required_right=None, parent=None, reason=None, force_reauth=False, allowed_roles=None):
         normalized_roles = {normalize_role(role) for role in (allowed_roles or set())}
@@ -827,101 +797,12 @@ class Gatekeeper:
         return dialog.exec() == QDialog.DialogCode.Accepted
 
     def _prompt_for_vault_login_tk(self, required_right=None, parent=None, reason=None, force_reauth=False, allowed_roles=None):
-        normalized_roles = {normalize_role(role) for role in (allowed_roles or set())}
-        if not force_reauth and self._session and self.has_right(required_right):
-            if not normalized_roles or self._session_role in normalized_roles:
-                return True
-
-        available_vaults = [
-            vault for vault in self.list_vaults()
-            if vault.enabled and (not normalized_roles or vault.role in normalized_roles)
-        ]
-        if not available_vaults:
-            self._show_error("Security", "No enabled vaults are available for this login.", parent=parent)
-            return False
-
-        result = {"granted": False}
-        top = tk.Toplevel(parent)
-        top.title("Security Access")
-        top.resizable(False, False)
-        if parent is not None:
-            top.transient(parent)
-        top.grab_set()
-
-        container = tk.Frame(top, padx=16, pady=16)
-        container.pack(fill=tk.BOTH, expand=True)
-
-        note_text = self._build_login_note_text(required_right=required_right, reason=reason)
-
-        tk.Label(container, text="Security Access", font=("Segoe UI", 11, "bold")).pack(anchor="w")
-        tk.Label(container, text=note_text, justify="left", wraplength=420).pack(anchor="w", pady=(4, 12))
-
-        selected_name = tk.StringVar(value=available_vaults[0].vault_name)
-        password_var = tk.StringVar(value="")
-        status_var = tk.StringVar(value="")
-        vault_status_var = tk.StringVar(value="")
-        vault_lookup = {vault.vault_name: vault for vault in available_vaults}
-
-        vault_row = tk.Frame(container)
-        vault_row.pack(fill=tk.X, pady=4)
-        tk.Label(vault_row, text="Vault", width=16, anchor="w").pack(side=tk.LEFT)
-        vault_combo = ttk.Combobox(vault_row, state="readonly", textvariable=selected_name, values=list(vault_lookup))
-        vault_combo.pack(side=tk.LEFT, fill=tk.X, expand=True)
-
-        password_row = tk.Frame(container)
-        password_row.pack(fill=tk.X, pady=4)
-        tk.Label(password_row, text="Password", width=16, anchor="w").pack(side=tk.LEFT)
-        password_entry = tk.Entry(password_row, textvariable=password_var, show="*")
-        password_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
-
-        tk.Label(container, textvariable=vault_status_var, justify="left", wraplength=420).pack(anchor="w", pady=(6, 8))
-        tk.Label(container, textvariable=status_var, justify="left", fg="#b22222", wraplength=420).pack(anchor="w", pady=(0, 8))
-
-        def refresh_vault_note(_event=None):
-            selected_vault = vault_lookup.get(selected_name.get())
-            if selected_vault is None:
-                vault_status_var.set("")
-                return
-            _effective_rights, status_text = self._build_vault_status_text(selected_vault)
-            vault_status_var.set(status_text)
-            if selected_vault.password_required:
-                password_entry.configure(state=tk.NORMAL)
-                password_entry.focus_set()
-            else:
-                password_var.set("")
-                password_entry.configure(state=tk.DISABLED)
-
-        def submit_login(_event=None):
-            selected_vault = vault_lookup.get(selected_name.get())
-            if selected_vault is None:
-                status_var.set("Choose a vault.")
-                return
-            effective_rights = self._get_effective_vault_rights(selected_vault)
-            if required_right and required_right not in effective_rights:
-                status_var.set("That vault does not have the required access right.")
-                return
-            if selected_vault.password_required:
-                entered_password = password_var.get()
-                if not entered_password:
-                    status_var.set("Enter the vault password.")
-                    return
-                if not self._verify_password(selected_vault, entered_password):
-                    status_var.set("Incorrect password.")
-                    return
-            self._set_session_from_vault(selected_vault)
-            result["granted"] = True
-            top.destroy()
-
-        button_frame = tk.Frame(container)
-        button_frame.pack(fill=tk.X, pady=(8, 0))
-        tk.Button(button_frame, text="Cancel", command=top.destroy).pack(side=tk.RIGHT)
-        tk.Button(button_frame, text="Unlock", command=submit_login).pack(side=tk.RIGHT, padx=(0, 8))
-
-        vault_combo.bind("<<ComboboxSelected>>", refresh_vault_note)
-        password_entry.bind("<Return>", submit_login)
-        refresh_vault_note()
-        top.wait_window()
-        return result["granted"]
+        _ = required_right
+        _ = parent
+        _ = reason
+        _ = force_reauth
+        _ = allowed_roles
+        raise RuntimeError("The Tk security login dialog was removed in Phase 9. See shadow/app/security.py.")
 
     def get_session_summary(self):
         if not self.has_master_password():
@@ -949,121 +830,11 @@ class Gatekeeper:
         return True
 
     def open_security_admin_dialog(self, parent=None, dispatcher=None):
-        if not self.authenticate(
-            required_right="security:manage_vaults",
-            parent=parent,
-            reason="Security administration requires an admin or developer vault.",
-        ):
-            return False
-
-        owner = parent.winfo_toplevel() if parent is not None else None
-        dialog = tk.Toplevel(owner)
-        dialog.title("Security Administration")
-        dialog.resizable(False, False)
-        if owner is not None:
-            dialog.transient(owner)
-        dialog.grab_set()
-
-        container = tk.Frame(dialog, padx=16, pady=16)
-        container.pack(fill=tk.BOTH, expand=True)
-
-        status_var = tk.StringVar(value=self.get_session_summary())
-        non_secure_var = tk.BooleanVar(value=self.is_non_secure_mode_enabled())
-        changed = {"value": False}
-
-        tk.Label(container, text="Security Administration", font=("Segoe UI", 11, "bold")).pack(anchor="w")
-        tk.Label(
-            container,
-            text="Use this panel to rotate the current vault password, review the active session, and control persisted non-secure mode while the larger MVC security admin rebuild is underway.",
-            justify="left",
-            wraplength=420,
-        ).pack(anchor="w", pady=(6, 12))
-
-        status_frame = tk.Frame(container)
-        status_frame.pack(fill=tk.X, pady=(0, 10))
-        tk.Label(status_frame, text="Current session:", anchor="w", width=18).pack(side=tk.LEFT)
-        tk.Label(status_frame, textvariable=status_var, anchor="w").pack(side=tk.LEFT, fill=tk.X, expand=True)
-
-        vault_frame = tk.LabelFrame(container, text="Vault Summary", padx=12, pady=12)
-        vault_frame.pack(fill=tk.X, pady=(0, 12))
-        tk.Label(
-            vault_frame,
-            text=(
-                f"Configured vaults: {len(self.list_vaults())}\n"
-                "Settings Manager remains the entry point for security administration in this first implementation pass."
-            ),
-            justify="left",
-            wraplength=380,
-        ).pack(anchor="w")
-
-        toggle_frame = tk.LabelFrame(container, text="Non-Secure Mode", padx=12, pady=12)
-        toggle_frame.pack(fill=tk.X, pady=(0, 12))
-        tk.Checkbutton(
-            toggle_frame,
-            text="Persistently bypass protected-module authentication",
-            variable=non_secure_var,
-            anchor="w",
-            justify="left",
-        ).pack(anchor="w")
-        tk.Label(
-            toggle_frame,
-            text="This is a global persisted setting intended for controlled admin use only.",
-            justify="left",
-            wraplength=380,
-        ).pack(anchor="w", pady=(6, 0))
-
-        reset_frame = tk.LabelFrame(container, text="Security Reset", padx=12, pady=12)
-        reset_frame.pack(fill=tk.X, pady=(0, 12))
-        tk.Label(
-            reset_frame,
-            text="Resetting security storage is destructive. Existing vault files will be backed up, persisted non-secure mode will be disabled, and the active session will be cleared.",
-            justify="left",
-            wraplength=380,
-        ).pack(anchor="w")
-
-        def handle_vault_reset():
-            if not self.reset_vault(parent=dialog, dispatcher=dispatcher):
-                return
-            status_var.set(self.get_session_summary())
-            non_secure_var.set(self.is_non_secure_mode_enabled())
-            changed["value"] = True
-            dialog.destroy()
-
-        def save_security_state():
-            desired_state = bool(non_secure_var.get())
-            current_state = self.is_non_secure_mode_enabled()
-            if desired_state == current_state:
-                return
-            action_text = "enable" if desired_state else "disable"
-            if not messagebox.askyesno(
-                "Confirm Security Change",
-                f"Are you sure you want to {action_text} persisted non-secure mode?",
-                parent=dialog,
-            ):
-                non_secure_var.set(current_state)
-                return
-            self.set_non_secure_mode(desired_state)
-            status_var.set(self.get_session_summary())
-            changed["value"] = True
-            if dispatcher is not None:
-                if desired_state:
-                    dispatcher.show_toast("Security", "Non-secure mode is enabled. Protected-module authentication is bypassed.", "warning")
-                else:
-                    dispatcher.show_toast("Security", "Non-secure mode is disabled. Protected modules are locked again.", "success")
-
-        button_frame = tk.Frame(container)
-        button_frame.pack(fill=tk.X)
-        tk.Button(button_frame, text="Save Mode", command=save_security_state).pack(side=tk.LEFT)
-        tk.Button(
-            button_frame,
-            text="Rotate Current Vault Password",
-            command=lambda: changed.__setitem__("value", self._rotate_master_password(parent=dialog) or changed["value"]),
-        ).pack(side=tk.LEFT, padx=(8, 0))
-        tk.Button(button_frame, text="Reset Security Storage", command=handle_vault_reset).pack(side=tk.LEFT, padx=(8, 0))
-        tk.Button(button_frame, text="Close", command=dialog.destroy).pack(side=tk.RIGHT)
-
-        dialog.wait_window()
-        return changed["value"]
+        _ = parent
+        _ = dispatcher
+        raise RuntimeError(
+            "The standalone Tk security admin dialog was removed in Phase 9. Use the Settings Manager PyQt6 security panel."
+        )
 
 
 gatekeeper = Gatekeeper()

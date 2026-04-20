@@ -19,8 +19,6 @@ import os
 import signal
 import sys
 
-import ttkbootstrap as tb
-
 try:
     from PyQt6.QtCore import Qt
     from PyQt6.QtWidgets import QApplication
@@ -36,15 +34,13 @@ from app.external_data_registry import ExternalDataRegistry
 from app.module_registry import get_launcher_module_names
 from app.theme_manager import (
     DEFAULT_THEME,
-    apply_readability_overrides,
     get_qt_palette,
     get_qt_stylesheet,
     normalize_theme,
-    resolve_base_theme,
 )
 from app.utils import resource_path
 from app.controllers.app_controller import Dispatcher
-from app.app_platform import SPLASH_LOGO_RELATIVE_PATH, apply_app_icon, apply_windows_app_id, apply_windows_window_icons
+from app.app_platform import SPLASH_LOGO_RELATIVE_PATH, apply_app_icon, apply_windows_app_id
 
 __module_name__ = "Dispatcher Core"
 __version__ = "2.2.0"
@@ -164,93 +160,62 @@ def run_application(main_module=None, initial_module_name=None):
         except Exception as exc:
             log_exception("main.__main__.load_theme", exc)
 
-    if ui_shell_backend not in {"tk", "pyqt6"}:
+    if ui_shell_backend == "tk":
+        raise RuntimeError(
+            "The Tk host was removed in Phase 9. Configure ui_shell_backend='pyqt6' and use the PyQt6 runtime."
+        )
+
+    if ui_shell_backend not in {"pyqt6"}:
         ui_shell_backend = "pyqt6"
 
-    active_shell_backend = "pyqt6" if ui_shell_backend == "pyqt6" and PYQT6_LAUNCHER_SUPPORT else "tk"
-    shell_backend_fallback_reason = None
-    if active_shell_backend != ui_shell_backend:
-        shell_backend_fallback_reason = (
-            f"Requested shell backend '{ui_shell_backend}' is not available in this build; using '{active_shell_backend}'."
+    if not PYQT6_LAUNCHER_SUPPORT:
+        raise RuntimeError(
+            "PyQt6 is not installed in the active Python environment. The Tk fallback was removed in Phase 9."
         )
+
+    active_shell_backend = "pyqt6"
+    shell_backend_fallback_reason = None
 
     runtime_settings["ui_shell_backend"] = ui_shell_backend
     runtime_settings["active_ui_shell_backend"] = active_shell_backend
     runtime_settings["ui_shell_backend_fallback_reason"] = shell_backend_fallback_reason
+    runtime_settings["phase9_tk_removed"] = True
 
-    if ui_shell_backend == "pyqt6" and PYQT6_LAUNCHER_SUPPORT:
-        from app.views.pyqt6_host_shell_view import PyQt6HostShellView
-
-        apply_windows_app_id()
-        application = create_qt_application(theme_name=theme_name)
-        host_shell = PyQt6HostShellView(
-            theme_name=theme_name,
-            runtime_settings=runtime_settings,
-            initial_module_name=initial_module_name,
-        )
-        dispatcher = Dispatcher(
-            host_shell,
-            main_module=main_module,
-            initial_module_name=initial_module_name,
-            runtime_settings_override=runtime_settings,
-            host_ui_adapter_factory=lambda backend, _dispatcher: host_shell.host_ui_adapter if backend == "pyqt6" else None,
-            shell_view_factory=lambda root, _update_coordinator, _dispatcher: root,
-        )
-
-        previous_sigint_handler = None
-        sigint_coordinator = None
-        try:
-            previous_sigint_handler = signal.getsignal(signal.SIGINT)
-            sigint_coordinator = _SigintCoordinator(host_shell, dispatcher)
-            signal.signal(signal.SIGINT, sigint_coordinator.handle_signal)
-            sigint_coordinator.start()
-        except (AttributeError, ValueError) as exc:
-            log_exception("launcher.sigint_setup.pyqt6", exc)
-            previous_sigint_handler = None
-            sigint_coordinator = None
-
-        host_shell.show()
-        try:
-            return application.exec()
-        finally:
-            if sigint_coordinator is not None:
-                sigint_coordinator.stop()
-            if previous_sigint_handler is not None:
-                try:
-                    signal.signal(signal.SIGINT, previous_sigint_handler)
-                except (AttributeError, ValueError):
-                    pass
+    from app.views.pyqt6_host_shell_view import PyQt6HostShellView
 
     apply_windows_app_id()
-    app_root = tb.Window(themename=resolve_base_theme(theme_name))
-    apply_readability_overrides(app_root, theme_name)
-    apply_app_icon(app_root)
-    apply_windows_window_icons(app_root)
-
-    from app.splash import show_splash_screen
-
-    show_splash_screen(app_root, duration=5000, logo_path=resource_path(SPLASH_LOGO_RELATIVE_PATH))
+    application = create_qt_application(theme_name=theme_name)
+    apply_app_icon(application)
+    host_shell = PyQt6HostShellView(
+        theme_name=theme_name,
+        runtime_settings=runtime_settings,
+        initial_module_name=initial_module_name,
+    )
+    apply_app_icon(host_shell)
     dispatcher = Dispatcher(
-        app_root,
+        host_shell,
         main_module=main_module,
         initial_module_name=initial_module_name,
         runtime_settings_override=runtime_settings,
+        host_ui_adapter_factory=lambda backend, _dispatcher: host_shell.host_ui_adapter if backend == "pyqt6" else None,
+        shell_view_factory=lambda root, _update_coordinator, _dispatcher: root,
     )
 
     previous_sigint_handler = None
     sigint_coordinator = None
     try:
         previous_sigint_handler = signal.getsignal(signal.SIGINT)
-        sigint_coordinator = _SigintCoordinator(app_root, dispatcher)
+        sigint_coordinator = _SigintCoordinator(host_shell, dispatcher)
         signal.signal(signal.SIGINT, sigint_coordinator.handle_signal)
         sigint_coordinator.start()
     except (AttributeError, ValueError) as exc:
-        log_exception("launcher.sigint_setup", exc)
+        log_exception("launcher.sigint_setup.pyqt6", exc)
         previous_sigint_handler = None
         sigint_coordinator = None
 
     try:
-        app_root.mainloop()
+        host_shell.show()
+        return application.exec()
     finally:
         if sigint_coordinator is not None:
             sigint_coordinator.stop()

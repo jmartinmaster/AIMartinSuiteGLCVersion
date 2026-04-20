@@ -47,5 +47,5 @@ scripts
 
 .venv-wsl-build/
 
-dist/ubuntu/production-logging-center-glc.deb
-dist/ubuntu/production-logging-center-glc_2.2.0_amd64.deb
+dist/
+

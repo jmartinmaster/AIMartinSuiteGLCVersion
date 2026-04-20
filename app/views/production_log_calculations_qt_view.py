@@ -18,45 +18,26 @@ from app.models.production_log_calculations_model import EDITOR_SECTIONS
 __module_name__ = "Production Log Calculations Qt View"
 __version__ = "1.1.0"
 
-try:
-    from PyQt6.QtCore import Qt
-    from PyQt6.QtWidgets import (
-        QCheckBox,
-        QComboBox,
-        QFormLayout,
-        QGroupBox,
-        QHBoxLayout,
-        QLabel,
-        QLineEdit,
-        QListWidget,
-        QMainWindow,
-        QMessageBox,
-        QPushButton,
-        QScrollArea,
-        QStatusBar,
-        QVBoxLayout,
-        QWidget,
-    )
+from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QFormLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QMainWindow,
+    QMessageBox,
+    QPushButton,
+    QScrollArea,
+    QStatusBar,
+    QVBoxLayout,
+    QWidget,
+)
 
-    PYQT6_AVAILABLE = True
-except ImportError:
-    QCheckBox = None
-    QComboBox = None
-    QFormLayout = None
-    QGroupBox = None
-    QHBoxLayout = None
-    QLabel = None
-    QLineEdit = None
-    QListWidget = None
-    QMainWindow = object
-    QMessageBox = None
-    QPushButton = None
-    QScrollArea = None
-    QStatusBar = None
-    QVBoxLayout = None
-    QWidget = None
-    Qt = None
-    PYQT6_AVAILABLE = False
+PYQT6_AVAILABLE = True
 
 
 class ProductionLogCalculationsQtView(QMainWindow):

@@ -13,14 +13,9 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-import os
-import webbrowser
-from tkinter import messagebox
+from app.tk_runtime_removed import raise_tk_runtime_removed
 
-from ttkbootstrap.constants import INFO, SUCCESS
-
-from app.models.recovery_viewer_model import RecoveryViewerModel
-from app.views.recovery_viewer_view import RecoveryViewerView
+raise_tk_runtime_removed("app/controllers/recovery_viewer_controller.py")
 
 __module_name__ = "Recovery Viewer"
 __version__ = "1.1.0"
@@ -111,10 +106,14 @@ class RecoveryViewerController:
             self.resume_selected()
 
     def restore_config_record(self, record):
-        if not messagebox.askyesno(
-            "Restore Backup",
-            f"Restore {record['name']} to {record['restore_target']}?\n\nThe current file will be backed up before restore.",
-        ):
+        if messagebox is not None:
+            if not messagebox.askyesno(
+                "Restore Backup",
+                f"Restore {record['name']} to {record['restore_target']}?\n\nThe current file will be backed up before restore.",
+            ):
+                return
+        else:
+            self.view.show_toast("Recovery Viewer", "Confirmation unavailable in this build.", INFO)
             return
 
         try:
@@ -127,20 +126,31 @@ class RecoveryViewerController:
             self.view.show_error("Restore Error", f"Could not restore backup: {exc}")
 
     def restore_snapshot_record(self, record, prompt_to_open=True):
-        if not messagebox.askyesno(
-            "Restore Draft Snapshot",
-            f"Restore {record['name']} as {record['restore_target']}?\n\nThe current draft will be snapshotted before replacement if it exists.",
-        ):
+        if messagebox is not None:
+            if not messagebox.askyesno(
+                "Restore Draft Snapshot",
+                f"Restore {record['name']} as {record['restore_target']}?\n\nThe current draft will be snapshotted before replacement if it exists.",
+            ):
+                return None
+        else:
+            self.view.show_toast("Recovery Viewer", "Confirmation unavailable in this build.", INFO)
             return None
 
         try:
             restored_path = self.model.restore_snapshot_as_draft(record)
             self.refresh_records()
-            if prompt_to_open and messagebox.askyesno("Open Restored Draft", "Draft snapshot restored. Open it in Production Log now?"):
-                if not bool(getattr(self.dispatcher, "open_production_log_draft", lambda _path: False)(restored_path)):
-                    self.view.show_error("Restore Error", "The restored draft could not be opened in Production Log.")
-            else:
-                self.view.show_toast("Restore Complete", f"Restored draft snapshot to {record['restore_target']}.", SUCCESS)
+            if prompt_to_open:
+                open_now = False
+                if messagebox is not None:
+                    try:
+                        open_now = bool(messagebox.askyesno("Open Restored Draft", "Draft snapshot restored. Open it in Production Log now?"))
+                    except Exception:
+                        open_now = False
+                if open_now:
+                    if not bool(getattr(self.dispatcher, "open_production_log_draft", lambda _path: False)(restored_path)):
+                        self.view.show_error("Restore Error", "The restored draft could not be opened in Production Log.")
+                else:
+                    self.view.show_toast("Restore Complete", f"Restored draft snapshot to {record['restore_target']}.", SUCCESS)
             return restored_path
         except Exception as exc:
             self.view.show_error("Restore Error", f"Could not restore draft snapshot: {exc}")

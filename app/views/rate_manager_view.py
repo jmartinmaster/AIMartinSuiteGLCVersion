@@ -13,11 +13,9 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-import tkinter as tk
+from app.tk_runtime_removed import raise_tk_runtime_removed
 
-import ttkbootstrap as tb
-from ttkbootstrap.constants import BOTH, DANGER, END, EW, INFO, LEFT, RIGHT, SECONDARY, SUCCESS, WARNING, W, X
-from ttkbootstrap.dialogs import Messagebox
+raise_tk_runtime_removed("app/views/rate_manager_view.py")
 
 __module_name__ = "Rate Manager"
 __version__ = "1.0.0"

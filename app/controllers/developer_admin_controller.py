@@ -13,8 +13,9 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-from app.controllers.settings_manager_controller import SettingsManagerController
-from app.views.developer_admin_view_factory import create_developer_admin_view
+from app.tk_runtime_removed import raise_tk_runtime_removed
+
+raise_tk_runtime_removed("app/controllers/developer_admin_controller.py")
 
 __module_name__ = "Developer Admin"
 __version__ = "1.0.0"

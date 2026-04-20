@@ -13,28 +13,13 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-from app.app_platform import get_work_area_insets
-import time
-from tkinter import messagebox
-import tkinter as tk
-
-import ttkbootstrap as tb
-
 __module_name__ = "Host UI Adapter"
 __version__ = "0.1.0"
 
-try:
-    from PyQt6.QtCore import QEvent, QObject, QTimer, pyqtSignal
-    from PyQt6.QtWidgets import QMessageBox
+from PyQt6.QtCore import QEvent, QObject, QTimer, pyqtSignal
+from PyQt6.QtWidgets import QMessageBox
 
-    PYQT6_ADAPTER_AVAILABLE = True
-except ImportError:
-    QEvent = None
-    QObject = None
-    QTimer = None
-    pyqtSignal = None
-    QMessageBox = None
-    PYQT6_ADAPTER_AVAILABLE = False
+PYQT6_ADAPTER_AVAILABLE = True
 
 
 class _QtMouseWheelForwarder(QObject if QObject is not None else object):
@@ -101,237 +86,15 @@ class _QtMainThreadInvoker(QObject if QObject is not None else object):
         QTimer.singleShot(max(0, delay_ms), callback)
 
 
+# DEPRECATED (Phase 9): Tk host UI adapter.
+# `TkHostUiAdapter` remains for compatibility during the migration window.
+# After Phase 9 validation and smoke tests, this adapter will be removed
+# and `PyQt6HostUiAdapter` will be the sole host adapter implementation.
 class TkHostUiAdapter:
     def __init__(self, dispatcher, toast_factory):
-        self.dispatcher = dispatcher
-        self.toast_factory = toast_factory
-
-    def call_later(self, delay_ms, callback):
-        try:
-            delay_ms = int(delay_ms)
-        except Exception:
-            delay_ms = 0
-        return self.dispatcher.root.after(max(0, delay_ms), callback)
-
-    def run_on_main_thread(self, callback):
-        return self.call_later(0, callback)
-
-    def cancel_call_later(self, timer_id):
-        if timer_id is None:
-            return
-        try:
-            self.dispatcher.root.after_cancel(timer_id)
-        except Exception:
-            pass
-
-    def request_shutdown(self, delay_ms=0):
-        self.call_later(delay_ms, self.dispatcher.root.destroy)
-
-    def supports_window_transition(self):
-        try:
-            current_alpha = float(self.dispatcher.root.attributes("-alpha"))
-            self.dispatcher.root.attributes("-alpha", current_alpha)
-            return True
-        except Exception:
-            return False
-
-    def run_window_transition(self, action, duration_ms=0, min_alpha=0.86):
-        if not self.supports_window_transition() or duration_ms <= 0:
-            return action()
-
-        steps = 6
-        half_duration = max(0.12, int(duration_ms) / 2000)
-        step_delay = half_duration / steps
-        alpha_values = [1.0 - ((1.0 - float(min_alpha)) * (index + 1) / steps) for index in range(steps)]
-
-        try:
-            for alpha_value in alpha_values:
-                self.dispatcher.root.attributes("-alpha", alpha_value)
-                self.dispatcher.root.update_idletasks()
-                self.dispatcher.root.update()
-                time.sleep(step_delay)
-
-            result = action()
-
-            for alpha_value in reversed(alpha_values[:-1]):
-                self.dispatcher.root.attributes("-alpha", alpha_value)
-                self.dispatcher.root.update_idletasks()
-                self.dispatcher.root.update()
-                time.sleep(step_delay)
-
-            self.dispatcher.root.attributes("-alpha", 1.0)
-            self.dispatcher.root.update_idletasks()
-            return result
-        finally:
-            try:
-                self.dispatcher.root.attributes("-alpha", 1.0)
-            except Exception:
-                pass
-
-    def bind_shell_viewport_resize(self, callback, add="+"):
-        return self.dispatcher.canvas.bind("<Configure>", callback, add=add)
-
-    def get_shell_viewport_size(self, min_width=0, min_height=0):
-        try:
-            min_width = int(min_width)
-        except Exception:
-            min_width = 0
-        try:
-            min_height = int(min_height)
-        except Exception:
-            min_height = 0
-        width = max(self.dispatcher.canvas.winfo_width(), min_width)
-        height = max(self.dispatcher.canvas.winfo_height(), min_height)
-        return (width, height)
-
-    def bind_mousewheel_to_widget_tree(self, root_widget, scroll_target, axis="y"):
-        def on_mousewheel(event):
-            step = self.dispatcher.get_mousewheel_units(event)
-            if not step:
-                return None
-            if axis == "x":
-                scroll_target.xview_scroll(step, "units")
-            else:
-                scroll_target.yview_scroll(step, "units")
-            return "break"
-
-        def bind_widget(widget):
-            widget.bind("<MouseWheel>", on_mousewheel)
-            widget.bind("<Button-4>", on_mousewheel)
-            widget.bind("<Button-5>", on_mousewheel)
-            for child in widget.winfo_children():
-                bind_widget(child)
-
-        bind_widget(root_widget)
-
-    def create_module_container(self, parent_reference, module_name=None):
-        _ = module_name
-        parent = parent_reference or self.dispatcher.content_area
-        module_container = tb.Frame(parent, style="Martin.Surface.TFrame")
-        module_container.pack(fill=tk.BOTH, expand=True)
-        return module_container
-
-    def container_exists(self, container):
-        if container is None or getattr(container, "_dispatcher_destroyed", False):
-            return False
-        winfo_exists = getattr(container, "winfo_exists", None)
-        if callable(winfo_exists):
-            try:
-                return bool(winfo_exists())
-            except Exception:
-                return False
-        return True
-
-    def hide_module_container(self, container):
-        if container is None:
-            return
-        pack_forget = getattr(container, "pack_forget", None)
-        if callable(pack_forget):
-            pack_forget()
-            return
-        hide = getattr(container, "hide", None)
-        if callable(hide):
-            hide()
-            return
-        set_visible = getattr(container, "setVisible", None)
-        if callable(set_visible):
-            set_visible(False)
-
-    def show_module_container(self, container):
-        if container is None or getattr(container, "_dispatcher_destroyed", False):
-            return
-        pack = getattr(container, "pack", None)
-        if callable(pack):
-            pack(fill=tk.BOTH, expand=True)
-            return
-        show = getattr(container, "show", None)
-        if callable(show):
-            show()
-            return
-        set_visible = getattr(container, "setVisible", None)
-        if callable(set_visible):
-            set_visible(True)
-
-    def destroy_module_container(self, container):
-        if container is None:
-            return
-        try:
-            setattr(container, "_dispatcher_destroyed", True)
-        except Exception:
-            pass
-        destroy = getattr(container, "destroy", None)
-        if callable(destroy):
-            destroy()
-            return
-        delete_later = getattr(container, "deleteLater", None)
-        if callable(delete_later):
-            delete_later()
-            return
-        close = getattr(container, "close", None)
-        if callable(close):
-            close()
-
-    def reset_shell_viewport_position(self):
-        if getattr(self.dispatcher, "canvas", None) is None:
-            return
-        try:
-            self.dispatcher.canvas.yview_moveto(0)
-        except Exception:
-            pass
-
-    def refresh_viewport_appearance(self):
-        content_area = getattr(self.dispatcher, "content_area", None)
-        update_idletasks = getattr(content_area, "update_idletasks", None)
-        if callable(update_idletasks):
-            update_idletasks()
-
-    def show_toast(self, title, message, bootstyle=None, duration_ms=None):
-        duration = duration_ms
-        if duration is None:
-            duration = int(self.dispatcher.get_setting("toast_duration_sec", 5)) * 1000
-        resolved_bootstyle = self.dispatcher._normalize_bootstyle(bootstyle)
-        right_inset, bottom_inset = get_work_area_insets(self.dispatcher.root)
-        toast = self.toast_factory(
-            title=title,
-            message=message,
-            duration=duration,
-            bootstyle=resolved_bootstyle,
-            position=(24 + right_inset, 24 + bottom_inset, "se"),
-        )
-        toast.show_toast()
-
-    def refresh_update_status_visibility(self):
-        self.dispatcher.view.refresh_update_status_visibility()
-
-    def show_error(self, title, message):
-        messagebox.showerror(title, message)
-
-    def show_warning(self, title, message):
-        messagebox.showwarning(title, message)
-
-    def ask_yes_no(self, title, message):
-        return bool(messagebox.askyesno(title, message))
-
-    def create_module_window(self, title=None, geometry=None, minsize=None):
-        top_window = tk.Toplevel(self.dispatcher.root)
-        if title:
-            top_window.title(str(title))
-        if geometry:
-            top_window.geometry(str(geometry))
-        if isinstance(minsize, (tuple, list)) and len(minsize) == 2:
-            try:
-                top_window.minsize(int(minsize[0]), int(minsize[1]))
-            except Exception:
-                pass
-        return top_window
-
-    def destroy_module_window(self, window):
-        if window is None:
-            return
-        try:
-            window.destroy()
-        except Exception:
-            pass
+        _ = dispatcher
+        _ = toast_factory
+        raise RuntimeError("The Tk host UI adapter was removed in Phase 9. See shadow/app/host_ui_adapter.py.")
 
 
 class PyQt6HostUiAdapter:

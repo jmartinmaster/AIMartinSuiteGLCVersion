@@ -16,37 +16,22 @@
 __module_name__ = "Rate Manager Qt View"
 __version__ = "1.1.0"
 
-try:
-    from PyQt6.QtCore import Qt
-    from PyQt6.QtWidgets import (
-        QHBoxLayout,
-        QLabel,
-        QLineEdit,
-        QMainWindow,
-        QMessageBox,
-        QPushButton,
-        QStatusBar,
-        QTableWidget,
-        QTableWidgetItem,
-        QVBoxLayout,
-        QWidget,
-    )
+from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import (
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMainWindow,
+    QMessageBox,
+    QPushButton,
+    QStatusBar,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
+    QWidget,
+)
 
-    PYQT6_AVAILABLE = True
-except ImportError:
-    QHBoxLayout = None
-    QLabel = None
-    QLineEdit = None
-    QMainWindow = object
-    QMessageBox = None
-    QPushButton = None
-    QStatusBar = None
-    QTableWidget = None
-    QTableWidgetItem = None
-    QVBoxLayout = None
-    QWidget = None
-    Qt = None
-    PYQT6_AVAILABLE = False
+PYQT6_AVAILABLE = True
 
 
 class RateManagerQtView(QMainWindow):

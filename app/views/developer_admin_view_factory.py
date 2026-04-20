@@ -13,7 +13,9 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-from app.views.settings_manager_view_factory import create_settings_manager_view
+from app.tk_runtime_removed import raise_tk_runtime_removed
+
+raise_tk_runtime_removed("app/views/developer_admin_view_factory.py")
 
 __module_name__ = "Developer Admin View Factory"
 __version__ = "1.0.0"

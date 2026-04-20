@@ -16,7 +16,7 @@
 import os
 from dataclasses import dataclass, field
 
-from ttkbootstrap.constants import SECONDARY
+SECONDARY = "secondary"
 
 UPDATE_PHASE_LABELS = {
     "idle": "Idle",

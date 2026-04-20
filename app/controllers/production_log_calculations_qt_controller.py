@@ -13,10 +13,11 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-from ttkbootstrap.constants import INFO, SUCCESS
-
 from app.models.production_log_calculations_model import ProductionLogCalculationsModel
 from app.views.production_log_calculations_qt_view import ProductionLogCalculationsQtView
+
+INFO = "info"
+SUCCESS = "success"
 
 __module_name__ = "Production Log Calculations Qt Controller"
 __version__ = "1.1.0"

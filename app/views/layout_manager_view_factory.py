@@ -13,12 +13,9 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-import os
-from typing import Callable
+from app.tk_runtime_removed import raise_tk_runtime_removed
 
-from app.views.layout_manager_qt_view import is_layout_manager_qt_runtime_available
-from app.views.layout_manager_view import LayoutManagerView
-from app.views.layout_manager_view_contract import LayoutManagerViewContract
+raise_tk_runtime_removed("app/views/layout_manager_view_factory.py")
 
 __module_name__ = "Layout Manager View Factory"
 __version__ = "1.0.1"

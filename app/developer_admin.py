@@ -13,9 +13,6 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-from app.controllers.developer_admin_controller import DeveloperAdminController
-from app.controllers.developer_admin_qt_controller import DeveloperAdminQtController
-
 __module_name__ = "Developer Tools"
 __version__ = "1.1.0"
 
@@ -23,5 +20,7 @@ __version__ = "1.1.0"
 def get_ui(parent, dispatcher):
     should_use_qt_in_viewport = getattr(dispatcher, "should_use_qt_in_viewport", None)
     if callable(should_use_qt_in_viewport) and should_use_qt_in_viewport("developer_admin"):
+        from app.controllers.developer_admin_qt_controller import DeveloperAdminQtController
+
         return DeveloperAdminQtController(parent=parent, dispatcher=dispatcher)
-    return DeveloperAdminController(parent, dispatcher)
+    raise RuntimeError("The Tk Developer Admin controller was removed from the live Phase 9 runtime. See shadow/app/controllers/developer_admin_controller.py.")

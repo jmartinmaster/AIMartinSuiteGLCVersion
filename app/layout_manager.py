@@ -13,11 +13,12 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-from app.controllers.layout_manager_controller import LayoutManagerController
-
 __module_name__ = "Layout Manager"
 __version__ = "1.0.4"
 
 
 def get_ui(parent, dispatcher):
-    return LayoutManagerController(parent, dispatcher)
+    layout_manager_dispatcher = getattr(dispatcher, "layout_manager_dispatcher", None)
+    if layout_manager_dispatcher is None:
+        raise RuntimeError("The Layout Manager dispatcher is unavailable in the Phase 9 PyQt6 runtime.")
+    return layout_manager_dispatcher.launch(parent)

@@ -13,9 +13,6 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-from app.controllers.internal_code_editor_controller import InternalCodeEditorController
-from app.controllers.internal_code_editor_qt_controller import InternalCodeEditorQtController
-
 __module_name__ = "Internal Code Editor"
 __version__ = "0.1.0"
 
@@ -23,5 +20,7 @@ __version__ = "0.1.0"
 def get_ui(parent, dispatcher):
     if dispatcher is not None and getattr(dispatcher, "should_use_qt_in_viewport", None):
         if dispatcher.should_use_qt_in_viewport("internal_code_editor"):
+            from app.controllers.internal_code_editor_qt_controller import InternalCodeEditorQtController
+
             return InternalCodeEditorQtController(parent=parent, dispatcher=dispatcher)
-    return InternalCodeEditorController(parent, dispatcher)
+    raise RuntimeError("The Tk Internal Code Editor controller was removed from the live Phase 9 runtime. See shadow/app/controllers/internal_code_editor_controller.py.")

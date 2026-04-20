@@ -14,15 +14,9 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 import builtins
-import io
-import keyword
-import tkinter as tk
-import tokenize
-from tkinter import messagebox, ttk
+from app.tk_runtime_removed import raise_tk_runtime_removed
 
-import ttkbootstrap as tb
-from ttkbootstrap.constants import BOTH, EW, HORIZONTAL, LEFT, NSEW, NS, RIGHT, VERTICAL, W, X, Y
-from app.theme_manager import get_theme_tokens
+raise_tk_runtime_removed("app/views/internal_code_editor_view.py")
 
 __module_name__ = "Internal Code Editor"
 __version__ = "0.1.0"

@@ -15,7 +15,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 import os
 
-from app.views.help_viewer_view import HelpViewerView
+from app.tk_runtime_removed import raise_tk_runtime_removed
 from app.utils import local_or_resource_path
 
 __module_name__ = "Help Viewer"
@@ -76,12 +76,9 @@ def read_help_document(relative_path):
 
 class HelpViewerController:
     def __init__(self, parent, dispatcher):
-        self.parent = parent
-        self.dispatcher = dispatcher
-        self.doc_groups = DOC_GROUPS
-        self.doc_index = DOC_INDEX
-        self.active_doc_path = None
-        self.view = HelpViewerView(parent, dispatcher, self)
+        _ = parent
+        _ = dispatcher
+        raise_tk_runtime_removed("app/controllers/help_viewer_controller.py")
 
     def __getattr__(self, attribute_name):
         view = self.__dict__.get("view")

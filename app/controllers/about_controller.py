@@ -13,12 +13,9 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-import os
-import subprocess
-import sys
-from tkinter import messagebox
+from app.tk_runtime_removed import raise_tk_runtime_removed
 
-from app.views.about_view import AboutView
+raise_tk_runtime_removed("app/controllers/about_controller.py")
 
 __module_name__ = "About System"
 __version__ = "1.1.0"
@@ -121,8 +118,11 @@ class AboutController:
 
     def confirm_repack(self):
         message = "This will compile a new executable with your current settings.\n\nThe app will close, build, and restart automatically.\n\nProceed?"
-        if messagebox.askyesno("Confirm Repack", message):
+        if messagebox is not None and messagebox.askyesno("Confirm Repack", message):
             self.self_repack()
+        elif messagebox is None:
+            self.dispatcher.host_ui_adapter.show_warning("Repack", "Confirmation dialog unavailable in this build.")
+            return
 
     def self_repack(self):
         exe_path = os.path.abspath(sys.executable)
@@ -180,4 +180,10 @@ class AboutController:
             self.dispatcher.request_shutdown(delay_ms=0)
             sys.exit()
         except Exception as exc:
-            messagebox.showerror("Repack Error", f"Failed to repack suite:\n{exc}")
+            if messagebox is not None:
+                try:
+                    messagebox.showerror("Repack Error", f"Failed to repack suite:\n{exc}")
+                except Exception:
+                    self.dispatcher.host_ui_adapter.show_error("Repack Error", f"Failed to repack suite:\n{exc}")
+            else:
+                self.dispatcher.host_ui_adapter.show_error("Repack Error", f"Failed to repack suite:\n{exc}")

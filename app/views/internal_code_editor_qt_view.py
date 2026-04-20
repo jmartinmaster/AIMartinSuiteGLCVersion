@@ -18,47 +18,26 @@ from app.theme_manager import get_qt_palette, get_qt_stylesheet
 __module_name__ = "Internal Code Editor Qt View"
 __version__ = "1.0.0"
 
-try:
-    from PyQt6.QtCore import QSignalBlocker, QTimer, Qt
-    from PyQt6.QtWidgets import (
-        QApplication,
-        QComboBox,
-        QHBoxLayout,
-        QLabel,
-        QLineEdit,
-        QMainWindow,
-        QMessageBox,
-        QPushButton,
-        QPlainTextEdit,
-        QSplitter,
-        QStatusBar,
-        QTreeWidget,
-        QTreeWidgetItem,
-        QVBoxLayout,
-        QWidget,
-    )
+from PyQt6.QtCore import QSignalBlocker, QTimer, Qt
+from PyQt6.QtWidgets import (
+    QApplication,
+    QComboBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMainWindow,
+    QMessageBox,
+    QPushButton,
+    QPlainTextEdit,
+    QSplitter,
+    QStatusBar,
+    QTreeWidget,
+    QTreeWidgetItem,
+    QVBoxLayout,
+    QWidget,
+)
 
-    PYQT6_AVAILABLE = True
-except ImportError:
-    QApplication = None
-    QComboBox = None
-    QHBoxLayout = None
-    QLabel = None
-    QLineEdit = None
-    QMainWindow = object
-    QMessageBox = None
-    QPushButton = None
-    QPlainTextEdit = None
-    QSplitter = None
-    QStatusBar = None
-    QTreeWidget = None
-    QTreeWidgetItem = None
-    QVBoxLayout = None
-    QWidget = None
-    QSignalBlocker = None
-    QTimer = None
-    Qt = None
-    PYQT6_AVAILABLE = False
+PYQT6_AVAILABLE = True
 
 
 def is_internal_code_editor_qt_runtime_available():

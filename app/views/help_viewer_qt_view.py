@@ -18,38 +18,22 @@ import os
 __module_name__ = "Help Viewer Qt View"
 __version__ = "1.0.0"
 
-try:
-    from PyQt6.QtCore import QSignalBlocker, Qt
-    from PyQt6.QtWidgets import (
-        QHBoxLayout,
-        QLabel,
-        QListWidget,
-        QListWidgetItem,
-        QMainWindow,
-        QMessageBox,
-        QPushButton,
-        QStatusBar,
-        QTextBrowser,
-        QVBoxLayout,
-        QWidget,
-    )
+from PyQt6.QtCore import QSignalBlocker, Qt
+from PyQt6.QtWidgets import (
+    QHBoxLayout,
+    QLabel,
+    QListWidget,
+    QListWidgetItem,
+    QMainWindow,
+    QMessageBox,
+    QPushButton,
+    QStatusBar,
+    QTextBrowser,
+    QVBoxLayout,
+    QWidget,
+)
 
-    PYQT6_AVAILABLE = True
-except ImportError:
-    Qt = None
-    QHBoxLayout = None
-    QLabel = None
-    QListWidget = None
-    QListWidgetItem = None
-    QMainWindow = object
-    QMessageBox = None
-    QPushButton = None
-    QStatusBar = None
-    QTextBrowser = None
-    QVBoxLayout = None
-    QWidget = None
-    QSignalBlocker = None
-    PYQT6_AVAILABLE = False
+PYQT6_AVAILABLE = True
 
 
 class HelpViewerQtView(QMainWindow):

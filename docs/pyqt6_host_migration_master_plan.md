@@ -380,12 +380,21 @@ Section 8E: Validation And Closeout
 2. Validate that all completed PyQt6 viewport modules load without sidecar infrastructure, and that any intentional external-window modules still open, reuse, raise, restart, and report status correctly.
 3. Keep explicit coverage for `layout_manager` as the dedicated-runtime exception, and add closeout coverage proving that `internal_code_editor` now mounts in the shared viewport instead of the separate-window runtime path.
 4. Exit criteria: no completed migration path depends on the generic sidecar stack, intentional external windows use stable non-migration contracts, and the master plan plus validation evidence reflect the new architecture state.
-5. Status: NOT STARTED.
+5. Current implementation state: the missing scripted validation path has been replaced in this checkout with `scripts/validate_module_loads.py` and `scripts/validate_pyqt6_phase_gate.py`, backed by `scripts/_pyqt6_validation_harness.py`. The restored closeout checks now validate the current Phase 8 architecture instead of the older migration-era sidecar flow: all completed PyQt6 viewport modules load through the shared host viewport, `internal_code_editor` is explicitly verified as an in-viewport `InternalCodeEditorQtController` route, and `layout_manager` is explicitly verified as the remaining dedicated-window exception through `app/layout_manager_dispatcher.py` rather than the deleted generic sidecar stack.
+6. Validation in this checkout: `py_compile` passed for `scripts/_pyqt6_validation_harness.py`, `scripts/validate_module_loads.py`, `scripts/validate_pyqt6_phase_gate.py`, and `app/controllers/app_controller.py`. `scripts/validate_module_loads.py --json` passed for `about`, `help_viewer`, `recovery_viewer`, `rate_manager`, `production_log`, `production_log_calculations`, `developer_admin`, `security_admin`, `settings_manager`, `update_manager`, and `internal_code_editor`, with each module reporting `status: in_viewport` and `sidecar_runtime: false`. `scripts/validate_pyqt6_phase_gate.py` passed with explicit checks for generic-sidecar removal, shared-viewport module loading, `internal_code_editor` viewport routing, and the `layout_manager` dedicated-window contract covering open, raise/reuse, restart, reload, stop, and host status reporting. Manual smoke validation also passed by launching `main.py` directly and by launching a dedicated Layout Manager session through `AIMARTIN_LAYOUT_MANAGER_QT_SESSION`; on Windows PowerShell the session JSON must be written without a UTF-8 BOM for that smoke path.
+7. Status: COMPLETED.
+
+Phase 8 closeout: COMPLETED.
 
 ### Phase 9: Tk Host Removal
-1. Remove the remaining Tk host path only after full PyQt6 parity.
-2. Preserve backend-neutral business logic, models, persistence, security, and valid abstractions.
-3. Archive Tk-host-specific shell guidance once no longer needed.
+1. Status: IN PROGRESS.
+2. Live startup now enforces the PyQt6 host path and fails fast when `ui_shell_backend` is set to `tk` or PyQt6 support is unavailable.
+3. Dispatcher-managed module shims now lazy-load the Qt controller path and raise immediately if a removed Tk controller path is requested.
+4. Disconnected Tk controllers, views, view factories, the legacy Tk shell view, and splash module now hard-fail on import in the live tree and are mirrored under `shadow/` for demolition reference.
+5. App icon setup now runs through Qt-native `QIcon` handling in the live startup path instead of the removed Tk image loader.
+6. Theme resolution in the live runtime now uses only the internal semantic token system; legacy ttkbootstrap theme names are compatibility keys only and no longer trigger ttkbootstrap lookups.
+7. Packaging/build inputs now target the PyQt6 runtime and no longer require Tk or ttkbootstrap hidden imports or dependency checks.
+8. Preserve backend-neutral business logic, models, persistence, security, and valid abstractions while deleting the remaining live Tk dependencies.
 
 ### Phase 10: Overflow Hardening and Screen-Fit Audit
 1. Audit every shared-viewport module and dedicated runtime window for content that exceeds the visible viewport or screen height/width.

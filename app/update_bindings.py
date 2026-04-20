@@ -13,9 +13,6 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-import ttkbootstrap as tb
-
-
 class ObservableValue:
     _trace_sequence = 0
 
@@ -51,7 +48,7 @@ class ObservableValue:
 
 def _create_binding(master, value=""):
     if hasattr(master, "tk"):
-        return tb.StringVar(master=master, value=value)
+        raise RuntimeError("Tk update bindings were removed from the live Phase 9 runtime.")
     return ObservableValue(value=value)
 
 

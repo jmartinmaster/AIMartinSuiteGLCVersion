@@ -13,14 +13,13 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-from app.controllers.about_controller import AboutController
-from app.controllers.about_qt_controller import AboutQtController
-
 __module_name__ = "About System"
 __version__ = "1.0.1"
 
 
 def get_ui(parent, dispatcher):
     if bool(getattr(dispatcher, "should_use_qt_in_viewport", lambda _module_name: False)("about")):
+        from app.controllers.about_qt_controller import AboutQtController
+
         return AboutQtController(parent=parent, dispatcher=dispatcher)
-    return AboutController(parent, dispatcher)
+    raise RuntimeError("The Tk About controller was removed from the live Phase 9 runtime. See shadow/app/controllers/about_controller.py.")

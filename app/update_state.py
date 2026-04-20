@@ -16,7 +16,9 @@
 import json
 import os
 
-from ttkbootstrap.constants import INFO, SECONDARY, WARNING
+INFO = "info"
+SECONDARY = "secondary"
+WARNING = "warning"
 
 from app.app_logging import log_exception
 from app.persistence import write_json_with_backup

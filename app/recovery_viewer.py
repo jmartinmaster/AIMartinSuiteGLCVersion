@@ -13,14 +13,13 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-from app.controllers.recovery_viewer_controller import RecoveryViewerController
-from app.controllers.recovery_viewer_qt_controller import RecoveryViewerQtController
-
 __module_name__ = "Backup / Recovery"
 __version__ = "1.0.1"
 
 
 def get_ui(parent, dispatcher):
     if bool(getattr(dispatcher, "should_use_qt_in_viewport", lambda _module_name: False)("recovery_viewer")):
+        from app.controllers.recovery_viewer_qt_controller import RecoveryViewerQtController
+
         return RecoveryViewerQtController(parent=parent, dispatcher=dispatcher)
-    return RecoveryViewerController(parent, dispatcher)
+    raise RuntimeError("The Tk Recovery Viewer controller was removed from the live Phase 9 runtime. See shadow/app/controllers/recovery_viewer_controller.py.")

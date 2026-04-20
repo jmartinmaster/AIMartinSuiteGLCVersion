@@ -18,54 +18,30 @@ from app.theme_manager import get_qt_palette, get_qt_stylesheet
 __module_name__ = "Production Log Qt View"
 __version__ = "1.2.0"
 
-try:
-    from PyQt6.QtCore import QTimer, Qt
-    from PyQt6.QtWidgets import (
-        QAbstractItemView,
-        QApplication,
-        QDialog,
-        QDialogButtonBox,
-        QFileDialog,
-        QGridLayout,
-        QGroupBox,
-        QHBoxLayout,
-        QLabel,
-        QLineEdit,
-        QMainWindow,
-        QMessageBox,
-        QPushButton,
-        QScrollArea,
-        QStatusBar,
-        QTableWidget,
-        QTableWidgetItem,
-        QVBoxLayout,
-        QWidget,
-    )
+from PyQt6.QtCore import QTimer, Qt
+from PyQt6.QtWidgets import (
+    QAbstractItemView,
+    QApplication,
+    QDialog,
+    QDialogButtonBox,
+    QFileDialog,
+    QGridLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMainWindow,
+    QMessageBox,
+    QPushButton,
+    QScrollArea,
+    QStatusBar,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
+    QWidget,
+)
 
-    PYQT6_AVAILABLE = True
-except ImportError:
-    QAbstractItemView = None
-    QApplication = None
-    QDialog = None
-    QDialogButtonBox = None
-    QFileDialog = None
-    QGridLayout = None
-    QGroupBox = None
-    QHBoxLayout = None
-    QLabel = None
-    QLineEdit = None
-    QMainWindow = object
-    QMessageBox = None
-    QPushButton = None
-    QScrollArea = None
-    QStatusBar = None
-    QTableWidget = None
-    QTableWidgetItem = None
-    QVBoxLayout = None
-    QWidget = None
-    QTimer = None
-    Qt = None
-    PYQT6_AVAILABLE = False
+PYQT6_AVAILABLE = True
 
 
 def is_production_log_qt_runtime_available():

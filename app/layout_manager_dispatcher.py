@@ -24,7 +24,8 @@ import threading
 import time
 from pathlib import Path
 
-import ttkbootstrap as tb
+from PyQt6.QtCore import QTimer
+from PyQt6.QtWidgets import QGroupBox, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
 from app.app_logging import log_exception
 
@@ -183,64 +184,80 @@ class LayoutManagerQtRuntimeManager:
             pass
 
 
-class LayoutManagerQtBridge:
+class LayoutManagerQtBridge(QWidget):
     def __init__(self, parent, mini_dispatcher):
-        self.parent = parent
+        super().__init__(parent)
         self.mini_dispatcher = mini_dispatcher
         self.runtime_manager = mini_dispatcher.runtime_manager
-        self.main_frame = tb.Frame(parent, style="Martin.Content.TFrame", padding=20)
-        self.main_frame.pack(fill="both", expand=True)
+        self._poll_timer = QTimer(self)
         self._build_ui()
+        self._poll_timer.setInterval(900)
+        self._poll_timer.timeout.connect(self._poll_state)
+        self._poll_timer.start()
         self._poll_state()
 
     def _build_ui(self):
-        header = tb.Label(self.main_frame, text="Layout Manager Qt Runtime", style="Martin.PageTitle.TLabel")
-        header.pack(anchor="w")
-        subtitle = tb.Label(
-            self.main_frame,
-            text=(
-                "Layout Manager now runs in a dedicated Qt window. "
-                "Use the controls below to open, raise, or resync the sidecar runtime."
-            ),
-            style="Martin.Subtitle.TLabel",
-            wraplength=720,
-            justify="left",
+        root_layout = QVBoxLayout(self)
+        root_layout.setContentsMargins(20, 20, 20, 20)
+        root_layout.setSpacing(12)
+
+        header = QLabel("Layout Manager Qt Runtime", self)
+        header.setObjectName("pageTitle")
+        root_layout.addWidget(header)
+
+        subtitle = QLabel(
+            "Layout Manager now runs in a dedicated Qt window. Use the controls below to open, raise, or resync the dedicated runtime.",
+            self,
         )
-        subtitle.pack(anchor="w", pady=(4, 14))
+        subtitle.setObjectName("subtitleLabel")
+        subtitle.setWordWrap(True)
+        root_layout.addWidget(subtitle)
 
-        controls = tb.Frame(self.main_frame, style="Martin.Content.TFrame")
-        controls.pack(fill="x", pady=(0, 12))
-        tb.Button(controls, text="Open / Raise Qt Window", bootstyle="primary", command=self.open_or_raise).pack(side="left")
-        tb.Button(controls, text="Reload From Disk", bootstyle="secondary", command=self.reload_from_disk).pack(side="left", padx=(8, 0))
-        tb.Button(controls, text="Restart Qt Runtime", bootstyle="warning", command=self.restart_runtime).pack(side="left", padx=(8, 0))
+        controls_layout = QHBoxLayout()
+        open_button = QPushButton("Open / Raise Qt Window", self)
+        open_button.clicked.connect(self.open_or_raise)
+        controls_layout.addWidget(open_button)
 
-        status_card = tb.Labelframe(self.main_frame, text="Qt Runtime Status", style="Martin.Card.TLabelframe", padding=(14, 10))
-        status_card.pack(fill="x")
-        self.status_label = tb.Label(status_card, text="Launching Qt runtime...", style="Martin.Section.TLabel")
-        self.status_label.pack(anchor="w")
-        self.form_label = tb.Label(status_card, text="Form: --", style="Martin.Muted.TLabel")
-        self.form_label.pack(anchor="w", pady=(6, 0))
-        self.path_label = tb.Label(status_card, text="Source: --", style="Martin.Muted.TLabel", wraplength=900, justify="left")
-        self.path_label.pack(anchor="w", pady=(4, 0))
-        self.message_label = tb.Label(status_card, text="Waiting for state...", style="Martin.Muted.TLabel", wraplength=900, justify="left")
-        self.message_label.pack(anchor="w", pady=(4, 0))
+        reload_button = QPushButton("Reload From Disk", self)
+        reload_button.clicked.connect(self.reload_from_disk)
+        controls_layout.addWidget(reload_button)
+
+        restart_button = QPushButton("Restart Qt Runtime", self)
+        restart_button.clicked.connect(self.restart_runtime)
+        controls_layout.addWidget(restart_button)
+        controls_layout.addStretch(1)
+        root_layout.addLayout(controls_layout)
+
+        status_group = QGroupBox("Qt Runtime Status", self)
+        status_layout = QVBoxLayout(status_group)
+        self.status_label = QLabel("Launching Qt runtime...", status_group)
+        self.form_label = QLabel("Form: --", status_group)
+        self.form_label.setObjectName("mutedLabel")
+        self.path_label = QLabel("Source: --", status_group)
+        self.path_label.setObjectName("mutedLabel")
+        self.path_label.setWordWrap(True)
+        self.message_label = QLabel("Waiting for state...", status_group)
+        self.message_label.setObjectName("mutedLabel")
+        self.message_label.setWordWrap(True)
+        status_layout.addWidget(self.status_label)
+        status_layout.addWidget(self.form_label)
+        status_layout.addWidget(self.path_label)
+        status_layout.addWidget(self.message_label)
+        root_layout.addWidget(status_group)
+        root_layout.addStretch(1)
 
     def _poll_state(self):
         state = self.runtime_manager.read_state()
         status = str(state.get("status") or "launching").title()
         dirty = bool(state.get("dirty"))
         dirty_suffix = " (Unsaved changes)" if dirty else ""
-        self.status_label.configure(text=f"Status: {status}{dirty_suffix}")
+        self.status_label.setText(f"Status: {status}{dirty_suffix}")
         form_name = state.get("form_name") or state.get("form_id") or "--"
-        self.form_label.configure(text=f"Form: {form_name}")
-        self.path_label.configure(text=f"Source: {state.get('source_path') or '--'}")
-        self.message_label.configure(text=str(state.get("message") or "Waiting for state..."))
+        self.form_label.setText(f"Form: {form_name}")
+        self.path_label.setText(f"Source: {state.get('source_path') or '--'}")
+        self.message_label.setText(str(state.get("message") or "Waiting for state..."))
         if status.lower() == "closed":
             self.mini_dispatcher.schedule_preload(force=True)
-        try:
-            self.main_frame.after(900, self._poll_state)
-        except Exception:
-            pass
 
     def open_or_raise(self):
         self.mini_dispatcher.open_or_raise_window(restart=False)
@@ -258,6 +275,7 @@ class LayoutManagerQtBridge:
         return None
 
     def on_unload(self):
+        self._poll_timer.stop()
         return None
 
     def apply_theme(self):

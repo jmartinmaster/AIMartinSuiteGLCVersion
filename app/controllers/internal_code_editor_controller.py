@@ -13,10 +13,9 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-from ttkbootstrap.constants import DANGER, SECONDARY, SUCCESS
+from app.tk_runtime_removed import raise_tk_runtime_removed
 
-from app.models.internal_code_editor_model import InternalCodeEditorModel
-from app.views.internal_code_editor_view_factory import create_internal_code_editor_view
+raise_tk_runtime_removed("app/controllers/internal_code_editor_controller.py")
 
 __module_name__ = "Internal Code Editor"
 __version__ = "0.2.0"

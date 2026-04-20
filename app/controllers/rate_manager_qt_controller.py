@@ -13,10 +13,11 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-from ttkbootstrap.constants import INFO, SUCCESS
-
 from app.models.rate_manager_model import RateManagerModel
 from app.views.rate_manager_qt_view import RateManagerQtView
+
+INFO = "info"
+SUCCESS = "success"
 
 __module_name__ = "Rate Manager Qt Controller"
 __version__ = "1.1.0"

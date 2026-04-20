@@ -13,10 +13,9 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-import tkinter as tk
+from app.tk_runtime_removed import raise_tk_runtime_removed
 
-import ttkbootstrap as tb
-from ttkbootstrap.constants import BOTH, EW, LEFT, SECONDARY, W, X
+raise_tk_runtime_removed("app/views/production_log_calculations_view.py")
 
 __module_name__ = "Production Log Calculations"
 __version__ = "1.0.0"

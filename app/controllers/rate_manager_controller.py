@@ -13,10 +13,9 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-from ttkbootstrap.constants import INFO, SUCCESS
+from app.tk_runtime_removed import raise_tk_runtime_removed
 
-from app.models.rate_manager_model import RateManagerModel
-from app.views.rate_manager_view import RateManagerView
+raise_tk_runtime_removed("app/controllers/rate_manager_controller.py")
 
 __module_name__ = "Rate Manager"
 __version__ = "1.2.0"

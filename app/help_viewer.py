@@ -13,14 +13,13 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-from app.controllers.help_viewer_controller import HelpViewerController
-from app.controllers.help_viewer_qt_controller import HelpViewerQtController
-
 __module_name__ = "Help Viewer"
 __version__ = "1.0.0"
 
 
 def get_ui(parent, dispatcher):
     if bool(getattr(dispatcher, "should_use_qt_in_viewport", lambda _module_name: False)("help_viewer")):
+        from app.controllers.help_viewer_qt_controller import HelpViewerQtController
+
         return HelpViewerQtController(parent=parent, dispatcher=dispatcher)
-    return HelpViewerController(parent, dispatcher)
+    raise RuntimeError("The Tk Help Viewer controller was removed from the live Phase 9 runtime. See shadow/app/controllers/help_viewer_controller.py.")

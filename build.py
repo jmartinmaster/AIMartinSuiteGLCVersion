@@ -45,8 +45,6 @@ REQUIRED_BUILD_MODULES = [
     "PyQt6",
     "PyInstaller",
     "openpyxl",
-    "ttkbootstrap",
-    "tkinter",
 ]
 WSL_VENV_CANDIDATE_PATHS = [
     ".venv-linux/bin/python",
@@ -68,8 +66,8 @@ BUILD_DATA_PATHS = [
     ("assets", "assets"),
     ("docs", "docs"),
     ("templates", "templates"),
-    ("layout_config.json", "."),
-    ("production_log_calculations.json", "."),
+    (os.path.join("data", "config", "layout_config.json"), os.path.join("data", "config")),
+    (os.path.join("data", "config", "production_log_calculations.json"), os.path.join("data", "config")),
 ]
 HIDDENIMPORTS = [
     "PyQt6",
@@ -78,15 +76,18 @@ HIDDENIMPORTS = [
     "PyQt6.QtWidgets",
     "openpyxl",
     "openpyxl.cell.cell",
-    "PIL._tkinter_finder",
-    "PyInstaller",
-    "tkinter.messagebox",
-    "tkinter.filedialog",
 ]
 COLLECT_SUBMODULE_PACKAGES = [
     "app",
     "PyQt6",
     "openpyxl",
+]
+EXCLUDED_MODULES = [
+    "tkinter",
+    "_tkinter",
+    "ttkbootstrap",
+    "PIL.ImageTk",
+    "PIL._tkinter_finder",
     "PyInstaller",
 ]
 WINDOWS_TARGET = "windows"
@@ -99,6 +100,10 @@ UBUNTU_APP_DIST_ROOT = UBUNTU_DIST_ROOT / "app"
 UBUNTU_PACKAGE_ROOT = UBUNTU_DIST_ROOT / "package-root"
 SANITIZED_RATES_SOURCE = REPO_ROOT / "rates_dummy.json"
 PUBLIC_VARIANT_DIST_ROOT = WINDOWS_DIST_ROOT / "variants" / "public"
+WINDOWS_RUNTIME_SEED_FILES = [
+    (REPO_ROOT / "data" / "config" / "layout_config.json", Path("data") / "config" / "layout_config.json"),
+    (REPO_ROOT / "data" / "config" / "production_log_calculations.json", Path("data") / "config" / "production_log_calculations.json"),
+]
 
 
 class BuildError(RuntimeError):
@@ -336,7 +341,7 @@ def prepare_sanitized_rates_asset(target):
     else:
         raise BuildError(f"Unsupported target for sanitized rates staging: {target}")
 
-    staged_directory = staged_root / "sanitized_data"
+    staged_directory = staged_root / "sanitized_data" / "data" / "config"
     staged_directory.mkdir(parents=True, exist_ok=True)
     staged_rates_path = staged_directory / "rates.json"
     shutil.copy2(SANITIZED_RATES_SOURCE, staged_rates_path)
@@ -352,6 +357,28 @@ def copy_artifact_to_public_variant_dist(artifact_path):
     destination_path = PUBLIC_VARIANT_DIST_ROOT / source_path.name
     shutil.copy2(source_path, destination_path)
     return destination_path
+
+
+def seed_windows_runtime_files(target_root, sanitized_rates_path):
+    target_root = Path(target_root)
+    target_root.mkdir(parents=True, exist_ok=True)
+
+    copied_paths = []
+    for source_path, relative_target_path in WINDOWS_RUNTIME_SEED_FILES:
+        if not source_path.exists():
+            raise BuildError(f"Missing Windows runtime seed file: {source_path}")
+        destination_path = target_root / relative_target_path
+        destination_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source_path, destination_path)
+        copied_paths.append(destination_path)
+
+    if sanitized_rates_path is not None:
+        rates_destination_path = target_root / "data" / "config" / "rates.json"
+        rates_destination_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(sanitized_rates_path, rates_destination_path)
+        copied_paths.append(rates_destination_path)
+
+    return copied_paths
 
 
 def build_pyinstaller_args(target):
@@ -398,11 +425,14 @@ def build_pyinstaller_args(target):
     for package_name in COLLECT_SUBMODULE_PACKAGES:
         args.extend(["--collect-submodules", package_name])
 
+    for module_name in EXCLUDED_MODULES:
+        args.extend(["--exclude-module", module_name])
+
     for source_path, destination_path in get_existing_build_data_paths():
         args.extend(["--add-data", f"{source_path}{os.pathsep}{destination_path}"])
 
     sanitized_rates_path = prepare_sanitized_rates_asset(target)
-    args.extend(["--add-data", f"{sanitized_rates_path}{os.pathsep}."])
+    args.extend(["--add-data", f"{sanitized_rates_path}{os.pathsep}{os.path.join('data', 'config')}"])
 
     return args
 
@@ -618,8 +648,8 @@ def invoke_ubuntu_build_via_wsl(wsl_distro=None):
         f"{linux_venv_selection}"
         "elif command -v python3 >/dev/null 2>&1; then BUILD_PYTHON=$(command -v python3); "
         "else echo 'No python3 runtime was found in the selected WSL distribution.' >&2; exit 1; fi; "
-        "if ! \"$BUILD_PYTHON\" -c 'import PIL, PyInstaller, openpyxl, ttkbootstrap, tkinter' >/dev/null 2>&1; then "
-        "echo 'The selected WSL Python runtime is missing one or more required build modules: Pillow, PyInstaller, openpyxl, ttkbootstrap, tkinter.' >&2; "
+        "if ! \"$BUILD_PYTHON\" -c 'import PIL, PyQt6, PyInstaller, openpyxl' >/dev/null 2>&1; then "
+        "echo 'The selected WSL Python runtime is missing one or more required build modules: Pillow, PyQt6, PyInstaller, openpyxl.' >&2; "
         "echo 'Create .venv-linux inside WSL or install the modules into the selected WSL Python runtime before building.' >&2; exit 1; fi; "
         "if ! command -v dpkg-deb >/dev/null 2>&1; then "
         "echo 'dpkg-deb is required inside WSL to build the Ubuntu package.' >&2; exit 1; fi; "
@@ -633,7 +663,7 @@ def invoke_ubuntu_build_via_wsl(wsl_distro=None):
         detail_suffix = f" Details: {failure_detail}" if failure_detail else ""
         raise BuildError(
             "The Ubuntu build failed"
-            f"{distro_suffix}. Confirm that the distro can access this repo and has Python, Pillow, PyInstaller, openpyxl, ttkbootstrap, tkinter, and dpkg-deb installed.{detail_suffix}"
+            f"{distro_suffix}. Confirm that the distro can access this repo and has Python, Pillow, PyQt6, PyInstaller, openpyxl, and dpkg-deb installed.{detail_suffix}"
         )
 
 
@@ -644,13 +674,17 @@ def run_windows_build():
 
     clean_previous_builds(WINDOWS_TARGET)
     sync_icon_assets()
+    sanitized_rates_path = prepare_sanitized_rates_asset(WINDOWS_TARGET)
     pyinstaller_main.run(build_pyinstaller_args(WINDOWS_TARGET))
 
     built_executable_path = WINDOWS_DIST_ROOT / EXE_NAME
     if not built_executable_path.exists():
         raise BuildError(f"PyInstaller completed, but the Windows executable was not created at {built_executable_path}.")
 
+    seed_windows_runtime_files(WINDOWS_DIST_ROOT, sanitized_rates_path)
+
     public_variant_executable_path = copy_artifact_to_public_variant_dist(built_executable_path)
+    seed_windows_runtime_files(PUBLIC_VARIANT_DIST_ROOT, sanitized_rates_path)
 
     archive_previous_builds()
 

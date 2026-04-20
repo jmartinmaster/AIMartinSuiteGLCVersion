@@ -1,10 +1,11 @@
 # -*- mode: python ; coding: utf-8 -*-
 from PyInstaller.utils.hooks import collect_submodules
 
-hiddenimports = ['openpyxl', 'openpyxl.cell.cell', 'PyInstaller', 'tkinter.messagebox', 'tkinter.filedialog']
+hiddenimports = ['openpyxl', 'openpyxl.cell.cell']
 hiddenimports += collect_submodules('openpyxl')
-hiddenimports += collect_submodules('PyInstaller')
 hiddenimports += collect_submodules('app')
+
+excludes = ['tkinter', '_tkinter', 'ttkbootstrap', 'PIL.ImageTk', 'PIL._tkinter_finder', 'PyInstaller']
 
 
 a = Analysis(
@@ -16,7 +17,7 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=excludes,
     noarchive=False,
     optimize=0,
 )

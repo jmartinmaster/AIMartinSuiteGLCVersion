@@ -13,8 +13,9 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-import ttkbootstrap as tb
-from ttkbootstrap.constants import BOTH, INFO, LEFT, PRIMARY, SECONDARY, SUCCESS, WARNING, W, X
+from app.tk_runtime_removed import raise_tk_runtime_removed
+
+raise_tk_runtime_removed("app/views/update_manager_view.py")
 
 __module_name__ = "Update Manager"
 __version__ = "2.1.4"

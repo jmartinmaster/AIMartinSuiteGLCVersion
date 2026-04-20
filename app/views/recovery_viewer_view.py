@@ -13,9 +13,9 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-import ttkbootstrap as tb
-from ttkbootstrap.constants import BOTH, END, INFO, LEFT, PRIMARY, RIGHT, SECONDARY, SUCCESS, VERTICAL, W, X, Y
-from ttkbootstrap.dialogs import Messagebox
+from app.tk_runtime_removed import raise_tk_runtime_removed
+
+raise_tk_runtime_removed("app/views/recovery_viewer_view.py")
 
 __module_name__ = "Backup / Recovery"
 __version__ = "1.0.1"

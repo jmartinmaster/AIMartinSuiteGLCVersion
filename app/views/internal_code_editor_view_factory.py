@@ -13,7 +13,9 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-from app.views.internal_code_editor_view import InternalCodeEditorView
+from app.tk_runtime_removed import raise_tk_runtime_removed
+
+raise_tk_runtime_removed("app/views/internal_code_editor_view_factory.py")
 
 __module_name__ = "Internal Code Editor View Factory"
 __version__ = "1.0.0"

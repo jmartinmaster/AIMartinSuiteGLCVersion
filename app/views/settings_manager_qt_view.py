@@ -16,62 +16,34 @@
 __module_name__ = "Settings Manager Qt View"
 __version__ = "1.5.1"
 
-try:
-    from PyQt6.QtCore import Qt
-    from PyQt6.QtWidgets import (
-        QAbstractItemView,
-        QApplication,
-        QCheckBox,
-        QCheckBox,
-        QComboBox,
-        QFormLayout,
-        QGroupBox,
-        QHeaderView,
-        QHBoxLayout,
-        QInputDialog,
-        QLabel,
-        QLineEdit,
-        QListWidget,
-        QListWidgetItem,
-        QMainWindow,
-        QMessageBox,
-        QPushButton,
-        QSpinBox,
-        QStatusBar,
-        QTableWidget,
-        QTableWidgetItem,
-        QTextEdit,
-        QVBoxLayout,
-        QWidget,
-    )
+from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import (
+    QAbstractItemView,
+    QApplication,
+    QCheckBox,
+    QComboBox,
+    QFormLayout,
+    QGroupBox,
+    QHeaderView,
+    QHBoxLayout,
+    QInputDialog,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QListWidgetItem,
+    QMainWindow,
+    QMessageBox,
+    QPushButton,
+    QSpinBox,
+    QStatusBar,
+    QTableWidget,
+    QTableWidgetItem,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
+)
 
-    PYQT6_AVAILABLE = True
-except ImportError:
-    QAbstractItemView = None
-    QApplication = None
-    QCheckBox = None
-    QComboBox = None
-    QFormLayout = None
-    QGroupBox = None
-    QHeaderView = None
-    QHBoxLayout = None
-    QInputDialog = None
-    QLabel = None
-    QLineEdit = None
-    QListWidget = None
-    QListWidgetItem = None
-    QMainWindow = object
-    QMessageBox = None
-    QPushButton = None
-    QSpinBox = None
-    QStatusBar = None
-    QTableWidget = None
-    QTableWidgetItem = None
-    QTextEdit = None
-    Qt = None
-    QVBoxLayout = None
-    QWidget = None
-    PYQT6_AVAILABLE = False
+PYQT6_AVAILABLE = True
 class SettingsManagerQtView(QMainWindow):
     def __init__(self, controller, payload, parent_widget=None):
         if not PYQT6_AVAILABLE:

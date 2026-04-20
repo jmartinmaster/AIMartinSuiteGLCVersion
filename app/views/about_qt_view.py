@@ -16,37 +16,22 @@
 __module_name__ = "About Qt View"
 __version__ = "1.0.0"
 
-try:
-    from PyQt6.QtCore import Qt
-    from PyQt6.QtWidgets import (
-        QGroupBox,
-        QHBoxLayout,
-        QLabel,
-        QMainWindow,
-        QMessageBox,
-        QPushButton,
-        QStatusBar,
-        QTableWidget,
-        QTableWidgetItem,
-        QVBoxLayout,
-        QWidget,
-    )
+from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import (
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QMainWindow,
+    QMessageBox,
+    QPushButton,
+    QStatusBar,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
+    QWidget,
+)
 
-    PYQT6_AVAILABLE = True
-except ImportError:
-    Qt = None
-    QGroupBox = None
-    QHBoxLayout = None
-    QLabel = None
-    QMainWindow = object
-    QMessageBox = None
-    QPushButton = None
-    QStatusBar = None
-    QTableWidget = None
-    QTableWidgetItem = None
-    QVBoxLayout = None
-    QWidget = None
-    PYQT6_AVAILABLE = False
+PYQT6_AVAILABLE = True
 
 
 class AboutQtView(QMainWindow):

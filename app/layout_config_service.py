@@ -26,7 +26,7 @@ class LayoutConfigService:
         self.data_registry = ExternalDataRegistry()
         self.registry = FormDefinitionRegistry()
         self.local_config = self.data_registry.resolve_write_path("layout_config")
-        self.internal_config = self.data_registry.resolve_read_path("layout_config")
+        self.internal_config = self.data_registry.resolve_resource_path("layout_config") or self.data_registry.resolve_read_path("layout_config")
         self.active_form_info = None
         self.config_path = None
         self.save_path = None

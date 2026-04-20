@@ -13,7 +13,9 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-from app.views.production_log_view import ProductionLogView
+from app.tk_runtime_removed import raise_tk_runtime_removed
+
+raise_tk_runtime_removed("app/views/production_log_view_factory.py")
 
 __module_name__ = "Production Log View Factory"
 __version__ = "1.1.0"

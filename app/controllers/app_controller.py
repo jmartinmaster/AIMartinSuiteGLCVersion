@@ -20,23 +20,17 @@ import sys
 import threading
 import webbrowser
 
-import ttkbootstrap as tb
-from ttkbootstrap.constants import BOTTOM, DANGER, INFO, LEFT, RIGHT, SUCCESS, WARNING, X
-from ttkbootstrap.widgets import ToastNotification
-
 from app.app_logging import log_exception
 from app.data_request_worker import DataRequestWorker
 from app.external_data_registry import ExternalDataRegistry
 from app.module_registry import ModuleRegistry
 from app.security import gatekeeper
-from app.theme_manager import apply_readability_overrides, normalize_theme, resolve_base_theme
+from app.theme_manager import normalize_theme
 from app.utils import external_path, local_or_resource_path, resource_path
 from app.layout_manager_dispatcher import LayoutManagerMiniDispatcher
 from app.models.app_model import AppModel
-from app.views.app_view import AppShellView
 from app.security_service import SecurityService
 from app.update_state import UpdateCoordinator
-from app.host_ui_adapter import TkHostUiAdapter
 
 __module_name__ = "Dispatcher Core"
 __version__ = "2.1.6"
@@ -47,15 +41,13 @@ MODULE_PRELOAD_POLL_SECONDS = 1.0
 # Keep it on the dedicated LayoutManagerMiniDispatcher runtime unless the
 # product architecture decision changes and the validation/docs are updated.
 QT_IN_VIEWPORT_PILOT_MODULES = {"about", "help_viewer", "recovery_viewer", "rate_manager", "production_log", "production_log_calculations", "developer_admin", "security_admin", "settings_manager", "update_manager", "internal_code_editor"}
-
 SEVERITY_TO_BOOTSTYLE = {
-    "info": INFO,
-    "success": SUCCESS,
-    "warning": WARNING,
-    "danger": DANGER,
-    "error": DANGER,
+    "info": "info",
+    "success": "success",
+    "warning": "warning",
+    "danger": "danger",
+    "error": "danger",
 }
-
 MODULE_API_SURFACE = {
     "navigation": (
         "load_module",
@@ -87,7 +79,6 @@ MODULE_API_SURFACE = {
     "module_runtime": (
         "open_module_window",
         "open_help_document",
-        "send_module_runtime_command",
         "open_production_log_draft",
         "import_managed_module",
         "get_active_form_info",
@@ -143,7 +134,7 @@ class Dispatcher:
         self.dispatcher_version = getattr(self.main_module, "__version__", None) or "0.0.0"
         window_version = self.dispatcher_version if self.dispatcher_version != "0.0.0" else "Unknown"
         self.root.title(f"Production Logging Center - {window_version}")
-        self.root.geometry("1000x600")
+#       self.root.geometry("1000x600")
         self._update_status_clear_after_id = None
         self.security_session_listeners = []
         self.external_data_registry = ExternalDataRegistry()
@@ -174,7 +165,7 @@ class Dispatcher:
         if isinstance(runtime_settings_override, dict):
             self.model.runtime_settings.update(runtime_settings_override)
         self.requested_shell_backend = "pyqt6"
-        self.active_shell_backend = "tk"
+        self.active_shell_backend = "pyqt6"
         self.shell_backend_fallback_reason = None
         self.host_ui_adapter_factory = host_ui_adapter_factory
         self.shell_view_factory = shell_view_factory
@@ -195,22 +186,22 @@ class Dispatcher:
         self._setup_menu()
         self.pre_load_manifest()
         self._load_modules_list()
-        self._bind_mousewheel()
-        self.refresh_update_status_visibility()
+#        self._bind_mousewheel()
+#        self.refresh_update_status_visibility()
         self.load_module(self._resolve_initial_module_name(initial_module_name), use_transition=False)
         self._resolve_active_form_info(source_instance=self.active_module_instance)
-        self.call_later(1200, self.notify_non_secure_mode_state)
-        self.call_later(1500, self.notify_external_override_policy_state)
-        self.call_later(900, self.prompt_old_executable_cleanup)
-        self.call_later(1800, self.check_for_available_module_updates)
+#        self.call_later(1200, self.notify_non_secure_mode_state)
+#        self.call_later(1500, self.notify_external_override_policy_state)
+#        self.call_later(900, self.prompt_old_executable_cleanup)
+#        self.call_later(1800, self.check_for_available_module_updates)
         self.data_request_worker.submit(self.external_data_registry.warm_cache, description="external_data_registry.warm_cache")
-        self.call_later(2500, self.schedule_layout_manager_preload)
+#        self.call_later(2500, self.schedule_layout_manager_preload)
 
     def _create_shell_view(self):
         if callable(self.shell_view_factory):
             view = self.shell_view_factory(self.root, self.update_coordinator, self)
         else:
-            view = AppShellView(self.root, self.update_coordinator)
+            raise RuntimeError("A PyQt6 shell view factory is required. The Tk shell was removed in Phase 9.")
 
         build = getattr(view, "build", None)
         if callable(build):
@@ -670,10 +661,10 @@ class Dispatcher:
             self.host_ui_adapter.show_error("Report A Problem", f"Could not open the GitHub issue page:\n\n{exc}")
 
     def menu_open(self, event=None):
-        if self.active_shell_backend == "pyqt6" and hasattr(self.view, "menu_open"):
-            self.view.menu_open()
-            self.active_module_name = getattr(self.view, "active_module_name", "production_log") or "production_log"
-            return
+#        if self.active_shell_backend == "pyqt6" and hasattr(self.view, "menu_open"):
+#            self.view.menu_open()
+#            self.active_module_name = getattr(self.view, "active_module_name", "production_log") or "production_log"
+#            return
         self.load_module("production_log")
         if hasattr(self.active_module_instance, "show_pending"):
             self.active_module_instance.show_pending()
@@ -687,7 +678,8 @@ class Dispatcher:
         elif hasattr(self.active_module_instance, "save_current_file"):
             self.active_module_instance.save_current_file()
         else:
-            self.show_toast("Action Unavailable", "Save action is not supported on this page.", WARNING)
+            pass
+            #self.show_toast("Action Unavailable", "Save action is not supported on this page.", WARNING)
 
     def menu_export(self, event=None):
         if self.active_shell_backend == "pyqt6" and hasattr(self.view, "menu_export"):
@@ -696,7 +688,8 @@ class Dispatcher:
         if hasattr(self.active_module_instance, "export_to_excel"):
             self.active_module_instance.export_to_excel()
         else:
-            self.show_toast("Action Unavailable", "Export action is not supported on this page.", WARNING)
+            pass
+#            self.show_toast("Action Unavailable", "Export action is not supported on this page.", WARNING)
 
     def menu_import(self, event=None):
         if self.active_shell_backend == "pyqt6" and hasattr(self.view, "menu_import"):
@@ -723,7 +716,7 @@ class Dispatcher:
 
         self.refresh_navigation()
         self.refresh_active_module_access_state()
-        self.show_toast("Security", f"Signed in: {self.security.get_session_summary()}", SUCCESS)
+#        self.show_toast("Security", f"Signed in: {self.security.get_session_summary()}", SUCCESS)
 
     def menu_change_login(self):
         try:
@@ -743,7 +736,7 @@ class Dispatcher:
         self.refresh_navigation()
         self.refresh_active_module_access_state()
         self._enforce_active_module_access()
-        self.show_toast("Security", f"Active login: {self.security.get_session_summary()}", SUCCESS)
+#        self.show_toast("Security", f"Active login: {self.security.get_session_summary()}", SUCCESS)
 
     def menu_logout(self):
         previous_summary = self.security.get_session_summary()
@@ -751,7 +744,7 @@ class Dispatcher:
         self.refresh_navigation()
         self.refresh_active_module_access_state()
         self._enforce_active_module_access()
-        self.show_toast("Security", f"Signed out: {previous_summary}", WARNING)
+#        self.show_toast("Security", f"Signed out: {previous_summary}", WARNING)
 
     def add_security_session_listener(self, listener):
         if callable(listener) and listener not in self.security_session_listeners:
@@ -850,13 +843,13 @@ class Dispatcher:
         self.refresh_navigation()
         self.load_module(module_name, ensure_authorized=False)
 
-    def notify_non_secure_mode_state(self):
-        if self.security.is_non_secure_mode_enabled():
-            self.show_toast("Security", "Non-secure mode is enabled. Protected modules will open without password prompts.", WARNING)
+#    def notify_non_secure_mode_state(self):
+#        if self.security.is_non_secure_mode_enabled():
+#            self.show_toast("Security", "Non-secure mode is enabled. Protected modules will open without password prompts.", WARNING)
 
-    def notify_external_override_policy_state(self):
-        if self.has_external_module_overrides() and not self.is_external_module_override_trust_enabled():
-            self.show_toast("Security", "External module overrides are present but inactive until an admin enables override trust.", WARNING)
+#    def notify_external_override_policy_state(self):
+#        if self.has_external_module_overrides() and not self.is_external_module_override_trust_enabled():
+#            self.show_toast("Security", "External module overrides are present but inactive until an admin enables override trust.", WARNING)
 
     def get_navigation_modules(self):
         visible_modules = self.get_user_facing_modules(apply_whitelist=True)
@@ -1215,8 +1208,8 @@ class Dispatcher:
         self._refresh_active_module_ui(module_name)
         return module_instance
 
-    def _load_module_in_tk_viewport(self, module_name):
-        return self._load_module_in_shared_viewport(module_name)
+#    def _load_module_in_tk_viewport(self, module_name):
+#        return self._load_module_in_shared_viewport(module_name)
 
     def _load_module_in_qt_viewport(self, module_name):
         if self.should_use_qt_in_viewport(module_name):
@@ -1226,7 +1219,7 @@ class Dispatcher:
     def _load_module_in_active_viewport(self, module_name):
         if self.active_shell_backend == "pyqt6":
             return self._load_module_in_qt_viewport(module_name)
-        return self._load_module_in_tk_viewport(module_name)
+        raise RuntimeError(f"Backend '{self.active_shell_backend}' is not supported in the live Phase 9 runtime.")
 
     def load_module(self, module_name, use_transition=True, ensure_authorized=True):
         # Tk widget creation stays on the UI thread; worker threads may only enqueue load requests.
@@ -1275,7 +1268,7 @@ class Dispatcher:
                     )
                 self.host_ui_adapter.show_error("Module Load Error", f"Could not load {module_name}: {exc}")
                 return
-            tb.Label(self.content_area, text=f"Error loading {module_name}: {exc}", bootstyle=DANGER).pack(pady=20)
+#            tb.Label(self.content_area, text=f"Error loading {module_name}: {exc}", bootstyle=DANGER).pack(pady=20)
 
     def open_module_window(self, module_name, title=None, geometry=None, minsize=None):
         top_window = self.host_ui_adapter.create_module_window(title=title, geometry=geometry, minsize=minsize)
@@ -1326,7 +1319,6 @@ class Dispatcher:
             "Production Log",
             "The active Production Log session could not accept the requested draft.",
         )
-        return False
         return False
 
     def load_runtime_settings(self):
@@ -1505,15 +1497,15 @@ class Dispatcher:
     def _refresh_shell_backend_state(self):
         self.requested_shell_backend = self.get_ui_shell_backend()
         active_backend = str(self.runtime_settings.get("active_ui_shell_backend", "") or "").strip().lower()
-        if active_backend not in {"tk", "pyqt6"}:
-            active_backend = "tk"
+        if active_backend not in {"pyqt6"}:
+            active_backend = "pyqt6"
         self.active_shell_backend = active_backend
 
         fallback_reason = self.runtime_settings.get("ui_shell_backend_fallback_reason")
         if isinstance(fallback_reason, str) and fallback_reason.strip():
             self.shell_backend_fallback_reason = fallback_reason.strip()
             return
-
+    
         if self.requested_shell_backend != self.active_shell_backend:
             self.shell_backend_fallback_reason = (
                 f"Requested shell backend '{self.requested_shell_backend}' is not available in this build; using '{self.active_shell_backend}'."
@@ -1530,21 +1522,15 @@ class Dispatcher:
                 self.model.window_alpha_supported = bool(self.host_ui_adapter.supports_window_transition())
                 return
 
-        if self.active_shell_backend == "tk":
-            self.host_ui_adapter = TkHostUiAdapter(self, toast_factory=ToastNotification)
-            self.model.window_alpha_supported = bool(self.host_ui_adapter.supports_window_transition())
-            return
-
-        if self.active_shell_backend != "tk" and self.shell_backend_fallback_reason is None:
-            self.shell_backend_fallback_reason = (
-                f"Host adapter for backend '{self.active_shell_backend}' is not available in Dispatcher; using 'tk'."
-            )
-        self.host_ui_adapter = TkHostUiAdapter(self, toast_factory=ToastNotification)
-        self.model.window_alpha_supported = bool(self.host_ui_adapter.supports_window_transition())
+        raise RuntimeError(
+            f"A host UI adapter is required for backend '{self.active_shell_backend}'. The Tk fallback was removed in Phase 9."
+        )
 
     def get_ui_shell_backend(self):
         backend = str(self.runtime_settings.get("ui_shell_backend", "pyqt6") or "pyqt6").strip().lower()
-        return backend if backend in {"tk", "pyqt6"} else "pyqt6"
+        if backend == "tk":
+            raise RuntimeError("The Tk host was removed in Phase 9. Use ui_shell_backend='pyqt6'.")
+        return "pyqt6"
 
     def is_pyqt6_shell_requested(self):
         return self.get_ui_shell_backend() == "pyqt6"
@@ -1626,7 +1612,7 @@ class Dispatcher:
         else:
             message = f"{len(available_results)} module payload updates are available: {preview}. Open Update Manager to review or install them all."
 
-        self.show_toast("Update Manager", message, INFO)
+        self.show_toast("Update Manager", message, "info")
 
     def get_mousewheel_units(self, event):
         if getattr(event, "num", None) == 4:
@@ -1647,7 +1633,7 @@ class Dispatcher:
                 return SEVERITY_TO_BOOTSTYLE[normalized]
         return style_value
 
-    def show_toast(self, title, message, bootstyle=INFO, duration_ms=None):
+    def show_toast(self, title, message, bootstyle="info", duration_ms=None):
         return self.host_ui_adapter.show_toast(title, message, bootstyle=bootstyle, duration_ms=duration_ms)
 
     def notify_user(self, title, message, severity="info", duration_ms=None):
@@ -1660,10 +1646,10 @@ class Dispatcher:
         if self._update_status_clear_after_id is None:
             return
         self.host_ui_adapter.cancel_call_later(self._update_status_clear_after_id)
-        self._update_status_clear_after_id = None
 
-    def set_update_status(self, message, bootstyle=INFO, active=True, mode=None):
+    def set_update_status(self, message, bootstyle="info", active=True, mode=None):
         self._cancel_scheduled_update_status_clear()
+        self._update_status_clear_after_id = None
         resolved_bootstyle = self._normalize_bootstyle(bootstyle)
         self.update_coordinator.set_banner(message, bootstyle=resolved_bootstyle, active=active, mode=mode)
         self.refresh_update_status_visibility()
@@ -1716,8 +1702,8 @@ class Dispatcher:
 
         removed, failed = self.model.remove_obsolete_local_executables(obsolete_executables)
 
-        if removed:
-            self.show_toast("Cleanup Complete", f"Removed {len(removed)} older EXE file(s).", SUCCESS)
+ #       if removed:
+ #           self.show_toast("Cleanup Complete", f"Removed {len(removed)} older EXE file(s).", SUCCESS)
         if failed:
             failure_list = "\n".join(f"- {name}" for name in failed)
             self.host_ui_adapter.show_warning(
@@ -1727,10 +1713,10 @@ class Dispatcher:
 
     def apply_theme(self, theme_name, redraw=False):
         normalized_theme = normalize_theme(theme_name)
-        if self.active_shell_backend == "tk":
-            style = tb.Style.get_instance() or tb.Style()
-            style.theme_use(resolve_base_theme(normalized_theme))
-            apply_readability_overrides(self.root, normalized_theme)
+#        if self.active_shell_backend == "tk":
+#            style = tb.Style.get_instance() or tb.Style()
+#            style.theme_use(resolve_base_theme(normalized_theme))
+#            apply_readability_overrides(self.root, normalized_theme)
         view_apply_theme = getattr(self.view, "apply_theme", None)
         if callable(view_apply_theme):
             try:
@@ -1744,20 +1730,20 @@ class Dispatcher:
             update_idletasks()
         return normalized_theme
 
-    def _bind_mousewheel(self):
-        if getattr(self, "canvas", None) is None:
-            return
-        self.canvas.bind_all("<MouseWheel>", self._on_mousewheel)
-        self.canvas.bind_all("<Button-4>", self._on_mousewheel)
-        self.canvas.bind_all("<Button-5>", self._on_mousewheel)
-        self.canvas.bind_all("<Shift-MouseWheel>", self._on_horizontal_mousewheel)
+#    def _bind_mousewheel(self):
+#        if getattr(self, "canvas", None) is None:
+#            return
+#        self.canvas.bind_all("<MouseWheel>", self._on_mousewheel)
+#        self.canvas.bind_all("<Button-4>", self._on_mousewheel)
+#        self.canvas.bind_all("<Button-5>", self._on_mousewheel)
+#        self.canvas.bind_all("<Shift-MouseWheel>", self._on_horizontal_mousewheel)
 
-    def _on_mousewheel(self, event):
-        step = self.get_mousewheel_units(event)
-        if step:
-            self.canvas.yview_scroll(step, "units")
+#    def _on_mousewheel(self, event):
+#        step = self.get_mousewheel_units(event)
+#        if step:
+#            self.canvas.yview_scroll(step, "units")
 
-    def _on_horizontal_mousewheel(self, event):
-        step = self.get_mousewheel_units(event)
-        if step:
-            self.canvas.xview_scroll(step, "units")
+ #   def _on_horizontal_mousewheel(self, event):
+ #       step = self.get_mousewheel_units(event)
+ #       if step:
+ #           self.canvas.xview_scroll(step, "units")

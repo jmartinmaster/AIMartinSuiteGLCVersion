@@ -13,15 +13,9 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-from copy import deepcopy
-import os
+from app.tk_runtime_removed import raise_tk_runtime_removed
 
-from app.downtime_codes import DEFAULT_DT_CODE_MAP, clear_downtime_code_cache
-from app.security import gatekeeper
-from app.theme_manager import get_theme_label, get_theme_labels, normalize_theme
-from app.models.security_model import ACCESS_RIGHTS, ROLE_DEFAULT_RIGHTS, ROLE_LIMITS, normalize_role, role_requires_password
-from app.models.settings_manager_model import SettingsManagerModel
-from app.views.settings_manager_view_factory import create_settings_manager_view
+raise_tk_runtime_removed("app/controllers/settings_manager_controller.py")
 
 __module_name__ = "Settings Manager"
 __version__ = "1.3.0"

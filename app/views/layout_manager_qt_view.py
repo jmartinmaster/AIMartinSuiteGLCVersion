@@ -28,63 +28,34 @@ __version__ = "0.3.1"
 LAYOUT_MANAGER_QT_SESSION_ENV = "AIMARTIN_LAYOUT_MANAGER_QT_SESSION"
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-try:
-    from PyQt6.QtCore import QSignalBlocker, Qt, QTimer
-    from PyQt6.QtWidgets import (
-        QApplication,
-        QComboBox,
-        QFormLayout,
-        QGridLayout,
-        QGroupBox,
-        QHBoxLayout,
-        QLabel,
-        QLineEdit,
-        QMainWindow,
-        QMessageBox,
-        QPlainTextEdit,
-        QPushButton,
-        QScrollArea,
-        QSplitter,
-        QStatusBar,
-        QTableWidget,
-        QTableWidgetItem,
-        QTabWidget,
-        QTreeWidget,
-        QTreeWidgetItem,
-        QVBoxLayout,
-        QWidget,
-        QInputDialog,
-    )
+from PyQt6.QtCore import QSignalBlocker, Qt, QTimer
+from PyQt6.QtWidgets import (
+    QApplication,
+    QComboBox,
+    QFormLayout,
+    QGridLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMainWindow,
+    QMessageBox,
+    QPlainTextEdit,
+    QPushButton,
+    QScrollArea,
+    QSplitter,
+    QStatusBar,
+    QTableWidget,
+    QTableWidgetItem,
+    QTabWidget,
+    QTreeWidget,
+    QTreeWidgetItem,
+    QVBoxLayout,
+    QWidget,
+    QInputDialog,
+)
 
-    PYQT6_AVAILABLE = True
-except ImportError:
-    QApplication = None
-    QComboBox = None
-    QFormLayout = None
-    QGridLayout = None
-    QGroupBox = None
-    QHBoxLayout = None
-    QLabel = None
-    QLineEdit = None
-    QMainWindow = object
-    QMessageBox = None
-    QPlainTextEdit = None
-    QPushButton = None
-    QScrollArea = None
-    QSplitter = None
-    QStatusBar = None
-    QTableWidget = None
-    QTableWidgetItem = None
-    QTabWidget = None
-    QTreeWidget = None
-    QTreeWidgetItem = None
-    QVBoxLayout = None
-    QWidget = None
-    QInputDialog = None
-    QSignalBlocker = None
-    Qt = None
-    QTimer = None
-    PYQT6_AVAILABLE = False
+PYQT6_AVAILABLE = True
 
 
 def is_layout_manager_qt_runtime_available():

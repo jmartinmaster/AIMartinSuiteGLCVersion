@@ -1,0 +1,62 @@
+# Phase 9 — Tk Host Removal Runbook
+
+Status: IN PROGRESS
+
+This runbook documents the current inventory, parity mapping, and the cautious checklist for removing the Tk host path (Phase 9). Follow the checklist exactly; if anything is uncertain, make a note and leave it alone.
+
+## Inventory (discovered Tk usage)
+- `app/views/app_view.py` — Tk host shell (primary Tk shell view)
+- `app/host_ui_adapter.py` — `TkHostUiAdapter` and `PyQt6HostUiAdapter` (adapter contains both implementations)
+- `app/app_platform.py` — imports `PhotoImage` from `tkinter` (icon path handling)
+- Controller files (use Tk or `ttkbootstrap` in fallback paths):
+  - `app/controllers/production_log_controller.py` (imports `tk`)
+  - `app/controllers/about_controller.py` (uses `tkinter.messagebox`)
+  - `app/controllers/recovery_viewer_controller.py` (uses `messagebox`)
+  - `app/controllers/internal_code_editor_controller.py` (uses `ttkbootstrap` constants)
+  - `app/controllers/layout_manager_controller.py` (uses `ttkbootstrap` constants)
+  - `app/controllers/production_log_calculations_controller.py` (uses `ttkbootstrap`)
+  - `app/controllers/rate_manager_controller.py` (uses `ttkbootstrap`)
+  - `app/security.py` (uses `tkinter.messagebox`, `simpledialog`, `ttk`)
+- `launcher.py` and `build.py` — contain launcher logic and packaging references to `tkinter` and `ttkbootstrap`.
+
+(Discovery used a repo-wide scan for `tkinter`, `from tkinter import`, and `ttkbootstrap`.)
+
+## PyQt6 parity mapping (Qt equivalents found)
+Most modules have Qt parity files already present (controller/view pairs):
+- `about` — `app/controllers/about_qt_controller.py`, `app/views/about_qt_view.py`
+- `help_viewer` — `app/controllers/help_viewer_qt_controller.py`, `app/views/help_viewer_qt_view.py`
+- `recovery_viewer` — `app/controllers/recovery_viewer_qt_controller.py`, `app/views/recovery_viewer_qt_view.py`
+- `rate_manager` — `app/controllers/rate_manager_qt_controller.py`, `app/views/rate_manager_qt_view.py`
+- `production_log` — `app/controllers/production_log_qt_controller.py`, `app/views/production_log_qt_view.py`
+- `production_log_calculations` — `app/controllers/production_log_calculations_qt_controller.py`, `app/views/production_log_calculations_qt_view.py`
+- `internal_code_editor` — `app/controllers/internal_code_editor_qt_controller.py`, `app/views/internal_code_editor_qt_view.py`
+- `settings_manager`, `update_manager`, `developer_admin`, `security_admin` — Qt controllers/views exist
+- `layout_manager` — dedicated runtime has `app/views/layout_manager_qt_view.py` and `layout_manager_qt_controller.py` (deliberate exception; remains separate-window by plan)
+
+Conclusion: module-level parity is present for the main navigation and pilot modules.
+
+## Uncertainties / Notes (leave these alone until resolved)
+- `app/app_platform.py` imports `tkinter.PhotoImage`. Confirm whether `PIL`-only or Qt-native icon handling is safe to switch. If unsure, leave `app_platform` as-is and adapt packaging later.
+- `app/security.py` uses `tkinter.simpledialog` and `messagebox`. Confirm that all call sites use the host `show_error()/ask_yes_no()` adapter rather than calling `tk` dialogs directly. If direct Tk calls remain, they must be ported or routed via `host_ui_adapter`.
+- Packaging and CI: `build.py` currently references `tkinter` and `ttkbootstrap` in hidden imports. Ensure packagers and build scripts are updated in a follow-up change only after removal is validated.
+- Windows launcher behavior: previous Phase 8 closeout noted a Windows UTF-8 BOM gotcha for standalone session JSON; keep this in mind when running dedicated-session smoke tests.
+
+## Current demolition state
+- `launcher.py` now enforces PyQt6-only startup and records `phase9_tk_removed = True` in runtime settings.
+- `app/controllers/app_controller.py` no longer imports `ttkbootstrap`, routes notifications through the host adapter, and raises on unsupported non-PyQt backends.
+- Managed module shims now lazy-load Qt controllers and fail fast instead of importing Tk controllers at module import time.
+- `app/host_ui_adapter.py`, `app/security.py`, and update-state support now fail fast on Tk-only runtime paths instead of silently falling back.
+- Disconnected Tk and ttkbootstrap-heavy surfaces are mirrored under `shadow/` with the same relative project structure for reference during removal.
+- Disconnected Tk controllers, views, view factories, the legacy Tk shell view, and `app/splash.py` now fail immediately on import through `app/tk_runtime_removed.py`.
+- `app/app_platform.py` now applies the live app icon through Qt-native `QIcon` handling for the application and host window during PyQt6 startup.
+- `app/theme_manager.py` now resolves all live theme tokens internally. Legacy ttkbootstrap theme names are retained only as compatibility labels that map onto the internal light/dark token profiles.
+- The live `app/` tree no longer contains Tk or ttkbootstrap imports.
+- `build.py`, the active PyInstaller spec, archived packaging specs, and `README.md` no longer require or describe Tk or ttkbootstrap for packaging.
+- PyInstaller packaging now explicitly excludes `tkinter`, `_tkinter`, `ttkbootstrap`, `PIL.ImageTk`, `PIL._tkinter_finder`, and `PyInstaller` so the removed Tk bridge cannot be reintroduced by optional Pillow or hook analysis.
+- Packaged runtime JSON seeds now come from bundled `data/config/*` files and are copied into the writable external runtime tree on first use so EXE and DEB runs do not depend on repo-root JSON paths.
+
+## Remaining checklist
+1. Run `py_compile` and the existing validators (`scripts/validate_pyqt6_phase_gate.py`, `scripts/validate_module_loads.py`) against the updated Phase 9 runtime.
+2. Run shown-window smoke tests for host startup, module navigation, theme application, and security flows under the live PyQt6-only path.
+3. Validate that the dedicated `layout_manager` runtime still opens, raises, reloads, and restarts correctly from the host bridge.
+4. Run an end-to-end Windows EXE and Ubuntu DEB build smoke pass with the cleaned packaging inputs.

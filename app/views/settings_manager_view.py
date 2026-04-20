@@ -13,16 +13,9 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-from copy import deepcopy
-import tkinter as tk
-from tkinter import filedialog, messagebox, simpledialog
+from app.tk_runtime_removed import raise_tk_runtime_removed
 
-import ttkbootstrap as tb
-from ttkbootstrap.constants import BOTH, DANGER, END, EW, INFO, LEFT, RIGHT, SECONDARY, SUCCESS, VERTICAL, W, X, Y
-from ttkbootstrap.dialogs import Messagebox
-
-from app.downtime_codes import DEFAULT_DT_CODE_MAP
-from app.theme_manager import DEFAULT_THEME, get_theme_label
+raise_tk_runtime_removed("app/views/settings_manager_view.py")
 
 __module_name__ = "Settings Manager"
 __version__ = "1.0.2"

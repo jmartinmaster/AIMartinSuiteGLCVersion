@@ -17,14 +17,10 @@
 import os
 import sys
 import threading
-from tkinter import messagebox
-
-import ttkbootstrap as tb
-from ttkbootstrap.dialogs import Messagebox
 from app.app_identity import format_versioned_deb_name, format_versioned_exe_name
 from app.app_platform import get_platform_update_artifact_kind, get_platform_update_artifact_label, is_windows_runtime
 from app.models.update_manager_model import UpdateManagerModel
-from app.views.update_manager_view_factory import create_update_manager_view
+from app.update_bindings import ObservableValue
 
 __module_name__ = "Update Manager"
 __version__ = "2.3.0"
@@ -39,10 +35,13 @@ class UpdateManagerController:
     SUCCESS_BANNER_AUTOHIDE_MS = 5000
 
     def _show_error_dialog(self, title, message):
-        Messagebox.show_error(str(message), str(title))
+        self.dispatcher.host_ui_adapter.show_error(str(title), str(message))
 
     def _ask_yes_no_dialog(self, title, message):
-        return bool(messagebox.askyesno(str(title), str(message)))
+        return bool(self.dispatcher.host_ui_adapter.ask_yes_no(str(title), str(message)))
+
+    def _create_var(self, value=""):
+        return ObservableValue(value=value)
 
     def __init__(self, parent, dispatcher):
         self.parent = parent
@@ -76,24 +75,26 @@ class UpdateManagerController:
         default_option = next((option for option in self.module_payload_options if option["key"] == "about"), None)
         if default_option is None and self.module_payload_options:
             default_option = self.module_payload_options[0]
-        self.module_payload_selection_var = tb.StringVar(value=default_option["display"] if default_option else "No module payloads available")
-        self.module_payload_name_var = tb.StringVar(value=default_option["module_name"] if default_option else "No payload selected")
-        self.module_payload_path_var = tb.StringVar(value=default_option["relative_path"] if default_option else "Payload updates are not available.")
-        self.module_payload_local_version_var = tb.StringVar(value="Unknown")
-        self.module_payload_remote_version_var = tb.StringVar(value="Not checked")
-        self.module_payload_status_var = tb.StringVar(value="Pending")
-        self.module_payload_note_var = tb.StringVar(value=self._payload_boundary_note("Select a payload to compare against the repository."))
+        self.module_payload_selection_var = self._create_var(default_option["display"] if default_option else "No module payloads available")
+        self.module_payload_name_var = self._create_var(default_option["module_name"] if default_option else "No payload selected")
+        self.module_payload_path_var = self._create_var(default_option["relative_path"] if default_option else "Payload updates are not available.")
+        self.module_payload_local_version_var = self._create_var("Unknown")
+        self.module_payload_remote_version_var = self._create_var("Not checked")
+        self.module_payload_status_var = self._create_var("Pending")
+        self.module_payload_note_var = self._create_var(self._payload_boundary_note("Select a payload to compare against the repository."))
         self.module_payload_in_progress = False
-        self.documentation_payload_tracked_var = tb.StringVar(value=f"{len(self.documentation_payload_options)} tracked file(s)")
-        self.documentation_payload_remote_state_var = tb.StringVar(value="Not checked")
-        self.documentation_payload_status_var = tb.StringVar(value="Pending")
-        self.documentation_payload_note_var = tb.StringVar(value="Documentation restores are grouped into one action so bundled help files can be refreshed without choosing individual documents.")
+        self.documentation_payload_tracked_var = self._create_var(f"{len(self.documentation_payload_options)} tracked file(s)")
+        self.documentation_payload_remote_state_var = self._create_var("Not checked")
+        self.documentation_payload_status_var = self._create_var("Pending")
+        self.documentation_payload_note_var = self._create_var("Documentation restores are grouped into one action so bundled help files can be refreshed without choosing individual documents.")
         self.documentation_payload_in_progress = False
         self.container = None
         self.coordinator.branch_name = self.branch_name
         self.coordinator.remote_info = self.remote_info
         self.branch_var.set(self.branch_name or "Unknown")
         self.repo_var.set(self.remote_info.get("display", "Unknown repository"))
+        from app.views.update_manager_view_factory import create_update_manager_view
+
         self.view = create_update_manager_view(parent, self)
         self.dispatcher.register_runtime_settings_listener(self._handle_runtime_settings_change)
         self._runtime_listener_registered = True
@@ -134,6 +135,8 @@ class UpdateManagerController:
 
     def mount(self, parent):
         self.parent = parent
+        from app.views.update_manager_view_factory import create_update_manager_view
+
         self.view = create_update_manager_view(parent, self)
         self.container = self.view.container
 

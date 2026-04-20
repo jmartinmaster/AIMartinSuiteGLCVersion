@@ -13,13 +13,9 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-from ttkbootstrap.constants import DANGER, INFO, SECONDARY, SUCCESS
+from app.tk_runtime_removed import raise_tk_runtime_removed
 
-from app.models.layout_manager_model import LayoutManagerModel
-from app.theme_manager import get_theme_tokens
-from app.views.layout_manager_qt_view import launch_layout_manager_qt_probe
-from app.views.layout_manager_view_contract import LayoutManagerViewContract
-from app.views.layout_manager_view_factory import create_layout_manager_view
+raise_tk_runtime_removed("app/controllers/layout_manager_controller.py")
 
 
 class LayoutManagerController:

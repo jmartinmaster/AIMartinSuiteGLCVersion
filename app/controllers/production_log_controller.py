@@ -13,14 +13,9 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-import os
-import sys
-import tkinter as tk
-import webbrowser
+from app.tk_runtime_removed import raise_tk_runtime_removed
 
-from app.models.production_log_model import ProductionLogModel
-from app.views.production_log_view import ProductionLogView, __version__ as PRODUCTION_LOG_VERSION
-from app.views.production_log_view_factory import create_production_log_view
+raise_tk_runtime_removed("app/controllers/production_log_controller.py")
 
 __module_name__ = "Production Log"
 __version__ = "1.2.8"

@@ -13,14 +13,9 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-import os
-import tkinter as tk
-import tkinter.font as tkfont
+from app.tk_runtime_removed import raise_tk_runtime_removed
 
-import ttkbootstrap as tb
-from ttkbootstrap.constants import BOTH, DISABLED, E, END, EW, HORIZONTAL, LEFT, NE, NORMAL, NSEW, NS, RIGHT, SECONDARY, VERTICAL, W, WORD
-
-from app.utils import local_or_resource_path
+raise_tk_runtime_removed("app/views/help_viewer_view.py")
 
 __module_name__ = "Help Viewer"
 __version__ = "1.0.1"

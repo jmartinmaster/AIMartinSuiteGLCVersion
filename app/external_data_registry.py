@@ -61,13 +61,13 @@ DEFAULT_EXTERNAL_DATA_SPECS = (
         external_relative_path=os.path.join(DATA_CONFIG_ROOT, "layout_config.json"),
         backup_relative_path=os.path.join("data", "backups", "layouts"),
         legacy_relative_paths=("layout_config.json",),
-        resource_relative_path="layout_config.json",
+        resource_relative_path=os.path.join(DATA_CONFIG_ROOT, "layout_config.json"),
         allow_resource_fallback=True,
         include_in_recovery=True,
         recovery_kind="Default Layout Backup",
         include_in_update_payloads=True,
         update_fallback_name="Production Logging Center Layout",
-        repo_relative_path="layout_config.json",
+        repo_relative_path=os.path.join(DATA_CONFIG_ROOT, "layout_config.json").replace("\\", "/"),
         notifies_active_form=True,
     ),
     ExternalDataSpec(
@@ -89,13 +89,13 @@ DEFAULT_EXTERNAL_DATA_SPECS = (
         external_relative_path=os.path.join(DATA_CONFIG_ROOT, "rates.json"),
         backup_relative_path=os.path.join("data", "backups", "rates"),
         legacy_relative_paths=("rates.json",),
-        resource_relative_path="rates.json",
+        resource_relative_path=os.path.join(DATA_CONFIG_ROOT, "rates.json"),
         allow_resource_fallback=True,
         include_in_recovery=True,
         recovery_kind="Rates Backup",
         include_in_update_payloads=True,
         update_fallback_name="Rates Config",
-        repo_relative_path="rates.json",
+        repo_relative_path=os.path.join(DATA_CONFIG_ROOT, "rates.json").replace("\\", "/"),
     ),
     ExternalDataSpec(
         key="production_log_calculations",
@@ -103,13 +103,13 @@ DEFAULT_EXTERNAL_DATA_SPECS = (
         external_relative_path=os.path.join(DATA_CONFIG_ROOT, "production_log_calculations.json"),
         backup_relative_path=os.path.join("data", "backups", "production_log_calculations"),
         legacy_relative_paths=("production_log_calculations.json",),
-        resource_relative_path="production_log_calculations.json",
+        resource_relative_path=os.path.join(DATA_CONFIG_ROOT, "production_log_calculations.json"),
         allow_resource_fallback=True,
         include_in_recovery=True,
         recovery_kind="Production Log Calculations Backup",
         include_in_update_payloads=True,
         update_fallback_name="Production Log Calculations",
-        repo_relative_path="production_log_calculations.json",
+        repo_relative_path=os.path.join(DATA_CONFIG_ROOT, "production_log_calculations.json").replace("\\", "/"),
     ),
 )
 
@@ -176,6 +176,29 @@ class ExternalDataRegistry:
         except OSError:
             return None
 
+    def _seed_from_resource(self, key):
+        spec = self.get_spec(key)
+        if not spec.allow_resource_fallback:
+            return None
+
+        write_path = self.resolve_write_path(key)
+        resource_path_value = self.resolve_resource_path(key)
+        if not write_path or not resource_path_value or not os.path.exists(resource_path_value):
+            return None
+
+        absolute_write_path = os.path.abspath(write_path)
+        absolute_resource_path = os.path.abspath(resource_path_value)
+        if absolute_write_path == absolute_resource_path:
+            return absolute_write_path if os.path.exists(absolute_write_path) else None
+
+        try:
+            os.makedirs(os.path.dirname(absolute_write_path), exist_ok=True)
+            if not os.path.exists(absolute_write_path):
+                shutil.copy2(absolute_resource_path, absolute_write_path)
+            return absolute_write_path
+        except OSError:
+            return None
+
     def migrate_legacy_file(self, key):
         write_path = self.resolve_write_path(key)
         if os.path.exists(write_path):
@@ -214,6 +237,10 @@ class ExternalDataRegistry:
         for legacy_path in self.resolve_legacy_paths(key):
             if os.path.exists(legacy_path):
                 return legacy_path
+
+        seeded_path = self._seed_from_resource(key)
+        if seeded_path and os.path.exists(seeded_path):
+            return seeded_path
 
         spec = self.get_spec(key)
         resource_path_value = self.resolve_resource_path(key)
