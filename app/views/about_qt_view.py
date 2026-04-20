@@ -18,6 +18,7 @@ __version__ = "1.0.0"
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
+    QApplication,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -61,7 +62,7 @@ class AboutQtView(QMainWindow):
         if self.embedded:
             self.setMinimumSize(0, 0)
         else:
-            self.resize(980, 720)
+            self._fit_window_to_screen(980, 720)
 
         central_widget = QWidget(self)
         root_layout = QVBoxLayout(central_widget)
@@ -115,6 +116,28 @@ class AboutQtView(QMainWindow):
         self.status_bar = QStatusBar(self)
         self.setStatusBar(self.status_bar)
         self.status_bar.showMessage("About view ready.", 5000)
+
+    def _available_screen_geometry(self):
+        window_handle = self.windowHandle()
+        screen = window_handle.screen() if window_handle is not None else None
+        if screen is None and hasattr(self, "screen"):
+            try:
+                screen = self.screen()
+            except Exception:
+                screen = None
+        application = QApplication.instance()
+        if screen is None and application is not None:
+            screen = application.primaryScreen()
+        return screen.availableGeometry() if screen is not None else None
+
+    def _fit_window_to_screen(self, requested_width, requested_height, padding=48):
+        geometry = self._available_screen_geometry()
+        if geometry is None:
+            self.resize(requested_width, requested_height)
+            return
+        max_width = max(720, geometry.width() - int(padding))
+        max_height = max(540, geometry.height() - int(padding))
+        self.resize(min(int(requested_width), max_width), min(int(requested_height), max_height))
 
     def _populate_manifest(self, manifest_rows):
         self.manifest_table.setRowCount(len(manifest_rows))

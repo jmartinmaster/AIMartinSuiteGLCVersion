@@ -119,6 +119,13 @@ class PyQt6HostShellView(QMainWindow):
         self.module_session_hint_label = None
         self.session_action_frame = None
         self.viewport_status_label = None
+        self.open_button = None
+        self.restart_button = None
+        self.stop_button = None
+        self.details_toggle_button = None
+        self.runtime_status_label = None
+        self.runtime_message_label = None
+        self.runtime_state_view = None
         self.host_ui_adapter = PyQt6HostUiAdapter(self)
         self._menu_actions = {}
         self._after_timers = {}
@@ -423,7 +430,7 @@ class PyQt6HostShellView(QMainWindow):
         placeholder_layout.addWidget(self.viewport_subtitle_label)
 
         self.viewport_hint_label = QLabel(
-            "Modules that still open in a separate window will keep their status and window actions connected here.",
+            "Modules that still open in a separate window will continue to launch from the host shell.",
             self.viewport_placeholder,
         )
         self.viewport_hint_label.setObjectName("sectionHint")
@@ -501,8 +508,7 @@ class PyQt6HostShellView(QMainWindow):
         self.runtime_state_view.setPlainText("{}")
         self.runtime_state_view.setVisible(False)
         diagnostics_layout.addWidget(self.runtime_state_view)
-
-        right_layout.addWidget(self.runtime_diagnostics_group)
+        self.runtime_diagnostics_group.setVisible(False)
 
         root_layout.addWidget(self.right_container, 1)
         self.setCentralWidget(self.main_container)
@@ -907,10 +913,14 @@ class PyQt6HostShellView(QMainWindow):
         if self.session_action_frame is not None:
             self.session_action_frame.setVisible(show_window_actions)
 
-        self.open_button.setEnabled(show_window_actions)
-        self.restart_button.setEnabled(show_window_actions)
-        self.stop_button.setEnabled(show_window_actions)
-        self.details_toggle_button.setEnabled(show_window_actions)
+        if self.open_button is not None:
+            self.open_button.setEnabled(show_window_actions)
+        if self.restart_button is not None:
+            self.restart_button.setEnabled(show_window_actions)
+        if self.stop_button is not None:
+            self.stop_button.setEnabled(show_window_actions)
+        if self.details_toggle_button is not None:
+            self.details_toggle_button.setEnabled(show_window_actions)
 
         if not show_window_actions:
             self._runtime_details_visible = False
@@ -924,9 +934,12 @@ class PyQt6HostShellView(QMainWindow):
 
         if self.module_session_title_label is not None:
             self.module_session_title_label.setText(display_title)
-        self.runtime_status_label.setText(route_line)
-        self.runtime_message_label.setText(detail_message)
-        self.runtime_state_view.setPlainText(json.dumps(payload, indent=2, sort_keys=True))
+        if self.runtime_status_label is not None:
+            self.runtime_status_label.setText(route_line)
+        if self.runtime_message_label is not None:
+            self.runtime_message_label.setText(detail_message)
+        if self.runtime_state_view is not None:
+            self.runtime_state_view.setPlainText(json.dumps(payload, indent=2, sort_keys=True))
         self._set_shell_window_title(payload.get("module"))
         self.status_bar.showMessage(detail_message, 4000)
         self._refresh_session_controls(session_mode=session_mode)

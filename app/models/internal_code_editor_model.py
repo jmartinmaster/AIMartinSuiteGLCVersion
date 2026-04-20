@@ -23,6 +23,7 @@ __version__ = "0.1.0"
 
 class InternalCodeEditorModel:
     SOURCE_SORT_ORDER = {"external": 0, "workspace": 0, "bundled": 1}
+    DEFAULT_SEARCH_LIMIT = 200
 
     def __init__(self, bundled_app_path, external_app_path):
         self.bundled_app_path = os.path.abspath(bundled_app_path)
@@ -139,6 +140,83 @@ class InternalCodeEditorModel:
             "parse_error": parse_error,
         }
 
+    def search_text_matches(self, search_text, limit=None):
+        normalized_search = str(search_text or "").strip().lower()
+        if not normalized_search:
+            return {"results": [], "truncated": False}
+
+        max_results = max(1, int(limit or self.DEFAULT_SEARCH_LIMIT))
+        results = []
+        truncated = False
+        for entry in self.file_entries:
+            try:
+                with open(entry["path"], "r", encoding="utf-8", errors="replace") as handle:
+                    for line_number, line_text in enumerate(handle, start=1):
+                        match_index = line_text.lower().find(normalized_search)
+                        if match_index < 0:
+                            continue
+                        results.append(
+                            {
+                                "key": f"text:{entry['key']}:{line_number}:{match_index + 1}",
+                                "result_type": "text",
+                                "file_key": entry["key"],
+                                "relative_path": entry["relative_path"],
+                                "source_name": entry["source_name"],
+                                "line": line_number,
+                                "column": match_index + 1,
+                                "summary": line_text.strip(),
+                            }
+                        )
+                        if len(results) >= max_results:
+                            truncated = True
+                            return {"results": results, "truncated": truncated}
+            except OSError:
+                continue
+        return {"results": results, "truncated": truncated}
+
+    def search_symbol_matches(self, search_text, limit=None):
+        normalized_search = str(search_text or "").strip().lower()
+        if not normalized_search:
+            return {"results": [], "truncated": False}
+
+        max_results = max(1, int(limit or self.DEFAULT_SEARCH_LIMIT))
+        results = []
+        truncated = False
+        for entry in self.file_entries:
+            try:
+                source_text = self.load_file_text(entry["key"])
+            except (OSError, ValueError):
+                continue
+            definition_entries, parse_error = self.build_definition_index(source_text)
+            if parse_error:
+                continue
+            for definition_entry in definition_entries:
+                haystack = " ".join(
+                    [
+                        str(definition_entry.get("name") or ""),
+                        str(definition_entry.get("qualified_name") or ""),
+                        str(definition_entry.get("kind") or ""),
+                    ]
+                ).lower()
+                if normalized_search not in haystack:
+                    continue
+                results.append(
+                    {
+                        "key": f"symbol:{entry['key']}:{definition_entry['key']}",
+                        "result_type": "symbol",
+                        "file_key": entry["key"],
+                        "relative_path": entry["relative_path"],
+                        "source_name": entry["source_name"],
+                        "line": int(definition_entry.get("line") or 1),
+                        "column": self._column_from_index_text(definition_entry.get("name_start_index")),
+                        "summary": f"{definition_entry.get('qualified_name') or definition_entry.get('name') or ''} ({definition_entry.get('kind') or 'symbol'})",
+                    }
+                )
+                if len(results) >= max_results:
+                    truncated = True
+                    return {"results": results, "truncated": truncated}
+        return {"results": results, "truncated": truncated}
+
     def build_definition_index(self, source_text):
         try:
             syntax_tree = ast.parse(source_text)
@@ -199,6 +277,15 @@ class InternalCodeEditorModel:
         if fallback_index >= 0:
             return fallback_index
         return max(0, minimum_column)
+
+    def _column_from_index_text(self, index_text):
+        parts = str(index_text or "").split(".", 1)
+        if len(parts) != 2:
+            return 1
+        try:
+            return max(1, int(parts[1]) + 1)
+        except ValueError:
+            return 1
 
     def _iter_sources(self):
         if self.bundled_app_path == self.external_app_path:

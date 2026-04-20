@@ -20,6 +20,7 @@ __version__ = "1.1.0"
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
+    QApplication,
     QCheckBox,
     QComboBox,
     QFormLayout,
@@ -70,7 +71,7 @@ class ProductionLogCalculationsQtView(QMainWindow):
     def _build_ui(self):
         self.setWindowTitle(str(self.payload.get("window_title") or "Production Log Calculations"))
         if not self.embedded:
-            self.resize(1200, 900)
+            self._fit_window_to_screen(1200, 900)
 
         central_widget = QWidget(self)
         root_layout = QVBoxLayout(central_widget)
@@ -109,10 +110,6 @@ class ProductionLogCalculationsQtView(QMainWindow):
         preview_layout.addWidget(self.preview_list)
         scroll_layout.addWidget(preview_group)
 
-        scroll_layout.addStretch(1)
-        scroll_area.setWidget(scroll_content)
-        root_layout.addWidget(scroll_area, 1)
-
         action_row = QHBoxLayout()
         save_button = QPushButton("Save Profile")
         save_button.clicked.connect(self.controller.save_settings)
@@ -131,11 +128,37 @@ class ProductionLogCalculationsQtView(QMainWindow):
         action_row.addWidget(open_button)
 
         action_row.addStretch(1)
-        root_layout.addLayout(action_row)
+        scroll_layout.addLayout(action_row)
+
+        scroll_layout.addStretch(1)
+        scroll_area.setWidget(scroll_content)
+        root_layout.addWidget(scroll_area, 1)
 
         self.setCentralWidget(central_widget)
         self.status_bar = QStatusBar(self)
         self.setStatusBar(self.status_bar)
+
+    def _available_screen_geometry(self):
+        window_handle = self.windowHandle()
+        screen = window_handle.screen() if window_handle is not None else None
+        if screen is None and hasattr(self, "screen"):
+            try:
+                screen = self.screen()
+            except Exception:
+                screen = None
+        application = QApplication.instance()
+        if screen is None and application is not None:
+            screen = application.primaryScreen()
+        return screen.availableGeometry() if screen is not None else None
+
+    def _fit_window_to_screen(self, requested_width, requested_height, padding=48):
+        geometry = self._available_screen_geometry()
+        if geometry is None:
+            self.resize(requested_width, requested_height)
+            return
+        max_width = max(820, geometry.width() - int(padding))
+        max_height = max(620, geometry.height() - int(padding))
+        self.resize(min(int(requested_width), max_width), min(int(requested_height), max_height))
 
     def _create_field_widget(self, field):
         key = str(field.get("key") or "")

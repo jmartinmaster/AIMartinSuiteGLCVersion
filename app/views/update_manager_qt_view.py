@@ -18,6 +18,7 @@ __version__ = "1.4.0"
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
+    QApplication,
     QComboBox,
     QFormLayout,
     QGroupBox,
@@ -26,6 +27,7 @@ from PyQt6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QStatusBar,
     QTextEdit,
     QVBoxLayout,
@@ -52,6 +54,7 @@ class UpdateManagerQtView(QMainWindow):
         self.payload_selector = None
         self.payload_name_label = None
         self.payload_path_label = None
+        self.note_text = None
         self._build_ui()
         self.apply_theme(theme_tokens=self.theme_tokens)
         if self.embedded:
@@ -70,21 +73,33 @@ class UpdateManagerQtView(QMainWindow):
 
     def _build_ui(self):
         self.setWindowTitle(str(self.payload.get("window_title") or "Update Manager"))
-        self.resize(1060, 720)
+        if self.embedded:
+            self.setMinimumSize(0, 0)
+        else:
+            self._fit_window_to_screen(1120, 820)
 
         central_widget = QWidget(self)
         root_layout = QVBoxLayout(central_widget)
-        root_layout.setContentsMargins(16, 16, 16, 16)
-        root_layout.setSpacing(10)
+        root_layout.setContentsMargins(0, 0, 0, 0)
+
+        scroll_area = QScrollArea(central_widget)
+        scroll_area.setWidgetResizable(True)
+        self.content_scroll_area = scroll_area
+        root_layout.addWidget(scroll_area, 1)
+
+        scroll_content = QWidget(scroll_area)
+        content_layout = QVBoxLayout(scroll_content)
+        content_layout.setContentsMargins(16, 16, 16, 16)
+        content_layout.setSpacing(10)
 
         title_label = QLabel(str(self.payload.get("title") or "Update Manager"))
         title_label.setObjectName("pageTitle")
-        root_layout.addWidget(title_label)
+        content_layout.addWidget(title_label)
 
-        subtitle_label = QLabel(str(self.payload.get("subtitle") or "Qt sidecar bootstrap for Update Manager migration."))
+        subtitle_label = QLabel(str(self.payload.get("subtitle") or "Manage stable releases, payload restores, and advanced source updates."))
         subtitle_label.setObjectName("mutedLabel")
         subtitle_label.setWordWrap(True)
-        root_layout.addWidget(subtitle_label)
+        content_layout.addWidget(subtitle_label)
 
         summary_group = QGroupBox("Current Update Snapshot")
         summary_form = QFormLayout(summary_group)
@@ -119,9 +134,9 @@ class UpdateManagerQtView(QMainWindow):
             self.value_labels[key] = value_label
             summary_form.addRow(QLabel(label), value_label)
 
-        root_layout.addWidget(summary_group)
+        content_layout.addWidget(summary_group)
 
-        payload_group = QGroupBox("Module Payload Restores (Slice 2)")
+        payload_group = QGroupBox("Module Payload Restores")
         payload_layout = QFormLayout(payload_group)
 
         self.payload_selector = QComboBox()
@@ -149,9 +164,9 @@ class UpdateManagerQtView(QMainWindow):
         payload_actions.addStretch(1)
         payload_layout.addRow(QLabel("Actions"), payload_actions)
 
-        root_layout.addWidget(payload_group)
+        content_layout.addWidget(payload_group)
 
-        documentation_group = QGroupBox("Documentation Payload Restores (Slice 3)")
+        documentation_group = QGroupBox("Documentation Payload Restores")
         documentation_layout = QFormLayout(documentation_group)
         documentation_actions = QHBoxLayout()
         check_documentation_button = QPushButton("Check Documentation Restores")
@@ -162,9 +177,9 @@ class UpdateManagerQtView(QMainWindow):
         documentation_actions.addWidget(apply_documentation_button)
         documentation_actions.addStretch(1)
         documentation_layout.addRow(QLabel("Actions"), documentation_actions)
-        root_layout.addWidget(documentation_group)
+        content_layout.addWidget(documentation_group)
 
-        advanced_group = QGroupBox("Advanced Source Jobs & Recovery (Slice 4)")
+        advanced_group = QGroupBox("Advanced Source Jobs & Recovery")
         advanced_layout = QFormLayout(advanced_group)
         advanced_actions = QHBoxLayout()
         start_advanced_button = QPushButton("Start Advanced Source Update")
@@ -181,14 +196,7 @@ class UpdateManagerQtView(QMainWindow):
         advanced_actions.addWidget(open_log_button)
         advanced_actions.addStretch(1)
         advanced_layout.addRow(QLabel("Actions"), advanced_actions)
-        root_layout.addWidget(advanced_group)
-
-        note_group = QGroupBox("Migration Note")
-        note_layout = QVBoxLayout(note_group)
-        self.note_text = QTextEdit()
-        self.note_text.setReadOnly(True)
-        note_layout.addWidget(self.note_text)
-        root_layout.addWidget(note_group, 1)
+        content_layout.addWidget(advanced_group)
 
         controls = QHBoxLayout()
         check_button = QPushButton("Check Repository")
@@ -201,17 +209,43 @@ class UpdateManagerQtView(QMainWindow):
         refresh_button.clicked.connect(self.controller.refresh_snapshot)
         controls.addWidget(refresh_button)
         controls.addStretch(1)
-        root_layout.addLayout(controls)
+        content_layout.addLayout(controls)
+        content_layout.addStretch(1)
+
+        scroll_area.setWidget(scroll_content)
 
         self.setCentralWidget(central_widget)
         self.status_bar = QStatusBar(self)
         self.setStatusBar(self.status_bar)
 
+    def _available_screen_geometry(self):
+        window_handle = self.windowHandle()
+        screen = window_handle.screen() if window_handle is not None else None
+        if screen is None and hasattr(self, "screen"):
+            try:
+                screen = self.screen()
+            except Exception:
+                screen = None
+        application = QApplication.instance()
+        if screen is None and application is not None:
+            screen = application.primaryScreen()
+        return screen.availableGeometry() if screen is not None else None
+
+    def _fit_window_to_screen(self, requested_width, requested_height, padding=48):
+        geometry = self._available_screen_geometry()
+        if geometry is None:
+            self.resize(requested_width, requested_height)
+            return
+        max_width = max(820, geometry.width() - int(padding))
+        max_height = max(620, geometry.height() - int(padding))
+        self.resize(min(int(requested_width), max_width), min(int(requested_height), max_height))
+
     def render_snapshot(self, snapshot):
         snapshot = snapshot if isinstance(snapshot, dict) else {}
         for key, label_widget in self.value_labels.items():
             label_widget.setText(str(snapshot.get(key, "-")))
-        self.note_text.setPlainText(str(snapshot.get("note") or ""))
+        if self.note_text is not None:
+            self.note_text.setPlainText(str(snapshot.get("note") or ""))
         self.payload_name_label.setText(str(snapshot.get("module_payload_selected") or "No payload selected"))
         self.payload_path_label.setText(str(snapshot.get("module_payload_path") or "Payload updates are not available."))
         self.status_bar.showMessage("Update snapshot refreshed.", 4000)

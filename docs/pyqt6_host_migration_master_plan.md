@@ -387,7 +387,7 @@ Section 8E: Validation And Closeout
 Phase 8 closeout: COMPLETED.
 
 ### Phase 9: Tk Host Removal
-1. Status: IN PROGRESS.
+1. Status: COMPLETED.
 2. Live startup now enforces the PyQt6 host path and fails fast when `ui_shell_backend` is set to `tk` or PyQt6 support is unavailable.
 3. Dispatcher-managed module shims now lazy-load the Qt controller path and raise immediately if a removed Tk controller path is requested.
 4. Disconnected Tk controllers, views, view factories, the legacy Tk shell view, and splash module now hard-fail on import in the live tree and are mirrored under `shadow/` for demolition reference.
@@ -395,14 +395,29 @@ Phase 8 closeout: COMPLETED.
 6. Theme resolution in the live runtime now uses only the internal semantic token system; legacy ttkbootstrap theme names are compatibility keys only and no longer trigger ttkbootstrap lookups.
 7. Packaging/build inputs now target the PyQt6 runtime and no longer require Tk or ttkbootstrap hidden imports or dependency checks.
 8. Preserve backend-neutral business logic, models, persistence, security, and valid abstractions while deleting the remaining live Tk dependencies.
+9. Validation in this checkout: `py_compile` passes for the recent Qt admin workflow changes, `scripts/validate_pyqt6_phase_gate.py` and `scripts/validate_module_loads.py` pass against the live PyQt6 runtime, source startup smoke passed for both `main.py` and `launcher.py --module about`, and the rebuilt Windows EXE was accepted by the user as passing.
+10. Ubuntu DEB smoke is deferred as follow-up packaging validation and does not keep the Tk-host removal phase open.
 
 ### Phase 10: Overflow Hardening and Screen-Fit Audit
-1. Audit every shared-viewport module and dedicated runtime window for content that exceeds the visible viewport or screen height/width.
-2. Replace layout compression with scrollable containers so large forms, editors, tables, and preview surfaces stay readable instead of shrinking their internals.
-3. Clamp standalone PyQt6 window sizes and major dialogs to the available screen geometry before showing them.
-4. Treat `layout_manager`, `settings_manager`, and `production_log` as required validation targets because their current Qt surfaces are the most likely to exceed available space.
+1. Status: IN PROGRESS.
+2. Audit every shared-viewport module and dedicated runtime window for content that exceeds the visible viewport or screen height/width.
+3. Replace layout compression with scrollable containers so large forms, editors, tables, and preview surfaces stay readable instead of shrinking their internals.
+4. Clamp standalone PyQt6 window sizes and major dialogs to the available screen geometry before showing them.
+5. Treat `layout_manager`, `settings_manager`, and `production_log` as required validation targets because their current Qt surfaces are the most likely to exceed available space.
+6. Entry note: packaged path seeding and Qt admin-auth dead-end regressions were resolved before starting this phase, so overflow hardening can proceed from a working packaged host baseline.
+7. Current implementation state: `layout_manager` and `production_log` already use scrollable central surfaces plus screen-fit clamping for standalone windows. `settings_manager` and `update_manager` now match that baseline with scrollable central workspaces and screen-fit sizing so long stacked admin/update sections remain reachable in the host viewport and in standalone launches.
+8. Broader screen-fit hardening in this checkout: `about`, `help_viewer`, `rate_manager`, `recovery_viewer`, `internal_code_editor`, and `production_log_calculations` now clamp standalone Qt window size to the available screen geometry instead of assuming a large desktop. Their embedded viewport paths remain unchanged.
+9. Validation in this checkout: `py_compile` passed for the broadened Phase 10 view changes, and `scripts/validate_module_loads.py` passed for `about`, `help_viewer`, `recovery_viewer`, `rate_manager`, `production_log_calculations`, `update_manager`, and `internal_code_editor` after the screen-fit sweep.
 
-### Phase 11: Documentation Finalization
+### Phase 11: Post-Migration UI Cleanup
+1. Status: IN PROGRESS.
+2. Remove leftover host-shell migration artifacts that are no longer useful in the live PyQt6 application, including the obsolete Active Module viewport panel.
+3. Remove migration-era slice labels, dedicated migration notes, and other transition wording from user-facing Qt module surfaces where the modules now behave as normal application pages.
+4. Finish retiring residual migration-only affordances from security, update, and host-shell surfaces while preserving any still-required backend or dedicated-runtime behavior behind the scenes.
+5. Validation targets: `pyqt6_host_shell_view`, `settings_manager`, `security_admin`, `developer_admin`, and `update_manager`.
+6. Current implementation state: the host shell no longer shows the old Active Module panel in the main viewport area, the Qt settings and update surfaces no longer show slice labels or migration-note panels, and the Qt security form again seeds role defaults for new vault creation so admin and developer accounts can be created from the migrated UI.
+
+### Phase 12: Documentation Finalization
 1. Keep `.github/copilot-instructions.md` aligned with the target PyQt6-first architecture.
 2. Mark older module-specific migration plans as historical or absorb their remaining useful content into canonical docs.
 3. Ensure future implementation work follows this plan instead of creating local planning sprawl.

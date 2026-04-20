@@ -19,6 +19,7 @@ __module_name__ = "Internal Code Editor Qt View"
 __version__ = "1.0.0"
 
 from PyQt6.QtCore import QSignalBlocker, QTimer, Qt
+from PyQt6.QtGui import QTextDocument
 from PyQt6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -55,6 +56,7 @@ class InternalCodeEditorQtView(QMainWindow):
         self.embedded = parent_widget is not None
         self.file_options = {}
         self.definition_entries = {}
+        self.navigation_entries = {}
         self._build_ui()
         self.apply_theme(theme_tokens=self.theme_tokens)
         if self.embedded:
@@ -82,7 +84,7 @@ class InternalCodeEditorQtView(QMainWindow):
         if self.embedded:
             self.setMinimumSize(0, 0)
         else:
-            self.resize(1360, 900)
+            self._fit_window_to_screen(1360, 900)
 
         central_widget = QWidget(self)
         root_layout = QVBoxLayout(central_widget)
@@ -128,6 +130,18 @@ class InternalCodeEditorQtView(QMainWindow):
         self.search_entry = QLineEdit()
         search_row.addWidget(self.search_entry)
 
+        text_search_button = QPushButton("Text Results")
+        text_search_button.clicked.connect(self.controller.run_text_search)
+        search_row.addWidget(text_search_button)
+
+        symbol_search_button = QPushButton("Symbol Results")
+        symbol_search_button.clicked.connect(self.controller.run_symbol_search)
+        search_row.addWidget(symbol_search_button)
+
+        definitions_button = QPushButton("Definitions")
+        definitions_button.clicked.connect(self.controller.show_definitions)
+        search_row.addWidget(definitions_button)
+
         prev_button = QPushButton("Previous")
         prev_button.clicked.connect(self.controller.find_previous)
         search_row.addWidget(prev_button)
@@ -141,7 +155,7 @@ class InternalCodeEditorQtView(QMainWindow):
 
         self.definition_tree = QTreeWidget()
         self.definition_tree.setHeaderLabels(["Name", "Kind", "Line"])
-        self.definition_tree.itemSelectionChanged.connect(self.controller.on_definition_selected)
+        self.definition_tree.itemSelectionChanged.connect(self.controller.on_navigation_item_selected)
         self.splitter.addWidget(self.definition_tree)
 
         self.text_editor = QPlainTextEdit()
@@ -160,6 +174,28 @@ class InternalCodeEditorQtView(QMainWindow):
         self.status_bar = QStatusBar(self)
         self.setStatusBar(self.status_bar)
         self.status_bar.showMessage("Internal Code Editor Qt window ready.", 5000)
+
+    def _available_screen_geometry(self):
+        window_handle = self.windowHandle()
+        screen = window_handle.screen() if window_handle is not None else None
+        if screen is None and hasattr(self, "screen"):
+            try:
+                screen = self.screen()
+            except Exception:
+                screen = None
+        application = QApplication.instance()
+        if screen is None and application is not None:
+            screen = application.primaryScreen()
+        return screen.availableGeometry() if screen is not None else None
+
+    def _fit_window_to_screen(self, requested_width, requested_height, padding=48):
+        geometry = self._available_screen_geometry()
+        if geometry is None:
+            self.resize(requested_width, requested_height)
+            return
+        max_width = max(840, geometry.width() - int(padding))
+        max_height = max(620, geometry.height() - int(padding))
+        self.resize(min(int(requested_width), max_width), min(int(requested_height), max_height))
 
     def apply_theme(self, theme_tokens=None):
         if isinstance(theme_tokens, dict):
@@ -215,7 +251,7 @@ class InternalCodeEditorQtView(QMainWindow):
             return False
         text_cursor = self.text_editor.textCursor()
         document = self.text_editor.document()
-        flags = text_cursor.FindFlag.FindBackward if backwards else text_cursor.FindFlag(0)
+        flags = QTextDocument.FindFlag.FindBackward if backwards else QTextDocument.FindFlag(0)
         found_cursor = document.find(search_text, text_cursor, flags)
         if found_cursor.isNull():
             start_cursor = self.text_editor.textCursor()
@@ -229,8 +265,10 @@ class InternalCodeEditorQtView(QMainWindow):
     def set_definition_entries(self, definition_entries):
         current_key = self.get_selected_definition_key()
         self.definition_entries = {entry["key"]: entry for entry in definition_entries}
+        self.navigation_entries = {entry["key"]: {"entry_type": "definition", **entry} for entry in definition_entries}
         with QSignalBlocker(self.definition_tree):
             self.definition_tree.clear()
+            self.definition_tree.setHeaderLabels(["Name", "Kind", "Line"])
             for entry in definition_entries:
                 item = QTreeWidgetItem([
                     str(entry["qualified_name"]),
@@ -241,6 +279,35 @@ class InternalCodeEditorQtView(QMainWindow):
                 self.definition_tree.addTopLevelItem(item)
         if current_key and current_key in self.definition_entries:
             self.select_definition_key(current_key)
+
+    def set_search_results(self, result_entries, search_kind, selected_key=None):
+        self.navigation_entries = {entry["key"]: {"entry_type": "search_result", **entry} for entry in result_entries}
+        result_label = "Text Match" if str(search_kind) == "text" else "Symbol"
+        with QSignalBlocker(self.definition_tree):
+            self.definition_tree.clear()
+            self.definition_tree.setHeaderLabels(["File", "Line", result_label])
+            for entry in result_entries:
+                item = QTreeWidgetItem([
+                    str(entry.get("relative_path") or ""),
+                    str(entry.get("line") or ""),
+                    str(entry.get("summary") or ""),
+                ])
+                item.setData(0, 0x0100, str(entry.get("key") or ""))
+                item.setToolTip(0, str(entry.get("relative_path") or ""))
+                item.setToolTip(2, str(entry.get("summary") or ""))
+                self.definition_tree.addTopLevelItem(item)
+        if selected_key:
+            self.select_navigation_key(selected_key)
+
+    def select_navigation_key(self, entry_key):
+        if not entry_key:
+            return
+        with QSignalBlocker(self.definition_tree):
+            for index in range(self.definition_tree.topLevelItemCount()):
+                item = self.definition_tree.topLevelItem(index)
+                if item.data(0, 0x0100) == entry_key:
+                    self.definition_tree.setCurrentItem(item)
+                    return
 
     def select_definition_key(self, definition_key):
         for index in range(self.definition_tree.topLevelItemCount()):
@@ -254,6 +321,12 @@ class InternalCodeEditorQtView(QMainWindow):
         if item is None:
             return None
         return item.data(0, 0x0100)
+
+    def get_selected_navigation_payload(self):
+        key = self.get_selected_definition_key()
+        if not key:
+            return None
+        return self.navigation_entries.get(key)
 
     def update_definition_summary(self, definition_count, parse_error=None):
         if parse_error:
@@ -271,6 +344,18 @@ class InternalCodeEditorQtView(QMainWindow):
             self.text_editor.setTextCursor(cursor)
             self.text_editor.centerCursor()
             self.text_editor.setFocus()
+
+    def show_search_result_location(self, result_entry):
+        line_number = max(1, int(result_entry.get("line") or 1))
+        column_number = max(1, int(result_entry.get("column") or 1))
+        cursor = self.text_editor.textCursor()
+        block = self.text_editor.document().findBlockByLineNumber(line_number - 1)
+        if not block.isValid():
+            return
+        cursor.setPosition(block.position() + max(0, column_number - 1))
+        self.text_editor.setTextCursor(cursor)
+        self.text_editor.centerCursor()
+        self.text_editor.setFocus()
 
     def update_status(self, message):
         self.status_bar.showMessage(str(message or ""), 6000)

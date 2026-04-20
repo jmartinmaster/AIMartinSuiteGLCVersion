@@ -34,6 +34,7 @@ from PyQt6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QSpinBox,
     QStatusBar,
     QTableWidget,
@@ -68,11 +69,13 @@ class SettingsManagerQtView(QMainWindow):
         self.security_session_label = None
         self.security_note_label = None
         self.security_vault_list = None
+        self.security_form_container = None
         self.security_vault_name_input = None
         self.security_role_combo = None
         self.security_enabled_checkbox = None
         self.security_password_rule_label = None
         self.security_non_secure_checkbox = None
+        self.security_unlock_button = None
         self.security_rights_checkboxes = {}
         self.security_role_defaults = {}
         self._security_state = {}
@@ -85,6 +88,9 @@ class SettingsManagerQtView(QMainWindow):
         self.developer_advanced_checkbox = None
         self.developer_trust_checkbox = None
         self.developer_status_label = None
+        self.developer_unlock_button = None
+        self.developer_save_button = None
+        self.note_text = None
         self._suspend_change_signal = False
         self._build_ui()
         self.apply_theme(theme_tokens=self.theme_tokens)
@@ -104,21 +110,33 @@ class SettingsManagerQtView(QMainWindow):
 
     def _build_ui(self):
         self.setWindowTitle(str(self.payload.get("window_title") or "Settings Manager"))
-        self.resize(1140, 820)
+        if self.embedded:
+            self.setMinimumSize(0, 0)
+        else:
+            self._fit_window_to_screen(1180, 860)
 
         central_widget = QWidget(self)
         root_layout = QVBoxLayout(central_widget)
-        root_layout.setContentsMargins(16, 16, 16, 16)
-        root_layout.setSpacing(10)
+        root_layout.setContentsMargins(0, 0, 0, 0)
+
+        scroll_area = QScrollArea(central_widget)
+        scroll_area.setWidgetResizable(True)
+        self.content_scroll_area = scroll_area
+        root_layout.addWidget(scroll_area, 1)
+
+        scroll_content = QWidget(scroll_area)
+        content_layout = QVBoxLayout(scroll_content)
+        content_layout.setContentsMargins(16, 16, 16, 16)
+        content_layout.setSpacing(10)
 
         title_label = QLabel(str(self.payload.get("title") or "Settings Manager"))
         title_label.setObjectName("pageTitle")
-        root_layout.addWidget(title_label)
+        content_layout.addWidget(title_label)
 
-        subtitle_label = QLabel(str(self.payload.get("subtitle") or "Qt sidecar bootstrap for Settings Manager migration."))
+        subtitle_label = QLabel(str(self.payload.get("subtitle") or "Manage application settings and privileged administration."))
         subtitle_label.setObjectName("mutedLabel")
         subtitle_label.setWordWrap(True)
-        root_layout.addWidget(subtitle_label)
+        content_layout.addWidget(subtitle_label)
 
         self.summary_group = QGroupBox("Current Settings Snapshot")
         summary_form = QFormLayout(self.summary_group)
@@ -138,9 +156,9 @@ class SettingsManagerQtView(QMainWindow):
             self.value_labels[key] = value_label
             summary_form.addRow(QLabel(label), value_label)
 
-        root_layout.addWidget(self.summary_group)
+        content_layout.addWidget(self.summary_group)
 
-        self.editable_group = QGroupBox("Core Settings (Slice 1)")
+        self.editable_group = QGroupBox("Core Settings")
         editable_layout = QFormLayout(self.editable_group)
 
         self.theme_combo = QComboBox()
@@ -185,9 +203,9 @@ class SettingsManagerQtView(QMainWindow):
         module_lists_row.addWidget(self.persistent_modules_list)
         editable_layout.addRow(QLabel("Module Lists"), module_lists_row)
 
-        root_layout.addWidget(self.editable_group)
+        content_layout.addWidget(self.editable_group)
 
-        self.downtime_group = QGroupBox("Downtime Codes (Slice 2)")
+        self.downtime_group = QGroupBox("Downtime Codes")
         downtime_layout = QVBoxLayout(self.downtime_group)
         downtime_hint = QLabel(
             "Edit numeric downtime codes inline. Imports and exports use these code numbers."
@@ -218,9 +236,9 @@ class SettingsManagerQtView(QMainWindow):
         downtime_actions.addStretch(1)
         downtime_layout.addLayout(downtime_actions)
 
-        root_layout.addWidget(self.downtime_group)
+        content_layout.addWidget(self.downtime_group)
 
-        self.security_admin_group = QGroupBox("Security Administration (Slice 3)")
+        self.security_admin_group = QGroupBox("Security Administration")
         security_layout = QVBoxLayout(self.security_admin_group)
 
         self.security_session_label = QLabel("Session: Locked")
@@ -231,6 +249,10 @@ class SettingsManagerQtView(QMainWindow):
         self.security_note_label.setWordWrap(True)
         security_layout.addWidget(self.security_note_label)
 
+        self.security_unlock_button = QPushButton("Unlock Security Admin")
+        self.security_unlock_button.clicked.connect(self.controller.request_security_admin_access)
+        security_layout.addWidget(self.security_unlock_button, 0, Qt.AlignmentFlag.AlignLeft)
+
         security_editor_layout = QHBoxLayout()
 
         self.security_vault_list = QListWidget()
@@ -238,6 +260,7 @@ class SettingsManagerQtView(QMainWindow):
         security_editor_layout.addWidget(self.security_vault_list, 1)
 
         security_form_container = QWidget()
+        self.security_form_container = security_form_container
         security_form = QFormLayout(security_form_container)
 
         self.security_vault_name_input = QLineEdit()
@@ -300,9 +323,9 @@ class SettingsManagerQtView(QMainWindow):
 
         security_editor_layout.addWidget(security_form_container, 2)
         security_layout.addLayout(security_editor_layout)
-        root_layout.addWidget(self.security_admin_group)
+        content_layout.addWidget(self.security_admin_group)
 
-        self.developer_admin_group = QGroupBox("Developer & Admin Tools (Slice 4)")
+        self.developer_admin_group = QGroupBox("Developer & Admin Tools")
         developer_layout = QFormLayout(self.developer_admin_group)
 
         self.developer_repository_input = QLineEdit()
@@ -321,18 +344,16 @@ class SettingsManagerQtView(QMainWindow):
         self.developer_status_label.setWordWrap(True)
         developer_layout.addRow(QLabel("External Modules"), self.developer_status_label)
 
+        self.developer_unlock_button = QPushButton("Unlock Developer Tools")
+        self.developer_unlock_button.clicked.connect(self.controller.request_developer_admin_access)
+        developer_layout.addRow(QLabel("Access"), self.developer_unlock_button)
+
         save_developer_button = QPushButton("Save Developer Settings")
         save_developer_button.clicked.connect(self.controller.save_current_developer_admin_settings)
+        self.developer_save_button = save_developer_button
         developer_layout.addRow(QLabel("Actions"), save_developer_button)
 
-        root_layout.addWidget(self.developer_admin_group)
-
-        note_group = QGroupBox("Migration Note")
-        note_layout = QVBoxLayout(note_group)
-        self.note_text = QTextEdit()
-        self.note_text.setReadOnly(True)
-        note_layout.addWidget(self.note_text)
-        root_layout.addWidget(note_group, 1)
+        content_layout.addWidget(self.developer_admin_group)
 
         controls = QHBoxLayout()
         save_button = QPushButton("Save Settings")
@@ -342,11 +363,36 @@ class SettingsManagerQtView(QMainWindow):
         refresh_button.clicked.connect(self.controller.refresh_snapshot)
         controls.addWidget(refresh_button)
         controls.addStretch(1)
-        root_layout.addLayout(controls)
+        content_layout.addLayout(controls)
+        content_layout.addStretch(1)
+
+        scroll_area.setWidget(scroll_content)
 
         self.setCentralWidget(central_widget)
         self.status_bar = QStatusBar(self)
         self.setStatusBar(self.status_bar)
+
+    def _available_screen_geometry(self):
+        window_handle = self.windowHandle()
+        screen = window_handle.screen() if window_handle is not None else None
+        if screen is None and hasattr(self, "screen"):
+            try:
+                screen = self.screen()
+            except Exception:
+                screen = None
+        application = QApplication.instance()
+        if screen is None and application is not None:
+            screen = application.primaryScreen()
+        return screen.availableGeometry() if screen is not None else None
+
+    def _fit_window_to_screen(self, requested_width, requested_height, padding=48):
+        geometry = self._available_screen_geometry()
+        if geometry is None:
+            self.resize(requested_width, requested_height)
+            return
+        max_width = max(820, geometry.width() - int(padding))
+        max_height = max(620, geometry.height() - int(padding))
+        self.resize(min(int(requested_width), max_width), min(int(requested_height), max_height))
 
     def _on_form_changed(self):
         if self._suspend_change_signal:
@@ -357,7 +403,8 @@ class SettingsManagerQtView(QMainWindow):
         snapshot = snapshot if isinstance(snapshot, dict) else {}
         for key, label_widget in self.value_labels.items():
             label_widget.setText(str(snapshot.get(key, "-")))
-        self.note_text.setPlainText(str(snapshot.get("note") or ""))
+        if self.note_text is not None:
+            self.note_text.setPlainText(str(snapshot.get("note") or ""))
         self.security_session_label.setText(f"Session: {snapshot.get('security_summary', 'Locked')}")
         self.apply_section_mode(snapshot)
         self.status_bar.showMessage("Settings snapshot refreshed.", 4000)
@@ -486,10 +533,10 @@ class SettingsManagerQtView(QMainWindow):
         return rows
 
     def _get_selected_vault_record(self):
-        current_item = self.security_vault_list.currentItem()
-        if current_item is None:
+        selected_items = self.security_vault_list.selectedItems() if self.security_vault_list is not None else []
+        if not selected_items:
             return None
-        return current_item.data(0x0100)
+        return selected_items[0].data(0x0100)
 
     def set_security_vault_form(self, vault_record):
         vault_record = vault_record if isinstance(vault_record, dict) else {}
@@ -504,7 +551,7 @@ class SettingsManagerQtView(QMainWindow):
             self.security_enabled_checkbox.setChecked(bool(vault_record.get("enabled", True)))
             self.update_security_role_note()
 
-            selected_rights = set(vault_record.get("rights") or [])
+            selected_rights = set(vault_record.get("rights") or self.security_role_defaults.get(role, []))
             for right_key, checkbox in self.security_rights_checkboxes.items():
                 checkbox.setChecked(right_key in selected_rights)
         finally:
@@ -517,7 +564,14 @@ class SettingsManagerQtView(QMainWindow):
         return str(record.get("vault_name") or "")
 
     def clear_security_vault_selection(self):
-        self.security_vault_list.clearSelection()
+        if self.security_vault_list is None:
+            return
+        self.security_vault_list.blockSignals(True)
+        try:
+            self.security_vault_list.clearSelection()
+            self.security_vault_list.setCurrentItem(None)
+        finally:
+            self.security_vault_list.blockSignals(False)
 
     def update_security_role_note(self):
         role = str(self.security_role_combo.currentText() or "general").strip().lower()
@@ -561,9 +615,19 @@ class SettingsManagerQtView(QMainWindow):
     def configure_security_admin_panel(self, state, preferred_name=None):
         state = state if isinstance(state, dict) else {}
         self._security_state = state
+        can_manage_security = bool(state.get("can_manage_security", False))
         self.security_role_defaults = dict(state.get("role_defaults") or {})
         self._configure_security_rights(state.get("access_rights") or [])
-        self.security_note_label.setText(str(state.get("session_summary") or "Locked"))
+        if can_manage_security:
+            self.security_note_label.setText("Security administration is unlocked for the active admin or developer session.")
+        else:
+            self.security_note_label.setText("Sign in with an admin or developer vault to edit vaults, passwords, and security mode.")
+        if self.security_form_container is not None:
+            self.security_form_container.setEnabled(can_manage_security)
+        if self.security_vault_list is not None:
+            self.security_vault_list.setEnabled(can_manage_security)
+        if self.security_unlock_button is not None:
+            self.security_unlock_button.setText("Re-authenticate Security Admin" if can_manage_security else "Unlock Security Admin")
 
         self.security_vault_list.clear()
         preferred = str(preferred_name or "").strip()
@@ -613,14 +677,25 @@ class SettingsManagerQtView(QMainWindow):
 
     def configure_developer_admin_tools(self, state):
         state = state if isinstance(state, dict) else {}
+        can_manage_developer = bool(state.get("can_manage_developer", False))
         self._suspend_change_signal = True
         try:
             self.developer_repository_input.setText(str(state.get("update_repository_url") or ""))
             self.developer_advanced_checkbox.setChecked(bool(state.get("enable_advanced_dev_updates", False)))
             self.developer_trust_checkbox.setChecked(bool(state.get("enable_external_override_trust", False)))
-            self.developer_status_label.setText(str(state.get("external_modules_status") or "-"))
+            status_text = str(state.get("external_modules_status") or "-")
+            if not can_manage_developer:
+                status_text = f"Developer tools are locked until a developer session is active.\n\n{status_text}"
+            self.developer_status_label.setText(status_text)
         finally:
             self._suspend_change_signal = False
+        self.developer_repository_input.setEnabled(can_manage_developer)
+        self.developer_advanced_checkbox.setEnabled(can_manage_developer)
+        self.developer_trust_checkbox.setEnabled(can_manage_developer)
+        if self.developer_save_button is not None:
+            self.developer_save_button.setEnabled(can_manage_developer)
+        if self.developer_unlock_button is not None:
+            self.developer_unlock_button.setText("Re-authenticate Developer Tools" if can_manage_developer else "Unlock Developer Tools")
 
     def get_developer_admin_settings_values(self):
         return {

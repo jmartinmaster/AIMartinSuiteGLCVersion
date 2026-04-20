@@ -33,6 +33,10 @@ class InternalCodeEditorQtController:
         external_path = str(self.payload.get("external_app_path") or getattr(dispatcher, "external_modules_path", bundled_path) or bundled_path)
         self.model = InternalCodeEditorModel(bundled_path, external_path)
         self.current_analysis = {"definitions": [], "parse_error": None}
+        self.active_navigation_mode = "definitions"
+        self.active_search_results = []
+        self.active_search_kind = None
+        self.active_search_query = ""
         if self.embedded:
             self.payload = self._build_view_payload()
         self._create_view()
@@ -193,13 +197,19 @@ class InternalCodeEditorQtController:
         editor_text = self.view.get_editor_text() if source_text is None else source_text
         self.current_analysis = self.model.build_editor_analysis(editor_text)
         definition_entries = self.current_analysis["definitions"]
-        self.view.set_definition_entries(definition_entries)
+        if self.active_navigation_mode == "definitions":
+            self.view.set_definition_entries(definition_entries)
         self.view.update_definition_summary(len(definition_entries), self.current_analysis["parse_error"])
 
-    def on_definition_selected(self):
-        definition_key = self.view.get_selected_definition_key()
-        if not definition_key:
+    def on_navigation_item_selected(self):
+        item_payload = self.view.get_selected_navigation_payload()
+        if not isinstance(item_payload, dict):
             return
+        entry_type = str(item_payload.get("entry_type") or "definition")
+        if entry_type == "search_result":
+            self._open_search_result(item_payload)
+            return
+        definition_key = str(item_payload.get("key") or "")
         definition_entry = self._get_definition_entry(definition_key)
         if definition_entry is None:
             return
@@ -213,6 +223,20 @@ class InternalCodeEditorQtController:
 
     def find_previous(self):
         self._find_match(backwards=True)
+
+    def run_text_search(self):
+        self._run_workspace_search(search_kind="text")
+
+    def run_symbol_search(self):
+        self._run_workspace_search(search_kind="symbol")
+
+    def show_definitions(self):
+        self.active_navigation_mode = "definitions"
+        self.active_search_results = []
+        self.active_search_kind = None
+        self.active_search_query = ""
+        self.view.set_definition_entries(self.current_analysis.get("definitions", []))
+        self.view.update_status("Showing definitions for the open file")
 
     def apply_theme(self):
         if self.embedded:
@@ -238,6 +262,53 @@ class InternalCodeEditorQtController:
             return
         direction_text = "Previous" if backwards else "Next"
         self.view.update_status(f"{direction_text} match: {search_text}")
+
+    def _run_workspace_search(self, search_kind):
+        search_text = self.view.get_search_text()
+        if not search_text.strip():
+            self.view.update_status("Enter search text first")
+            self.view.focus_search()
+            return
+        if search_kind == "symbol":
+            search_payload = self.model.search_symbol_matches(search_text)
+            result_label = "symbol"
+        else:
+            search_payload = self.model.search_text_matches(search_text)
+            result_label = "text"
+
+        self.active_navigation_mode = "search"
+        self.active_search_results = list(search_payload.get("results") or [])
+        self.active_search_kind = search_kind
+        self.active_search_query = str(search_text)
+        self.view.set_search_results(
+            self.active_search_results,
+            search_kind=search_kind,
+            selected_key=None,
+        )
+        count = len(self.active_search_results)
+        truncated = bool(search_payload.get("truncated", False))
+        truncation_note = " (showing first matches)" if truncated else ""
+        if count == 0:
+            self.view.update_status(f"No {result_label} results for '{search_text}'")
+            return
+        self.view.update_status(f"Found {count} {result_label} result(s) for '{search_text}'{truncation_note}")
+
+    def _open_search_result(self, result_entry):
+        target_file_key = str(result_entry.get("file_key") or "")
+        if not target_file_key:
+            return
+        if target_file_key != self.model.current_file_key:
+            self.load_file(target_file_key, refresh_selector=False)
+        self.active_navigation_mode = "search"
+        self.view.set_search_results(
+            self.active_search_results,
+            search_kind=self.active_search_kind or result_entry.get("result_type") or "text",
+            selected_key=str(result_entry.get("key") or ""),
+        )
+        self.view.show_search_result_location(result_entry)
+        self.view.update_status(
+            f"Opened {result_entry.get('relative_path')} at line {result_entry.get('line')}"
+        )
 
     def _get_definition_entry(self, definition_key):
         for entry in self.current_analysis.get("definitions", []):

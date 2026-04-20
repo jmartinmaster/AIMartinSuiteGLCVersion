@@ -155,7 +155,7 @@ class UpdateManagerQtController(UpdateManagerController):
             "advanced_source_detail": str(self.coordinator.job_detail or "No update job is running."),
             "advanced_recovery_available": "Yes" if self._has_recoverable_source_job() else "No",
             "advanced_build_log": str(self.coordinator.source_build_log_path or "Not available"),
-            "note": "Embedded Qt viewport: stable, module payload, documentation payload, and advanced source operations now run in-process through the host dispatcher.",
+            "note": "Manage stable updates, payload restores, documentation restores, and advanced source operations from the main workspace.",
         }
         self.view.render_snapshot(snapshot)
         self.view.set_module_payload_options(self.module_payload_options, selected_key)
@@ -165,7 +165,7 @@ class UpdateManagerQtController(UpdateManagerController):
         return {
             "window_title": "Update Manager - Production Logging Center",
             "title": "Update Manager",
-            "subtitle": "Manage stable releases, payload restores, and advanced source updates in the shared PyQt6 workspace.",
+            "subtitle": "Manage stable releases, payload restores, and advanced source updates from the shared workspace.",
             "theme_tokens": theme_tokens,
         }
 

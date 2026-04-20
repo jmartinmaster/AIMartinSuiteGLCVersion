@@ -1,6 +1,6 @@
 # Phase 9 — Tk Host Removal Runbook
 
-Status: IN PROGRESS
+Status: COMPLETED
 
 This runbook documents the current inventory, parity mapping, and the cautious checklist for removing the Tk host path (Phase 9). Follow the checklist exactly; if anything is uncertain, make a note and leave it alone.
 
@@ -54,9 +54,13 @@ Conclusion: module-level parity is present for the main navigation and pilot mod
 - `build.py`, the active PyInstaller spec, archived packaging specs, and `README.md` no longer require or describe Tk or ttkbootstrap for packaging.
 - PyInstaller packaging now explicitly excludes `tkinter`, `_tkinter`, `ttkbootstrap`, `PIL.ImageTk`, `PIL._tkinter_finder`, and `PyInstaller` so the removed Tk bridge cannot be reintroduced by optional Pillow or hook analysis.
 - Packaged runtime JSON seeds now come from bundled `data/config/*` files and are copied into the writable external runtime tree on first use so EXE and DEB runs do not depend on repo-root JSON paths.
+- The PyQt6 Security Admin and Developer Tools slices now prompt for vault authentication on demand and render read-only while locked instead of failing with a dead-end access error.
+- `py_compile` now passes for the live Qt admin controller/view surfaces after the Security Admin and Developer Tools lock-state fix.
+- `scripts/validate_pyqt6_phase_gate.py` and `scripts/validate_module_loads.py` now pass again against the live Phase 9 runtime, including `developer_admin`, `security_admin`, `settings_manager`, and the dedicated `layout_manager` runtime contract.
+- Source-mode smoke passed by launching `main.py` and `launcher.py --module about` through the PyQt6-only runtime with no startup error output and both processes remaining alive until manually stopped.
+- The rebuilt Windows EXE was manually validated by the user and accepted as passing for the Phase 9 packaged runtime closeout gate.
 
-## Remaining checklist
-1. Run `py_compile` and the existing validators (`scripts/validate_pyqt6_phase_gate.py`, `scripts/validate_module_loads.py`) against the updated Phase 9 runtime.
-2. Run shown-window smoke tests for host startup, module navigation, theme application, and security flows under the live PyQt6-only path.
-3. Validate that the dedicated `layout_manager` runtime still opens, raises, reloads, and restarts correctly from the host bridge.
-4. Run an end-to-end Windows EXE and Ubuntu DEB build smoke pass with the cleaned packaging inputs.
+## Closeout Notes
+1. Windows EXE validation is accepted as complete for migration closeout in this checkout.
+2. Ubuntu DEB follow-up is deferred and will be handled as a packaging validation task rather than keeping the Tk-host removal phase open.
+3. Phase 10 overflow hardening begins from this PyQt6-only packaged baseline.

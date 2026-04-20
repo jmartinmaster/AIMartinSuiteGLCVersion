@@ -49,6 +49,7 @@ class SettingsManagerQtController:
         if self.embedded and hasattr(self.dispatcher, "add_security_session_listener"):
             self.dispatcher.add_security_session_listener(self.on_security_session_changed)
             self._security_listener_registered = True
+        self._prime_section_access()
         self.refresh_snapshot(initial=True)
         if self.embedded:
             self.view.show()
@@ -70,7 +71,7 @@ class SettingsManagerQtController:
         return {
             "window_title": f"{self.module_title} - Production Logging Center",
             "title": self.module_title,
-            "subtitle": f"Qt viewport editor for {section_label.lower()}.",
+            "subtitle": f"Manage {section_label.lower()} from the shared workspace.",
             "module_name": self.module_name,
             "section_mode": self.section_mode,
             "theme_options": [{"key": theme_name, "label": get_theme_label(theme_name)} for theme_name in get_theme_names()],
@@ -110,6 +111,22 @@ class SettingsManagerQtController:
         self.view.raise_()
         self.view.activateWindow()
 
+    def _prime_section_access(self):
+        if self.section_mode == "security_admin":
+            self._ensure_security_access(prompt_if_needed=True, show_error=False)
+        elif self.section_mode == "developer_admin":
+            self._ensure_developer_access(prompt_if_needed=True, show_error=False)
+
+    def _get_session_role(self):
+        session = gatekeeper.get_session()
+        return normalize_role(session.role) if session is not None else "general"
+
+    def _has_security_access(self):
+        return gatekeeper.get_session() is not None and gatekeeper.has_right("security:manage_vaults") and self._get_session_role() in {"admin", "developer"}
+
+    def _has_developer_access(self):
+        return gatekeeper.get_session() is not None and gatekeeper.has_right("developer:update_configuration") and self._get_session_role() == "developer"
+
     def refresh_snapshot(self, initial=False):
         self.model.settings = self.model.load_settings()
         if self.embedded:
@@ -131,9 +148,10 @@ class SettingsManagerQtController:
         whitelist = list(self.model.settings.get("module_whitelist", []))
         persistent_modules = list(self.model.settings.get("persistent_modules", []))
 
-        has_admin_session = gatekeeper.has_admin_session()
-        security_visible = has_admin_session
-        developer_visible = has_admin_session
+        has_security_access = self._has_security_access()
+        has_developer_access = self._has_developer_access()
+        security_visible = has_security_access
+        developer_visible = has_developer_access
         if self.section_mode == "security_admin":
             security_visible = True
             developer_visible = False
@@ -150,7 +168,7 @@ class SettingsManagerQtController:
             "persistent_modules": ", ".join(persistent_modules) if persistent_modules else "Disabled",
             "external_override_trust": "Enabled" if gatekeeper.is_external_module_override_trust_enabled() else "Disabled",
             "section_mode": self.section_mode,
-            "note": "PyQt6 viewport editor: core settings, downtime codes, security administration, and developer tools are editable and persisted.",
+            "note": "Manage application settings, downtime codes, security administration, and developer tools from the main workspace.",
         }
         self.view.set_editable_settings(
             self.model.get_settings_copy(),
@@ -236,18 +254,69 @@ class SettingsManagerQtController:
             "updated_at": vault_record.updated_at,
         }
 
-    def _ensure_security_access(self):
-        if gatekeeper.has_admin_session() and gatekeeper.has_right("security:manage_vaults"):
+    def _ensure_security_access(self, prompt_if_needed=True, show_error=True):
+        return self._ensure_security_access_with_prompt(prompt_if_needed=prompt_if_needed, show_error=show_error)
+
+    def _ensure_security_access_with_prompt(self, prompt_if_needed=True, show_error=True):
+        if self._has_security_access():
             return True
-        self.view.show_error(
-            "Security",
-            "Security administration requires an active admin or developer session with security rights.",
-        )
+        if prompt_if_needed:
+            try:
+                granted = gatekeeper.authenticate(
+                    required_right="security:manage_vaults",
+                    parent=self.view,
+                    reason="Security administration requires an admin or developer vault.",
+                    allowed_roles={"admin", "developer"},
+                )
+            except Exception as exc:
+                if show_error:
+                    self.view.show_error("Security", f"Could not unlock security administration: {exc}")
+                return False
+            if granted and self._has_security_access():
+                self.refresh_snapshot(initial=False)
+                return True
+        if show_error:
+            self.view.show_error(
+                "Security",
+                "Security administration requires an active admin or developer session with security rights.",
+            )
         return False
+
+    def _ensure_developer_access(self, prompt_if_needed=True, show_error=True):
+        if self._has_developer_access():
+            return True
+        if prompt_if_needed:
+            try:
+                granted = gatekeeper.authenticate(
+                    required_right="developer:update_configuration",
+                    parent=self.view,
+                    reason="Developer tools require a developer vault.",
+                    allowed_roles={"developer"},
+                )
+            except Exception as exc:
+                if show_error:
+                    self.view.show_error("Developer Tools", f"Could not unlock developer tools: {exc}")
+                return False
+            if granted and self._has_developer_access():
+                self.refresh_snapshot(initial=False)
+                return True
+        if show_error:
+            self.view.show_error(
+                "Developer Tools",
+                "Developer tools require an active developer session with update-configuration rights.",
+            )
+        return False
+
+    def request_security_admin_access(self):
+        self._ensure_security_access_with_prompt(prompt_if_needed=True, show_error=True)
+
+    def request_developer_admin_access(self):
+        self._ensure_developer_access(prompt_if_needed=True, show_error=True)
 
     def get_security_admin_state(self):
         session = gatekeeper.get_session()
         return {
+            "can_manage_security": self._has_security_access(),
             "session_summary": gatekeeper.get_session_summary(),
             "non_secure_mode": gatekeeper.is_non_secure_mode_enabled(),
             "session_vault_name": session.vault_name if session else None,
@@ -275,6 +344,9 @@ class SettingsManagerQtController:
 
     def on_security_role_selected(self, _event=None):
         self.view.update_security_role_note()
+        if self.view._get_selected_vault_record() is None:
+            self.view.apply_security_role_defaults()
+            return
         self.on_form_changed()
 
     def apply_selected_security_role_defaults(self):
@@ -413,6 +485,7 @@ class SettingsManagerQtController:
 
     def get_developer_admin_settings_state(self):
         return {
+            "can_manage_developer": self._has_developer_access(),
             "update_repository_url": self.model.settings.get("update_repository_url", ""),
             "enable_advanced_dev_updates": bool(self.model.settings.get("enable_advanced_dev_updates", False)),
             "enable_external_override_trust": gatekeeper.is_external_module_override_trust_enabled(),
@@ -420,6 +493,8 @@ class SettingsManagerQtController:
         }
 
     def save_current_developer_admin_settings(self):
+        if not self._ensure_developer_access(prompt_if_needed=True, show_error=True):
+            return
         values = self.view.get_developer_admin_settings_values()
         self.save_developer_admin_settings(
             values["update_repository_url"],
