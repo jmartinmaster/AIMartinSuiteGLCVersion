@@ -1087,7 +1087,12 @@ def locate_extracted_source_root(extract_dir):
 
 
 def validate_source_snapshot(source_root):
-    required_files = ["main.py", "build.py", os.path.join("app", "controllers", "update_manager_controller.py")]
+    required_files = [
+        "main.py",
+        "build.py",
+        os.path.join("app", "update_manager.py"),
+        os.path.join("app", "controllers", "update_manager_qt_controller.py"),
+    ]
     missing = [relative_path for relative_path in required_files if not os.path.exists(os.path.join(source_root, relative_path))]
     if missing:
         missing_text = ", ".join(missing)

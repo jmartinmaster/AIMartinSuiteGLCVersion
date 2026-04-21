@@ -15,7 +15,8 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 import os
 
-from app.controllers.update_manager_controller import UpdateManagerController
+from app.controllers.update_manager_runtime_controller import UpdateManagerRuntimeController
+from app.models.update_manager_model import UpdateManagerModel
 from app.views.update_manager_qt_view import UpdateManagerQtView
 
 __module_name__ = "Update Manager Qt Controller"
@@ -36,7 +37,7 @@ class SimpleVar:
             self._on_change()
 
 
-class UpdateManagerQtController(UpdateManagerController):
+class UpdateManagerQtController(UpdateManagerRuntimeController):
     def __init__(self, parent=None, dispatcher=None):
         self.parent = parent
         self.dispatcher = dispatcher
@@ -121,7 +122,9 @@ class UpdateManagerQtController(UpdateManagerController):
         return getattr(view, attribute_name)
 
     def _create_model(self):
-        return self.model if hasattr(self, "model") else type(self).mro()[1].__dict__.get("model", None) or self.__class__.__mro__[1].__dict__.get("model", None) or __import__("app.models.update_manager_model", fromlist=["UpdateManagerModel"]).UpdateManagerModel(data_registry=getattr(self.dispatcher, "external_data_registry", None))
+        if hasattr(self, "model") and self.model is not None:
+            return self.model
+        return UpdateManagerModel(data_registry=getattr(self.dispatcher, "external_data_registry", None))
 
     def _create_var(self, value=""):
         return SimpleVar(value=value, on_change=self._render_from_state)

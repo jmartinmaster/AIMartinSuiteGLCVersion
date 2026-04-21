@@ -58,9 +58,8 @@ AIMartinSuiteGLCVersion/
 
 The `app/` directory is flat for service/utility modules. All **dashboard modules** (Production Log, Rate Manager, etc.) follow strict MVC splits inside `app/controllers/`, `app/models/`, and `app/views/`.
 
-The canonical host-migration plan lives at `docs/pyqt6_host_migration_master_plan.md`. Do not create separate migration plans for the same effort.
+The canonical host-migration plan lives at `docs/Completed Plans/pyqt6_host_migration_master_plan.md`. Do not create separate migration plans for the same effort.
 
----
 
 ## 3. Strict MVC Architecture Rules
 
@@ -127,7 +126,7 @@ Protected modules (cannot be unloaded while security lock is active): `layout_ma
 
 ### 3.6 Migration Governance
 
-- The canonical completed migration record is `docs/pyqt6_host_migration_master_plan.md`.
+- The canonical completed migration record is `docs/Completed Plans/pyqt6_host_migration_master_plan.md`.
 - Do not create mini plans, phase plans, or module-specific execution plans for the same host migration effort.
 - Existing audits and older migration notes are reference inputs only.
 - The generic migration-era sidecar stack is removed in the live tree. Do not reintroduce `QtModuleRuntimeManager`, `QtModuleBridgeView`, or generic module-local JSON IPC/session scaffolding.
@@ -359,9 +358,8 @@ When adding a **new dashboard module**, follow this sequence exactly:
 
 6. **Navigation** — if user-visible, verify it appears through `ModuleRegistry`-driven navigation and backend host loading
 
-7. **Migration Discipline** — if the module change affects host migration sequence, update `docs/pyqt6_host_migration_master_plan.md` in the same change
+7. **Migration Discipline** — if the module change affects host migration sequence, update `docs/Completed Plans/pyqt6_host_migration_master_plan.md` in the same change
 
----
 
 ## 7. Aesthetic Design Rules
 
@@ -516,9 +514,8 @@ When starting a new coding session on this repository, confirm:
 4. ✅ `get_theme_tokens(...)`, `get_qt_palette()`, and `get_qt_stylesheet()` are the correct way to derive backend presentation from semantic theme tokens.
 5. ✅ `write_json_with_backup()` is the correct way to persist JSON configuration files.
 6. ✅ New modules must be registered in `app/module_registry.json` and `get_ui()` remains the public module entry point.
-7. ✅ `docs/pyqt6_host_migration_master_plan.md` is the canonical completed migration record; do not create new mini plans for the finished migration effort.
+7. ✅ `docs/Completed Plans/pyqt6_host_migration_master_plan.md` is the canonical completed migration record; do not create new mini plans for the finished migration effort.
 
----
 
 ## 15. Validation Workflow
 

@@ -436,7 +436,7 @@ Phase 11 closeout: COMPLETED.
 5. Final implementation state:
 	- `.github/copilot-instructions.md` now describes the live runtime as PyQt6-only, keeps `layout_manager` on the explicit dedicated-window contract, and removes remaining transitional-Tk guidance from the active architecture, shell, theme, module-creation, and validation sections.
 	- this document's verification and related-documents blocks now reflect the completed Phase 8 through Phase 11 architecture instead of pre-closeout migration criteria.
-	- `docs/phase9_runbook.md` is explicitly labeled as a historical closeout artifact, and the older `docs/layout_manager_pyqt6_migration_plan.md` remains labeled as historical reference.
+	- `docs/phase9_runbook.md` is explicitly labeled as a historical closeout artifact, and the older `docs/Completed Plans/layout_manager_pyqt6_migration_plan.md` remains labeled as historical reference.
 6. Validation in this checkout: documentation consistency was updated in place across the canonical master plan, repo instructions, and historical runbook surfaces; file-level diagnostics report no errors for the touched documentation files.
 
 Phase 12 closeout: COMPLETED.
@@ -454,7 +454,7 @@ Phase 12 closeout: COMPLETED.
 10. Confirm user-facing modules and the dedicated `layout_manager` runtime continue to pass scripted validation plus targeted manual regression.
 
 ## Related Documents
-- Historical reference: `docs/layout_manager_pyqt6_migration_plan.md`
+- Historical reference: `docs/Completed Plans/layout_manager_pyqt6_migration_plan.md`
 - Historical closeout artifact: `docs/phase9_runbook.md`
 - Deferred future architecture: `docs/multi_user_migration_assessment.md`
 - Operational QA: `docs/release_regression_checklist.md`

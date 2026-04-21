@@ -4,9 +4,9 @@
 >
 > This document records the earlier Layout Manager migration path, including the sidecar-first integration strategy that produced the current mini-dispatcher and view-contract groundwork.
 >
-> It is superseded by the completed implementation captured in `docs/pyqt6_host_migration_master_plan.md` and by the live dedicated-window contract in `app/layout_manager_dispatcher.py`.
+> It is superseded by the completed implementation captured in `docs/Completed Plans/pyqt6_host_migration_master_plan.md` and by the live dedicated-window contract in `app/layout_manager_dispatcher.py`.
 >
-> The active migration plan for host-shell and module migration work is [docs/pyqt6_host_migration_master_plan.md](./pyqt6_host_migration_master_plan.md).
+> The active migration plan for host-shell and module migration work is [docs/Completed Plans/pyqt6_host_migration_master_plan.md](./pyqt6_host_migration_master_plan.md).
 >
 > Do not create additional module-specific migration plans for this effort. Update the master plan instead.
 

@@ -18,12 +18,4 @@ from app.tk_runtime_removed import raise_tk_runtime_removed
 raise_tk_runtime_removed("app/views/update_manager_view_factory.py")
 
 __module_name__ = "Update Manager View Factory"
-__version__ = "1.0.0"
-
-
-def create_update_manager_view(parent, controller):
-    _ = getattr(controller, "dispatcher", None)
-    controller.requested_view_backend = "tk"
-    controller.resolved_view_backend = "tk"
-    controller.view_backend_fallback_reason = None
-    return UpdateManagerView(parent, controller)
+__version__ = "1.0.1"
