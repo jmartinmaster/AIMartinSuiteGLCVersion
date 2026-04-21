@@ -19,7 +19,7 @@ from app.models.internal_code_editor_model import InternalCodeEditorModel
 from app.views.internal_code_editor_qt_view import InternalCodeEditorQtView
 
 __module_name__ = "Internal Code Editor Qt Controller"
-__version__ = "1.0.0"
+__version__ = "1.2.2"
 
 
 class InternalCodeEditorQtController:
@@ -37,6 +37,7 @@ class InternalCodeEditorQtController:
         self.active_search_results = []
         self.active_search_kind = None
         self.active_search_query = ""
+        self.loaded_file_text = ""
         if self.embedded:
             self.payload = self._build_view_payload()
         self._create_view()
@@ -95,6 +96,15 @@ class InternalCodeEditorQtController:
         _ = dirty
         return None
 
+    def show_toast(self, title, message):
+        dispatcher = self.dispatcher
+        show_toast = getattr(dispatcher, "show_toast", None)
+        if callable(show_toast):
+            show_toast(title, message)
+            self.view.update_status(message)
+            return
+        self.view.show_info(title, message)
+
     def refresh_file_list(self, selected_key=None, preferred_path=None):
         entries = self.model.refresh_file_entries()
         if not entries:
@@ -143,6 +153,7 @@ class InternalCodeEditorQtController:
         self.view.set_file_options(self.model.file_entries, entry["key"] if refresh_selector else None)
         self.view.select_file_key(entry["key"])
         self.view.set_editor_text(file_text)
+        self.loaded_file_text = file_text
         self.refresh_editor_analysis(file_text)
         self.view.update_file_details(self._build_source_text(entry), self._build_save_target_text(entry))
         self.view.update_status(f"Loaded {entry['relative_path']}")
@@ -175,31 +186,56 @@ class InternalCodeEditorQtController:
         if target_entry is not None:
             message = f"Saved {target_entry['relative_path']}"
             self.view.update_status(message)
-            self.view.show_toast("File Saved", message)
+            self.show_toast("File Saved", message)
             self.write_state(status="ready", message=message, dirty=False)
 
     def can_navigate_away(self):
+        view = self.__dict__.get("view")
+        if view is None:
+            return True
+        if view.get_editor_text() == self.loaded_file_text:
+            self.model.mark_clean()
+            view.clear_editor_modified_state()
+            return True
         if not self.model.is_dirty:
             return True
-        return self.view.confirm_discard_changes()
+        return view.confirm_discard_changes()
 
     def handle_editor_modified(self):
+        view = self.__dict__.get("view")
+        if view is None:
+            return
+        if getattr(view, "_suspend_modified_signal", False):
+            return
+        if view.get_editor_text() == self.loaded_file_text:
+            self.model.mark_clean()
+            view.clear_editor_modified_state()
+            entry = self.model.get_current_file_entry()
+            if entry is not None:
+                view.update_status(f"Loaded {entry['relative_path']}")
+            return
         self.model.mark_dirty()
         entry = self.model.get_current_file_entry()
         if entry is None:
             message = "Unsaved changes"
         else:
             message = f"Editing {entry['relative_path']} | Unsaved changes"
-        self.view.update_status(message)
+        view.update_status(message)
+        view.schedule_analysis_refresh()
         self.write_state(status="ready", message=message, dirty=True)
 
     def refresh_editor_analysis(self, source_text=None):
-        editor_text = self.view.get_editor_text() if source_text is None else source_text
+        view = self.__dict__.get("view")
+        if view is None:
+            return
+        editor_text = view.get_editor_text() if source_text is None else source_text
         self.current_analysis = self.model.build_editor_analysis(editor_text)
         definition_entries = self.current_analysis["definitions"]
+        semantic_entries = self.current_analysis.get("semantic_entries", [])
+        view.refresh_syntax_highlighting(definition_entries, semantic_entries)
         if self.active_navigation_mode == "definitions":
-            self.view.set_definition_entries(definition_entries)
-        self.view.update_definition_summary(len(definition_entries), self.current_analysis["parse_error"])
+            view.set_definition_entries(definition_entries)
+        view.update_definition_summary(len(definition_entries), self.current_analysis["parse_error"])
 
     def on_navigation_item_selected(self):
         item_payload = self.view.get_selected_navigation_payload()

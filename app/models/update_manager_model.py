@@ -53,8 +53,10 @@ DOCUMENTATION_STANDALONE_FILES = [
 ]
 MODULE_PAYLOAD_MVC_PATH_SPECS = [
     ("controllers", "{module_key}_controller.py"),
+    ("controllers", "{module_key}_qt_controller.py"),
     ("models", "{module_key}_model.py"),
     ("views", "{module_key}_view.py"),
+    ("views", "{module_key}_qt_view.py"),
 ]
 UBUNTU_PACKAGE_VERSION_PATTERN = re.compile(r"(?P<version>\d+\.\d+(?:\.\d+)?)")
 
@@ -77,8 +79,9 @@ def _build_module_payload_paths(modules_path, module_key, file_name):
     for subdirectory, file_template in MODULE_PAYLOAD_MVC_PATH_SPECS:
         related_file_name = file_template.format(module_key=module_key)
         related_absolute_path = os.path.join(modules_path, subdirectory, related_file_name)
-        if os.path.isfile(related_absolute_path):
-            payload_paths.append(f"app/{subdirectory}/{related_file_name}")
+        relative_payload_path = f"app/{subdirectory}/{related_file_name}"
+        if os.path.isfile(related_absolute_path) and relative_payload_path not in payload_paths:
+            payload_paths.append(relative_payload_path)
     return payload_paths
 
 

@@ -16,7 +16,7 @@
 from app.theme_manager import get_qt_palette, get_qt_stylesheet
 
 __module_name__ = "Production Log Qt View"
-__version__ = "1.2.0"
+__version__ = "1.3.1"
 
 from PyQt6.QtCore import QTimer, Qt
 from PyQt6.QtWidgets import (
@@ -49,6 +49,8 @@ def is_production_log_qt_runtime_available():
 
 
 class ProductionLogQtView(QMainWindow):
+    ROW_ACTION_COLUMN = 0
+
     def __init__(self, controller, payload, header_fields, production_fields, downtime_fields, parent_widget=None):
         if not PYQT6_AVAILABLE:
             raise RuntimeError("PyQt6 is not installed in the active Python environment.")
@@ -236,8 +238,9 @@ class ProductionLogQtView(QMainWindow):
 
         self.production_table = QTableWidget()
         self.production_table.setMinimumHeight(260)
-        self.production_table.setColumnCount(len(self.production_fields))
-        self.production_table.setHorizontalHeaderLabels(self._field_labels(self.production_fields))
+        self.production_table.setColumnCount(len(self.production_fields) + 1)
+        self.production_table.setHorizontalHeaderLabels([""] + self._field_labels(self.production_fields))
+        self.production_table.setColumnWidth(self.ROW_ACTION_COLUMN, 36)
         self.production_table.horizontalHeader().setStretchLastSection(True)
         self.production_table.verticalHeader().setVisible(False)
         self.production_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -260,8 +263,9 @@ class ProductionLogQtView(QMainWindow):
 
         self.downtime_table = QTableWidget()
         self.downtime_table.setMinimumHeight(240)
-        self.downtime_table.setColumnCount(len(self.downtime_fields))
-        self.downtime_table.setHorizontalHeaderLabels(self._field_labels(self.downtime_fields))
+        self.downtime_table.setColumnCount(len(self.downtime_fields) + 1)
+        self.downtime_table.setHorizontalHeaderLabels([""] + self._field_labels(self.downtime_fields))
+        self.downtime_table.setColumnWidth(self.ROW_ACTION_COLUMN, 36)
         self.downtime_table.horizontalHeader().setStretchLastSection(True)
         self.downtime_table.verticalHeader().setVisible(False)
         self.downtime_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -313,13 +317,24 @@ class ProductionLogQtView(QMainWindow):
             except Exception:
                 continue
         try:
-            self.production_table.itemChanged.connect(self._queue_live_recalculate)
+            self.production_table.itemChanged.connect(self._handle_production_item_changed)
         except Exception:
             pass
         try:
-            self.downtime_table.itemChanged.connect(self._queue_live_recalculate)
+            self.downtime_table.itemChanged.connect(self._handle_downtime_item_changed)
         except Exception:
             pass
+
+    def _handle_production_item_changed(self, _item):
+        self._handle_table_item_changed(self.production_table, self.production_fields)
+
+    def _handle_downtime_item_changed(self, _item):
+        self._handle_table_item_changed(self.downtime_table, self.downtime_fields)
+
+    def _handle_table_item_changed(self, table, field_configs):
+        self._ensure_open_row(table, field_configs)
+        self._refresh_row_action_buttons(table, field_configs)
+        self._queue_live_recalculate()
 
     def _queue_live_recalculate(self, *_args):
         if not self._suspend_dirty_tracking:
@@ -338,18 +353,76 @@ class ProductionLogQtView(QMainWindow):
             labels.append(label_text or "Field")
         return labels
 
+    def _field_column_offset(self):
+        return self.ROW_ACTION_COLUMN + 1
+
+    def _first_editable_column(self, field_configs):
+        for column_index, field in enumerate(field_configs, start=self._field_column_offset()):
+            if not bool(field.get("readonly")) and not bool(field.get("derived")):
+                return column_index
+        return self._field_column_offset()
+
+    def _row_has_content(self, table, field_configs, row_index):
+        for column_index, _field in enumerate(field_configs, start=self._field_column_offset()):
+            item = table.item(row_index, column_index)
+            if item is not None and str(item.text() or "").strip():
+                return True
+        return False
+
+    def _table_field_configs(self, table):
+        if table is self.production_table:
+            return self.production_fields
+        return self.downtime_fields
+
+    def _refresh_row_action_buttons(self, table, field_configs):
+        for row_index in range(table.rowCount()):
+            delete_button = QPushButton("X")
+            delete_button.setMaximumWidth(26)
+            delete_button.setToolTip("Delete this row")
+            delete_button.clicked.connect(
+                lambda _checked=False, current_table=table, current_row=row_index: self._remove_table_row(current_table, current_row)
+            )
+            table.setCellWidget(row_index, self.ROW_ACTION_COLUMN, delete_button)
+
+    def _ensure_open_row(self, table, field_configs):
+        table.blockSignals(True)
+        try:
+            row_index = table.rowCount() - 1
+            while row_index >= 0:
+                if not self._row_has_content(table, field_configs, row_index) and row_index != table.rowCount() - 1:
+                    table.removeRow(row_index)
+                row_index -= 1
+            if table.rowCount() == 0 or self._row_has_content(table, field_configs, table.rowCount() - 1):
+                self._append_row(table, field_configs)
+        finally:
+            table.blockSignals(False)
+
+    def _focus_open_row(self, table, field_configs):
+        self._ensure_open_row(table, field_configs)
+        self._refresh_row_action_buttons(table, field_configs)
+        if table.rowCount() <= 0:
+            return
+        row_index = table.rowCount() - 1
+        column_index = self._first_editable_column(field_configs)
+        table.setCurrentCell(row_index, column_index)
+        item = table.item(row_index, column_index)
+        if item is not None:
+            table.editItem(item)
+
     def _set_table_rows(self, table, field_configs, rows):
         table.blockSignals(True)
         table.setRowCount(0)
         for row_data in rows:
             self._append_row(table, field_configs, row_data=row_data)
+        self._ensure_open_row(table, field_configs)
+        self._refresh_row_action_buttons(table, field_configs)
         table.blockSignals(False)
 
     def _append_row(self, table, field_configs, row_data=None):
         row_data = dict(row_data or {})
         row_index = table.rowCount()
         table.insertRow(row_index)
-        for column_index, field in enumerate(field_configs):
+        for column_index, field in enumerate(field_configs, start=self._field_column_offset()):
             field_id = str(field.get("id") or "").strip()
             item_value = str(row_data.get(field_id, field.get("default") or ""))
             table_item = QTableWidgetItem(item_value)
@@ -359,7 +432,7 @@ class ProductionLogQtView(QMainWindow):
 
     def _field_index_map(self, field_configs):
         mapping = {}
-        for column_index, field in enumerate(field_configs):
+        for column_index, field in enumerate(field_configs, start=self._field_column_offset()):
             field_id = str(field.get("id") or "").strip()
             if field_id:
                 mapping[field_id] = column_index
@@ -385,6 +458,17 @@ class ProductionLogQtView(QMainWindow):
         item.setText(str(value or ""))
         table.blockSignals(False)
 
+    def set_header_field_value(self, field_id, value):
+        field_key = str(field_id or "").strip()
+        if not field_key:
+            return
+        widget = self.header_widgets.get(field_key)
+        if widget is None:
+            return
+        widget.blockSignals(True)
+        widget.setText(str(value or ""))
+        widget.blockSignals(False)
+
     def ask_import_file_path(self):
         file_path, _selected = QFileDialog.getOpenFileName(
             self,
@@ -403,7 +487,7 @@ class ProductionLogQtView(QMainWindow):
         for row_index in range(table.rowCount()):
             row_payload = {}
             has_content = False
-            for column_index, field in enumerate(field_configs):
+            for column_index, field in enumerate(field_configs, start=self._field_column_offset()):
                 field_id = str(field.get("id") or "").strip()
                 if not field_id:
                     continue
@@ -435,10 +519,6 @@ class ProductionLogQtView(QMainWindow):
             widget.blockSignals(False)
         self._set_table_rows(self.production_table, self.production_fields, list(production_rows or []))
         self._set_table_rows(self.downtime_table, self.downtime_fields, list(downtime_rows or []))
-        if self.production_table.rowCount() == 0:
-            self._append_row(self.production_table, self.production_fields)
-        if self.downtime_table.rowCount() == 0:
-            self._append_row(self.downtime_table, self.downtime_fields)
         self._suspend_dirty_tracking = False
 
     def set_form_name(self, form_name):
@@ -451,26 +531,32 @@ class ProductionLogQtView(QMainWindow):
         )
 
     def _add_production_row(self):
-        self._append_row(self.production_table, self.production_fields)
-        self.mark_dirty()
+        self._focus_open_row(self.production_table, self.production_fields)
 
     def _remove_selected_production_row(self):
         selected_rows = self.production_table.selectionModel().selectedRows()
         if not selected_rows:
             return
-        self.production_table.removeRow(int(selected_rows[0].row()))
-        self.mark_dirty()
-        self._queue_live_recalculate()
+        self._remove_table_row(self.production_table, int(selected_rows[0].row()))
 
     def _add_downtime_row(self):
-        self._append_row(self.downtime_table, self.downtime_fields)
-        self.mark_dirty()
+        self._focus_open_row(self.downtime_table, self.downtime_fields)
 
     def _remove_selected_downtime_row(self):
         selected_rows = self.downtime_table.selectionModel().selectedRows()
         if not selected_rows:
             return
-        self.downtime_table.removeRow(int(selected_rows[0].row()))
+        self._remove_table_row(self.downtime_table, int(selected_rows[0].row()))
+
+    def _remove_table_row(self, table, row_index):
+        if row_index < 0 or row_index >= table.rowCount():
+            return
+        field_configs = self._table_field_configs(table)
+        table.blockSignals(True)
+        table.removeRow(row_index)
+        table.blockSignals(False)
+        self._ensure_open_row(table, field_configs)
+        self._refresh_row_action_buttons(table, field_configs)
         self.mark_dirty()
         self._queue_live_recalculate()
 
@@ -603,13 +689,7 @@ class ProductionLogQtView(QMainWindow):
         QMessageBox.information(self, title, message)
 
     def show_toast(self, title, message, bootstyle=None):
-        dispatcher = getattr(self.controller, "dispatcher", None)
-        show_toast = getattr(dispatcher, "show_toast", None)
-        if callable(show_toast):
-            show_toast(title, message, bootstyle)
-            self.set_status(message)
-            return
-        self.show_info(title, message)
+        self.controller.show_toast(title, message, bootstyle)
 
     def mark_dirty(self):
         self.has_unsaved_changes = True

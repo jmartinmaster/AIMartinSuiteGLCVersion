@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 __module_name__ = "Settings Manager Qt View"
-__version__ = "1.5.1"
+__version__ = "1.7.3"
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
@@ -56,6 +56,7 @@ class SettingsManagerQtView(QMainWindow):
         self.embedded = parent_widget is not None
         self.value_labels = {}
         self.theme_combo = None
+        self.theme_status_label = None
         self.export_directory_input = None
         self.toast_duration_spin = None
         self.auto_save_spin = None
@@ -163,11 +164,30 @@ class SettingsManagerQtView(QMainWindow):
 
         self.theme_combo = QComboBox()
         self.theme_combo.currentIndexChanged.connect(self._on_form_changed)
-        editable_layout.addRow(QLabel("Theme"), self.theme_combo)
+        self.theme_combo.currentIndexChanged.connect(self.controller.preview_selected_theme)
+        theme_row = QWidget()
+        theme_row_layout = QHBoxLayout(theme_row)
+        theme_row_layout.setContentsMargins(0, 0, 0, 0)
+        theme_row_layout.addWidget(self.theme_combo, 1)
+        revert_theme_button = QPushButton("Revert Preview")
+        revert_theme_button.clicked.connect(self.controller.revert_theme_preview)
+        theme_row_layout.addWidget(revert_theme_button)
+        editable_layout.addRow(QLabel("Theme"), theme_row)
+
+        self.theme_status_label = QLabel("Current theme: -")
+        self.theme_status_label.setWordWrap(True)
+        editable_layout.addRow(QLabel("Theme Status"), self.theme_status_label)
 
         self.export_directory_input = QLineEdit()
         self.export_directory_input.textChanged.connect(self._on_form_changed)
-        editable_layout.addRow(QLabel("Export Directory"), self.export_directory_input)
+        export_row = QWidget()
+        export_row_layout = QHBoxLayout(export_row)
+        export_row_layout.setContentsMargins(0, 0, 0, 0)
+        export_row_layout.addWidget(self.export_directory_input, 1)
+        browse_export_button = QPushButton("Browse")
+        browse_export_button.clicked.connect(self.controller.browse_export_dir)
+        export_row_layout.addWidget(browse_export_button)
+        editable_layout.addRow(QLabel("Export Directory"), export_row)
 
         self.organize_exports_checkbox = QCheckBox("Organize exports by date")
         self.organize_exports_checkbox.stateChanged.connect(self._on_form_changed)
@@ -331,6 +351,16 @@ class SettingsManagerQtView(QMainWindow):
         self.developer_admin_group = QGroupBox("Developer & Admin Tools")
         developer_layout = QFormLayout(self.developer_admin_group)
 
+        self.developer_access_label = QLabel("Admin or developer session required")
+        self.developer_access_label.setWordWrap(True)
+        developer_layout.addRow(QLabel("Developer & Admin"), self.developer_access_label)
+
+        self.developer_note_label = QLabel(
+            "Sign in from the File menu or Security tools to reveal privileged pages in the main navigation, including Internal Code Editor."
+        )
+        self.developer_note_label.setWordWrap(True)
+        developer_layout.addRow(QLabel("Guidance"), self.developer_note_label)
+
         self.developer_repository_input = QLineEdit()
         self.developer_repository_input.textChanged.connect(self._on_form_changed)
         developer_layout.addRow(QLabel("Update Repository URL"), self.developer_repository_input)
@@ -343,6 +373,12 @@ class SettingsManagerQtView(QMainWindow):
         self.developer_trust_checkbox.stateChanged.connect(self._on_form_changed)
         developer_layout.addRow(QLabel("Override Trust"), self.developer_trust_checkbox)
 
+        self.developer_trust_note_label = QLabel(
+            "Override files can exist beside the app without executing. Enable trust only when you intentionally want the app to load those external Python files."
+        )
+        self.developer_trust_note_label.setWordWrap(True)
+        developer_layout.addRow(QLabel("Trust Guidance"), self.developer_trust_note_label)
+
         self.developer_status_label = QLabel("-")
         self.developer_status_label.setWordWrap(True)
         developer_layout.addRow(QLabel("External Modules"), self.developer_status_label)
@@ -350,6 +386,15 @@ class SettingsManagerQtView(QMainWindow):
         self.developer_unlock_button = QPushButton("Unlock Developer Tools")
         self.developer_unlock_button.clicked.connect(self.controller.request_developer_admin_access)
         developer_layout.addRow(QLabel("Access"), self.developer_unlock_button)
+
+        developer_shortcuts = QWidget()
+        developer_shortcuts_layout = QHBoxLayout(developer_shortcuts)
+        developer_shortcuts_layout.setContentsMargins(0, 0, 0, 0)
+        open_code_editor_button = QPushButton("Open Internal Code Editor")
+        open_code_editor_button.clicked.connect(self.controller.open_internal_code_editor)
+        developer_shortcuts_layout.addWidget(open_code_editor_button)
+        developer_shortcuts_layout.addStretch(1)
+        developer_layout.addRow(QLabel("Shortcuts"), developer_shortcuts)
 
         save_developer_button = QPushButton("Save Developer Settings")
         save_developer_button.clicked.connect(self.controller.save_current_developer_admin_settings)
@@ -436,7 +481,7 @@ class SettingsManagerQtView(QMainWindow):
             self.setWindowTitle(str(self.payload.get("window_title") or "Developer Tools - Production Logging Center"))
             return
 
-        self.security_admin_group.setVisible(security_visible)
+        self.security_admin_group.setVisible(True)
         self.developer_admin_group.setVisible(developer_visible)
         self.setWindowTitle(str(self.payload.get("window_title") or "Settings Manager - Production Logging Center"))
 
@@ -478,6 +523,7 @@ class SettingsManagerQtView(QMainWindow):
                 selected_index = 0
             if selected_index >= 0:
                 self.theme_combo.setCurrentIndex(selected_index)
+            self.set_theme_status(f"Current theme: {self.theme_combo.currentText() or '-'}")
 
             self.export_directory_input.setText(str(settings.get("export_directory") or ""))
             self.organize_exports_checkbox.setChecked(bool(settings.get("organize_exports_by_date", True)))
@@ -504,6 +550,27 @@ class SettingsManagerQtView(QMainWindow):
             "module_whitelist": self._selected_module_names(self.module_whitelist_list),
             "persistent_modules": self._selected_module_names(self.persistent_modules_list),
         }
+
+    def set_theme_selection(self, theme_name):
+        theme_name = str(theme_name or "").strip()
+        self._suspend_change_signal = True
+        try:
+            selected_index = self.theme_combo.findData(theme_name)
+            if selected_index >= 0:
+                self.theme_combo.setCurrentIndex(selected_index)
+        finally:
+            self._suspend_change_signal = False
+
+    def set_theme_status(self, message):
+        if self.theme_status_label is not None:
+            self.theme_status_label.setText(str(message or ""))
+        self.status_bar.showMessage(str(message or ""), 4000)
+
+    def set_export_directory(self, directory_path):
+        self.export_directory_input.setText(str(directory_path or ""))
+
+    def ask_for_export_directory(self):
+        return str(QFileDialog.getExistingDirectory(self, "Select Export Directory", self.export_directory_input.text().strip() or "") or "").strip()
 
     def set_downtime_code_rows(self, code_map):
         code_map = code_map if isinstance(code_map, dict) else {}
@@ -578,22 +645,21 @@ class SettingsManagerQtView(QMainWindow):
 
     def update_security_role_note(self):
         role = str(self.security_role_combo.currentText() or "general").strip().lower()
+        limit = self._security_state.get("role_limits", {}).get(role)
         if role == "general":
-            self.security_password_rule_label.setText("General vaults do not require passwords.")
+            self.security_password_rule_label.setText(f"General vaults do not require passwords. Limit: {limit}.")
         elif role == "admin":
-            self.security_password_rule_label.setText("Admin vaults require a password.")
+            self.security_password_rule_label.setText(f"Admin vaults require a password. Limit: {limit}.")
         else:
-            self.security_password_rule_label.setText("Developer vaults require a password and include all rights.")
+            self.security_password_rule_label.setText(
+                f"Developer vaults require a password and native security-device verification. Limit: {limit}."
+            )
 
     def apply_security_role_defaults(self):
         role = str(self.security_role_combo.currentText() or "general").strip().lower()
         defaults = set(self.security_role_defaults.get(role, []))
-        if role == "developer":
-            for checkbox in self.security_rights_checkboxes.values():
-                checkbox.setChecked(True)
-        else:
-            for right_key, checkbox in self.security_rights_checkboxes.items():
-                checkbox.setChecked(right_key in defaults)
+        for right_key, checkbox in self.security_rights_checkboxes.items():
+            checkbox.setChecked(right_key in defaults)
         self._on_form_changed()
 
     def _configure_security_rights(self, access_rights):
@@ -619,12 +685,15 @@ class SettingsManagerQtView(QMainWindow):
         state = state if isinstance(state, dict) else {}
         self._security_state = state
         can_manage_security = bool(state.get("can_manage_security", False))
+        session_vault_name = str(state.get("session_vault_name") or "").strip()
         self.security_role_defaults = dict(state.get("role_defaults") or {})
         self._configure_security_rights(state.get("access_rights") or [])
         if can_manage_security:
             self.security_note_label.setText("Security administration is unlocked for the active admin or developer session.")
         else:
-            self.security_note_label.setText("Sign in with an admin or developer vault to edit vaults, passwords, and security mode.")
+            self.security_note_label.setText(
+                "Sign in with an admin or developer vault to edit vaults, passwords, and security mode from this page."
+            )
         if self.security_form_container is not None:
             self.security_form_container.setEnabled(can_manage_security)
         if self.security_vault_list is not None:
@@ -633,13 +702,15 @@ class SettingsManagerQtView(QMainWindow):
             self.security_unlock_button.setText("Re-authenticate Security Admin" if can_manage_security else "Unlock Security Admin")
 
         self.security_vault_list.clear()
-        preferred = str(preferred_name or "").strip()
+        preferred = str(preferred_name or "").strip() or session_vault_name
         selected_row = -1
         for index, vault in enumerate(state.get("vaults") or []):
             vault_name = str(vault.get("vault_name") or "")
             role = str(vault.get("role") or "general")
             enabled_text = "enabled" if bool(vault.get("enabled", True)) else "disabled"
-            list_item = QListWidgetItem(f"{vault_name} ({role}, {enabled_text})")
+            native_text = ", native verification" if bool(vault.get("requires_yubikey", False)) else ""
+            active_text = ", active" if session_vault_name and vault_name == session_vault_name else ""
+            list_item = QListWidgetItem(f"{vault_name} ({role}, {enabled_text}{native_text}{active_text})")
             list_item.setData(0x0100, vault)
             self.security_vault_list.addItem(list_item)
             if preferred and vault_name == preferred:
@@ -681,15 +752,22 @@ class SettingsManagerQtView(QMainWindow):
     def configure_developer_admin_tools(self, state):
         state = state if isinstance(state, dict) else {}
         can_manage_developer = bool(state.get("can_manage_developer", False))
+        session_summary = str(state.get("session_summary") or "Locked")
+        section_mode = str(state.get("section_mode") or self.section_mode or "full")
         self._suspend_change_signal = True
         try:
+            self.developer_access_label.setText(f"Session: {session_summary}")
             self.developer_repository_input.setText(str(state.get("update_repository_url") or ""))
             self.developer_advanced_checkbox.setChecked(bool(state.get("enable_advanced_dev_updates", False)))
             self.developer_trust_checkbox.setChecked(bool(state.get("enable_external_override_trust", False)))
-            status_text = str(state.get("external_modules_status") or "-")
-            if not can_manage_developer:
-                status_text = f"Developer tools are locked until a developer session is active.\n\n{status_text}"
-            self.developer_status_label.setText(status_text)
+            self.developer_status_label.setText(str(state.get("external_modules_status") or "-"))
+            if section_mode == "developer_admin":
+                note_text = "Privileged update and override settings now live on this dedicated page. Internal Code Editor remains a separate sidebar module."
+            elif can_manage_developer:
+                note_text = "Developer tools are unlocked for the active developer session."
+            else:
+                note_text = "Sign in from the File menu or Security tools to reveal privileged pages in the main navigation, including Internal Code Editor."
+            self.developer_note_label.setText(note_text)
         finally:
             self._suspend_change_signal = False
         self.developer_repository_input.setEnabled(can_manage_developer)
@@ -726,13 +804,11 @@ class SettingsManagerQtView(QMainWindow):
         response = QMessageBox.question(self, title, message)
         return response == QMessageBox.StandardButton.Yes
 
+    def set_status(self, message):
+        self.status_bar.showMessage(str(message or ""), 5000)
+
     def show_toast(self, title, message, _bootstyle=None):
-        combined = f"{title}: {message}" if title else str(message or "")
-        dispatcher = getattr(self.controller, "dispatcher", None)
-        show_toast = getattr(dispatcher, "show_toast", None)
-        if callable(show_toast):
-            show_toast(title, message, _bootstyle)
-        self.status_bar.showMessage(combined, 5000)
+        self.controller.show_toast(title, message, _bootstyle)
 
     def apply_theme(self, theme_tokens=None):
         if theme_tokens is not None:

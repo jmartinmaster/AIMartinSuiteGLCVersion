@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 __module_name__ = "Rate Manager Qt View"
-__version__ = "1.1.0"
+__version__ = "1.1.1"
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
@@ -214,13 +214,7 @@ class RateManagerQtView(QMainWindow):
         QMessageBox.information(self, title, message)
 
     def show_toast(self, title, message, bootstyle=None):
-        dispatcher = getattr(self.controller, "dispatcher", None)
-        show_toast = getattr(dispatcher, "show_toast", None)
-        if callable(show_toast):
-            show_toast(title, message, bootstyle)
-            self.set_status(message)
-            return
-        self.show_info(title, message)
+        self.controller.show_toast(title, message, bootstyle)
 
     def closeEvent(self, event):
         self.controller.handle_close()

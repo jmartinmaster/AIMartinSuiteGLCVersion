@@ -16,6 +16,7 @@
 import hashlib
 import json
 import os
+import platform
 import secrets
 import shutil
 from datetime import datetime
@@ -52,10 +53,11 @@ from app.models.security_model import (
     normalize_role,
     role_requires_password,
 )
+from app.native_security_verifier import native_security_verifier
 from app.utils import ensure_external_directory, external_path
 
 __module_name__ = "Security Blanket"
-__version__ = "2.0.2"
+__version__ = "2.1.0"
 
 
 class Gatekeeper:
@@ -162,7 +164,14 @@ class Gatekeeper:
             if right_key in ACCESS_RIGHTS_BY_KEY
         ) or "No rights assigned"
         password_text = "Password required" if vault_record.password_required else "No password required"
-        return effective_rights, f"Role: {vault_record.role.title()} | {password_text}\nRights: {rights_text}"
+        device_text = " | Native device verification required" if getattr(vault_record, "requires_yubikey", False) else ""
+        return effective_rights, f"Role: {vault_record.role.title()} | {password_text}{device_text}\nRights: {rights_text}"
+
+    def _verify_native_device_requirement(self, vault_record):
+        if not getattr(vault_record, "requires_yubikey", False):
+            return True, ""
+        prompt_text = f"Verify the {vault_record.role.title()} vault '{vault_record.display_name or vault_record.vault_name}' to continue."
+        return native_security_verifier.verify_access(prompt_text)
 
     def _sanitize_vault_name(self, raw_value):
         text = str(raw_value or "").strip()
@@ -337,7 +346,7 @@ class Gatekeeper:
             role=role_key,
             enabled=bool(enabled),
             password_required=password_required,
-            requires_yubikey=False,
+            requires_yubikey=True if role_key == "developer" else bool(existing_record.requires_yubikey) if existing_record is not None else False,
             rights=normalized_rights,
             created_at=existing_record.created_at if existing_record else self._utc_timestamp(),
             updated_at=self._utc_timestamp(),
@@ -786,6 +795,10 @@ class Gatekeeper:
                 if not self._verify_password(selected_vault, entered_password):
                     status_label.setText("Incorrect password.")
                     return
+            native_verified, native_message = self._verify_native_device_requirement(selected_vault)
+            if not native_verified:
+                status_label.setText(native_message or "Native security-device verification failed.")
+                return
             self._set_session_from_vault(selected_vault)
             dialog.accept()
 

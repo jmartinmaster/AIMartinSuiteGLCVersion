@@ -63,6 +63,15 @@ class RecoveryViewerQtController:
             str(record.get("restore_target") or ""),
         )
 
+    def _find_record_key_by_path(self, record_path):
+        record_path = str(record_path or "").strip()
+        if not record_path:
+            return None
+        for record in self.records:
+            if str(record.get("path") or "").strip() == record_path:
+                return self._record_key(record)
+        return None
+
     def _sync_selected_record_key(self):
         selected_index = getattr(self.view, "get_selected_index", lambda: None)()
         if selected_index is not None and 0 <= selected_index < len(self.records):
@@ -112,6 +121,14 @@ class RecoveryViewerQtController:
         self.view.refresh_table(self.records)
         self._restore_selected_record(selected_record_key)
         _ = initial
+
+    def focus_record_path(self, record_path):
+        record_key = self._find_record_key_by_path(record_path)
+        if record_key is None:
+            self._restore_selected_record(None)
+            return False
+        self._restore_selected_record(record_key)
+        return True
 
     def get_selected_record(self):
         selected_index = self.view.get_selected_index()

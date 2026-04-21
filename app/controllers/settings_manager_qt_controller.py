@@ -21,7 +21,7 @@ from app.models.settings_manager_model import SettingsManagerModel
 from app.views.settings_manager_qt_view import SettingsManagerQtView
 
 __module_name__ = "Settings Manager Qt Controller"
-__version__ = "1.6.0"
+__version__ = "1.8.2"
 
 
 class SettingsManagerQtController:
@@ -179,14 +179,49 @@ class SettingsManagerQtController:
         self.view.render_snapshot(snapshot)
         self.view.configure_security_admin_panel(self.get_security_admin_state())
         self.view.configure_developer_admin_tools(self.get_developer_admin_settings_state())
+        self.view.set_theme_status(f"Current theme: {get_theme_label(self.model.preview_theme)}")
         if initial:
-            self.view.status_bar.showMessage(f"{self.module_title} viewport ready.", 4000)
+            self.view.set_status(f"{self.module_title} viewport ready.")
 
     def on_security_session_changed(self, _event_name=None):
         self.refresh_snapshot(initial=False)
 
     def on_form_changed(self):
         return None
+
+    def show_toast(self, title, message, bootstyle=None):
+        message_text = str(message or "")
+        dispatcher = self.dispatcher
+        show_toast = getattr(dispatcher, "show_toast", None)
+        if callable(show_toast):
+            show_toast(title, message, bootstyle)
+        self.view.set_status(f"{title}: {message_text}" if title else message_text)
+
+    def preview_selected_theme(self, _event=None):
+        if self.dispatcher is None or getattr(self.view, "_suspend_change_signal", False):
+            return
+        form_values = self.view.get_form_values()
+        selected_theme = normalize_theme(form_values.get("theme"))
+        applied_theme = self.dispatcher.apply_theme(selected_theme)
+        self.model.set_preview_theme(applied_theme)
+        self.view.set_theme_status(f"Previewing theme: {get_theme_label(applied_theme)}")
+
+    def revert_theme_preview(self):
+        if self.dispatcher is None:
+            return
+        reverted_theme = self.dispatcher.apply_theme(self.model.revert_preview_theme())
+        self.view.set_theme_selection(reverted_theme)
+        self.view.set_theme_status(f"Theme reverted to: {get_theme_label(reverted_theme)}")
+
+    def browse_export_dir(self):
+        directory_path = self.view.ask_for_export_directory()
+        if directory_path:
+            self.view.set_export_directory(directory_path)
+
+    def open_internal_code_editor(self):
+        if self.dispatcher is None or not hasattr(self.dispatcher, "secure_load"):
+            return
+        self.dispatcher.secure_load("internal_code_editor")
 
     def save_settings(self):
         form_values = self.view.get_form_values()
@@ -249,6 +284,7 @@ class SettingsManagerQtController:
             "role": vault_record.role,
             "enabled": bool(vault_record.enabled),
             "password_required": bool(vault_record.password_required),
+            "requires_yubikey": bool(vault_record.requires_yubikey),
             "rights": list(vault_record.rights),
             "created_at": vault_record.created_at,
             "updated_at": vault_record.updated_at,
@@ -505,6 +541,8 @@ class SettingsManagerQtController:
     def get_developer_admin_settings_state(self):
         return {
             "can_manage_developer": self._has_developer_access(),
+            "session_summary": gatekeeper.get_session_summary(),
+            "section_mode": self.section_mode,
             "update_repository_url": self.model.settings.get("update_repository_url", ""),
             "enable_advanced_dev_updates": bool(self.model.settings.get("enable_advanced_dev_updates", False)),
             "enable_external_override_trust": gatekeeper.is_external_module_override_trust_enabled(),
@@ -541,6 +579,13 @@ class SettingsManagerQtController:
             "apply_external_override_policy_change": bool(trust_changed),
         }
         self._write_saved_runtime_state("Saved developer settings successfully.", metadata=metadata)
+        if trust_changed:
+            trust_message = (
+                "External override trust is enabled. Override files can load when modules are reloaded."
+                if enable_external_override_trust
+                else "External override trust is disabled. Bundled modules are now preferred again."
+            )
+            self.view.show_toast("Developer Tools", trust_message)
         self.refresh_snapshot(initial=False)
 
     def _apply_saved_runtime_effects(self, metadata):
@@ -590,6 +635,8 @@ class SettingsManagerQtController:
         if self._security_listener_registered and hasattr(self.dispatcher, "remove_security_session_listener"):
             self.dispatcher.remove_security_session_listener(self.on_security_session_changed)
             self._security_listener_registered = False
+        if self.dispatcher is not None and self.model.preview_theme != self.model.saved_theme:
+            self.dispatcher.apply_theme(self.model.saved_theme)
         try:
             self.view.close()
         except Exception:

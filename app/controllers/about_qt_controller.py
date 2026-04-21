@@ -18,7 +18,7 @@ import sys
 from app.views.about_qt_view import AboutQtView
 
 __module_name__ = "About Qt Controller"
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 
 
 class AboutQtController:
@@ -129,7 +129,7 @@ class AboutQtController:
     def request_repack(self):
         self.view.show_info(
             "Repack Not Available",
-            "Suite repacking is still handled by the Tk host shell in this migration phase.",
+            "Suite repacking is not available from the live PyQt6 workspace runtime.",
         )
 
     def apply_theme(self):

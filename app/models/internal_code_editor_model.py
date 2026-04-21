@@ -18,7 +18,7 @@ import os
 import tempfile
 
 __module_name__ = "Internal Code Editor"
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 
 class InternalCodeEditorModel:
@@ -134,9 +134,10 @@ class InternalCodeEditorModel:
         return target_path
 
     def build_editor_analysis(self, source_text):
-        definitions, parse_error = self.build_definition_index(source_text)
+        definitions, semantic_entries, parse_error = self.build_definition_index(source_text)
         return {
             "definitions": definitions,
+            "semantic_entries": semantic_entries,
             "parse_error": parse_error,
         }
 
@@ -222,13 +223,14 @@ class InternalCodeEditorModel:
             syntax_tree = ast.parse(source_text)
         except SyntaxError as exc:
             if exc.lineno:
-                return [], f"Syntax error at line {exc.lineno}: {exc.msg}"
-            return [], f"Syntax error: {exc.msg}"
+                return [], [], f"Syntax error at line {exc.lineno}: {exc.msg}"
+            return [], [], f"Syntax error: {exc.msg}"
 
         source_lines = source_text.splitlines()
         definition_entries = []
+        semantic_entries = self._build_semantic_highlights(syntax_tree, source_lines)
         self._collect_definition_entries(syntax_tree.body, definition_entries, source_lines, owner_class=None)
-        return definition_entries, None
+        return definition_entries, semantic_entries, None
 
     def get_current_file_entry(self):
         if self.current_file_key is None:
@@ -264,6 +266,46 @@ class InternalCodeEditorModel:
             "line": line_number,
             "target_index": f"{line_number}.0",
             "name_start_index": f"{line_number}.{name_column}",
+            "name_end_index": f"{line_number}.{end_column}",
+        }
+
+    def _build_semantic_highlights(self, syntax_tree, source_lines):
+        semantic_entries = []
+        for node in ast.walk(syntax_tree):
+            if isinstance(node, ast.arg):
+                semantic_entry = self._build_named_semantic_entry(
+                    name=node.arg,
+                    line_number=int(getattr(node, "lineno", 1) or 1),
+                    column_number=int(getattr(node, "col_offset", 0) or 0),
+                    source_lines=source_lines,
+                    semantic_kind="parameter",
+                )
+                if semantic_entry is not None:
+                    semantic_entries.append(semantic_entry)
+            elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+                semantic_entry = self._build_named_semantic_entry(
+                    name=node.id,
+                    line_number=int(getattr(node, "lineno", 1) or 1),
+                    column_number=int(getattr(node, "col_offset", 0) or 0),
+                    source_lines=source_lines,
+                    semantic_kind="variable",
+                )
+                if semantic_entry is not None:
+                    semantic_entries.append(semantic_entry)
+        return semantic_entries
+
+    def _build_named_semantic_entry(self, name, line_number, column_number, source_lines, semantic_kind):
+        if not name:
+            return None
+        line_text = source_lines[line_number - 1] if 0 < line_number <= len(source_lines) else ""
+        start_column = self._find_name_column(line_text, name, column_number)
+        end_column = start_column + len(name)
+        return {
+            "key": f"{semantic_kind}:{name}:{line_number}:{start_column}",
+            "kind": semantic_kind,
+            "line": line_number,
+            "name": name,
+            "name_start_index": f"{line_number}.{start_column}",
             "name_end_index": f"{line_number}.{end_column}",
         }
 

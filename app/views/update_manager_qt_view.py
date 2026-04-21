@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 __module_name__ = "Update Manager Qt View"
-__version__ = "1.4.0"
+__version__ = "1.5.0"
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
@@ -54,6 +54,19 @@ class UpdateManagerQtView(QMainWindow):
         self.payload_selector = None
         self.payload_name_label = None
         self.payload_path_label = None
+        self.payload_local_version_label = None
+        self.payload_remote_version_label = None
+        self.payload_status_label = None
+        self.payload_note_label = None
+        self.documentation_tracked_label = None
+        self.documentation_remote_state_label = None
+        self.documentation_status_label = None
+        self.documentation_note_label = None
+        self.advanced_enabled_label = None
+        self.advanced_phase_label = None
+        self.advanced_detail_label = None
+        self.advanced_recovery_label = None
+        self.advanced_build_log_label = None
         self.note_text = None
         self._build_ui()
         self.apply_theme(theme_tokens=self.theme_tokens)
@@ -151,6 +164,22 @@ class UpdateManagerQtView(QMainWindow):
         self.payload_path_label.setWordWrap(True)
         payload_layout.addRow(QLabel("Path"), self.payload_path_label)
 
+        self.payload_local_version_label = QLabel("Unknown")
+        self.payload_local_version_label.setWordWrap(True)
+        payload_layout.addRow(QLabel("Local State"), self.payload_local_version_label)
+
+        self.payload_remote_version_label = QLabel("Not checked")
+        self.payload_remote_version_label.setWordWrap(True)
+        payload_layout.addRow(QLabel("Repository State"), self.payload_remote_version_label)
+
+        self.payload_status_label = QLabel("Pending")
+        self.payload_status_label.setWordWrap(True)
+        payload_layout.addRow(QLabel("Status"), self.payload_status_label)
+
+        self.payload_note_label = QLabel("Select a payload to compare against the repository.")
+        self.payload_note_label.setWordWrap(True)
+        payload_layout.addRow(QLabel("Note"), self.payload_note_label)
+
         payload_actions = QHBoxLayout()
         check_payload_button = QPushButton("Check Selected Payload")
         check_payload_button.clicked.connect(self.controller.check_module_payload_update)
@@ -168,6 +197,23 @@ class UpdateManagerQtView(QMainWindow):
 
         documentation_group = QGroupBox("Documentation Updates")
         documentation_layout = QFormLayout(documentation_group)
+
+        self.documentation_tracked_label = QLabel("0 tracked file(s)")
+        self.documentation_tracked_label.setWordWrap(True)
+        documentation_layout.addRow(QLabel("Tracked Files"), self.documentation_tracked_label)
+
+        self.documentation_remote_state_label = QLabel("Not checked")
+        self.documentation_remote_state_label.setWordWrap(True)
+        documentation_layout.addRow(QLabel("Repository State"), self.documentation_remote_state_label)
+
+        self.documentation_status_label = QLabel("Pending")
+        self.documentation_status_label.setWordWrap(True)
+        documentation_layout.addRow(QLabel("Status"), self.documentation_status_label)
+
+        self.documentation_note_label = QLabel("Check and apply grouped documentation restores from the repository.")
+        self.documentation_note_label.setWordWrap(True)
+        documentation_layout.addRow(QLabel("Note"), self.documentation_note_label)
+
         documentation_actions = QHBoxLayout()
         check_documentation_button = QPushButton("Check Documentation Restores")
         check_documentation_button.clicked.connect(self.controller.check_documentation_payload_updates)
@@ -181,6 +227,27 @@ class UpdateManagerQtView(QMainWindow):
 
         advanced_group = QGroupBox("Advanced Source Operations")
         advanced_layout = QFormLayout(advanced_group)
+
+        self.advanced_enabled_label = QLabel("No")
+        self.advanced_enabled_label.setWordWrap(True)
+        advanced_layout.addRow(QLabel("Channel Enabled"), self.advanced_enabled_label)
+
+        self.advanced_phase_label = QLabel("idle")
+        self.advanced_phase_label.setWordWrap(True)
+        advanced_layout.addRow(QLabel("Source Phase"), self.advanced_phase_label)
+
+        self.advanced_detail_label = QLabel("No update job is running.")
+        self.advanced_detail_label.setWordWrap(True)
+        advanced_layout.addRow(QLabel("Source Detail"), self.advanced_detail_label)
+
+        self.advanced_recovery_label = QLabel("No")
+        self.advanced_recovery_label.setWordWrap(True)
+        advanced_layout.addRow(QLabel("Recovery Available"), self.advanced_recovery_label)
+
+        self.advanced_build_log_label = QLabel("Not available")
+        self.advanced_build_log_label.setWordWrap(True)
+        advanced_layout.addRow(QLabel("Build Log"), self.advanced_build_log_label)
+
         advanced_actions = QHBoxLayout()
         start_advanced_button = QPushButton("Start Advanced Source Update")
         start_advanced_button.clicked.connect(self.controller.start_advanced_dev_update)
@@ -248,6 +315,19 @@ class UpdateManagerQtView(QMainWindow):
             self.note_text.setPlainText(str(snapshot.get("note") or ""))
         self.payload_name_label.setText(str(snapshot.get("module_payload_selected") or "No payload selected"))
         self.payload_path_label.setText(str(snapshot.get("module_payload_path") or "Payload updates are not available."))
+        self.payload_local_version_label.setText(str(snapshot.get("module_payload_local_version") or "Unknown"))
+        self.payload_remote_version_label.setText(str(snapshot.get("module_payload_remote_version") or "Not checked"))
+        self.payload_status_label.setText(str(snapshot.get("module_payload_status") or "Pending"))
+        self.payload_note_label.setText(str(snapshot.get("module_payload_note") or "Select a payload to compare against the repository."))
+        self.documentation_tracked_label.setText(str(snapshot.get("documentation_payloads") or "0 tracked file(s)"))
+        self.documentation_remote_state_label.setText(str(snapshot.get("documentation_remote_state") or "Not checked"))
+        self.documentation_status_label.setText(str(snapshot.get("documentation_status") or "Pending"))
+        self.documentation_note_label.setText(str(snapshot.get("documentation_note") or "Check and apply grouped documentation restores from the repository."))
+        self.advanced_enabled_label.setText(str(snapshot.get("advanced_channel_enabled") or "No"))
+        self.advanced_phase_label.setText(str(snapshot.get("advanced_source_phase") or "idle"))
+        self.advanced_detail_label.setText(str(snapshot.get("advanced_source_detail") or "No update job is running."))
+        self.advanced_recovery_label.setText(str(snapshot.get("advanced_recovery_available") or "No"))
+        self.advanced_build_log_label.setText(str(snapshot.get("advanced_build_log") or "Not available"))
         self.status_bar.showMessage("Update snapshot refreshed.", 4000)
 
     def set_module_payload_options(self, options, selected_key):

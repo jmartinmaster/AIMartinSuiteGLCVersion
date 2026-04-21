@@ -21,7 +21,7 @@ from app.models.production_log_model import ProductionLogModel
 from app.views.production_log_qt_view import ProductionLogQtView
 
 __module_name__ = "Production Log Qt Controller"
-__version__ = "1.2.0"
+__version__ = "1.2.2"
 
 
 class ProductionLogQtController:
@@ -128,6 +128,15 @@ class ProductionLogQtController:
         self.view.raise_()
         self.view.activateWindow()
 
+    def show_toast(self, title, message, bootstyle=None):
+        dispatcher = self.dispatcher
+        show_toast = getattr(dispatcher, "show_toast", None)
+        if callable(show_toast):
+            show_toast(title, message, bootstyle)
+            self.view.set_status(message)
+            return
+        self.view.show_info(title, message)
+
     def _initialize_form(self):
         self.view.set_form_name(self.model.get_active_form_name())
         self.balance_state = self.model.normalize_balance_state()
@@ -195,7 +204,7 @@ class ProductionLogQtController:
         if is_auto:
             self.write_state(status="ready", message=f"Auto-saved draft {os.path.basename(draft_path)}.")
             return
-        self.view.show_toast("Draft Saved", f"Saved draft {os.path.basename(draft_path)}.")
+        self.show_toast("Draft Saved", f"Saved draft {os.path.basename(draft_path)}.")
         self.write_state(status="ready", message=f"Saved draft {os.path.basename(draft_path)}.")
 
     def auto_save(self):
@@ -305,14 +314,20 @@ class ProductionLogQtController:
         self.refresh_draft_lists(initial=False)
         self.view.show_recovery_dialog(self.recovery_snapshots)
 
-    def open_recovery_viewer(self):
+    def open_recovery_viewer(self, snapshot_path=None):
         if self.dispatcher is None:
             return None
         self.dispatcher.load_module("recovery_viewer", use_transition=False, ensure_authorized=False)
         recovery_instance = getattr(self.dispatcher, "active_module_instance", None)
+        selected_record_path = str(snapshot_path or "").strip() or None
         if recovery_instance is not None and hasattr(recovery_instance, "refresh_records"):
             try:
                 recovery_instance.refresh_records()
+            except Exception:
+                pass
+        if selected_record_path and recovery_instance is not None and hasattr(recovery_instance, "focus_record_path"):
+            try:
+                recovery_instance.focus_record_path(selected_record_path)
             except Exception:
                 pass
         return None
@@ -357,8 +372,7 @@ class ProductionLogQtController:
             )
 
     def request_open_recovery(self, snapshot_path=None):
-        _ = snapshot_path
-        self.open_recovery_viewer()
+        self.open_recovery_viewer(snapshot_path=snapshot_path)
         return None
 
     def _header_value_by_role(self, header_payload, role_name, fallback_id=None, default=""):
@@ -462,8 +476,7 @@ class ProductionLogQtController:
             config=self.layout_config,
             fallback_id="total_molds",
         )
-        if total_molds_field_id in self.view.header_widgets:
-            self.view.header_widgets[total_molds_field_id].setText(str(total_molds))
+        self.view.set_header_field_value(total_molds_field_id, str(total_molds))
 
         hours_value = self._header_value_by_role(header_payload, "shift_hours", fallback_id="hours", default="8")
         shift_total_minutes = self.model.calculate_shift_total_minutes(hours_value)
@@ -513,7 +526,7 @@ class ProductionLogQtController:
             self.current_draft_path = None
             self._apply_loaded_payload(data, draft_path=None, mark_dirty_after_load=True)
             self.calculate_metrics()
-            self.view.show_toast("Import Complete", "Imported workbook into Production Log.")
+            self.show_toast("Import Complete", "Imported workbook into Production Log.")
             self._show_data_handler_warnings("import")
         except Exception as exc:
             self.view.show_error("Import Error", f"Failed to import Excel:\n{exc}")

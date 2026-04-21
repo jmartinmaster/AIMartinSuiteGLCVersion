@@ -20,7 +20,7 @@ INFO = "info"
 SUCCESS = "success"
 
 __module_name__ = "Rate Manager Qt Controller"
-__version__ = "1.1.0"
+__version__ = "1.1.1"
 
 
 class RateManagerQtController:
@@ -67,6 +67,13 @@ class RateManagerQtController:
 
     def on_search_changed(self):
         self.refresh_table()
+
+    def show_toast(self, title, message, bootstyle=None):
+        dispatcher = self.dispatcher
+        show_toast = getattr(dispatcher, "show_toast", None)
+        if callable(show_toast):
+            show_toast(title, message, bootstyle)
+        self.view.set_status(str(message or ""))
 
     def enter_edit_mode(self):
         try:
