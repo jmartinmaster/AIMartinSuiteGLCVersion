@@ -132,13 +132,20 @@ class LayoutManagerQtRuntimeManager:
         except Exception:
             return {}
 
-    def send_command(self, action):
+    def send_command(self, action, payload=None):
         command_path = self.command_path
         if command_path is None:
             return
         try:
             command_path.write_text(
-                json.dumps({"action": action, "requested_at": time.time()}, indent=2),
+                json.dumps(
+                    {
+                        "action": action,
+                        "requested_at": time.time(),
+                        "payload": _to_json_compatible(payload or {}),
+                    },
+                    indent=2,
+                ),
                 encoding="utf-8",
             )
         except Exception as exc:
@@ -279,6 +286,7 @@ class LayoutManagerQtBridge(QWidget):
         return None
 
     def apply_theme(self):
+        self.mini_dispatcher.apply_theme()
         return None
 
 
@@ -290,7 +298,6 @@ class LayoutManagerMiniDispatcher:
         "app.controllers.layout_manager_controller",
         "app.controllers.layout_manager_qt_controller",
         "app.models.layout_manager_model",
-        "app.views.layout_manager_view",
         "app.views.layout_manager_qt_view",
     )
 
@@ -301,6 +308,17 @@ class LayoutManagerMiniDispatcher:
     def is_runtime_running(self):
         return self.runtime_manager.is_running()
 
+    def _current_theme_tokens(self):
+        view = getattr(self.host_dispatcher, "view", None)
+        if view is not None:
+            theme_tokens = getattr(view, "theme_tokens", None)
+            if isinstance(theme_tokens, dict) and theme_tokens:
+                return dict(theme_tokens)
+        root_tokens = getattr(self.host_dispatcher.root, "_martin_theme_tokens", None)
+        if isinstance(root_tokens, dict) and root_tokens:
+            return dict(root_tokens)
+        return {}
+
     def open_or_raise_window(self, restart=False):
         self.schedule_preload(force=bool(restart))
         self.runtime_manager.ensure_running(force_restart=bool(restart))
@@ -310,6 +328,18 @@ class LayoutManagerMiniDispatcher:
             self.runtime_manager.send_command("reload_from_disk")
             return
         self.open_or_raise_window(restart=False)
+
+    def apply_theme(self):
+        theme_tokens = self._current_theme_tokens()
+        host = self.host_dispatcher
+        with host.model.preload_data_lock:
+            cached_payload = host.shared_data.get(self.PRELOAD_KEY)
+            if isinstance(cached_payload, dict):
+                cached_payload["theme_tokens"] = dict(theme_tokens)
+        if self.runtime_manager.is_running():
+            self.runtime_manager.send_command("apply_theme", {"theme_tokens": theme_tokens})
+            return
+        self.schedule_preload(force=True)
 
     def stop_window(self):
         self.runtime_manager.stop_runtime(force=False)
@@ -373,7 +403,7 @@ class LayoutManagerMiniDispatcher:
             "preview_grid": model.build_preview_grid(config),
             "guardrails": model.build_editor_guardrails(config),
             "protected_row_field_lookup": model.get_protected_row_field_lookup(config),
-            "theme_tokens": dict(getattr(self.host_dispatcher.root, "_martin_theme_tokens", {}) or {}),
+            "theme_tokens": self._current_theme_tokens(),
             "loaded_at": time.time(),
         }
 

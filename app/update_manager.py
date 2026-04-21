@@ -23,4 +23,4 @@ def get_ui(parent, dispatcher):
         from app.controllers.update_manager_qt_controller import UpdateManagerQtController
 
         return UpdateManagerQtController(parent=parent, dispatcher=dispatcher)
-    raise RuntimeError("The Tk Update Manager controller was removed from the live Phase 9 runtime. See shadow/app/controllers/update_manager_controller.py.")
+    raise RuntimeError("The legacy Tk Update Manager controller is not available in the live application. Inspect shadow/app/controllers/update_manager_controller.py if you need the archived implementation.")

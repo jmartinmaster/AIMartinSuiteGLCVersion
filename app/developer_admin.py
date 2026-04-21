@@ -23,4 +23,4 @@ def get_ui(parent, dispatcher):
         from app.controllers.developer_admin_qt_controller import DeveloperAdminQtController
 
         return DeveloperAdminQtController(parent=parent, dispatcher=dispatcher)
-    raise RuntimeError("The Tk Developer Admin controller was removed from the live Phase 9 runtime. See shadow/app/controllers/developer_admin_controller.py.")
+    raise RuntimeError("The legacy Tk Developer Admin controller is not available in the live application. Inspect shadow/app/controllers/developer_admin_controller.py if you need the archived implementation.")

@@ -13,9 +13,11 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-from app.tk_runtime_removed import raise_tk_runtime_removed
+import os
+from typing import Callable
 
-raise_tk_runtime_removed("app/views/layout_manager_view_factory.py")
+from app.views.layout_manager_qt_view import is_layout_manager_qt_runtime_available
+from app.views.layout_manager_view_contract import LayoutManagerViewContract
 
 __module_name__ = "Layout Manager View Factory"
 __version__ = "1.0.1"
@@ -39,18 +41,20 @@ def get_requested_layout_manager_ui_backend(dispatcher):
 def create_layout_manager_view(parent, dispatcher, controller):
     requested_backend = get_requested_layout_manager_ui_backend(dispatcher)
     controller.requested_view_backend = requested_backend
-    controller.resolved_view_backend = "tk"
+    controller.resolved_view_backend = "qt"
     controller.view_backend_fallback_reason = None
 
-    if requested_backend == "qt":
-        if not is_layout_manager_qt_runtime_available():
-            controller.view_backend_fallback_reason = "PyQt6 is not installed; using the Tk layout manager view."
-        else:
-            layout_manager_dispatcher = getattr(dispatcher, "layout_manager_dispatcher", None)
-            if layout_manager_dispatcher is None:
-                controller.view_backend_fallback_reason = "Layout Manager Qt runtime is unavailable; using the Tk layout manager view."
-            else:
-                controller.resolved_view_backend = "qt"
-                return layout_manager_dispatcher.launch(parent)
+    if requested_backend != "qt":
+        controller.view_backend_fallback_reason = "The live runtime only supports the dedicated PyQt6 Layout Manager window."
+        raise RuntimeError(controller.view_backend_fallback_reason)
 
-    return LayoutManagerView(parent, dispatcher, controller)
+    if not is_layout_manager_qt_runtime_available():
+        controller.view_backend_fallback_reason = "PyQt6 is not installed; the Layout Manager dedicated window cannot be launched."
+        raise RuntimeError(controller.view_backend_fallback_reason)
+
+    layout_manager_dispatcher = getattr(dispatcher, "layout_manager_dispatcher", None)
+    if layout_manager_dispatcher is None:
+        controller.view_backend_fallback_reason = "Layout Manager Qt runtime is unavailable in the current dispatcher."
+        raise RuntimeError(controller.view_backend_fallback_reason)
+
+    return layout_manager_dispatcher.launch(parent)

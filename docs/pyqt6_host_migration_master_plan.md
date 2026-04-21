@@ -1,9 +1,9 @@
 # PyQt6 Host Migration Master Plan
 
 ## Status
-- Active canonical migration plan for host-shell and module migration work.
-- Sidecars are temporary migration scaffolding only.
-- Tk host support is temporary compatibility infrastructure only.
+- Canonical migration record for the completed PyQt6 host-shell and module migration effort.
+- Migration status: completed through Phase 12 in this checkout.
+- Future feature and update planning should live outside this document; use this file as the architecture baseline and historical closeout record.
 - Phase 0 COMPLETED.
 - Phase 1 Part 1 COMPLETED: dispatcher contract groundwork landed for `get_ui(parent, dispatcher)`, lifecycle hooks, container-neutral active-module state, and explicit active-form signaling.
 - Phase 1 Part 2 COMPLETED: the current Tk loader sequence is now split into reusable dispatcher lifecycle helpers so the Qt viewport path can mirror the same steps instead of re-implementing them ad hoc.
@@ -36,10 +36,10 @@
 - Phase 4 Section 4C.2 COMPLETED: compile, phase-gate, and shown-window PyQt6 smoke validation all passed, so Phase 4 is closed.
 
 ## Plan Governance
-1. This is the only active migration plan for the PyQt6 host-shell effort.
-2. Do not create mini plans, separate phase plans, or module-specific execution plans outside this document.
+1. This is the canonical completed migration record for the PyQt6 host-shell effort.
+2. Do not reopen or extend this document for routine feature planning, release planning, or unrelated enhancements.
 3. Existing audits and older migration docs are reference inputs only.
-4. If sequencing, scope, risks, or requirements change, update this document in place.
+4. Update this document only if migration-closeout facts need correction or if a future architecture effort explicitly supersedes part of this baseline.
 5. Operational docs such as validation runbooks and release checklists remain separate because they are execution aids, not migration plans.
 
 ## Current State
@@ -50,11 +50,11 @@
 - The shell window title, workspace placeholder, and active-module messaging now distinguish clearly between the main workspace and temporary separate-window modules.
 - `PyQt6HostUiAdapter` now delegates shared-viewport resize binding and viewport size queries to the real Qt workspace and forwards Qt mousewheel events to scroll targets.
 - The PyQt6 shell now emits viewport resize notifications when shell layout changes such as sidebar collapse, banner visibility, or viewport surface switches occur.
-- `_load_module_in_active_viewport()` now routes by active backend, and `_load_module_in_qt_viewport()` supports both an in-process viewport path and the temporary sidecar fallback.
+- `_load_module_in_active_viewport()` now routes through the live PyQt6 host path, and `layout_manager` remains the explicit dedicated-window exception through `app/layout_manager_dispatcher.py`.
 - `about` is the first verified in-process Qt pilot module mounted inside the shared viewport.
 - `scripts/validate_pyqt6_phase_gate.py` now provides the repeatable phase-gate validator for Qt-side lifecycle parity and runs without the prior probe-layout warning noise.
-- Multiple remaining modules still depend on `QtModuleRuntimeManager`, JSON IPC session files, and bridge views.
-- Repository instructions have been realigned to the PyQt6-first target architecture.
+- The generic migration-era sidecar stack is removed from the live tree; only the explicit `layout_manager` dedicated runtime contract remains.
+- Repository instructions and historical references have been realigned to the completed PyQt6-only architecture.
 
 ## Target Architecture
 - The application runs as a real in-process PyQt6 shell with a shared central viewport.
@@ -62,7 +62,7 @@
 - Modules continue to enter through `get_ui(parent, dispatcher)`.
 - Controllers and models remain backend-neutral where practical; views are free to be backend-specific.
 - Every migrated PyQt6 module must match the user-facing behavior of its Tk counterpart.
-- No summary modules, reduced-function Qt ports, or long-term sidecars are acceptable.
+- No summary modules, reduced-function Qt ports, or reintroduced generic sidecar scaffolding are acceptable.
 
 ## Phases
 
@@ -336,7 +336,7 @@ Section 7C: Production Log Migration
 1. Remove `QtModuleRuntimeManager` once no migrated modules depend on it.
 2. Retire JSON session/state/command files and bridge views.
 3. Keep standalone Qt windows only if they remain an intentional product feature.
-4. Status: IN PROGRESS.
+4. Status: COMPLETED.
 5. Current dependency snapshot before Phase 8 work begins: the generic sidecar stack is still present in `app/qt_module_runtime.py`, `app/views/qt_module_bridge_view.py`, the launcher-side Qt session branch in `launcher.py`, and the PyQt6 host shell separate-window runtime-manager path in `app/views/pyqt6_host_shell_view.py`. The current tree still contains module-local sidecar seams for `production_log`, `update_manager`, and `internal_code_editor`, while `layout_manager` remains the explicit dedicated-runtime exception under Phase 7A.
 
 Section 8A: Inventory And Scope Lock
@@ -399,7 +399,7 @@ Phase 8 closeout: COMPLETED.
 10. Ubuntu DEB smoke is deferred as follow-up packaging validation and does not keep the Tk-host removal phase open.
 
 ### Phase 10: Overflow Hardening and Screen-Fit Audit
-1. Status: IN PROGRESS.
+1. Status: COMPLETED.
 2. Audit every shared-viewport module and dedicated runtime window for content that exceeds the visible viewport or screen height/width.
 3. Replace layout compression with scrollable containers so large forms, editors, tables, and preview surfaces stay readable instead of shrinking their internals.
 4. Clamp standalone PyQt6 window sizes and major dialogs to the available screen geometry before showing them.
@@ -407,35 +407,55 @@ Phase 8 closeout: COMPLETED.
 6. Entry note: packaged path seeding and Qt admin-auth dead-end regressions were resolved before starting this phase, so overflow hardening can proceed from a working packaged host baseline.
 7. Current implementation state: `layout_manager` and `production_log` already use scrollable central surfaces plus screen-fit clamping for standalone windows. `settings_manager` and `update_manager` now match that baseline with scrollable central workspaces and screen-fit sizing so long stacked admin/update sections remain reachable in the host viewport and in standalone launches.
 8. Broader screen-fit hardening in this checkout: `about`, `help_viewer`, `rate_manager`, `recovery_viewer`, `internal_code_editor`, and `production_log_calculations` now clamp standalone Qt window size to the available screen geometry instead of assuming a large desktop. Their embedded viewport paths remain unchanged.
-9. Validation in this checkout: `py_compile` passed for the broadened Phase 10 view changes, and `scripts/validate_module_loads.py` passed for `about`, `help_viewer`, `recovery_viewer`, `rate_manager`, `production_log_calculations`, `update_manager`, and `internal_code_editor` after the screen-fit sweep.
+9. Validation in this checkout: `py_compile` passed for the broadened Phase 10 view changes, `scripts/validate_module_loads.py` passed for `about`, `help_viewer`, `recovery_viewer`, `rate_manager`, `production_log_calculations`, `update_manager`, and `internal_code_editor` after the screen-fit sweep, and the current `scripts/validate_pyqt6_phase_gate.py` closeout run remains green with all 19 checks passing across the live host and dedicated runtime surfaces.
+
+Phase 10 closeout: COMPLETED.
 
 ### Phase 11: Post-Migration UI Cleanup
-1. Status: IN PROGRESS.
+1. Status: COMPLETED.
 2. Remove leftover host-shell migration artifacts that are no longer useful in the live PyQt6 application, including the obsolete Active Module viewport panel.
 3. Remove migration-era slice labels, dedicated migration notes, and other transition wording from user-facing Qt module surfaces where the modules now behave as normal application pages.
 4. Finish retiring residual migration-only affordances from security, update, and host-shell surfaces while preserving any still-required backend or dedicated-runtime behavior behind the scenes.
 5. Validation targets: `pyqt6_host_shell_view`, `settings_manager`, `security_admin`, `developer_admin`, and `update_manager`.
-6. Current implementation state: the host shell no longer shows the old Active Module panel in the main viewport area, the Qt settings and update surfaces no longer show slice labels or migration-note panels, and the Qt security form again seeds role defaults for new vault creation so admin and developer accounts can be created from the migrated UI.
+6. Current implementation state: the obsolete host-shell Active Module diagnostics surface has been removed, the Qt settings and update pages now use normal product copy instead of snapshot/debug labels, shared module shims no longer expose Phase 9 or shadow-path messaging as live user-facing language, and the remaining dedicated-window exception for `layout_manager` uses its explicit post-migration contract rather than generic sidecar behavior.
+7. Closeout evidence in this checkout:
+	- `app/views/pyqt6_host_shell_view.py` no longer constructs the hidden `runtime_diagnostics_group` panel or exposes the old Active Module session controls.
+	- `app/views/settings_manager_qt_view.py`, `app/views/update_manager_qt_view.py`, `app/controllers/settings_manager_qt_controller.py`, `app/controllers/update_manager_qt_controller.py`, the affected module shims, and `app/security.py` have all been normalized away from migration/snapshot wording.
+	- `layout_manager` launch and theme propagation regressions discovered during closeout were fixed through the dedicated runtime path in `app/layout_manager_dispatcher.py`, `app/controllers/layout_manager_qt_controller.py`, and `app/views/layout_manager_qt_view.py`.
+	- `scripts/validate_pyqt6_phase_gate.py` now includes explicit cleanup-surface absence checks and validates the dedicated `layout_manager` runtime against its real launching-to-running lifecycle.
+8. Validation in this checkout: `py_compile` passed for the touched Phase 11 cleanup and dedicated-runtime files, the focused Layout Manager runtime probe confirmed the dedicated window applied updated theme tokens live, and `scripts/validate_pyqt6_phase_gate.py` passed with all 19 checks green.
+9. Closeout result: Phase 11.10 is satisfied. The wording cleanup is landed, the validator covers the removed artifacts explicitly, the dedicated Layout Manager exception is stable again, and Phase 11 is closed.
+
+Phase 11 closeout: COMPLETED.
 
 ### Phase 12: Documentation Finalization
-1. Keep `.github/copilot-instructions.md` aligned with the target PyQt6-first architecture.
-2. Mark older module-specific migration plans as historical or absorb their remaining useful content into canonical docs.
-3. Ensure future implementation work follows this plan instead of creating local planning sprawl.
+1. Status: COMPLETED.
+2. Keep `.github/copilot-instructions.md` aligned with the target PyQt6-first architecture.
+3. Mark older module-specific migration plans as historical or absorb their remaining useful content into canonical docs.
+4. Ensure future implementation work follows this plan instead of creating local planning sprawl.
+5. Final implementation state:
+	- `.github/copilot-instructions.md` now describes the live runtime as PyQt6-only, keeps `layout_manager` on the explicit dedicated-window contract, and removes remaining transitional-Tk guidance from the active architecture, shell, theme, module-creation, and validation sections.
+	- this document's verification and related-documents blocks now reflect the completed Phase 8 through Phase 11 architecture instead of pre-closeout migration criteria.
+	- `docs/phase9_runbook.md` is explicitly labeled as a historical closeout artifact, and the older `docs/layout_manager_pyqt6_migration_plan.md` remains labeled as historical reference.
+6. Validation in this checkout: documentation consistency was updated in place across the canonical master plan, repo instructions, and historical runbook surfaces; file-level diagnostics report no errors for the touched documentation files.
+
+Phase 12 closeout: COMPLETED.
 
 ## Verification
-1. Canonical docs agree that PyQt6 host shell is primary, sidecars are temporary, Tk host is transitional, and reduced-function Qt modules are out of scope.
+1. Canonical docs agree that the live application is PyQt6-only, `layout_manager` is the explicit dedicated-window exception, and reduced-function Qt modules are out of scope.
 2. `Dispatcher.load_module()` behavior is mirrored on the Qt side for authorization, lifecycle hooks, caching, active-form notifications, theme application, and active navigation state.
 3. Pilot modules render inside the shared Qt viewport rather than opening separate top-level windows, except for intentional dedicated-runtime modules such as `layout_manager`.
 4. Live theme switching updates active and cached in-process Qt modules correctly.
-5. Protected-module and security-lock behavior remains correct during migration.
-6. Mixed-backend sessions remain stable during the migration window.
+5. Protected-module and security-lock behavior remains correct on the live PyQt6 runtime.
+6. Shared-viewport modules and the dedicated `layout_manager` runtime coexist safely without generic sidecar infrastructure.
 7. Migrated modules avoid blocking the Qt main thread or move heavy work off-thread safely.
-8. Before sidecar removal, confirm no migrated module still depends on sidecar-only infrastructure.
+8. Confirm no completed migration path depends on the removed generic sidecar infrastructure.
 9. Shared-viewport modules and dedicated runtime windows use scrollable surfaces and screen-fit sizing instead of compressing unreadable internals.
-10. Before Tk-host removal, confirm all user-facing modules have full PyQt6 parity and pass manual regression.
+10. Confirm user-facing modules and the dedicated `layout_manager` runtime continue to pass scripted validation plus targeted manual regression.
 
 ## Related Documents
 - Historical reference: `docs/layout_manager_pyqt6_migration_plan.md`
+- Historical closeout artifact: `docs/phase9_runbook.md`
 - Deferred future architecture: `docs/multi_user_migration_assessment.md`
 - Operational QA: `docs/release_regression_checklist.md`
 - Operational QA: `docs/packaged_windows_validation_runbook.md`

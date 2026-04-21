@@ -55,6 +55,11 @@ class LayoutManagerQtController:
         self.view.raise_window()
         self.write_state(status="running", message="Layout Manager Qt window is visible.")
 
+    def apply_theme(self, theme_tokens):
+        self.payload["theme_tokens"] = dict(theme_tokens or {})
+        self.view.set_theme_tokens(self.payload["theme_tokens"])
+        self.write_state(message="Applied updated theme tokens.")
+
     def refresh_forms(self):
         self.forms = list(self.model.list_forms())
         self.view.set_forms(self.forms, self.current_form_info.get("id"))
@@ -250,6 +255,7 @@ class LayoutManagerQtController:
         except Exception:
             return
         action = str(command.get("action") or "").strip().lower()
+        payload = command.get("payload") if isinstance(command.get("payload"), dict) else {}
         if not action:
             return
         try:
@@ -259,6 +265,8 @@ class LayoutManagerQtController:
         if action == "raise_window":
             self.view.raise_window()
             self.write_state(message="Raised Layout Manager Qt window.")
+        elif action == "apply_theme":
+            self.apply_theme(payload.get("theme_tokens") or {})
         elif action == "reload_from_disk":
             self.reload_current()
         elif action == "close_window":

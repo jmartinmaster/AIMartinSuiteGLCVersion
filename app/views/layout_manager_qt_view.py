@@ -266,6 +266,10 @@ class LayoutManagerQtView(QMainWindow):
         if application is not None:
             application.setPalette(get_qt_palette(theme_tokens=tokens))
 
+    def set_theme_tokens(self, theme_tokens):
+        self.theme_tokens = dict(theme_tokens or {})
+        self._apply_theme()
+
     def _handle_editor_changed(self):
         if self._updating_editor:
             return

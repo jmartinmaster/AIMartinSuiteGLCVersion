@@ -101,7 +101,7 @@ class UpdateManagerQtView(QMainWindow):
         subtitle_label.setWordWrap(True)
         content_layout.addWidget(subtitle_label)
 
-        summary_group = QGroupBox("Current Update Snapshot")
+        summary_group = QGroupBox("Current Update Status")
         summary_form = QFormLayout(summary_group)
 
         for key, label in [
@@ -136,7 +136,7 @@ class UpdateManagerQtView(QMainWindow):
 
         content_layout.addWidget(summary_group)
 
-        payload_group = QGroupBox("Module Payload Restores")
+        payload_group = QGroupBox("Module Payload Updates")
         payload_layout = QFormLayout(payload_group)
 
         self.payload_selector = QComboBox()
@@ -166,7 +166,7 @@ class UpdateManagerQtView(QMainWindow):
 
         content_layout.addWidget(payload_group)
 
-        documentation_group = QGroupBox("Documentation Payload Restores")
+        documentation_group = QGroupBox("Documentation Updates")
         documentation_layout = QFormLayout(documentation_group)
         documentation_actions = QHBoxLayout()
         check_documentation_button = QPushButton("Check Documentation Restores")
@@ -179,7 +179,7 @@ class UpdateManagerQtView(QMainWindow):
         documentation_layout.addRow(QLabel("Actions"), documentation_actions)
         content_layout.addWidget(documentation_group)
 
-        advanced_group = QGroupBox("Advanced Source Jobs & Recovery")
+        advanced_group = QGroupBox("Advanced Source Operations")
         advanced_layout = QFormLayout(advanced_group)
         advanced_actions = QHBoxLayout()
         start_advanced_button = QPushButton("Start Advanced Source Update")
@@ -205,7 +205,7 @@ class UpdateManagerQtView(QMainWindow):
         apply_button = QPushButton("Apply Stable Updates")
         apply_button.clicked.connect(self.controller.apply_updates)
         controls.addWidget(apply_button)
-        refresh_button = QPushButton("Refresh Snapshot")
+        refresh_button = QPushButton("Refresh Status")
         refresh_button.clicked.connect(self.controller.refresh_snapshot)
         controls.addWidget(refresh_button)
         controls.addStretch(1)

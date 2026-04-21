@@ -15,7 +15,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 import os
 
-from app.controllers.help_viewer_controller import DOC_GROUPS, DOC_INDEX, get_doc_group_name, get_document_meta_label, read_help_document
+from app.help_viewer_documents import DOC_GROUPS, DOC_INDEX, get_doc_group_name, get_document_meta_label, read_help_document
 from app.views.help_viewer_qt_view import HelpViewerQtView
 
 __module_name__ = "Help Viewer Qt Controller"

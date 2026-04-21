@@ -1,6 +1,8 @@
 # Multi-User Migration Assessment
 
-This note remains relevant as future architecture guidance. It is not part of the `2.1.4` release checklist.
+Status: Deferred future feature guidance.
+
+This note remains relevant as future architecture guidance. It is not part of the completed PyQt6 migration plan or the `2.1.4` release checklist.
 
 ## Current `2.1.4` Baseline
 
@@ -39,3 +41,5 @@ This note remains relevant as future architecture guidance. It is not part of th
 ## Bottom Line
 
 The next meaningful security step is a service-backed multi-user model with roles and rights, rebuilt inside the current MVC structure. The earlier detailed comparison notes have served their purpose; this file is the condensed forward-looking version.
+
+Planning note: treat this document as input for future security feature planning, not as an active migration plan.

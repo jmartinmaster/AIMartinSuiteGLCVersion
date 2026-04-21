@@ -23,4 +23,4 @@ def get_ui(parent, dispatcher):
         from app.controllers.security_admin_qt_controller import SecurityAdminQtController
 
         return SecurityAdminQtController(parent=parent, dispatcher=dispatcher)
-    raise RuntimeError("The Tk Security Admin controller was removed from the live Phase 9 runtime. See shadow/app/controllers/security_admin_controller.py.")
+    raise RuntimeError("The legacy Tk Security Admin controller is not available in the live application. Inspect shadow/app/controllers/security_admin_controller.py if you need the archived implementation.")

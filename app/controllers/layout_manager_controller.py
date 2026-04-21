@@ -13,9 +13,17 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-from app.tk_runtime_removed import raise_tk_runtime_removed
 
-raise_tk_runtime_removed("app/controllers/layout_manager_controller.py")
+from app.models.layout_manager_model import LayoutManagerModel
+from app.theme_manager import get_theme_tokens
+from app.views.layout_manager_qt_view import launch_layout_manager_qt_probe
+from app.views.layout_manager_view_contract import LayoutManagerViewContract
+from app.views.layout_manager_view_factory import create_layout_manager_view
+
+DANGER = "danger"
+INFO = "info"
+SECONDARY = "secondary"
+SUCCESS = "success"
 
 
 class LayoutManagerController:
@@ -42,8 +50,24 @@ class LayoutManagerController:
         self.apply_theme()
         self.load_config(initial=True)
 
+    def _get_theme_tokens(self):
+        dispatcher_view = getattr(self.dispatcher, "view", None)
+        theme_tokens = getattr(dispatcher_view, "theme_tokens", None)
+        if isinstance(theme_tokens, dict) and theme_tokens:
+            return dict(theme_tokens)
+
+        parent_tokens = getattr(self.parent, "_martin_theme_tokens", None)
+        if isinstance(parent_tokens, dict) and parent_tokens:
+            return dict(parent_tokens)
+
+        winfo_toplevel = getattr(self.parent, "winfo_toplevel", None)
+        if callable(winfo_toplevel):
+            root = winfo_toplevel()
+            return get_theme_tokens(root=root)
+
+        return get_theme_tokens()
+
     def build_qt_session_payload(self):
-        root = self.parent.winfo_toplevel()
         loaded_form = self._get_loaded_form_info()
         config = self.current_config
         source_path = self.model.config_path
@@ -63,7 +87,7 @@ class LayoutManagerController:
             "config": config,
             "guardrails": self.model.build_editor_guardrails(config),
             "protected_row_field_lookup": self.model.get_protected_row_field_lookup(config),
-            "theme_tokens": dict(getattr(root, "_martin_theme_tokens", {}) or {}),
+            "theme_tokens": self._get_theme_tokens(),
         }
 
     def open_or_raise_qt_window(self):
@@ -294,8 +318,7 @@ class LayoutManagerController:
         self.view.apply_selection(item_key, scroll=scroll)
 
     def apply_theme(self):
-        root = self.parent.winfo_toplevel()
-        self.view.apply_theme(get_theme_tokens(root=root))
+        self.view.apply_theme(self._get_theme_tokens())
         if self.current_config is not None:
             protected_row_field_lookup = self.model.get_protected_row_field_lookup(self.current_config)
             guardrails = self.model.build_editor_guardrails(self.current_config)
@@ -416,7 +439,6 @@ class LayoutManagerController:
     def launch_qt_probe(self):
         try:
             config, _payload_details = self._resolve_editor_config()
-            root = self.parent.winfo_toplevel()
             loaded_form = self._get_loaded_form_info()
             launch_layout_manager_qt_probe(
                 {
@@ -426,7 +448,7 @@ class LayoutManagerController:
                     "form_name": loaded_form.get("name", "Form"),
                     "form_id": loaded_form.get("id", "form"),
                     "source_label": self._get_source_label(),
-                    "theme_tokens": get_theme_tokens(root=root),
+                    "theme_tokens": self._get_theme_tokens(),
                     "serialized_config": self.model.serialize_config(config),
                 }
             )

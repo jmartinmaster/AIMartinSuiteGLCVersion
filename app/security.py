@@ -524,8 +524,8 @@ class Gatekeeper:
         if not legacy_hash:
             return False
         vault_name = self._prompt_text(
-            "Security Migration",
-            "Name the first admin vault for the migrated security system:",
+            "Security Setup",
+            "Name the first admin vault for the current security system:",
             parent=parent,
             initialvalue="admin_1",
         )
@@ -533,7 +533,7 @@ class Gatekeeper:
             return False
         normalized_name = self._sanitize_vault_name(vault_name)
         if not normalized_name:
-            self._show_error("Security Migration", "A valid admin vault name is required.", parent=parent)
+            self._show_error("Security Setup", "A valid admin vault name is required.", parent=parent)
             return False
 
         self._validate_role_limit("admin")

@@ -71,7 +71,7 @@ class SettingsManagerQtController:
         return {
             "window_title": f"{self.module_title} - Production Logging Center",
             "title": self.module_title,
-            "subtitle": f"Manage {section_label.lower()} from the shared workspace.",
+            "subtitle": f"Manage {section_label.lower()} from this page.",
             "module_name": self.module_name,
             "section_mode": self.section_mode,
             "theme_options": [{"key": theme_name, "label": get_theme_label(theme_name)} for theme_name in get_theme_names()],
@@ -168,7 +168,7 @@ class SettingsManagerQtController:
             "persistent_modules": ", ".join(persistent_modules) if persistent_modules else "Disabled",
             "external_override_trust": "Enabled" if gatekeeper.is_external_module_override_trust_enabled() else "Disabled",
             "section_mode": self.section_mode,
-            "note": "Manage application settings, downtime codes, security administration, and developer tools from the main workspace.",
+            "note": "Manage application settings, downtime codes, security administration, and developer tools from this page.",
         }
         self.view.set_editable_settings(
             self.model.get_settings_copy(),
@@ -482,6 +482,25 @@ class SettingsManagerQtController:
         )
         self.view.show_toast("Security", message)
         return self.get_security_admin_state()
+
+    def reset_security_storage(self):
+        if not self._ensure_security_access():
+            return None
+        if not gatekeeper.reset_vault(parent=self.view, dispatcher=self.dispatcher):
+            return None
+        self.refresh_snapshot(initial=False)
+        self.view.configure_security_admin_panel(self.get_security_admin_state())
+        return self.get_security_admin_state()
+
+    def reset_security_storage_from_ui(self):
+        try:
+            new_state = self.reset_security_storage()
+        except Exception as exc:
+            self.view.show_error("Security", str(exc))
+            return
+        if new_state is None:
+            return
+        self.view.configure_security_admin_panel(new_state)
 
     def get_developer_admin_settings_state(self):
         return {

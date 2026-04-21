@@ -1723,6 +1723,8 @@ class Dispatcher:
                 view_apply_theme(normalized_theme)
             except TypeError:
                 view_apply_theme()
+        if self.layout_manager_dispatcher is not None:
+            self.layout_manager_dispatcher.apply_theme()
         if hasattr(self.active_module_instance, "apply_theme"):
             self.active_module_instance.apply_theme()
         update_idletasks = getattr(self.root, "update_idletasks", None)

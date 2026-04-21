@@ -138,18 +138,18 @@ class SettingsManagerQtView(QMainWindow):
         subtitle_label.setWordWrap(True)
         content_layout.addWidget(subtitle_label)
 
-        self.summary_group = QGroupBox("Current Settings Snapshot")
+        self.summary_group = QGroupBox("Current Settings")
         summary_form = QFormLayout(self.summary_group)
 
         for key, label in [
             ("theme", "Theme"),
             ("security_summary", "Security Session"),
-            ("section_mode", "Section Mode"),
+            ("section_mode", "Administration Scope"),
             ("module_whitelist", "Module Whitelist"),
             ("persistent_modules", "Persistent Modules"),
             ("external_override_trust", "External Override Trust"),
-            ("security_admin_visible", "Security Admin Visible"),
-            ("developer_admin_visible", "Developer Admin Visible"),
+            ("security_admin_visible", "Security Tools Access"),
+            ("developer_admin_visible", "Developer Tools Access"),
         ]:
             value_label = QLabel("-")
             value_label.setWordWrap(True)
@@ -315,6 +315,9 @@ class SettingsManagerQtView(QMainWindow):
         delete_vault_button = QPushButton("Delete Vault")
         delete_vault_button.clicked.connect(self.controller.delete_selected_security_vault)
         security_actions_row_2.addWidget(delete_vault_button)
+        reset_security_button = QPushButton("Reset Security Storage")
+        reset_security_button.clicked.connect(self.controller.reset_security_storage_from_ui)
+        security_actions_row_2.addWidget(reset_security_button)
         save_security_mode_button = QPushButton("Save Security Mode")
         save_security_mode_button.clicked.connect(self.controller.save_current_security_mode)
         security_actions_row_2.addWidget(save_security_mode_button)
@@ -359,7 +362,7 @@ class SettingsManagerQtView(QMainWindow):
         save_button = QPushButton("Save Settings")
         save_button.clicked.connect(self.controller.save_settings)
         controls.addWidget(save_button)
-        refresh_button = QPushButton("Refresh Snapshot")
+        refresh_button = QPushButton("Refresh Settings")
         refresh_button.clicked.connect(self.controller.refresh_snapshot)
         controls.addWidget(refresh_button)
         controls.addStretch(1)

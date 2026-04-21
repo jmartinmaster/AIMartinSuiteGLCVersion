@@ -2,7 +2,9 @@
 
 Status: COMPLETED
 
-This runbook documents the current inventory, parity mapping, and the cautious checklist for removing the Tk host path (Phase 9). Follow the checklist exactly; if anything is uncertain, make a note and leave it alone.
+Historical status: This document is a closeout artifact for the completed Tk-host removal phase. It is retained for audit and packaging reference, not as an active implementation plan.
+
+This runbook documents the inventory, parity mapping, and closeout notes that supported removal of the Tk host path during Phase 9. Treat it as historical reference.
 
 ## Inventory (discovered Tk usage)
 - `app/views/app_view.py` — Tk host shell (primary Tk shell view)
@@ -41,7 +43,7 @@ Conclusion: module-level parity is present for the main navigation and pilot mod
 - Packaging and CI: `build.py` currently references `tkinter` and `ttkbootstrap` in hidden imports. Ensure packagers and build scripts are updated in a follow-up change only after removal is validated.
 - Windows launcher behavior: previous Phase 8 closeout noted a Windows UTF-8 BOM gotcha for standalone session JSON; keep this in mind when running dedicated-session smoke tests.
 
-## Current demolition state
+## Final Removal State
 - `launcher.py` now enforces PyQt6-only startup and records `phase9_tk_removed = True` in runtime settings.
 - `app/controllers/app_controller.py` no longer imports `ttkbootstrap`, routes notifications through the host adapter, and raises on unsupported non-PyQt backends.
 - Managed module shims now lazy-load Qt controllers and fail fast instead of importing Tk controllers at module import time.

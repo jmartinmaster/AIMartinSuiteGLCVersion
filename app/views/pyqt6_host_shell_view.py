@@ -13,7 +13,6 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-import json
 import re
 from types import SimpleNamespace
 
@@ -26,17 +25,14 @@ __version__ = "0.1.1"
 
 try:
     from PyQt6.QtCore import QTimer
-    from PyQt6.QtGui import QAction, QFont, QKeySequence
+    from PyQt6.QtGui import QAction, QKeySequence
     from PyQt6.QtWidgets import (
         QApplication,
         QFrame,
-        QGroupBox,
         QHBoxLayout,
         QLabel,
         QMainWindow,
         QPushButton,
-        QPlainTextEdit,
-        QSizePolicy,
         QStatusBar,
         QVBoxLayout,
         QWidget,
@@ -47,15 +43,11 @@ except ImportError:
     QAction = None
     QApplication = None
     QFrame = None
-    QGroupBox = None
-    QFont = None
     QHBoxLayout = None
     QLabel = None
     QKeySequence = None
     QMainWindow = object
     QPushButton = None
-    QPlainTextEdit = None
-    QSizePolicy = None
     QStatusBar = None
     QTimer = None
     QVBoxLayout = None
@@ -75,6 +67,7 @@ class PyQt6HostShellView(QMainWindow):
         self.theme_name = normalize_theme(theme_name)
         self.runtime_settings = dict(runtime_settings or {})
         self.theme_tokens = get_theme_tokens(theme_name=self.theme_name)
+        self._martin_theme_tokens = dict(self.theme_tokens)
         self.base_window_title = "Production Logging Center"
         self.module_registry = ModuleRegistry()
         self.module_buttons = {}
@@ -114,18 +107,7 @@ class PyQt6HostShellView(QMainWindow):
         self.viewport_title_label = None
         self.viewport_subtitle_label = None
         self.viewport_hint_label = None
-        self.runtime_diagnostics_group = None
-        self.module_session_title_label = None
-        self.module_session_hint_label = None
-        self.session_action_frame = None
         self.viewport_status_label = None
-        self.open_button = None
-        self.restart_button = None
-        self.stop_button = None
-        self.details_toggle_button = None
-        self.runtime_status_label = None
-        self.runtime_message_label = None
-        self.runtime_state_view = None
         self.host_ui_adapter = PyQt6HostUiAdapter(self)
         self._menu_actions = {}
         self._after_timers = {}
@@ -133,7 +115,6 @@ class PyQt6HostShellView(QMainWindow):
         self._window_close_callback = None
         self._closing_via_dispatcher = False
         self._update_trace_tokens = []
-        self._runtime_details_visible = False
         self._viewport_resize_bindings = {}
         self._viewport_resize_sequence = 0
         self._viewport_resize_after_id = None
@@ -420,7 +401,7 @@ class PyQt6HostShellView(QMainWindow):
         placeholder_layout = QVBoxLayout(self.viewport_placeholder)
         placeholder_layout.setContentsMargins(8, 8, 8, 8)
         placeholder_layout.setSpacing(10)
-        self.viewport_title_label = QLabel("Main Workspace", self.viewport_placeholder)
+        self.viewport_title_label = QLabel("Workspace", self.viewport_placeholder)
         self.viewport_title_label.setObjectName("pageTitle")
         placeholder_layout.addWidget(self.viewport_title_label)
 
@@ -430,7 +411,7 @@ class PyQt6HostShellView(QMainWindow):
         placeholder_layout.addWidget(self.viewport_subtitle_label)
 
         self.viewport_hint_label = QLabel(
-            "Modules that still open in a separate window will continue to launch from the host shell.",
+            "Layout Manager keeps its own window. Other modules load here in the workspace.",
             self.viewport_placeholder,
         )
         self.viewport_hint_label.setObjectName("sectionHint")
@@ -450,66 +431,6 @@ class PyQt6HostShellView(QMainWindow):
 
         right_layout.addWidget(self.viewport_frame, 1)
 
-        self.runtime_diagnostics_group = QGroupBox("Active Module", self.right_container)
-        diagnostics_layout = QVBoxLayout(self.runtime_diagnostics_group)
-        diagnostics_layout.setContentsMargins(12, 14, 12, 12)
-        diagnostics_layout.setSpacing(10)
-
-        self.module_session_title_label = QLabel("No module selected", self.runtime_diagnostics_group)
-        self.module_session_title_label.setObjectName("pageTitle")
-        diagnostics_layout.addWidget(self.module_session_title_label)
-
-        self.module_session_hint_label = QLabel("", self.runtime_diagnostics_group)
-        self.module_session_hint_label.setObjectName("sectionHint")
-        self.module_session_hint_label.setWordWrap(True)
-        self.module_session_hint_label.setVisible(False)
-        diagnostics_layout.addWidget(self.module_session_hint_label)
-
-        self.session_action_frame = QFrame(self.runtime_diagnostics_group)
-        controls = QHBoxLayout(self.session_action_frame)
-        controls.setContentsMargins(0, 0, 0, 0)
-        controls.setSpacing(8)
-        self.open_button = QPushButton("Show Window", self.session_action_frame)
-        self.open_button.clicked.connect(self._open_active_module)
-        controls.addWidget(self.open_button)
-
-        self.restart_button = QPushButton("Reload Window", self.session_action_frame)
-        self.restart_button.clicked.connect(self._restart_active_module)
-        controls.addWidget(self.restart_button)
-
-        self.stop_button = QPushButton("Close Window", self.session_action_frame)
-        self.stop_button.clicked.connect(self._stop_active_module)
-        controls.addWidget(self.stop_button)
-
-        self.details_toggle_button = QPushButton("Show Details", self.session_action_frame)
-        self.details_toggle_button.clicked.connect(self._toggle_runtime_details)
-        controls.addWidget(self.details_toggle_button)
-        controls.addStretch(1)
-        self.session_action_frame.setVisible(False)
-        diagnostics_layout.addWidget(self.session_action_frame)
-
-        self.runtime_status_label = QLabel("Location: none selected", self.runtime_diagnostics_group)
-        self.runtime_status_label.setObjectName("subtitleLabel")
-        diagnostics_layout.addWidget(self.runtime_status_label)
-
-        self.runtime_message_label = QLabel("Select a module to begin.", self.runtime_diagnostics_group)
-        self.runtime_message_label.setObjectName("mutedLabel")
-        self.runtime_message_label.setWordWrap(True)
-        diagnostics_layout.addWidget(self.runtime_message_label)
-
-        self.runtime_state_view = QPlainTextEdit(self.runtime_diagnostics_group)
-        self.runtime_state_view.setReadOnly(True)
-        self.runtime_state_view.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        self.runtime_state_view.setMinimumHeight(180)
-        if QFont is not None:
-            mono = QFont("Consolas")
-            mono.setStyleHint(QFont.StyleHint.Monospace)
-            self.runtime_state_view.setFont(mono)
-        self.runtime_state_view.setPlainText("{}")
-        self.runtime_state_view.setVisible(False)
-        diagnostics_layout.addWidget(self.runtime_state_view)
-        self.runtime_diagnostics_group.setVisible(False)
-
         root_layout.addWidget(self.right_container, 1)
         self.setCentralWidget(self.main_container)
 
@@ -521,7 +442,6 @@ class PyQt6HostShellView(QMainWindow):
         self.show_viewport_placeholder()
         self._refresh_nav_button_states()
         self.set_sidebar_collapsed(self.sidebar_collapsed)
-        self._refresh_session_controls(session_mode="idle")
 
     def _rebuild_module_catalog_from_navigation_items(self, grouped_items):
         module_catalog = []
@@ -549,23 +469,23 @@ class PyQt6HostShellView(QMainWindow):
         if isinstance(grouped_items, dict):
             self._rebuild_module_catalog_from_navigation_items(grouped_items)
         elif grouped_items is None:
-            grouped_items = {
-                "top": [
-                    (entry["display_name"], entry["name"])
-                    for entry in self.module_catalog
-                    if entry.get("navigation_group") == "top"
-                ],
-                "middle": [
-                    (entry["display_name"], entry["name"])
-                    for entry in self.module_catalog
-                    if entry.get("navigation_group") == "middle"
-                ],
-                "bottom": [
-                    (entry["display_name"], entry["name"])
-                    for entry in self.module_catalog
-                    if entry.get("navigation_group") == "bottom"
-                ],
-            }
+                grouped_items = {
+                    "top": [
+                        (entry["display_name"], entry["name"])
+                        for entry in self.module_catalog
+                        if entry.get("navigation_group") == "top"
+                    ],
+                    "middle": [
+                        (entry["display_name"], entry["name"])
+                        for entry in self.module_catalog
+                        if entry.get("navigation_group") == "middle"
+                    ],
+                    "bottom": [
+                        (entry["display_name"], entry["name"])
+                        for entry in self.module_catalog
+                        if entry.get("navigation_group") == "bottom"
+                    ],
+                }
 
         self.module_buttons = {}
         self.nav_button_labels = {}
@@ -758,7 +678,7 @@ class PyQt6HostShellView(QMainWindow):
         if not self._viewport_has_content():
             self.viewport_container.setVisible(False)
         self.viewport_placeholder.setVisible(True)
-        self.viewport_title_label.setText(str(title or "Main Workspace"))
+        self.viewport_title_label.setText(str(title or "Workspace"))
         self.viewport_subtitle_label.setText(
             str(
                 message
@@ -768,7 +688,7 @@ class PyQt6HostShellView(QMainWindow):
         self.viewport_hint_label.setText(
             str(
                 hint
-                or "Modules that still open in a separate window will keep their status and actions connected here."
+                or "Layout Manager keeps its own window. Other modules load here in the workspace."
             )
         )
         self._queue_viewport_resize_notification()
@@ -857,6 +777,7 @@ class PyQt6HostShellView(QMainWindow):
         if theme_name is not None:
             self.theme_name = normalize_theme(theme_name)
         self.theme_tokens = get_theme_tokens(theme_name=self.theme_name)
+        self._martin_theme_tokens = dict(self.theme_tokens)
         application = QApplication.instance()
         if application is not None:
             application.setStyleSheet(get_qt_stylesheet(theme_name=self.theme_name, theme_tokens=self.theme_tokens))
@@ -891,58 +812,10 @@ class PyQt6HostShellView(QMainWindow):
             return "?"
         return "".join(word[0].upper() for word in words[:3]) or str(display_name)[:2].upper()
 
-    def _toggle_runtime_details(self):
-        self._set_runtime_details_visible(not self._runtime_details_visible)
-
-    def _set_runtime_details_visible(self, visible):
-        self._runtime_details_visible = bool(visible)
-        if self.runtime_state_view is not None:
-            action_frame_visible = bool(self.session_action_frame is not None and self.session_action_frame.isVisible())
-            self.runtime_state_view.setVisible(action_frame_visible and self._runtime_details_visible)
-        if hasattr(self, "details_toggle_button") and self.details_toggle_button is not None:
-            self.details_toggle_button.setText("Hide Details" if self._runtime_details_visible else "Show Details")
-
-    def _refresh_session_controls(self, session_mode="idle"):
-        has_active_module = bool(self.active_module_name)
-        show_window_actions = has_active_module and session_mode == "dedicated_window"
-
-        if self.module_session_hint_label is not None:
-            self.module_session_hint_label.setVisible(show_window_actions)
-            hint_text = "This module intentionally uses its own dedicated window. The shell keeps its window status and actions available here." if show_window_actions else ""
-            self.module_session_hint_label.setText(hint_text)
-        if self.session_action_frame is not None:
-            self.session_action_frame.setVisible(show_window_actions)
-
-        if self.open_button is not None:
-            self.open_button.setEnabled(show_window_actions)
-        if self.restart_button is not None:
-            self.restart_button.setEnabled(show_window_actions)
-        if self.stop_button is not None:
-            self.stop_button.setEnabled(show_window_actions)
-        if self.details_toggle_button is not None:
-            self.details_toggle_button.setEnabled(show_window_actions)
-
-        if not show_window_actions:
-            self._runtime_details_visible = False
-        self._set_runtime_details_visible(self._runtime_details_visible)
-
-    def _set_module_session_context(self, title=None, route_text=None, message=None, state_payload=None, session_mode="idle"):
-        display_title = str(title or "No module selected")
-        route_line = str(route_text or "Location: none selected")
-        detail_message = str(message or "Select a module to begin.")
-        payload = state_payload if isinstance(state_payload, dict) else {}
-
-        if self.module_session_title_label is not None:
-            self.module_session_title_label.setText(display_title)
-        if self.runtime_status_label is not None:
-            self.runtime_status_label.setText(route_line)
-        if self.runtime_message_label is not None:
-            self.runtime_message_label.setText(detail_message)
-        if self.runtime_state_view is not None:
-            self.runtime_state_view.setPlainText(json.dumps(payload, indent=2, sort_keys=True))
-        self._set_shell_window_title(payload.get("module"))
-        self.status_bar.showMessage(detail_message, 4000)
-        self._refresh_session_controls(session_mode=session_mode)
+    def _set_workspace_status(self, module_name=None, message=None):
+        self._set_shell_window_title(module_name)
+        if self.status_bar is not None and message:
+            self.status_bar.showMessage(str(message), 4000)
 
     def _add_menu_action(self, menu, title, callback, shortcut=None):
         action = QAction(str(title), self)
@@ -1098,45 +971,6 @@ class PyQt6HostShellView(QMainWindow):
         )
         return False
 
-    def _open_active_module(self):
-        if self.active_module_name is None:
-            return
-        self.open_or_raise_module(self.active_module_name, restart=False)
-
-    def _restart_active_module(self):
-        if self.active_module_name is None:
-            return
-        if self._is_dispatcher_viewport_module(self.active_module_name) and self.dispatcher is not None:
-            self.dispatcher.load_module(self.active_module_name, use_transition=False)
-            return
-        self.open_or_raise_module(self.active_module_name, restart=True)
-
-    def _stop_active_module(self):
-        if self.active_module_name is None:
-            return
-        if self._is_dispatcher_viewport_module(self.active_module_name):
-            display_name = self._display_name_for_module(self.active_module_name) or self.active_module_name
-            self.host_ui_adapter.show_warning(
-                "Action Unavailable",
-                f"{display_name} is already open in the main workspace and does not have a separate window to close.",
-            )
-            return
-        module_name = self.active_module_name
-        if self._uses_dedicated_window_contract(module_name):
-            dedicated_runtime = self._get_layout_manager_runtime_dispatcher()
-            if dedicated_runtime is None:
-                return
-            dedicated_runtime.stop_window()
-            self._notify_navigation_state("runtime_closed", module_name=module_name)
-            display_name = self._display_name_for_module(module_name) or module_name
-            self.host_ui_adapter.show_toast(self.base_window_title, f"Closed the dedicated window for {display_name}.", duration_ms=3500)
-            self._poll_runtime_state()
-            return
-        self.host_ui_adapter.show_warning(
-            "Action Unavailable",
-            f"{self._display_name_for_module(module_name) or module_name} does not have a dedicated window to close on the active PyQt6 shell.",
-        )
-
     def _refresh_nav_button_states(self):
         for module_name, button in self.module_buttons.items():
             is_active = module_name == self.active_module_name
@@ -1149,95 +983,40 @@ class PyQt6HostShellView(QMainWindow):
 
     def _refresh_active_module_text(self):
         if self.active_module_name is None:
-            self._set_module_session_context(
-                title="No module selected",
-                route_text="Location: none selected",
-                message="Select a module from the navigation to begin.",
-                state_payload={},
-                session_mode="idle",
-            )
+            self._set_workspace_status(message="Select a module from the navigation to begin.")
             if not self._viewport_has_content():
                 self.show_viewport_placeholder(
-                    title="Main Workspace",
+                    title="Workspace",
                     message="Select a module from the navigation to start work.",
-                    hint="Modules that currently use a separate window will keep their status and actions connected here.",
                 )
             return
 
         entry = self._module_entry(self.active_module_name) or {"display_name": self.active_module_name}
         display_name = str(entry["display_name"])
         if self._is_dispatcher_viewport_module(self.active_module_name):
-            self._set_module_session_context(
-                title=display_name,
-                route_text="Location: main workspace",
-                message=f"{display_name} is open in the main workspace.",
-                state_payload={
-                    "module": self.active_module_name,
-                    "status": "in_viewport",
-                    "sidecar_runtime": False,
-                },
-                session_mode="viewport",
-            )
+            self._set_workspace_status(self.active_module_name, f"{display_name} is ready in the workspace.")
             return
 
         if self._uses_dedicated_window_contract(self.active_module_name):
-            persistence_text = "reusable dedicated window" if self.is_module_persistent(self.active_module_name) else "dedicated window"
-            self._set_module_session_context(
-                title=display_name,
-                route_text="Location: dedicated window",
-                message=f"{display_name} intentionally opens in its dedicated window.",
-                state_payload={
-                    "module": self.active_module_name,
-                    "status": "dedicated_window",
-                    "window_mode": "dedicated_window",
-                    "host_contract": "layout_manager_dispatcher",
-                    "persistence": persistence_text,
-                },
-                session_mode="dedicated_window",
-            )
+            self._set_workspace_status(self.active_module_name, f"{display_name} uses its own window.")
             if not self._viewport_has_content():
                 self.show_viewport_placeholder(
-                    title="Main Workspace",
-                    message=f"{display_name} intentionally runs in its dedicated window.",
-                    hint="This workspace stays available for modules that load directly inside the shell.",
+                    title=display_name,
+                    message=f"{display_name} uses its own window.",
+                    hint="Select Layout Manager again in the navigation to raise or restart its window.",
                 )
             return
-        self._set_module_session_context(
-            title=display_name,
-            route_text="Location: unavailable",
-            message=f"{display_name} is not mapped to the shared viewport or a dedicated window contract.",
-            state_payload={
-                "module": self.active_module_name,
-                "status": "unavailable",
-            },
-            session_mode="idle",
-        )
+        self._set_workspace_status(self.active_module_name, f"{display_name} is not mapped to the workspace.")
 
     def _poll_runtime_state(self):
         if self.active_module_name is None:
-            self._set_module_session_context(
-                title="No module selected",
-                route_text="Location: none selected",
-                message="Select a module to begin.",
-                state_payload={},
-                session_mode="idle",
-            )
+            self._set_workspace_status(message="Select a module to begin.")
             return
 
         if self._is_dispatcher_viewport_module(self.active_module_name):
             entry = self._module_entry(self.active_module_name) or {"display_name": self.active_module_name}
             display_name = str(entry["display_name"])
-            self._set_module_session_context(
-                title=display_name,
-                route_text="Location: main workspace",
-                message=f"{display_name} is open in the main workspace.",
-                state_payload={
-                    "module": self.active_module_name,
-                    "status": "in_viewport",
-                    "sidecar_runtime": False,
-                },
-                session_mode="viewport",
-            )
+            self._set_workspace_status(self.active_module_name, f"{display_name} is ready in the workspace.")
             return
 
         if self._uses_dedicated_window_contract(self.active_module_name):
@@ -1249,26 +1028,27 @@ class PyQt6HostShellView(QMainWindow):
             message = str(state.get("message") or "No dedicated-window status is available.")
             entry = self._module_entry(self.active_module_name) or {"display_name": self.active_module_name}
             display_name = str(entry["display_name"])
-            self._set_module_session_context(
-                title=display_name,
-                route_text=f"Location: dedicated window ({status})",
-                message=message,
-                state_payload=state,
-                session_mode="dedicated_window",
-            )
+            self._set_workspace_status(self.active_module_name, message)
+            if not self._viewport_has_content():
+                hint = "Select Layout Manager again in the navigation to raise or restart its window."
+                if status == "closed":
+                    hint = "Select Layout Manager in the navigation to reopen its window."
+                self.show_viewport_placeholder(
+                    title=display_name,
+                    message=message,
+                    hint=hint,
+                )
             return
         entry = self._module_entry(self.active_module_name) or {"display_name": self.active_module_name}
         display_name = str(entry["display_name"])
-        self._set_module_session_context(
-            title=display_name,
-            route_text="Location: unavailable",
-            message=f"{display_name} is not mapped to the shared viewport or a dedicated window contract.",
-            state_payload={
-                "module": self.active_module_name,
-                "status": "unavailable",
-            },
-            session_mode="idle",
-        )
+        message = f"{display_name} is not mapped to the workspace."
+        self._set_workspace_status(self.active_module_name, message)
+        if not self._viewport_has_content():
+            self.show_viewport_placeholder(
+                title=display_name,
+                message=message,
+                hint="Select another module from the navigation to continue working.",
+            )
         
     def closeEvent(self, event):
         if self._window_close_callback is not None and not self._closing_via_dispatcher:
