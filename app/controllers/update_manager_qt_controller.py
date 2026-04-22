@@ -20,7 +20,7 @@ from app.models.update_manager_model import UpdateManagerModel
 from app.views.update_manager_qt_view import UpdateManagerQtView
 
 __module_name__ = "Update Manager Qt Controller"
-__version__ = "1.4.0"
+__version__ = "1.4.1"
 
 
 class SimpleVar:
@@ -138,10 +138,12 @@ class UpdateManagerQtController(UpdateManagerRuntimeController):
             "repository": self.repo_var.get() or "Unknown repository",
             "branch": self.branch_var.get() or "Unknown",
             "stable_artifact": self.stable_artifact_label,
+            "target_name": self.target_name_var.get() or f"Dispatcher Core ({self.stable_artifact_label})",
             "updates_configured": "Yes" if self._updates_configured() else "No",
             "local_version": self.local_version_var.get() or "Unknown",
             "remote_version": self.remote_version_var.get() or "Not checked",
             "status": self.result_var.get() or "Pending",
+            "runtime_status": self.status_var.get() or "Ready",
             "job_phase": self.job_phase_var.get() or "Idle",
             "job_detail": self.job_detail_var.get() or "No update job is running.",
             "summary_note": self.note_var.get() or "Run a repository check to compare the packaged release target.",

@@ -21,7 +21,7 @@ from app.models.settings_manager_model import SettingsManagerModel
 from app.views.settings_manager_qt_view import SettingsManagerQtView
 
 __module_name__ = "Settings Manager Qt Controller"
-__version__ = "1.8.2"
+__version__ = "1.8.3"
 
 
 class SettingsManagerQtController:
@@ -429,7 +429,7 @@ class SettingsManagerQtController:
             enabled=enabled,
             existing_name=existing_name,
         )
-        self.view.show_toast("Security", f"Saved vault {vault_name}.")
+        self.show_toast("Security", f"Saved vault {vault_name}.")
         return self.get_security_admin_state()
 
     def delete_selected_security_vault(self):
@@ -455,7 +455,7 @@ class SettingsManagerQtController:
         ):
             return None
         gatekeeper.delete_vault(vault_name)
-        self.view.show_toast("Security", f"Deleted vault {vault_name}.")
+        self.show_toast("Security", f"Deleted vault {vault_name}.")
         return self.get_security_admin_state()
 
     def rotate_selected_security_vault_password(self):
@@ -482,7 +482,7 @@ class SettingsManagerQtController:
         if password is None:
             return None
         gatekeeper.change_vault_password(vault_name, password)
-        self.view.show_toast("Security", f"Updated password for {vault_name}.")
+        self.show_toast("Security", f"Updated password for {vault_name}.")
         return self.get_security_admin_state()
 
     def save_current_security_mode(self):
@@ -516,7 +516,7 @@ class SettingsManagerQtController:
             if enabled
             else "Non-secure mode is disabled. Protected modules are locked again."
         )
-        self.view.show_toast("Security", message)
+        self.show_toast("Security", message)
         return self.get_security_admin_state()
 
     def reset_security_storage(self):
@@ -585,7 +585,7 @@ class SettingsManagerQtController:
                 if enable_external_override_trust
                 else "External override trust is disabled. Bundled modules are now preferred again."
             )
-            self.view.show_toast("Developer Tools", trust_message)
+            self.show_toast("Developer Tools", trust_message)
         self.refresh_snapshot(initial=False)
 
     def _apply_saved_runtime_effects(self, metadata):

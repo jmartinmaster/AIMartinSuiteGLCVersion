@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 __module_name__ = "Update Manager Qt View"
-__version__ = "1.5.0"
+__version__ = "1.5.1"
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
@@ -51,6 +51,8 @@ class UpdateManagerQtView(QMainWindow):
         self.theme_tokens = dict(self.payload.get("theme_tokens") or {})
         self.embedded = parent_widget is not None
         self.value_labels = {}
+        self.target_name_label = None
+        self.runtime_status_value_label = None
         self.payload_selector = None
         self.payload_name_label = None
         self.payload_path_label = None
@@ -116,6 +118,11 @@ class UpdateManagerQtView(QMainWindow):
 
         summary_group = QGroupBox("Current Update Status")
         summary_form = QFormLayout(summary_group)
+
+        self.target_name_label = QLabel("Dispatcher Core")
+        self.target_name_label.setObjectName("pageTitle")
+        self.target_name_label.setWordWrap(True)
+        summary_form.addRow(QLabel("Release Target"), self.target_name_label)
 
         for key, label in [
             ("repository", "Repository"),
@@ -265,6 +272,13 @@ class UpdateManagerQtView(QMainWindow):
         advanced_layout.addRow(QLabel("Actions"), advanced_actions)
         content_layout.addWidget(advanced_group)
 
+        runtime_status_group = QGroupBox("Runtime Status")
+        runtime_status_layout = QVBoxLayout(runtime_status_group)
+        self.runtime_status_value_label = QLabel("Ready")
+        self.runtime_status_value_label.setWordWrap(True)
+        runtime_status_layout.addWidget(self.runtime_status_value_label)
+        content_layout.addWidget(runtime_status_group)
+
         controls = QHBoxLayout()
         check_button = QPushButton("Check Repository")
         check_button.clicked.connect(self.controller.check_for_updates)
@@ -309,6 +323,7 @@ class UpdateManagerQtView(QMainWindow):
 
     def render_snapshot(self, snapshot):
         snapshot = snapshot if isinstance(snapshot, dict) else {}
+        self.target_name_label.setText(str(snapshot.get("target_name") or "Dispatcher Core"))
         for key, label_widget in self.value_labels.items():
             label_widget.setText(str(snapshot.get(key, "-")))
         if self.note_text is not None:
@@ -328,7 +343,9 @@ class UpdateManagerQtView(QMainWindow):
         self.advanced_detail_label.setText(str(snapshot.get("advanced_source_detail") or "No update job is running."))
         self.advanced_recovery_label.setText(str(snapshot.get("advanced_recovery_available") or "No"))
         self.advanced_build_log_label.setText(str(snapshot.get("advanced_build_log") or "Not available"))
-        self.status_bar.showMessage("Update snapshot refreshed.", 4000)
+        runtime_status = str(snapshot.get("runtime_status") or "Ready")
+        self.runtime_status_value_label.setText(runtime_status)
+        self.status_bar.showMessage(runtime_status, 4000)
 
     def set_module_payload_options(self, options, selected_key):
         options = options if isinstance(options, list) else []

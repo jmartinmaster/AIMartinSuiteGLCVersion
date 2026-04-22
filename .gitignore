@@ -29,7 +29,6 @@ dist/data
 dist/ubuntu/app
 dist/ubuntu/package-root
 dist/*.deb
-dist/variants/public
 dist/*.json
 
 #docs
@@ -47,5 +46,9 @@ scripts
 
 .venv-wsl-build/
 
-dist/
+dist/*
+!dist/variants/
+dist/variants/*
+!dist/variants/public/
+!dist/variants/public/**
 

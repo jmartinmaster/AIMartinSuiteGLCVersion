@@ -19,7 +19,7 @@ from app.help_viewer_documents import DOC_GROUPS, DOC_INDEX, get_doc_group_name,
 from app.views.help_viewer_qt_view import HelpViewerQtView
 
 __module_name__ = "Help Viewer Qt Controller"
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 
 
 class HelpViewerQtController:
@@ -108,6 +108,12 @@ class HelpViewerQtController:
             self.dispatcher.open_help_document(self.active_doc_path)
             return
         self.view.show_error("Open Document", "Help document dispatch is unavailable.")
+
+    def open_license_document(self):
+        if self.dispatcher is not None:
+            self.dispatcher.open_help_document("docs/legal/LICENSE.txt")
+            return
+        self.view.show_error("Open License", "Help document dispatch is unavailable.")
 
     def handle_close(self):
         return None

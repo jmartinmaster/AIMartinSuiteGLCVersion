@@ -14,14 +14,15 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 import os
+import sys
 import time
 import webbrowser
 
-from app.models.production_log_model import ProductionLogModel
+from app.models.production_log_model import BALANCE_DOWNTIME_CAUSE, ProductionLogModel
 from app.views.production_log_qt_view import ProductionLogQtView
 
 __module_name__ = "Production Log Qt Controller"
-__version__ = "1.2.2"
+__version__ = "1.3.0"
 
 
 class ProductionLogQtController:
@@ -152,7 +153,19 @@ class ProductionLogQtController:
             if not field_id:
                 continue
             payload[field_id] = str(field.get("default") or "")
-        return payload
+        return self.model.normalize_header_data(payload)
+
+    def apply_header_data(self, header_data, mark_dirty=False):
+        normalized_header = self.model.normalize_header_data(header_data)
+        for field_id, value in normalized_header.items():
+            self.view.set_header_field_value(field_id, value)
+        if mark_dirty:
+            self.view.mark_dirty()
+        return normalized_header
+
+    def on_header_field_focus_out(self, _event=None):
+        header_payload = self.collect_ui_data().get("header") or {}
+        self.apply_header_data(header_payload, mark_dirty=False)
 
     def write_state(self, status="ready", message="", dirty=False, runtime_event=None, metadata=None):
         _ = status
@@ -173,6 +186,7 @@ class ProductionLogQtController:
             message = "Draft and recovery lists refreshed."
             self.view.set_status(message)
         self.write_state(status="ready", message=message)
+        self.update_export_action_state()
 
     def collect_ui_data(self):
         data = self.view.collect_form_data()
@@ -215,10 +229,11 @@ class ProductionLogQtController:
         payload = dict(payload or {})
         self.balance_state = self.model.normalize_balance_state(payload.get("balance_state"))
         self.current_draft_path = draft_path
+        normalized_header = self.model.normalize_header_data(payload.get("header") or {})
         production_rows = list(payload.get("production") or []) or [{}]
         downtime_rows = list(payload.get("downtime") or []) or [{}]
         self.view.set_form_name(self.model.get_active_form_name())
-        self.view.set_form_data(payload.get("header") or {}, production_rows, downtime_rows)
+        self.view.set_form_data(normalized_header, production_rows, downtime_rows)
         if mark_dirty_after_load:
             self.view.mark_dirty()
         else:
@@ -294,12 +309,16 @@ class ProductionLogQtController:
         return True
 
     def refresh_view(self):
-        self.resume_latest_draft()
+        latest = self.model.get_latest_pending_draft()
+        if not latest:
+            self.show_toast("Refresh View", "No previous draft found to reload.", "info")
+            return
+        self.load_draft_path(str(latest.get("path") or ""))
 
     def resume_latest_draft(self):
         latest = self.model.get_latest_pending_draft()
         if not latest:
-            self.view.show_info("Resume Latest", "No pending drafts are available.")
+            self.show_toast("Resume Latest", "No pending drafts are available.", "info")
             return
         self.load_draft_path(str(latest.get("path") or ""))
 
@@ -353,12 +372,12 @@ class ProductionLogQtController:
     def delete_current_draft(self):
         draft_path = str(self.current_draft_path or "").strip()
         if not draft_path:
-            self.view.show_info("Delete Current Draft", "There is no saved draft attached to the current session.")
+            self.show_toast("Delete Draft", "There is no saved draft attached to the current session.", "info")
             return
         if not os.path.exists(draft_path):
             self.current_draft_path = None
             self.refresh_draft_lists(initial=False)
-            self.view.show_info("Delete Current Draft", "The current draft file no longer exists.")
+            self.show_toast("Delete Draft", "There is no saved draft attached to the current session.", "info")
             return
         if not self.view.ask_yes_no("Delete Current Draft", f"Delete {os.path.basename(draft_path)}?"):
             return
@@ -405,6 +424,183 @@ class ProductionLogQtController:
         if not message:
             return
         self.view.show_info(f"{operation_name.title()} Warnings", message)
+        self.show_toast(
+            f"{operation_name.title()} Warnings",
+            "Some declared profiles were skipped because runtime support is not implemented yet.",
+            "warning",
+        )
+
+    def _header_value_by_role(self, header_payload, role_name, fallback_id=None, default=""):
+        return self.model.get_header_value_by_role(
+            header_payload,
+            role_name,
+            config=self.layout_config,
+            fallback_id=fallback_id,
+            default=default,
+        )
+
+    def _row_value_by_role(self, row_payload, section_name, role_name, fallback_id=None):
+        field_id = self.model.get_section_field_id_by_role(
+            section_name,
+            role_name,
+            config=self.layout_config,
+            fallback_id=fallback_id,
+        )
+        if field_id and field_id in row_payload:
+            return row_payload.get(field_id)
+        if fallback_id and fallback_id in row_payload:
+            return row_payload.get(fallback_id)
+        return ""
+
+    def _set_row_value_by_role(self, row_payload, section_name, role_name, value, fallback_id=None):
+        field_id = self.model.get_section_field_id_by_role(
+            section_name,
+            role_name,
+            config=self.layout_config,
+            fallback_id=fallback_id,
+        )
+        if field_id:
+            row_payload[field_id] = value
+        elif fallback_id:
+            row_payload[fallback_id] = value
+
+    def _is_balance_downtime_row(self, row_payload):
+        return self.model.is_balance_downtime_cause(
+            self._row_value_by_role(row_payload, "downtime", "cause_text", fallback_id="cause")
+        )
+
+    def _find_balance_downtime_index(self, downtime_rows):
+        for row_index, row_payload in enumerate(downtime_rows):
+            if self._is_balance_downtime_row(row_payload):
+                return row_index
+        return None
+
+    def _get_last_export_path(self):
+        export_path = str(getattr(self.view, "last_export_path", "") or "").strip()
+        return export_path if export_path and os.path.exists(export_path) else None
+
+    def update_export_action_state(self):
+        export_available = self._get_last_export_path() is not None
+        if hasattr(self.view, "open_export_button"):
+            self.view.open_export_button.setEnabled(export_available)
+        if hasattr(self.view, "print_export_button"):
+            self.view.print_export_button.setEnabled(export_available)
+
+    def open_last_exported_file(self, show_prompt=True):
+        export_path = self._get_last_export_path()
+        if not export_path:
+            if show_prompt:
+                self.view.show_error("Open Export", "No exported workbook is available yet.")
+            return
+        try:
+            if hasattr(os, "startfile"):
+                os.startfile(export_path)
+            else:
+                webbrowser.open(f"file://{export_path}")
+            self.show_toast("Open Export", f"Opened {os.path.basename(export_path)}", "info")
+        except Exception as exc:
+            self.view.show_error("Open Export", f"Could not open exported workbook:\n{exc}")
+
+    def print_last_exported_file(self):
+        export_path = self._get_last_export_path()
+        if not export_path:
+            self.view.show_error("Print Export", "Export a workbook first so there is something to print.")
+            return
+        if not self.view.ask_yes_no(
+            "Print Export",
+            f"Print this workbook using the default application print action?\n\n{export_path}\n\n"
+            "Review it first with Open Last Export if needed.",
+        ):
+            return
+        try:
+            if sys.platform.startswith("win") and hasattr(os, "startfile"):
+                os.startfile(export_path, "print")
+                self.show_toast("Print Export", "Sent exported workbook to the default printer.", "info")
+            else:
+                self.open_last_exported_file(show_prompt=False)
+                self.show_toast("Print Export", "Opened exported workbook for manual printing.", "info")
+        except Exception as exc:
+            self.view.show_error("Print Export", f"Could not print exported workbook:\n{exc}")
+
+    def balance_downtime_to_shift(self):
+        self.calculate_metrics(silent=True)
+        data = self.collect_ui_data()
+        header_payload = dict(data.get("header") or {})
+        production_rows = list(data.get("production") or [])
+        downtime_rows = list(data.get("downtime") or [])
+
+        shift_total_minutes = self.model.calculate_shift_total_minutes(
+            self._header_value_by_role(header_payload, "shift_hours", fallback_id="hours", default="8")
+        )
+        if shift_total_minutes <= 0:
+            self.show_toast("Balance Downtime", "Enter a valid shift hour value before balancing.", "warning")
+            return
+
+        production_total_minutes = 0
+        for row_payload in production_rows:
+            production_total_minutes += self.model.parse_minutes_label(
+                self._row_value_by_role(row_payload, "production", "duration_minutes", fallback_id="time_calc")
+            )
+
+        target_downtime_total = shift_total_minutes - production_total_minutes
+        if target_downtime_total < 0:
+            self.show_toast(
+                "Balance Downtime",
+                f"Production time exceeds shift total by {abs(target_downtime_total)} minutes. Downtime balance cannot correct that overrun.",
+                "warning",
+            )
+            return
+
+        balance_index = self._find_balance_downtime_index(downtime_rows)
+        non_balance_total = 0
+        for row_index, row_payload in enumerate(downtime_rows):
+            if balance_index is not None and row_index == balance_index:
+                continue
+            non_balance_total += self.model.calculate_downtime_minutes(
+                self._row_value_by_role(row_payload, "downtime", "start_clock", fallback_id="start"),
+                self._row_value_by_role(row_payload, "downtime", "stop_clock", fallback_id="stop"),
+                fallback_label=self._row_value_by_role(row_payload, "downtime", "duration_minutes", fallback_id="time_calc"),
+            )
+
+        balance_minutes = max(0, target_downtime_total - non_balance_total)
+
+        if balance_minutes <= 0:
+            if balance_index is not None:
+                downtime_rows.pop(balance_index)
+                self._apply_loaded_payload(
+                    {"header": header_payload, "production": production_rows, "downtime": downtime_rows},
+                    draft_path=self.current_draft_path,
+                    mark_dirty_after_load=True,
+                )
+                self.calculate_metrics(silent=True)
+                self.show_toast(
+                    "Balance Downtime",
+                    "Removed balance downtime row because existing downtime now covers the shift target.",
+                    "success",
+                )
+                return
+            self.show_toast("Balance Downtime", "Accounted time already matches the shift total.", "info")
+            return
+
+        if balance_index is None:
+            downtime_rows.append({})
+            balance_index = len(downtime_rows) - 1
+
+        balance_row = downtime_rows[balance_index]
+        self._set_row_value_by_role(balance_row, "downtime", "cause_text", BALANCE_DOWNTIME_CAUSE, fallback_id="cause")
+        self._set_row_value_by_role(balance_row, "downtime", "duration_minutes", f"{balance_minutes} min", fallback_id="time_calc")
+
+        self._apply_loaded_payload(
+            {"header": header_payload, "production": production_rows, "downtime": downtime_rows},
+            draft_path=self.current_draft_path,
+            mark_dirty_after_load=True,
+        )
+        self.calculate_metrics(silent=True)
+        self.show_toast(
+            "Balance Downtime",
+            f"Updated balance downtime row to {balance_minutes} minutes so accounted time matches the shift target.",
+            "success",
+        )
 
     def calculate_metrics(self, silent=False):
         data = self.collect_ui_data()
@@ -506,8 +702,15 @@ class ProductionLogQtController:
                 date_text,
                 calculation_settings=self.model.get_calculation_settings_copy(),
             )
-            self.view.set_status(f"Exported workbook: {os.path.basename(target_path)}")
+            self.view.last_export_path = target_path
+            self.update_export_action_state()
+            self.show_toast("Export Complete", f"Excel export completed successfully: {os.path.basename(target_path)}", "success")
             self._show_data_handler_warnings("export")
+            if self.view.ask_yes_no(
+                "Export Complete",
+                f"Workbook created successfully.\n\n{target_path}\n\nOpen it now so you can review it before printing?",
+            ):
+                self.open_last_exported_file(show_prompt=False)
         except Exception as exc:
             self.view.show_error("Export Error", f"Export failed:\n{exc}")
 

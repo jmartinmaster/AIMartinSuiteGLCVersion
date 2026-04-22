@@ -25,12 +25,12 @@ import time
 from pathlib import Path
 
 from PyQt6.QtCore import QTimer
-from PyQt6.QtWidgets import QGroupBox, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QGroupBox, QHBoxLayout, QLabel, QMessageBox, QPushButton, QVBoxLayout, QWidget
 
 from app.app_logging import log_exception
 
 __module_name__ = "Layout Manager Mini Dispatcher"
-__version__ = "1.1.1"
+__version__ = "1.1.2"
 LAYOUT_MANAGER_QT_SESSION_ENV = "AIMARTIN_LAYOUT_MANAGER_QT_SESSION"
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -196,6 +196,7 @@ class LayoutManagerQtBridge(QWidget):
         super().__init__(parent)
         self.mini_dispatcher = mini_dispatcher
         self.runtime_manager = mini_dispatcher.runtime_manager
+        self._last_toast_token = None
         self._poll_timer = QTimer(self)
         self._build_ui()
         self._poll_timer.setInterval(900)
@@ -263,6 +264,11 @@ class LayoutManagerQtBridge(QWidget):
         self.form_label.setText(f"Form: {form_name}")
         self.path_label.setText(f"Source: {state.get('source_path') or '--'}")
         self.message_label.setText(str(state.get("message") or "Waiting for state..."))
+        toast_event = state.get("toast_event") if isinstance(state.get("toast_event"), dict) else None
+        toast_token = toast_event.get("token") if isinstance(toast_event, dict) else None
+        if toast_token is not None and toast_token != self._last_toast_token:
+            self._last_toast_token = toast_token
+            self.mini_dispatcher.forward_runtime_toast(toast_event)
         if status.lower() == "closed":
             self.mini_dispatcher.schedule_preload(force=True)
 
@@ -276,7 +282,19 @@ class LayoutManagerQtBridge(QWidget):
         self.mini_dispatcher.open_or_raise_window(restart=True)
 
     def can_navigate_away(self):
-        return True
+        state = self.runtime_manager.read_state()
+        if not isinstance(state, dict):
+            return True
+        if not bool(state.get("dirty")):
+            return True
+        decision = QMessageBox.question(
+            self,
+            "Unsaved Layout Changes",
+            "Layout Manager reports unsaved changes in the dedicated window. Navigate away and keep those changes pending there?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        return decision == QMessageBox.StandardButton.Yes
 
     def on_hide(self):
         return None
@@ -340,6 +358,22 @@ class LayoutManagerMiniDispatcher:
             self.runtime_manager.send_command("apply_theme", {"theme_tokens": theme_tokens})
             return
         self.schedule_preload(force=True)
+
+    def forward_runtime_toast(self, toast_event):
+        if not isinstance(toast_event, dict):
+            return
+        title = str(toast_event.get("title") or "Layout Manager")
+        message = str(toast_event.get("message") or "")
+        if not message:
+            return
+        bootstyle = str(toast_event.get("bootstyle") or "info")
+        duration_ms = toast_event.get("duration_ms")
+        try:
+            if duration_ms is not None:
+                duration_ms = int(duration_ms)
+        except Exception:
+            duration_ms = None
+        self.host_dispatcher.show_toast(title, message, bootstyle=bootstyle, duration_ms=duration_ms)
 
     def stop_window(self):
         self.runtime_manager.stop_runtime(force=False)

@@ -21,7 +21,7 @@ from app.models.layout_manager_model import LayoutManagerModel
 from app.views.layout_manager_qt_view import LayoutManagerQtView
 
 __module_name__ = "Layout Manager Qt Controller"
-__version__ = "0.2.0"
+__version__ = "0.3.1"
 
 
 class LayoutManagerQtController:
@@ -32,6 +32,7 @@ class LayoutManagerQtController:
         self.state_path = Path(payload["state_path"])
         self.command_path = Path(payload["command_path"])
         self.change_token = 0
+        self.toast_token = 0
         self.dirty = False
         self.current_form_info = dict(payload.get("form_info") or {})
         self.current_config = dict(payload.get("config") or {})
@@ -70,6 +71,8 @@ class LayoutManagerQtController:
         self.guardrails = self.model.build_editor_guardrails(self.current_config)
         self.protected_row_field_lookup = self.model.get_protected_row_field_lookup(self.current_config)
         self.view.set_editor_text(serialized_config)
+        self.view.render_block_authoring(self.current_config)
+        self.view.render_import_export_authoring(self.current_config)
         self.view.render_preview_grid(preview_grid)
         self.view.render_structure(
             self.current_config,
@@ -83,7 +86,7 @@ class LayoutManagerQtController:
         )
         self.view.set_dirty(self.dirty)
 
-    def write_state(self, status="running", message=""):
+    def write_state(self, status="running", message="", toast_event=None):
         state = {
             "status": status,
             "dirty": self.dirty,
@@ -94,7 +97,20 @@ class LayoutManagerQtController:
             "message": message,
             "updated_at": time.time(),
         }
+        if isinstance(toast_event, dict):
+            state["toast_event"] = toast_event
         self.state_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
+
+    def _emit_host_toast(self, message, bootstyle="info", title="Layout Manager", duration_ms=None):
+        self.toast_token += 1
+        toast_payload = {
+            "token": self.toast_token,
+            "title": str(title or "Layout Manager"),
+            "message": str(message or ""),
+            "bootstyle": str(bootstyle or "info"),
+            "duration_ms": duration_ms,
+        }
+        self.write_state(message=str(message or ""), toast_event=toast_payload)
 
     def mark_dirty(self):
         if self.dirty:
@@ -122,17 +138,176 @@ class LayoutManagerQtController:
         self.mark_dirty()
         return config
 
+    def _load_editor_config(self):
+        return self.model.parse_editor_text(self.view.editor_text(), base_config=self.current_config)
+
+    def _apply_layout_update(self, updated_config, status_message):
+        self.current_config = updated_config
+        self.refresh_view(reason=status_message)
+        self.mark_dirty()
+        self.view.set_status(status_message)
+
     def validate_editor(self):
         self.model.resolve_editor_text(
             self.view.editor_text(),
             base_config=self.current_config,
         )
         self.view.set_status("JSON is valid.")
-        self.write_state(message="JSON validation passed.")
+        self._emit_host_toast("Layout JSON is valid.", bootstyle="success")
 
     def format_editor(self):
         self.apply_editor_changes(message="Formatted editor JSON")
         self.view.set_status("Editor JSON was normalized and reformatted.")
+
+    def on_row_section_changed(self, *_args):
+        self.view.render_row_fields_authoring(self.current_config)
+
+    def on_mapping_section_changed(self, *_args):
+        self.view.render_mapping_authoring(self.current_config)
+
+    def add_header_field_from_block(self):
+        try:
+            config = self._load_editor_config()
+            updated_config, status_message = self.model.add_header_field(config)
+            self._apply_layout_update(updated_config, status_message)
+        except Exception as exc:
+            self.view.set_status(f"Block edit error: {exc}", error=True)
+
+    def remove_header_field_from_block(self):
+        field_id = self.view.selected_header_field_id()
+        if not field_id:
+            self.view.set_status("Select a header field to remove.", error=True)
+            return
+        try:
+            config = self._load_editor_config()
+            updated_config, status_message = self.model.remove_header_field(config, field_id)
+            self._apply_layout_update(updated_config, status_message)
+        except Exception as exc:
+            self.view.set_status(f"Block edit error: {exc}", error=True)
+
+    def move_header_field_up_from_block(self):
+        self._move_header_field_from_block(-1)
+
+    def move_header_field_down_from_block(self):
+        self._move_header_field_from_block(1)
+
+    def _move_header_field_from_block(self, direction):
+        field_id = self.view.selected_header_field_id()
+        if not field_id:
+            self.view.set_status("Select a header field to move.", error=True)
+            return
+        try:
+            config = self._load_editor_config()
+            updated_config, status_message = self.model.move_header_field(config, field_id, direction)
+            if status_message is not None:
+                self._apply_layout_update(updated_config, status_message)
+        except Exception as exc:
+            self.view.set_status(f"Block edit error: {exc}", error=True)
+
+    def apply_header_field_from_block(self):
+        field_id = self.view.selected_header_field_id()
+        field_values = self.view.selected_header_field_values()
+        if not field_id or field_values is None:
+            self.view.set_status("Select a header field to apply.", error=True)
+            return
+        try:
+            config = self._load_editor_config()
+            updated_config, status_message = self.model.update_header_field(
+                config,
+                field_id,
+                field_values["row"],
+                field_values["col"],
+                field_values["cell"],
+                field_values["width"],
+                field_values["readonly"],
+                field_values["default"],
+                field_values["role"],
+                field_values["import_enabled"],
+                field_values["export_enabled"],
+            )
+            self._apply_layout_update(updated_config, status_message)
+        except Exception as exc:
+            self.view.set_status(f"Block edit error: {exc}", error=True)
+
+    def add_row_field_from_block(self):
+        section_name = self.view.current_row_section_name()
+        try:
+            config = self._load_editor_config()
+            updated_config, status_message = self.model.add_row_field(config, section_name)
+            self._apply_layout_update(updated_config, status_message)
+        except Exception as exc:
+            self.view.set_status(f"Block edit error: {exc}", error=True)
+
+    def remove_row_field_from_block(self):
+        section_name = self.view.current_row_section_name()
+        field_id = self.view.selected_row_field_id()
+        if not field_id:
+            self.view.set_status("Select a row field to remove.", error=True)
+            return
+        try:
+            config = self._load_editor_config()
+            updated_config, status_message = self.model.remove_row_field(config, section_name, field_id)
+            self._apply_layout_update(updated_config, status_message)
+        except Exception as exc:
+            self.view.set_status(f"Block edit error: {exc}", error=True)
+
+    def move_row_field_up_from_block(self):
+        self._move_row_field_from_block(-1)
+
+    def move_row_field_down_from_block(self):
+        self._move_row_field_from_block(1)
+
+    def _move_row_field_from_block(self, direction):
+        section_name = self.view.current_row_section_name()
+        field_id = self.view.selected_row_field_id()
+        if not field_id:
+            self.view.set_status("Select a row field to move.", error=True)
+            return
+        try:
+            config = self._load_editor_config()
+            updated_config, status_message = self.model.move_row_field(config, section_name, field_id, direction)
+            if status_message is not None:
+                self._apply_layout_update(updated_config, status_message)
+        except Exception as exc:
+            self.view.set_status(f"Block edit error: {exc}", error=True)
+
+    def apply_row_field_from_block(self):
+        section_name = self.view.current_row_section_name()
+        field_id = self.view.selected_row_field_id()
+        field_values = self.view.selected_row_field_values()
+        if not field_id or field_values is None:
+            self.view.set_status("Select a row field to apply.", error=True)
+            return
+        try:
+            config = self._load_editor_config()
+            updated_config, status_message = self.model.update_row_field(config, section_name, field_id, field_values)
+            self._apply_layout_update(updated_config, status_message)
+        except Exception as exc:
+            self.view.set_status(f"Block edit error: {exc}", error=True)
+
+    def apply_template_path_from_import_export(self):
+        try:
+            config = self._load_editor_config()
+            updated_config, status_message = self.model.update_template_path(config, self.view.template_path_value())
+            self._apply_layout_update(updated_config, status_message)
+        except Exception as exc:
+            self.view.set_status(f"Import/export error: {exc}", error=True)
+
+    def apply_mapping_from_import_export(self):
+        mapping_name = self.view.current_mapping_name()
+        mapping_values = self.view.mapping_form_values()
+        try:
+            config = self._load_editor_config()
+            updated_config, status_message = self.model.update_mapping(
+                config,
+                mapping_name,
+                mapping_values["start_row"],
+                mapping_values["max_rows"],
+                mapping_values["columns"],
+            )
+            self._apply_layout_update(updated_config, status_message)
+        except Exception as exc:
+            self.view.set_status(f"Import/export error: {exc}", error=True)
 
     def reload_current(self):
         config, source_path, form_info = self.model.load_current_config()
@@ -167,6 +342,7 @@ class LayoutManagerQtController:
         self.mark_clean(message)
         self.refresh_forms()
         self.refresh_view(reason="Saved current layout configuration")
+        self._emit_host_toast(message, bootstyle="success")
 
     def activate_selected_form(self):
         form_id = self.view.current_form_id()
@@ -178,8 +354,10 @@ class LayoutManagerQtController:
         self.current_form_info = dict(form_info)
         self.current_config, self.current_source_path, self.current_form_info = self.model.load_current_config()
         self.refresh_forms()
-        self.mark_clean(f"Activated form '{self.current_form_info.get('name', form_id)}'.")
+        action_message = f"Activated form '{self.current_form_info.get('name', form_id)}'."
+        self.mark_clean(action_message)
         self.refresh_view(reason="Activated selected form")
+        self._emit_host_toast(action_message, bootstyle="success")
 
     def create_form(self):
         name = self.view.prompt_text("Create Form", "Form name:")
@@ -190,8 +368,10 @@ class LayoutManagerQtController:
         form_info = self.model.create_form_from_config(name, config, description=description, activate=False)
         self.current_form_info = dict(form_info)
         self.refresh_forms()
-        self.mark_clean(f"Created form '{form_info.get('name', name)}'.")
+        action_message = f"Created form '{form_info.get('name', name)}'."
+        self.mark_clean(action_message)
         self.refresh_view(reason="Created new form from editor")
+        self._emit_host_toast(action_message, bootstyle="success")
 
     def duplicate_form(self):
         source_form_id = self.view.current_form_id() or self.current_form_info.get("id")
@@ -206,8 +386,10 @@ class LayoutManagerQtController:
         form_info = self.model.duplicate_form(source_form_id, name, description=description, activate=False)
         self.current_form_info = dict(form_info)
         self.refresh_forms()
-        self.mark_clean(f"Duplicated form '{name}'.")
+        action_message = f"Duplicated form '{name}'."
+        self.mark_clean(action_message)
         self.refresh_view(reason="Duplicated selected form")
+        self._emit_host_toast(action_message, bootstyle="success")
 
     def rename_form(self):
         form_id = self.view.current_form_id() or self.current_form_info.get("id")
@@ -227,8 +409,9 @@ class LayoutManagerQtController:
         self.current_form_info = dict(form_info)
         self.refresh_forms()
         self.refresh_view(reason="Renamed selected form")
-        self.write_state(message=f"Renamed form '{name}'.")
-        self.view.set_status(f"Renamed form to '{name}'.")
+        action_message = f"Renamed form to '{name}'."
+        self.view.set_status(action_message)
+        self._emit_host_toast(action_message, bootstyle="success")
 
     def delete_form(self):
         form_id = self.view.current_form_id() or self.current_form_info.get("id")
@@ -244,8 +427,10 @@ class LayoutManagerQtController:
         result = self.model.delete_form(form_id)
         self.current_config, self.current_source_path, self.current_form_info = self.model.load_current_config()
         self.refresh_forms()
-        self.mark_clean(result or f"Deleted form '{form_name}'.")
+        action_message = result or f"Deleted form '{form_name}'."
+        self.mark_clean(action_message)
         self.refresh_view(reason="Deleted selected form")
+        self._emit_host_toast(action_message, bootstyle="success")
 
     def poll_commands(self):
         if not self.command_path.exists():

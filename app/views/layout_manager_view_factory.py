@@ -13,29 +13,21 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-import os
 from typing import Callable
 
 from app.views.layout_manager_qt_view import is_layout_manager_qt_runtime_available
 from app.views.layout_manager_view_contract import LayoutManagerViewContract
 
 __module_name__ = "Layout Manager View Factory"
-__version__ = "1.0.1"
+__version__ = "1.0.2"
 
 LayoutManagerViewFactory = Callable[[object, object, object], LayoutManagerViewContract]
 
 
 def get_requested_layout_manager_ui_backend(dispatcher):
     runtime_settings = getattr(dispatcher, "runtime_settings", {}) or {}
-    default_backend = "qt" if bool(getattr(dispatcher, "is_pyqt6_shell_requested", lambda: False)()) else "tk"
-    requested_backend = runtime_settings.get(
-        "layout_manager_ui_backend",
-        os.environ.get("AIMARTIN_LAYOUT_MANAGER_UI_BACKEND", default_backend),
-    )
-    requested_backend = str(requested_backend).strip().lower()
-    if requested_backend not in {"tk", "qt"}:
-        return "tk"
-    return requested_backend
+    requested_backend = str(runtime_settings.get("layout_manager_ui_backend", "qt")).strip().lower()
+    return requested_backend or "qt"
 
 
 def create_layout_manager_view(parent, dispatcher, controller):
@@ -45,8 +37,10 @@ def create_layout_manager_view(parent, dispatcher, controller):
     controller.view_backend_fallback_reason = None
 
     if requested_backend != "qt":
-        controller.view_backend_fallback_reason = "The live runtime only supports the dedicated PyQt6 Layout Manager window."
-        raise RuntimeError(controller.view_backend_fallback_reason)
+        controller.view_backend_fallback_reason = (
+            f"Ignoring unsupported Layout Manager backend '{requested_backend}'. "
+            "The live runtime uses the dedicated PyQt6 Layout Manager window."
+        )
 
     if not is_layout_manager_qt_runtime_available():
         controller.view_backend_fallback_reason = "PyQt6 is not installed; the Layout Manager dedicated window cannot be launched."

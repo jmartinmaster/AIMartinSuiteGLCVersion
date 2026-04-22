@@ -16,7 +16,7 @@
 import os
 
 __module_name__ = "Help Viewer Qt View"
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 from PyQt6.QtCore import QSignalBlocker, Qt
 from PyQt6.QtWidgets import (
@@ -27,9 +27,9 @@ from PyQt6.QtWidgets import (
     QListWidgetItem,
     QMainWindow,
     QMessageBox,
+    QPlainTextEdit,
     QPushButton,
     QStatusBar,
-    QTextBrowser,
     QVBoxLayout,
     QWidget,
 )
@@ -89,6 +89,9 @@ class HelpViewerQtView(QMainWindow):
         open_button = QPushButton("Open Current File")
         open_button.clicked.connect(self.controller.open_active_document)
         action_row.addWidget(open_button)
+        license_button = QPushButton("Open License File")
+        license_button.clicked.connect(self.controller.open_license_document)
+        action_row.addWidget(license_button)
         action_row.addStretch(1)
         root_layout.addLayout(action_row)
 
@@ -134,8 +137,9 @@ class HelpViewerQtView(QMainWindow):
         self.doc_path_label.setObjectName("mutedLabel")
         right_layout.addWidget(self.doc_path_label)
 
-        self.doc_browser = QTextBrowser()
-        self.doc_browser.setOpenExternalLinks(False)
+        self.doc_browser = QPlainTextEdit()
+        self.doc_browser.setReadOnly(True)
+        self.doc_browser.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
         right_layout.addWidget(self.doc_browser, 1)
 
         content_row.addWidget(right_panel, 3)
@@ -191,10 +195,7 @@ class HelpViewerQtView(QMainWindow):
         self.doc_title_label.setText(str(doc_name))
         self.doc_meta_label.setText(str(meta_label))
         self.doc_path_label.setText(str(doc_path))
-        if str(doc_path).lower().endswith(".md"):
-            self.doc_browser.setMarkdown(content)
-        else:
-            self.doc_browser.setPlainText(content)
+        self.doc_browser.setPlainText(content)
         target_scroll = 0 if restore_scroll is None else max(0, int(restore_scroll))
         self.doc_browser.verticalScrollBar().setValue(target_scroll)
 

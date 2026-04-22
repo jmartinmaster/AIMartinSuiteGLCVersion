@@ -24,7 +24,7 @@ from launcher import create_qt_application
 from app.theme_manager import get_qt_palette, get_qt_stylesheet
 
 __module_name__ = "Layout Manager Qt View"
-__version__ = "0.3.1"
+__version__ = "0.4.0"
 LAYOUT_MANAGER_QT_SESSION_ENV = "AIMARTIN_LAYOUT_MANAGER_QT_SESSION"
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -204,6 +204,167 @@ class LayoutManagerQtView(QMainWindow):
         details_layout.setSpacing(8)
         self.tabs = QTabWidget()
 
+        block_tab = QWidget()
+        block_layout = QVBoxLayout(block_tab)
+        block_layout.setContentsMargins(8, 8, 8, 8)
+        block_layout.setSpacing(8)
+
+        header_group = QGroupBox("Header Fields")
+        header_layout = QVBoxLayout(header_group)
+        self.header_fields_table = QTableWidget()
+        self.header_fields_table.setColumnCount(11)
+        self.header_fields_table.setHorizontalHeaderLabels(
+            [
+                "id",
+                "label",
+                "row",
+                "col",
+                "cell",
+                "width",
+                "readonly",
+                "default",
+                "role",
+                "import_enabled",
+                "export_enabled",
+            ]
+        )
+        self.header_fields_table.horizontalHeader().setStretchLastSection(True)
+        header_layout.addWidget(self.header_fields_table)
+
+        header_actions = QHBoxLayout()
+        header_add_button = QPushButton("Add Header Field")
+        header_add_button.clicked.connect(self.controller.add_header_field_from_block)
+        header_actions.addWidget(header_add_button)
+        header_remove_button = QPushButton("Remove")
+        header_remove_button.clicked.connect(self.controller.remove_header_field_from_block)
+        header_actions.addWidget(header_remove_button)
+        header_up_button = QPushButton("Move Up")
+        header_up_button.clicked.connect(self.controller.move_header_field_up_from_block)
+        header_actions.addWidget(header_up_button)
+        header_down_button = QPushButton("Move Down")
+        header_down_button.clicked.connect(self.controller.move_header_field_down_from_block)
+        header_actions.addWidget(header_down_button)
+        header_apply_button = QPushButton("Apply Selected")
+        header_apply_button.clicked.connect(self.controller.apply_header_field_from_block)
+        header_actions.addWidget(header_apply_button)
+        header_actions.addStretch(1)
+        header_layout.addLayout(header_actions)
+        block_layout.addWidget(header_group)
+
+        row_group = QGroupBox("Row Fields")
+        row_layout = QVBoxLayout(row_group)
+        row_section_row = QHBoxLayout()
+        row_section_row.addWidget(QLabel("Section"))
+        self.row_section_combo = QComboBox()
+        self.row_section_combo.addItem("Production", "production_row_fields")
+        self.row_section_combo.addItem("Downtime", "downtime_row_fields")
+        self.row_section_combo.currentIndexChanged.connect(self.controller.on_row_section_changed)
+        row_section_row.addWidget(self.row_section_combo)
+        row_section_row.addStretch(1)
+        row_layout.addLayout(row_section_row)
+
+        self.row_fields_table = QTableWidget()
+        self.row_fields_table.setColumnCount(10)
+        self.row_fields_table.setHorizontalHeaderLabels(
+            [
+                "id",
+                "label",
+                "widget",
+                "width",
+                "role",
+                "readonly",
+                "derived",
+                "open_row_trigger",
+                "user_input",
+                "values",
+            ]
+        )
+        self.row_fields_table.horizontalHeader().setStretchLastSection(True)
+        row_layout.addWidget(self.row_fields_table)
+
+        row_actions = QHBoxLayout()
+        row_add_button = QPushButton("Add Row Field")
+        row_add_button.clicked.connect(self.controller.add_row_field_from_block)
+        row_actions.addWidget(row_add_button)
+        row_remove_button = QPushButton("Remove")
+        row_remove_button.clicked.connect(self.controller.remove_row_field_from_block)
+        row_actions.addWidget(row_remove_button)
+        row_up_button = QPushButton("Move Up")
+        row_up_button.clicked.connect(self.controller.move_row_field_up_from_block)
+        row_actions.addWidget(row_up_button)
+        row_down_button = QPushButton("Move Down")
+        row_down_button.clicked.connect(self.controller.move_row_field_down_from_block)
+        row_actions.addWidget(row_down_button)
+        row_apply_button = QPushButton("Apply Selected")
+        row_apply_button.clicked.connect(self.controller.apply_row_field_from_block)
+        row_actions.addWidget(row_apply_button)
+        row_actions.addStretch(1)
+        row_layout.addLayout(row_actions)
+        block_layout.addWidget(row_group)
+
+        self.tabs.addTab(block_tab, "Block View")
+
+        import_export_tab = QWidget()
+        import_export_layout = QVBoxLayout(import_export_tab)
+        import_export_layout.setContentsMargins(8, 8, 8, 8)
+        import_export_layout.setSpacing(8)
+
+        template_group = QGroupBox("Template Path")
+        template_layout = QHBoxLayout(template_group)
+        template_layout.addWidget(QLabel("template_path"))
+        self.template_path_input = QLineEdit()
+        template_layout.addWidget(self.template_path_input)
+        template_apply_button = QPushButton("Apply")
+        template_apply_button.clicked.connect(self.controller.apply_template_path_from_import_export)
+        template_layout.addWidget(template_apply_button)
+        import_export_layout.addWidget(template_group)
+
+        mapping_group = QGroupBox("Row Mapping")
+        mapping_layout = QVBoxLayout(mapping_group)
+
+        mapping_selector_row = QHBoxLayout()
+        mapping_selector_row.addWidget(QLabel("Mapping"))
+        self.mapping_section_combo = QComboBox()
+        self.mapping_section_combo.addItem("Production", "production_mapping")
+        self.mapping_section_combo.addItem("Downtime", "downtime_mapping")
+        self.mapping_section_combo.currentIndexChanged.connect(self.controller.on_mapping_section_changed)
+        mapping_selector_row.addWidget(self.mapping_section_combo)
+        mapping_selector_row.addWidget(QLabel("start_row"))
+        self.mapping_start_row_input = QLineEdit()
+        self.mapping_start_row_input.setFixedWidth(80)
+        mapping_selector_row.addWidget(self.mapping_start_row_input)
+        mapping_selector_row.addWidget(QLabel("max_rows"))
+        self.mapping_max_rows_input = QLineEdit()
+        self.mapping_max_rows_input.setFixedWidth(80)
+        mapping_selector_row.addWidget(self.mapping_max_rows_input)
+        mapping_selector_row.addStretch(1)
+        mapping_layout.addLayout(mapping_selector_row)
+
+        self.mapping_table = QTableWidget()
+        self.mapping_table.setColumnCount(6)
+        self.mapping_table.setHorizontalHeaderLabels(
+            [
+                "field_id",
+                "column",
+                "import_enabled",
+                "export_enabled",
+                "import_transform",
+                "export_transform",
+            ]
+        )
+        self.mapping_table.horizontalHeader().setStretchLastSection(True)
+        mapping_layout.addWidget(self.mapping_table)
+
+        mapping_actions = QHBoxLayout()
+        mapping_apply_button = QPushButton("Apply Mapping")
+        mapping_apply_button.clicked.connect(self.controller.apply_mapping_from_import_export)
+        mapping_actions.addWidget(mapping_apply_button)
+        mapping_actions.addStretch(1)
+        mapping_layout.addLayout(mapping_actions)
+        import_export_layout.addWidget(mapping_group)
+
+        self.tabs.addTab(import_export_tab, "Import / Export")
+
         preview_tab = QWidget()
         preview_layout = QVBoxLayout(preview_tab)
         preview_layout.setContentsMargins(8, 8, 8, 8)
@@ -359,6 +520,161 @@ class LayoutManagerQtView(QMainWindow):
 
         self.field_count_value.setText(str(preview.get("field_count", 0)))
         self.grid_shape_value.setText(f"{row_count} x {column_count}")
+
+    def _set_table_text(self, table_widget, row_index, column_index, value):
+        item = QTableWidgetItem(str(value if value is not None else ""))
+        table_widget.setItem(row_index, column_index, item)
+
+    def _cell_text(self, table_widget, row_index, column_index):
+        item = table_widget.item(row_index, column_index)
+        return str(item.text()).strip() if item is not None else ""
+
+    def _selected_row_index(self, table_widget):
+        selected_items = table_widget.selectedItems()
+        if not selected_items:
+            return -1
+        return selected_items[0].row()
+
+    def _mapping_name_to_row_section(self, mapping_name):
+        return "downtime_row_fields" if mapping_name == "downtime_mapping" else "production_row_fields"
+
+    def current_row_section_name(self):
+        return str(self.row_section_combo.currentData() or "production_row_fields")
+
+    def current_mapping_name(self):
+        return str(self.mapping_section_combo.currentData() or "production_mapping")
+
+    def render_block_authoring(self, config):
+        header_fields = list(config.get("header_fields") or [])
+        self.header_fields_table.setRowCount(len(header_fields))
+        for row_index, field in enumerate(header_fields):
+            self._set_table_text(self.header_fields_table, row_index, 0, field.get("id", ""))
+            self._set_table_text(self.header_fields_table, row_index, 1, field.get("label", ""))
+            self._set_table_text(self.header_fields_table, row_index, 2, field.get("row", 0))
+            self._set_table_text(self.header_fields_table, row_index, 3, field.get("col", 0))
+            self._set_table_text(self.header_fields_table, row_index, 4, field.get("cell", ""))
+            self._set_table_text(self.header_fields_table, row_index, 5, field.get("width", ""))
+            self._set_table_text(self.header_fields_table, row_index, 6, bool(field.get("readonly", False)))
+            self._set_table_text(self.header_fields_table, row_index, 7, field.get("default", ""))
+            self._set_table_text(self.header_fields_table, row_index, 8, field.get("role", ""))
+            self._set_table_text(self.header_fields_table, row_index, 9, bool(field.get("import_enabled", True)))
+            self._set_table_text(self.header_fields_table, row_index, 10, bool(field.get("export_enabled", True)))
+
+        self.render_row_fields_authoring(config)
+
+    def render_row_fields_authoring(self, config):
+        section_name = self.current_row_section_name()
+        row_fields = list(config.get(section_name) or [])
+        self.row_fields_table.setRowCount(len(row_fields))
+        for row_index, field in enumerate(row_fields):
+            self._set_table_text(self.row_fields_table, row_index, 0, field.get("id", ""))
+            self._set_table_text(self.row_fields_table, row_index, 1, field.get("label", ""))
+            self._set_table_text(self.row_fields_table, row_index, 2, field.get("widget", "entry"))
+            self._set_table_text(self.row_fields_table, row_index, 3, field.get("width", ""))
+            self._set_table_text(self.row_fields_table, row_index, 4, field.get("role", ""))
+            self._set_table_text(self.row_fields_table, row_index, 5, bool(field.get("readonly", False)))
+            self._set_table_text(self.row_fields_table, row_index, 6, bool(field.get("derived", False)))
+            self._set_table_text(self.row_fields_table, row_index, 7, bool(field.get("open_row_trigger", False)))
+            self._set_table_text(self.row_fields_table, row_index, 8, bool(field.get("user_input", False)))
+            values = field.get("values") if isinstance(field.get("values"), list) else []
+            self._set_table_text(self.row_fields_table, row_index, 9, ", ".join(str(item).strip() for item in values if str(item).strip()))
+
+    def render_import_export_authoring(self, config):
+        self.template_path_input.setText(str(config.get("template_path") or ""))
+        self.render_mapping_authoring(config)
+
+    def render_mapping_authoring(self, config):
+        mapping_name = self.current_mapping_name()
+        mapping = config.get(mapping_name) if isinstance(config.get(mapping_name), dict) else {}
+        self.mapping_start_row_input.setText(str(mapping.get("start_row", 1)))
+        self.mapping_max_rows_input.setText(str(mapping.get("max_rows", 25)))
+        row_section_name = self._mapping_name_to_row_section(mapping_name)
+        row_fields = list(config.get(row_section_name) or [])
+        columns = mapping.get("columns") if isinstance(mapping.get("columns"), dict) else {}
+
+        self.mapping_table.setRowCount(len(row_fields))
+        for row_index, field in enumerate(row_fields):
+            field_id = str(field.get("id") or "").strip()
+            self._set_table_text(self.mapping_table, row_index, 0, field_id)
+            column_value = columns.get(field_id, "")
+            if isinstance(column_value, dict):
+                self._set_table_text(self.mapping_table, row_index, 1, column_value.get("column", ""))
+                self._set_table_text(self.mapping_table, row_index, 2, bool(column_value.get("import_enabled", True)))
+                self._set_table_text(self.mapping_table, row_index, 3, bool(column_value.get("export_enabled", True)))
+                self._set_table_text(self.mapping_table, row_index, 4, column_value.get("import_transform", "value"))
+                self._set_table_text(self.mapping_table, row_index, 5, column_value.get("export_transform", "value"))
+            else:
+                self._set_table_text(self.mapping_table, row_index, 1, column_value)
+                self._set_table_text(self.mapping_table, row_index, 2, True)
+                self._set_table_text(self.mapping_table, row_index, 3, True)
+                self._set_table_text(self.mapping_table, row_index, 4, "value")
+                self._set_table_text(self.mapping_table, row_index, 5, "value")
+
+    def selected_header_field_id(self):
+        row_index = self._selected_row_index(self.header_fields_table)
+        if row_index < 0:
+            return ""
+        return self._cell_text(self.header_fields_table, row_index, 0)
+
+    def selected_header_field_values(self):
+        row_index = self._selected_row_index(self.header_fields_table)
+        if row_index < 0:
+            return None
+        return {
+            "row": self._cell_text(self.header_fields_table, row_index, 2),
+            "col": self._cell_text(self.header_fields_table, row_index, 3),
+            "cell": self._cell_text(self.header_fields_table, row_index, 4),
+            "width": self._cell_text(self.header_fields_table, row_index, 5),
+            "readonly": self._cell_text(self.header_fields_table, row_index, 6),
+            "default": self._cell_text(self.header_fields_table, row_index, 7),
+            "role": self._cell_text(self.header_fields_table, row_index, 8),
+            "import_enabled": self._cell_text(self.header_fields_table, row_index, 9),
+            "export_enabled": self._cell_text(self.header_fields_table, row_index, 10),
+        }
+
+    def selected_row_field_id(self):
+        row_index = self._selected_row_index(self.row_fields_table)
+        if row_index < 0:
+            return ""
+        return self._cell_text(self.row_fields_table, row_index, 0)
+
+    def selected_row_field_values(self):
+        row_index = self._selected_row_index(self.row_fields_table)
+        if row_index < 0:
+            return None
+        return {
+            "label": self._cell_text(self.row_fields_table, row_index, 1),
+            "widget": self._cell_text(self.row_fields_table, row_index, 2),
+            "width": self._cell_text(self.row_fields_table, row_index, 3),
+            "role": self._cell_text(self.row_fields_table, row_index, 4),
+            "readonly": self._cell_text(self.row_fields_table, row_index, 5),
+            "derived": self._cell_text(self.row_fields_table, row_index, 6),
+            "open_row_trigger": self._cell_text(self.row_fields_table, row_index, 7),
+            "user_input": self._cell_text(self.row_fields_table, row_index, 8),
+            "values": self._cell_text(self.row_fields_table, row_index, 9),
+        }
+
+    def template_path_value(self):
+        return str(self.template_path_input.text()).strip()
+
+    def mapping_form_values(self):
+        column_values = {}
+        for row_index in range(self.mapping_table.rowCount()):
+            field_id = self._cell_text(self.mapping_table, row_index, 0)
+            if not field_id:
+                continue
+            column_values[field_id] = {
+                "column": self._cell_text(self.mapping_table, row_index, 1),
+                "import_enabled": self._cell_text(self.mapping_table, row_index, 2),
+                "export_enabled": self._cell_text(self.mapping_table, row_index, 3),
+                "import_transform": self._cell_text(self.mapping_table, row_index, 4),
+                "export_transform": self._cell_text(self.mapping_table, row_index, 5),
+            }
+        return {
+            "start_row": self.mapping_start_row_input.text().strip(),
+            "max_rows": self.mapping_max_rows_input.text().strip(),
+            "columns": column_values,
+        }
 
     def render_structure(self, config, guardrails, protected_row_field_lookup):
         del protected_row_field_lookup

@@ -20,7 +20,7 @@ INFO = "info"
 SUCCESS = "success"
 
 __module_name__ = "Production Log Calculations Qt Controller"
-__version__ = "1.1.0"
+__version__ = "1.1.2"
 
 
 class ProductionLogCalculationsQtController:
@@ -46,7 +46,13 @@ class ProductionLogCalculationsQtController:
             "window_title": "Production Log Calculations - Production Logging Center",
             "title": "Production Log Calculations",
             "subtitle": (
-                "Developer controls for named formulas and runtime calculation behavior in the shared PyQt6 workspace."
+                "Developer-only controls for Production Log calculation behavior. Per-part rates still come from "
+                "Rate Manager, while named formulas drive the live runtime and workbook import/export paths."
+            ),
+            "guidance_note": (
+                "Saved changes apply to Production Log recalculations, target-time normalization, and workbook "
+                "import/export transforms. Stored draft inputs remain intact, but recalculated minute fields "
+                "reflect the active profile."
             ),
             "theme_tokens": theme_tokens,
         }
@@ -69,6 +75,15 @@ class ProductionLogCalculationsQtController:
         self.view.set_preview_lines(self.build_preview_lines(settings))
         self.view.set_status("Reloaded calculation profile from disk.", INFO)
 
+    def show_toast(self, title, message, bootstyle=None):
+        dispatcher = self.dispatcher
+        show_toast = getattr(dispatcher, "show_toast", None)
+        if callable(show_toast):
+            show_toast(title, message, bootstyle)
+            self.view.set_status(str(message or ""), bootstyle)
+            return
+        self.view.show_info(title, message)
+
     def save_settings(self):
         settings = self.model.update_settings(self.view.get_form_values())
         self.model.save_settings_with_backup()
@@ -77,7 +92,7 @@ class ProductionLogCalculationsQtController:
         if self.dispatcher is not None:
             self.dispatcher.notify_production_log_calculation_settings_changed()
         self.view.set_status("Saved the developer calculation profile and refreshed open Production Log pages.", SUCCESS)
-        self.view.show_toast(
+        self.show_toast(
             "Production Log Calculations",
             "Saved calculation behavior and refreshed open Production Log pages.",
             SUCCESS,

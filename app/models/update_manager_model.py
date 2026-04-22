@@ -52,10 +52,8 @@ DOCUMENTATION_STANDALONE_FILES = [
     "docs/production_log_json_architecture.md",
 ]
 MODULE_PAYLOAD_MVC_PATH_SPECS = [
-    ("controllers", "{module_key}_controller.py"),
     ("controllers", "{module_key}_qt_controller.py"),
     ("models", "{module_key}_model.py"),
-    ("views", "{module_key}_view.py"),
     ("views", "{module_key}_qt_view.py"),
 ]
 UBUNTU_PACKAGE_VERSION_PATTERN = re.compile(r"(?P<version>\d+\.\d+(?:\.\d+)?)")

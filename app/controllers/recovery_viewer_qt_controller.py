@@ -20,7 +20,7 @@ from app.models.recovery_viewer_model import RecoveryViewerModel
 from app.views.recovery_viewer_qt_view import RecoveryViewerQtView
 
 __module_name__ = "Recovery Viewer Qt Controller"
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 
 
 class RecoveryViewerQtController:
@@ -114,6 +114,15 @@ class RecoveryViewerQtController:
         self.view.raise_()
         self.view.activateWindow()
 
+    def show_toast(self, title, message, bootstyle=None):
+        dispatcher = self.dispatcher
+        show_toast = getattr(dispatcher, "show_toast", None)
+        if callable(show_toast):
+            show_toast(title, message, bootstyle)
+            self.view.set_status(str(message or ""))
+            return
+        self.view.show_info(title, message)
+
     def refresh_records(self, initial=False, selected_record_key=None):
         if selected_record_key is None:
             selected_record_key = self._sync_selected_record_key()
@@ -133,10 +142,10 @@ class RecoveryViewerQtController:
     def get_selected_record(self):
         selected_index = self.view.get_selected_index()
         if selected_index is None:
-            self.view.show_info("Recovery Viewer", "Select an item first.")
+            self.show_toast("Recovery Viewer", "Select an item first.", "info")
             return None
         if selected_index < 0 or selected_index >= len(self.records):
-            self.view.show_info("Recovery Viewer", "The selected item is no longer available. Refresh and try again.")
+            self.show_toast("Recovery Viewer", "The selected item is no longer available. Refresh and try again.", "info")
             return None
         return self.records[selected_index]
 
@@ -176,14 +185,14 @@ class RecoveryViewerQtController:
             self.resume_selected()
             return
 
-        self.view.show_info("Recovery Viewer", "Restore is not supported for the selected item type.")
+        self.show_toast("Recovery Viewer", "Restore is not supported for the selected item type.", "info")
 
     def resume_selected(self):
         record = self.get_selected_record()
         if not record:
             return
         if record["record_type"] not in {"draft", "snapshot"}:
-            self.view.show_info("Recovery Viewer", "Resume is only available for drafts and recovery snapshots.")
+            self.show_toast("Recovery Viewer", "Resume is only available for drafts and recovery snapshots.", "info")
             return
 
         if record["record_type"] == "snapshot":
@@ -215,7 +224,7 @@ class RecoveryViewerQtController:
             if record.get("notifies_active_form") and hasattr(self.dispatcher, "notify_active_form_changed"):
                 self.dispatcher.notify_active_form_changed(source_instance=self)
             self.refresh_records(selected_record_key=self._record_key(record))
-            self.view.show_info("Restore Complete", f"Restored {record['restore_target']} from backup.")
+            self.show_toast("Restore Complete", f"Restored {record['restore_target']} from backup.", "success")
         except Exception as exc:
             self.view.show_error("Restore Error", f"Could not restore backup:\n{exc}")
 
@@ -236,7 +245,7 @@ class RecoveryViewerQtController:
                 if not self._open_production_log_draft(restored_path):
                     self.view.show_error("Restore Error", "The restored draft could not be opened in Production Log.")
             else:
-                self.view.set_status(f"Restored draft snapshot to {record['restore_target']}.")
+                self.show_toast("Restore Complete", f"Restored draft snapshot to {record['restore_target']}.", "success")
             return restored_path
         except Exception as exc:
             self.view.show_error("Restore Error", f"Could not restore draft snapshot:\n{exc}")

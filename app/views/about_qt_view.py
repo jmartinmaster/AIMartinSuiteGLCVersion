@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 __module_name__ = "About Qt View"
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
@@ -163,6 +163,16 @@ class AboutQtView(QMainWindow):
 
     def show_info(self, title, message):
         QMessageBox.information(self, title, message)
+
+    def ask_yes_no(self, title, message):
+        decision = QMessageBox.question(
+            self,
+            str(title or "Confirm"),
+            str(message or ""),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        return decision == QMessageBox.StandardButton.Yes
 
     def closeEvent(self, event):
         self.controller.handle_close()

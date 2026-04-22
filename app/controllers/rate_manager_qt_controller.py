@@ -20,7 +20,7 @@ INFO = "info"
 SUCCESS = "success"
 
 __module_name__ = "Rate Manager Qt Controller"
-__version__ = "1.1.1"
+__version__ = "1.1.2"
 
 
 class RateManagerQtController:
@@ -91,7 +91,7 @@ class RateManagerQtController:
             self.model.save_edit(new_rate)
             self.view.reset_form()
             self.refresh_table()
-            self.view.show_toast("Rate Saved", "Updated target rate.", INFO)
+            self.show_toast("Rate Saved", "Updated target rate.", INFO)
         except Exception as exc:
             self.view.show_error("Rate Manager", str(exc))
 
@@ -105,7 +105,7 @@ class RateManagerQtController:
             self.model.add_rate(part, rate)
             self.view.reset_form()
             self.refresh_table()
-            self.view.show_toast("Rate Added", "Added target rate entry.", SUCCESS)
+            self.show_toast("Rate Added", "Added target rate entry.", SUCCESS)
         except Exception as exc:
             self.view.show_error("Rate Manager", str(exc))
 
@@ -117,7 +117,7 @@ class RateManagerQtController:
             self.model.delete_rate(part_key)
             self.view.reset_form()
             self.refresh_table()
-            self.view.show_toast("Rate Deleted", "Removed target rate entry.", SUCCESS)
+            self.show_toast("Rate Deleted", "Removed target rate entry.", SUCCESS)
         except Exception as exc:
             self.view.show_error("Rate Manager", str(exc))
 

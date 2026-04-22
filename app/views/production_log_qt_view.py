@@ -16,7 +16,7 @@
 from app.theme_manager import get_qt_palette, get_qt_stylesheet
 
 __module_name__ = "Production Log Qt View"
-__version__ = "1.3.1"
+__version__ = "1.3.2"
 
 from PyQt6.QtCore import QTimer, Qt
 from PyQt6.QtWidgets import (
@@ -209,6 +209,16 @@ class ProductionLogQtView(QMainWindow):
         export_button.clicked.connect(self.controller.export_to_excel)
         controls_layout.addWidget(export_button)
 
+        self.open_export_button = QPushButton("Open Last Export")
+        self.open_export_button.clicked.connect(self.controller.open_last_exported_file)
+        self.open_export_button.setEnabled(False)
+        controls_layout.addWidget(self.open_export_button)
+
+        self.print_export_button = QPushButton("Print Last Export")
+        self.print_export_button.clicked.connect(self.controller.print_last_exported_file)
+        self.print_export_button.setEnabled(False)
+        controls_layout.addWidget(self.print_export_button)
+
         import_button = QPushButton("Import Excel")
         import_button.clicked.connect(self.controller.import_from_excel_ui)
         controls_layout.addWidget(import_button)
@@ -220,6 +230,10 @@ class ProductionLogQtView(QMainWindow):
         recovery_button = QPushButton("Recovery Snapshots")
         recovery_button.clicked.connect(self.controller.open_recovery_dialog)
         controls_layout.addWidget(recovery_button)
+
+        balance_button = QPushButton("Balance Downtime")
+        balance_button.clicked.connect(self.controller.balance_downtime_to_shift)
+        controls_layout.addWidget(balance_button)
 
         open_pending_button = QPushButton("Open Pending Folder")
         open_pending_button.clicked.connect(self.controller.open_pending_folder)
@@ -316,6 +330,10 @@ class ProductionLogQtView(QMainWindow):
                 widget.textChanged.connect(self._queue_live_recalculate)
             except Exception:
                 continue
+            try:
+                widget.editingFinished.connect(self.controller.on_header_field_focus_out)
+            except Exception:
+                pass
         try:
             self.production_table.itemChanged.connect(self._handle_production_item_changed)
         except Exception:

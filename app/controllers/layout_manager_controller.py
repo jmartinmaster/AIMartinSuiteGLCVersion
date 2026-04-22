@@ -37,8 +37,8 @@ class LayoutManagerController:
         self.selected_form_id = None
         self.loaded_form_info = None
         self.pending_active_form_info = None
-        self.requested_view_backend = "tk"
-        self.resolved_view_backend = "tk"
+        self.requested_view_backend = "qt"
+        self.resolved_view_backend = "qt"
         self.view_backend_fallback_reason = None
         self._last_runtime_change_token = None
         layout_manager_dispatcher = getattr(self.dispatcher, "layout_manager_dispatcher", None)
@@ -78,7 +78,7 @@ class LayoutManagerController:
         return {
             "window_title": "Layout Manager - Production Logging Center",
             "title": "Layout Manager",
-            "subtitle": "Qt sidecar runtime for staged Layout Manager migration.",
+            "subtitle": "Dedicated PyQt6 runtime window.",
             "requested_backend": self.requested_view_backend,
             "resolved_backend": self.resolved_view_backend,
             "form_info": dict(loaded_form or {}),
@@ -343,9 +343,7 @@ class LayoutManagerController:
             self.update_preview()
 
     def on_hide(self):
-        if self.resolved_view_backend == "qt":
-            return None
-        return self.view.on_hide()
+        return None
 
     def on_active_form_changed(self, active_form_info=None, form_id=None):
         active_form = dict(active_form_info) if isinstance(active_form_info, dict) else self.model.get_active_form_info()
@@ -369,10 +367,8 @@ class LayoutManagerController:
         self.load_config(initial=True)
 
     def on_unload(self):
-        if self.resolved_view_backend == "qt":
-            self.stop_qt_window()
-            return None
-        return self.view.on_unload()
+        self.stop_qt_window()
+        return None
 
     def load_config(self, initial=False):
         if not initial and not self.view.confirm_discard_changes(self.model.is_dirty):

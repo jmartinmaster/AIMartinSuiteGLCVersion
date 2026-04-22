@@ -16,7 +16,7 @@
 from app.models.production_log_calculations_model import EDITOR_SECTIONS
 
 __module_name__ = "Production Log Calculations Qt View"
-__version__ = "1.1.0"
+__version__ = "1.1.2"
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
@@ -109,6 +109,16 @@ class ProductionLogCalculationsQtView(QMainWindow):
         self.preview_list = QListWidget()
         preview_layout.addWidget(self.preview_list)
         scroll_layout.addWidget(preview_group)
+
+        guidance_note = QLabel(
+            str(
+                self.payload.get("guidance_note")
+                or "Saved profile changes apply to Production Log recalculations and workbook import/export behavior."
+            )
+        )
+        guidance_note.setObjectName("mutedLabel")
+        guidance_note.setWordWrap(True)
+        scroll_layout.addWidget(guidance_note)
 
         action_row = QHBoxLayout()
         save_button = QPushButton("Save Profile")
@@ -249,13 +259,7 @@ class ProductionLogCalculationsQtView(QMainWindow):
         QMessageBox.information(self, title, message)
 
     def show_toast(self, title, message, bootstyle=None):
-        dispatcher = getattr(self.controller, "dispatcher", None)
-        show_toast = getattr(dispatcher, "show_toast", None)
-        if callable(show_toast):
-            show_toast(title, message, bootstyle)
-            self.set_status(message, bootstyle)
-            return
-        self.show_info(title, message)
+        self.controller.show_toast(title, message, bootstyle)
 
     def closeEvent(self, event):
         self.controller.handle_close()

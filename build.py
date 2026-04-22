@@ -16,6 +16,7 @@
 
 import importlib
 import importlib.util
+import json
 import os
 import shlex
 import shutil
@@ -23,6 +24,7 @@ import stat
 import subprocess
 import sys
 import argparse
+import time
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
 from app.app_identity import DEB_PACKAGE_NAME, LEGACY_DEB_NAME, LEGACY_EXE_NAME, format_versioned_deb_name, format_versioned_exe_name, load_version_from_main, normalize_version, parse_version, parse_versioned_exe_name
@@ -100,9 +102,23 @@ UBUNTU_APP_DIST_ROOT = UBUNTU_DIST_ROOT / "app"
 UBUNTU_PACKAGE_ROOT = UBUNTU_DIST_ROOT / "package-root"
 SANITIZED_RATES_SOURCE = REPO_ROOT / "rates_dummy.json"
 PUBLIC_VARIANT_DIST_ROOT = WINDOWS_DIST_ROOT / "variants" / "public"
-WINDOWS_RUNTIME_SEED_FILES = [
+PRIVATE_WINDOWS_RUNTIME_SEED_FILES = [
     (REPO_ROOT / "data" / "config" / "layout_config.json", Path("data") / "config" / "layout_config.json"),
     (REPO_ROOT / "data" / "config" / "production_log_calculations.json", Path("data") / "config" / "production_log_calculations.json"),
+    (REPO_ROOT / "data" / "config" / "form_definitions.json", Path("data") / "config" / "form_definitions.json"),
+    (REPO_ROOT / "data" / "config" / "settings.json", Path("data") / "config" / "settings.json"),
+    (REPO_ROOT / "data" / "config" / "rates.json", Path("data") / "config" / "rates.json"),
+]
+PUBLIC_WINDOWS_RUNTIME_SHARED_SEED_FILES = [
+    (REPO_ROOT / "data" / "config" / "layout_config.json", Path("data") / "config" / "layout_config.json"),
+    (REPO_ROOT / "data" / "config" / "production_log_calculations.json", Path("data") / "config" / "production_log_calculations.json"),
+]
+WINDOWS_RUNTIME_LEGACY_FILES = [
+    "layout_config.json",
+    "production_log_calculations.json",
+    "form_definitions.json",
+    "settings.json",
+    "rates.json",
 ]
 
 
@@ -359,24 +375,112 @@ def copy_artifact_to_public_variant_dist(artifact_path):
     return destination_path
 
 
-def seed_windows_runtime_files(target_root, sanitized_rates_path):
+def _reset_windows_runtime_seed_targets(target_root):
     target_root = Path(target_root)
     target_root.mkdir(parents=True, exist_ok=True)
 
+    def _make_writable(path):
+        try:
+            os.chmod(path, stat.S_IWRITE)
+        except OSError:
+            return
+
+    def _remove_tree_with_retries(path_obj, retries=6, delay_sec=0.25):
+        if not path_obj.exists():
+            return
+        for attempt in range(retries):
+            try:
+                shutil.rmtree(path_obj, onexc=lambda _func, failing_path, _exc_info: _make_writable(failing_path))
+                return
+            except FileNotFoundError:
+                return
+            except PermissionError:
+                if attempt == retries - 1:
+                    break
+                time.sleep(delay_sec)
+        raise BuildError(
+            f"Could not clean runtime seed directory '{path_obj}'. "
+            "Close any running app/build process using dist data and retry."
+        )
+
+    def _remove_file_with_retries(path_obj, retries=6, delay_sec=0.25):
+        if not path_obj.exists() or path_obj.is_dir():
+            return
+        for attempt in range(retries):
+            try:
+                path_obj.unlink()
+                return
+            except FileNotFoundError:
+                return
+            except PermissionError:
+                _make_writable(path_obj)
+                if attempt == retries - 1:
+                    break
+                time.sleep(delay_sec)
+        raise BuildError(
+            f"Could not remove legacy runtime seed file '{path_obj}'. "
+            "Close any running app/build process using dist data and retry."
+        )
+
+    config_root = target_root / "data" / "config"
+    forms_root = target_root / "data" / "forms"
+    _remove_tree_with_retries(config_root)
+    _remove_tree_with_retries(forms_root)
+
+    for legacy_file_name in WINDOWS_RUNTIME_LEGACY_FILES:
+        legacy_path = target_root / legacy_file_name
+        _remove_file_with_retries(legacy_path)
+
+
+def _copy_seed_files(target_root, seed_files):
     copied_paths = []
-    for source_path, relative_target_path in WINDOWS_RUNTIME_SEED_FILES:
+    for source_path, relative_target_path in seed_files:
         if not source_path.exists():
             raise BuildError(f"Missing Windows runtime seed file: {source_path}")
         destination_path = target_root / relative_target_path
         destination_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source_path, destination_path)
         copied_paths.append(destination_path)
+    return copied_paths
+
+
+def _write_seed_json(target_root, relative_target_path, payload):
+    destination_path = Path(target_root) / relative_target_path
+    destination_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(destination_path, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle, indent=2)
+        handle.write("\n")
+    return destination_path
+
+
+def seed_private_windows_runtime_files(target_root):
+    target_root = Path(target_root)
+    _reset_windows_runtime_seed_targets(target_root)
+
+    copied_paths = _copy_seed_files(target_root, PRIVATE_WINDOWS_RUNTIME_SEED_FILES)
+
+    forms_source_root = REPO_ROOT / "data" / "forms"
+    if forms_source_root.exists():
+        shutil.copytree(forms_source_root, target_root / "data" / "forms", dirs_exist_ok=True)
+        copied_paths.append(target_root / "data" / "forms")
+
+    return copied_paths
+
+
+def seed_public_windows_runtime_files(target_root, sanitized_rates_path):
+    target_root = Path(target_root)
+    _reset_windows_runtime_seed_targets(target_root)
+
+    copied_paths = _copy_seed_files(target_root, PUBLIC_WINDOWS_RUNTIME_SHARED_SEED_FILES)
 
     if sanitized_rates_path is not None:
         rates_destination_path = target_root / "data" / "config" / "rates.json"
         rates_destination_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(sanitized_rates_path, rates_destination_path)
         copied_paths.append(rates_destination_path)
+
+    copied_paths.append(_write_seed_json(target_root, Path("data") / "config" / "settings.json", {}))
+    copied_paths.append(_write_seed_json(target_root, Path("data") / "config" / "form_definitions.json", {}))
 
     return copied_paths
 
@@ -681,15 +785,15 @@ def run_windows_build():
     if not built_executable_path.exists():
         raise BuildError(f"PyInstaller completed, but the Windows executable was not created at {built_executable_path}.")
 
-    seed_windows_runtime_files(WINDOWS_DIST_ROOT, sanitized_rates_path)
+    seed_private_windows_runtime_files(WINDOWS_DIST_ROOT)
 
     public_variant_executable_path = copy_artifact_to_public_variant_dist(built_executable_path)
-    seed_windows_runtime_files(PUBLIC_VARIANT_DIST_ROOT, sanitized_rates_path)
+    seed_public_windows_runtime_files(PUBLIC_VARIANT_DIST_ROOT, sanitized_rates_path)
 
     archive_previous_builds()
 
-    print(f"\n--- Windows build complete. Check {built_executable_path} ---")
-    print(f"--- Public variant copy: {public_variant_executable_path} ---")
+    print(f"\n--- Windows build complete with real runtime data seeded at {WINDOWS_DIST_ROOT / 'data' / 'config'} ---")
+    print(f"--- Public variant copy with dummy runtime data: {public_variant_executable_path} ---")
 
 
 def run_ubuntu_build_direct():

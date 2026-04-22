@@ -1,0 +1,26 @@
+{
+    "version": 2,
+    "vault_name": "admin",
+    "display_name": "admin",
+    "role": "admin",
+    "enabled": true,
+    "password_required": true,
+    "requires_yubikey": false,
+    "rights": [
+        "module:production_log",
+        "module:layout_manager",
+        "module:rate_manager",
+        "module:settings_manager",
+        "module:update_manager",
+        "module:recovery_viewer",
+        "module:help_viewer",
+        "module:about",
+        "security:manage_vaults"
+    ],
+    "hash_scheme": "pbkdf2_sha256",
+    "password_hash": "b58f0b9eda629136806fbd6adfb2f4efc8bdde7bcca39e37ebeb114275ac1c08",
+    "password_salt": "3e33b073af22aa52ae93ed196871d9c0",
+    "password_iterations": 600000,
+    "created_at": "2026-04-22T00:20:09Z",
+    "updated_at": "2026-04-22T00:20:09Z"
+}

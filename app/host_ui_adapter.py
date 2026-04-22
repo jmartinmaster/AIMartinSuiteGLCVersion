@@ -14,10 +14,11 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 __module_name__ = "Host UI Adapter"
-__version__ = "0.1.0"
+__version__ = "0.2.2"
 
-from PyQt6.QtCore import QEvent, QObject, QTimer, pyqtSignal
-from PyQt6.QtWidgets import QMessageBox
+from PyQt6.QtCore import QEasingCurve, QEvent, QObject, QPropertyAnimation, QTimer, Qt, pyqtSignal
+from PyQt6.QtGui import QColor
+from PyQt6.QtWidgets import QFrame, QGraphicsOpacityEffect, QHBoxLayout, QLabel, QMessageBox, QVBoxLayout, QWidget
 
 PYQT6_ADAPTER_AVAILABLE = True
 
@@ -86,22 +87,215 @@ class _QtMainThreadInvoker(QObject if QObject is not None else object):
         QTimer.singleShot(max(0, delay_ms), callback)
 
 
-# DEPRECATED (Phase 9): Tk host UI adapter.
-# `TkHostUiAdapter` remains for compatibility during the migration window.
-# After Phase 9 validation and smoke tests, this adapter will be removed
-# and `PyQt6HostUiAdapter` will be the sole host adapter implementation.
-class TkHostUiAdapter:
-    def __init__(self, dispatcher, toast_factory):
-        _ = dispatcher
-        _ = toast_factory
-        raise RuntimeError("The Tk host UI adapter was removed in Phase 9. See shadow/app/host_ui_adapter.py.")
-
-
-class PyQt6HostUiAdapter:
+class _QtToastPresenter(QFrame if QFrame is not None else object):
     def __init__(self, host_window):
+        if QFrame is not None:
+            super().__init__(host_window)
+        self.host_window = host_window
+        self._theme_tokens = {}
+        self._current_title = ""
+        self._current_message = ""
+        self._current_bootstyle = None
+        self._hide_after_ms = 5000
+        self._fade_target = None
+
+        if QWidget is None:
+            return
+
+        self.setObjectName("martinToastPresenter")
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self.hide()
+
+        self._build_ui()
+        self._configure_effects()
+
+    def _build_ui(self):
+        self.setMinimumWidth(280)
+        self.setMaximumWidth(420)
+
+        root_layout = QHBoxLayout(self)
+        root_layout.setContentsMargins(0, 0, 0, 0)
+        root_layout.setSpacing(0)
+
+        self.accent_bar = QFrame(self)
+        self.accent_bar.setFixedWidth(6)
+        root_layout.addWidget(self.accent_bar)
+
+        body_widget = QWidget(self)
+        body_layout = QVBoxLayout(body_widget)
+        body_layout.setContentsMargins(14, 12, 14, 12)
+        body_layout.setSpacing(4)
+
+        self.title_label = QLabel(body_widget)
+        self.title_label.setWordWrap(True)
+        body_layout.addWidget(self.title_label)
+
+        self.message_label = QLabel(body_widget)
+        self.message_label.setWordWrap(True)
+        body_layout.addWidget(self.message_label)
+
+        root_layout.addWidget(body_widget, 1)
+
+    def _configure_effects(self):
+        self.opacity_effect = QGraphicsOpacityEffect(self)
+        self.opacity_effect.setOpacity(0.0)
+        self.setGraphicsEffect(self.opacity_effect)
+
+        self.fade_animation = QPropertyAnimation(self.opacity_effect, b"opacity", self)
+        self.fade_animation.setDuration(180)
+        self.fade_animation.setEasingCurve(QEasingCurve.Type.InOutQuad)
+        self.fade_animation.finished.connect(self._on_fade_finished)
+
+        self.hide_timer = QTimer(self)
+        self.hide_timer.setSingleShot(True)
+        self.hide_timer.timeout.connect(self.start_hide)
+
+    def show_toast(self, title, message, bootstyle, duration_ms, theme_tokens):
+        if QWidget is None:
+            return
+
+        self._current_title = str(title or "")
+        self._current_message = str(message or "")
+        self._current_bootstyle = bootstyle
+        self._hide_after_ms = max(1200, int(duration_ms))
+        self._theme_tokens = dict(theme_tokens or {})
+
+        self._apply_theme()
+        self._reflow()
+        self.raise_()
+        self.show()
+        self._start_fade(1.0)
+        self.hide_timer.start(self._hide_after_ms)
+
+    def refresh_theme(self, theme_tokens):
+        if QWidget is None or not self.isVisible():
+            return
+        self._theme_tokens = dict(theme_tokens or {})
+        self._apply_theme()
+        self._reflow()
+
+    def start_hide(self):
+        if QWidget is None or not self.isVisible():
+            return
+        self.hide_timer.stop()
+        self._start_fade(0.0)
+
+    def reposition(self):
+        if QWidget is None:
+            return
+
+        host_rect = self.host_window.rect()
+        status_bar = getattr(self.host_window, "statusBar", lambda: None)()
+        status_bar_height = status_bar.height() if status_bar is not None else 0
+        margin = 20
+        bottom_gap = status_bar_height + margin
+
+        self.adjustSize()
+        width = min(self.sizeHint().width(), max(240, host_rect.width() - (margin * 2)))
+        height = self.sizeHint().height()
+        x_pos = max(margin, host_rect.width() - width - margin)
+        y_pos = max(margin, host_rect.height() - height - bottom_gap)
+        self.resize(width, height)
+        self.move(x_pos, y_pos)
+
+    def _reflow(self):
+        if QWidget is None:
+            return
+        available_width = max(240, self.host_window.width() - 48)
+        max_width = min(420, available_width)
+        self.setMaximumWidth(max_width)
+        text_width = max(200, max_width - 54)
+        self.title_label.setMaximumWidth(text_width)
+        self.message_label.setMaximumWidth(text_width)
+        self.reposition()
+
+    def _apply_theme(self):
+        tokens = dict(self._theme_tokens or {})
+        surface_bg = str(tokens.get("surface_bg") or "#ffffff")
+        surface_fg = str(tokens.get("surface_fg") or "#152129")
+        muted_fg = str(tokens.get("muted_fg") or surface_fg)
+        border_color = str(tokens.get("border_color") or "#c6d2d8")
+        accent_color = self._resolve_severity_color(tokens, self._current_bootstyle)
+        soft_fill = self._blend_with_surface(surface_bg, accent_color, 0.10)
+
+        self.setStyleSheet(
+            "".join(
+                [
+                    "QFrame#martinToastPresenter {",
+                    f"background-color: {soft_fill};",
+                    f"border: 1px solid {border_color};",
+                    "border-radius: 12px;",
+                    "}",
+                ]
+            )
+        )
+        self.accent_bar.setStyleSheet(
+            "".join(
+                [
+                    "QFrame {",
+                    f"background-color: {accent_color};",
+                    "border-top-left-radius: 12px;",
+                    "border-bottom-left-radius: 12px;",
+                    "}",
+                ]
+            )
+        )
+        self.title_label.setText(self._current_title)
+        self.title_label.setVisible(bool(self._current_title))
+        self.title_label.setStyleSheet(f"color: {surface_fg}; font-weight: 700;")
+        self.message_label.setText(self._current_message)
+        self.message_label.setStyleSheet(f"color: {muted_fg};")
+
+    def _resolve_severity_color(self, tokens, bootstyle):
+        base_color = QColor(str(tokens.get("accent") or "#0f7c8f"))
+        style_name = str(bootstyle or "info").strip().lower()
+        target_hues = {
+            "success": 145,
+            "warning": 36,
+            "danger": 5,
+            "error": 5,
+            "critical": 5,
+        }
+        hue = target_hues.get(style_name, base_color.hslHue())
+        if hue < 0:
+            hue = 190
+        saturation = max(base_color.hslSaturation(), 120)
+        lightness = max(base_color.lightness(), 118)
+        return QColor.fromHsl(hue, saturation, lightness).name()
+
+    def _blend_with_surface(self, surface_hex, overlay_hex, overlay_alpha):
+        surface_color = QColor(str(surface_hex))
+        overlay_color = QColor(str(overlay_hex))
+        alpha = max(0.0, min(float(overlay_alpha), 1.0))
+        red = round((surface_color.red() * (1.0 - alpha)) + (overlay_color.red() * alpha))
+        green = round((surface_color.green() * (1.0 - alpha)) + (overlay_color.green() * alpha))
+        blue = round((surface_color.blue() * (1.0 - alpha)) + (overlay_color.blue() * alpha))
+        return QColor(red, green, blue).name()
+
+    def _start_fade(self, target_opacity):
+        self._fade_target = float(target_opacity)
+        self.fade_animation.stop()
+        self.fade_animation.setStartValue(self.opacity_effect.opacity())
+        self.fade_animation.setEndValue(self._fade_target)
+        self.fade_animation.start()
+
+    def _on_fade_finished(self):
+        if self._fade_target == 0.0:
+            self.hide()
+
+
+class PyQt6HostUiAdapter(QObject if QObject is not None else object):
+    def __init__(self, host_window):
+        if QObject is not None:
+            super().__init__(host_window)
         self.host_window = host_window
         self._wheel_forwarders = []
         self._main_thread_invoker = _QtMainThreadInvoker(host_window) if PYQT6_ADAPTER_AVAILABLE else None
+        self._toast_presenter = _QtToastPresenter(host_window) if QWidget is not None else None
+        install_event_filter = getattr(self.host_window, "installEventFilter", None)
+        if callable(install_event_filter):
+            install_event_filter(self)
 
     def call_later(self, delay_ms, callback):
         if not PYQT6_ADAPTER_AVAILABLE:
@@ -281,12 +475,29 @@ class PyQt6HostUiAdapter:
         return None
 
     def show_toast(self, title, message, bootstyle=None, duration_ms=None):
-        _ = bootstyle
-        duration = duration_ms if duration_ms is not None else 5000
-        combined = f"{title}: {message}" if title else str(message or "")
-        status_bar = self.host_window.statusBar()
-        if status_bar is not None:
-            status_bar.showMessage(combined, max(0, int(duration)))
+        payload = {
+            "title": str(title or ""),
+            "message": str(message or ""),
+            "bootstyle": bootstyle,
+            "duration_ms": self._resolve_toast_duration_ms(duration_ms),
+            "theme_tokens": self._current_theme_tokens(),
+            "has_presenter": self._toast_presenter is not None,
+        }
+        return self.run_on_main_thread(lambda current_payload=payload: self._present_toast(current_payload))
+
+    def eventFilter(self, watched, event):
+        if watched is self.host_window and event is not None and self._toast_presenter is not None:
+            if event.type() in {
+                QEvent.Type.Resize,
+                QEvent.Type.Move,
+                QEvent.Type.Show,
+                QEvent.Type.WindowStateChange,
+                QEvent.Type.StyleChange,
+                QEvent.Type.PaletteChange,
+                QEvent.Type.LayoutRequest,
+            }:
+                self._toast_presenter.refresh_theme(self._current_theme_tokens())
+        return False
 
     def refresh_update_status_visibility(self):
         refresh = getattr(self.host_window, "refresh_update_status_visibility", None)
@@ -321,3 +532,49 @@ class PyQt6HostUiAdapter:
     def destroy_module_window(self, window):
         _ = window
         return None
+
+    def _present_toast(self, payload):
+        if not payload.get("has_presenter") or self._toast_presenter is None:
+            combined = f"{payload.get('title', '')}: {payload.get('message', '')}" if payload.get("title") else str(payload.get("message") or "")
+            status_bar = self.host_window.statusBar()
+            if status_bar is not None:
+                status_bar.showMessage(combined, int(payload.get("duration_ms", 5000)))
+            return None
+        self._toast_presenter.show_toast(
+            payload.get("title", ""),
+            payload.get("message", ""),
+            payload.get("bootstyle"),
+            payload.get("duration_ms", 5000),
+            payload.get("theme_tokens") or {},
+        )
+        return None
+
+    def _current_theme_tokens(self):
+        theme_tokens = getattr(self.host_window, "theme_tokens", None)
+        if isinstance(theme_tokens, dict) and theme_tokens:
+            return dict(theme_tokens)
+        martin_theme_tokens = getattr(self.host_window, "_martin_theme_tokens", None)
+        if isinstance(martin_theme_tokens, dict) and martin_theme_tokens:
+            return dict(martin_theme_tokens)
+        return {}
+
+    def _resolve_toast_duration_ms(self, explicit_duration_ms=None):
+        if explicit_duration_ms is not None:
+            try:
+                return max(800, int(explicit_duration_ms))
+            except Exception:
+                return 5000
+
+        dispatcher = getattr(self.host_window, "dispatcher", None)
+        get_setting = getattr(dispatcher, "get_setting", None)
+        if callable(get_setting):
+            try:
+                return max(800, int(get_setting("toast_duration_sec", 5)) * 1000)
+            except Exception:
+                return 5000
+
+        runtime_settings = getattr(self.host_window, "runtime_settings", {}) or {}
+        try:
+            return max(800, int(runtime_settings.get("toast_duration_sec", 5)) * 1000)
+        except Exception:
+            return 5000
