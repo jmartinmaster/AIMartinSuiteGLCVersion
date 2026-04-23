@@ -149,17 +149,12 @@ For the PyQt6 shell, use the ThemeManager's Qt helpers such as `get_qt_palette()
 
 ### 4.2 Theme Presets
 
-| Theme key | Display label | Compatibility label | Character |
-|-----------|---------------|------------------------|-----------|
-| `martin_modern_light` *(default)* | Martin Modern Light — industrial | `flatly` | Industrial slate-and-steel light mode |
-| `cyber_industrial_dark` | Cyber-Industrial Dark — neon steel | `superhero` | Deep navy/charcoal with cyan neon accents |
-| `flatly` | Flatly — balanced light | — | ttkbootstrap built-in |
-| `cosmo` | Cosmo — crisp light | — | ttkbootstrap built-in |
-| `lumen` | Lumen — soft light | — | ttkbootstrap built-in |
-| `journal` | Journal — paper light | — | ttkbootstrap built-in |
-| `litera` | Litera — text-forward light | — | ttkbootstrap built-in |
-| `darkly` | Darkly — balanced dark | — | ttkbootstrap built-in |
-| `superhero` | Superhero — high-contrast dark | — | ttkbootstrap built-in |
+| Theme key | Display label | Legacy alias mapping | Character |
+|-----------|---------------|----------------------|-----------|
+| `martin_modern_light` *(default)* | Martin Modern Light — industrial | — | Industrial slate-and-steel light mode |
+| `cyber_industrial_dark` | Cyber-Industrial Dark — neon steel | — | High-pop SCADA-style dark theme with bright cyan emphasis |
+| `journal` | Journal — paper light | `flatly`, `cosmo`, `lumen`, `litera` | Warm paper-and-ink light mode |
+| `superhero` | Superhero — high-contrast dark | `darkly` | Neutral high-contrast dark mode |
 
 `DEFAULT_THEME = "martin_modern_light"`. The settings system persists the theme key in `settings.json`.
 

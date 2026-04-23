@@ -21,7 +21,7 @@ from app.theme_manager import get_qt_palette, get_qt_stylesheet, get_theme_token
 from app.host_ui_adapter import PyQt6HostUiAdapter
 
 __module_name__ = "PyQt6 Host Shell"
-__version__ = "0.1.2"
+__version__ = "0.1.3"
 
 try:
     from PyQt6.QtCore import QTimer
@@ -94,6 +94,8 @@ class PyQt6HostShellView(QMainWindow):
         self.sidebar_collapsed = False
         self.sidebar_expanded_width = 184
         self.sidebar_collapsed_width = 60
+        self.sidebar_title_expanded_text = "Logging\nCenter"
+        self.sidebar_title_collapsed_text = "LC"
         self.right_container = None
         self.canvas = None
         self.scrollbar = None
@@ -348,8 +350,10 @@ class PyQt6HostShellView(QMainWindow):
         header_layout.setContentsMargins(0, 0, 0, 0)
         header_layout.setSpacing(8)
 
-        self.sidebar_title = QLabel("LOGGING CENTER", header_frame)
+        self.sidebar_title = QLabel(self.sidebar_title_expanded_text, header_frame)
         self.sidebar_title.setObjectName("sidebarTitleLabel")
+        self.sidebar_title.setWordWrap(True)
+        self.sidebar_title.setMinimumHeight(40)
         header_layout.addWidget(self.sidebar_title, 1)
 
         self.sidebar_toggle_button = QPushButton("<", header_frame)
@@ -825,7 +829,9 @@ class PyQt6HostShellView(QMainWindow):
             self.sidebar.setMinimumWidth(sidebar_width)
             self.sidebar.setMaximumWidth(sidebar_width)
         if self.sidebar_title is not None:
-            self.sidebar_title.setText("LC" if self.sidebar_collapsed else "LOGGING CENTER")
+            self.sidebar_title.setText(
+                self.sidebar_title_collapsed_text if self.sidebar_collapsed else self.sidebar_title_expanded_text
+            )
         if self.sidebar_subtitle is not None:
             self.sidebar_subtitle.setVisible(not self.sidebar_collapsed)
         if self.sidebar_toggle_button is not None:

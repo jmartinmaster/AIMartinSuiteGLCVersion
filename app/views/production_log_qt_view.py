@@ -17,7 +17,7 @@ from app.downtime_codes import get_code_options
 from app.theme_manager import get_qt_palette, get_qt_stylesheet
 
 __module_name__ = "Form Loader Qt View"
-__version__ = "1.3.2"
+__version__ = "1.3.6"
 
 from PyQt6.QtCore import QTimer, Qt
 from PyQt6.QtWidgets import (
@@ -93,6 +93,7 @@ class ProductionLogQtView(QMainWindow):
         self.row_delete_policies = dict(row_delete_policies or {})
         self.header_widgets = {}
         self.repeating_sections = {}
+        self.action_buttons = []
         self.production_table = None
         self.downtime_table = None
         self.has_unsaved_changes = False
@@ -204,61 +205,6 @@ class ProductionLogQtView(QMainWindow):
         selector_layout.addWidget(activate_form_button)
         content_layout.addWidget(selector_group)
 
-        controls_layout = QHBoxLayout()
-
-        refresh_button = QPushButton("Refresh Draft Lists")
-        refresh_button.clicked.connect(self.controller.refresh_draft_lists)
-        controls_layout.addWidget(refresh_button)
-
-        save_button = QPushButton("Save Draft")
-        save_button.clicked.connect(self.controller.save_draft)
-        controls_layout.addWidget(save_button)
-
-        calculate_button = QPushButton("Calculate")
-        calculate_button.clicked.connect(self.controller.calculate_metrics)
-        controls_layout.addWidget(calculate_button)
-
-        export_button = QPushButton("Export Excel")
-        export_button.clicked.connect(self.controller.export_to_excel)
-        controls_layout.addWidget(export_button)
-
-        self.open_export_button = QPushButton("Open Last Export")
-        self.open_export_button.clicked.connect(self.controller.open_last_exported_file)
-        self.open_export_button.setEnabled(False)
-        controls_layout.addWidget(self.open_export_button)
-
-        self.print_export_button = QPushButton("Print Last Export")
-        self.print_export_button.clicked.connect(self.controller.print_last_exported_file)
-        self.print_export_button.setEnabled(False)
-        controls_layout.addWidget(self.print_export_button)
-
-        import_button = QPushButton("Import Excel")
-        import_button.clicked.connect(self.controller.import_from_excel_ui)
-        controls_layout.addWidget(import_button)
-
-        pending_button = QPushButton("Pending Drafts")
-        pending_button.clicked.connect(self.controller.open_pending_dialog)
-        controls_layout.addWidget(pending_button)
-
-        recovery_button = QPushButton("Recovery Snapshots")
-        recovery_button.clicked.connect(self.controller.open_recovery_dialog)
-        controls_layout.addWidget(recovery_button)
-
-        balance_button = QPushButton("Balance Downtime")
-        balance_button.clicked.connect(self.controller.balance_downtime_to_shift)
-        controls_layout.addWidget(balance_button)
-
-        open_pending_button = QPushButton("Open Pending Folder")
-        open_pending_button.clicked.connect(self.controller.open_pending_folder)
-        controls_layout.addWidget(open_pending_button)
-
-        open_recovery_button = QPushButton("Open Recovery Folder")
-        open_recovery_button.clicked.connect(self.controller.open_recovery_folder)
-        controls_layout.addWidget(open_recovery_button)
-
-        controls_layout.addStretch(1)
-        content_layout.addLayout(controls_layout)
-
         self._build_dynamic_sections(content_layout)
 
         self.draft_status_label = QLabel("Drafts: 0 | Recovery: 0 | Latest: None")
@@ -274,6 +220,7 @@ class ProductionLogQtView(QMainWindow):
         content_layout.addLayout(metrics_layout)
 
         content_layout.addStretch(1)
+        content_layout.addWidget(self._build_action_panel(scroll_content))
         scroll_area.setWidget(scroll_content)
 
         self.setCentralWidget(central_widget)
@@ -381,6 +328,94 @@ class ProductionLogQtView(QMainWindow):
                 section_name,
                 f"Section profile '{behavior_profile or 'unknown'}' with type '{section_type or 'unknown'}' is not yet rendered in Form Loader.",
             )
+
+    def _create_action_button(self, title, callback, enabled=True):
+        button = QPushButton(str(title or "Action"))
+        button.setMinimumHeight(40)
+        button.clicked.connect(callback)
+        button.setEnabled(bool(enabled))
+        self.action_buttons.append(button)
+        return button
+
+    def _build_action_group(self, title, buttons, parent):
+        group = QGroupBox(str(title or "Actions"), parent)
+        group_layout = QVBoxLayout(group)
+        group_layout.setContentsMargins(8, 8, 8, 8)
+        group_layout.setSpacing(8)
+        for button in buttons:
+            group_layout.addWidget(button, 0, Qt.AlignmentFlag.AlignHCenter)
+        group_layout.addStretch(1)
+        return group
+
+    def _update_action_button_widths(self):
+        if not self.action_buttons:
+            return
+        target_width = max(button.sizeHint().width() for button in self.action_buttons)
+        for button in self.action_buttons:
+            button.setFixedWidth(target_width)
+
+    def _build_action_panel(self, parent):
+        action_panel = QGroupBox("Workspace Actions", parent)
+        action_panel_layout = QGridLayout(action_panel)
+        action_panel_layout.setContentsMargins(10, 10, 10, 10)
+        action_panel_layout.setHorizontalSpacing(12)
+        action_panel_layout.setVerticalSpacing(12)
+
+        draft_group = self._build_action_group(
+            "Draft Workflow",
+            [
+                self._create_action_button("Save Draft", self.controller.save_draft),
+                self._create_action_button("Refresh Draft Lists", self.controller.refresh_draft_lists),
+                self._create_action_button("Pending Drafts", self.controller.open_pending_dialog),
+                self._create_action_button("Open Pending Folder", self.controller.open_pending_folder),
+            ],
+            action_panel,
+        )
+
+        recovery_group = self._build_action_group(
+            "Recovery",
+            [
+                self._create_action_button("Recovery Snapshots", self.controller.open_recovery_dialog),
+                self._create_action_button("Open Recovery Folder", self.controller.open_recovery_folder),
+            ],
+            action_panel,
+        )
+
+        self.open_export_button = self._create_action_button("Open Last Export", self.controller.open_last_exported_file, enabled=False)
+        self.print_export_button = self._create_action_button(
+            "Print Last Export",
+            self.controller.print_last_exported_file,
+            enabled=False,
+        )
+        workbook_group = self._build_action_group(
+            "Workbook",
+            [
+                self._create_action_button("Import Excel", self.controller.import_from_excel_ui),
+                self._create_action_button("Export Excel", self.controller.export_to_excel),
+                self.open_export_button,
+                self.print_export_button,
+            ],
+            action_panel,
+        )
+
+        tools_group = self._build_action_group(
+            "Calculations & Tools",
+            [
+                self._create_action_button("Calculate", self.controller.calculate_metrics),
+                self._create_action_button("Balance Downtime", self.controller.balance_downtime_to_shift),
+            ],
+            action_panel,
+        )
+
+        action_panel_layout.addWidget(draft_group, 0, 0)
+        action_panel_layout.addWidget(recovery_group, 0, 1)
+        action_panel_layout.addWidget(tools_group, 0, 2)
+        action_panel_layout.addWidget(workbook_group, 0, 3)
+        action_panel_layout.setColumnStretch(0, 1)
+        action_panel_layout.setColumnStretch(1, 1)
+        action_panel_layout.setColumnStretch(2, 1)
+        action_panel_layout.setColumnStretch(3, 1)
+        return action_panel
 
     def _add_section_heading(self, content_layout, title, description=None):
         title_label = QLabel(str(title or "Section"))
@@ -536,6 +571,7 @@ class ProductionLogQtView(QMainWindow):
         if isinstance(theme_tokens, dict):
             self.theme_tokens = dict(theme_tokens)
         self.setStyleSheet(get_qt_stylesheet(theme_tokens=self.theme_tokens))
+        self._update_action_button_widths()
         application = QApplication.instance()
         if application is not None:
             application.setPalette(get_qt_palette(theme_tokens=self.theme_tokens))

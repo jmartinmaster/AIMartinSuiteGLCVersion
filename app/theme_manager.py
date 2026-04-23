@@ -23,20 +23,31 @@ except ImportError:
     PYQT6_THEME_SUPPORT = False
 
 __module_name__ = "Theme Manager"
-__version__ = "1.2.0"
+__version__ = "1.4.3"
 
 DEFAULT_THEME = "martin_modern_light"
 
 READABLE_THEMES = {
     "martin_modern_light": "Martin Modern Light - industrial",
     "cyber_industrial_dark": "Cyber-Industrial Dark - neon steel",
-    "flatly": "Flatly - balanced light",
-    "cosmo": "Cosmo - crisp light",
-    "lumen": "Lumen - soft light",
     "journal": "Journal - paper light",
-    "litera": "Litera - text-forward light",
-    "darkly": "Darkly - balanced dark",
     "superhero": "Superhero - high-contrast dark",
+}
+
+LEGACY_THEME_ALIASES = {
+    "flatly": "journal",
+    "cosmo": "journal",
+    "lumen": "journal",
+    "litera": "journal",
+    "darkly": "superhero",
+}
+
+LEGACY_THEME_LABEL_ALIASES = {
+    "Flatly - balanced light": "journal",
+    "Cosmo - crisp light": "journal",
+    "Lumen - soft light": "journal",
+    "Litera - text-forward light": "journal",
+    "Darkly - balanced dark": "superhero",
 }
 
 def get_theme_names():
@@ -54,16 +65,26 @@ def get_theme_label(theme_name):
 def normalize_theme(theme_name):
     if theme_name in READABLE_THEMES:
         return theme_name
+    legacy_theme = LEGACY_THEME_ALIASES.get(theme_name)
+    if legacy_theme:
+        return legacy_theme
     for key, label in READABLE_THEMES.items():
         if theme_name == label:
             return key
+    legacy_label_theme = LEGACY_THEME_LABEL_ALIASES.get(theme_name)
+    if legacy_label_theme:
+        return legacy_label_theme
     return DEFAULT_THEME
 
 
 def _resolve_theme_token_profile(theme_name):
     normalized = normalize_theme(theme_name)
-    if normalized in {"cyber_industrial_dark", "darkly", "superhero"}:
+    if normalized == "cyber_industrial_dark":
         return "cyber_industrial_dark"
+    if normalized == "journal":
+        return "journal"
+    if normalized == "superhero":
+        return "superhero"
     return "martin_modern_light"
 
 
@@ -71,85 +92,169 @@ def _build_theme_tokens(theme_name):
     normalized = _resolve_theme_token_profile(theme_name)
     if normalized == "martin_modern_light":
         return {
-            "app_bg": "#edf1f4",
-            "sidebar_bg": "#162229",
-            "sidebar_fg": "#f2f6f8",
-            "sidebar_muted_fg": "#adc0c9",
-            "sidebar_border": "#273740",
-            "sidebar_button_bg": "#213038",
-            "sidebar_button_hover": "#2c404a",
-            "sidebar_button_active_bg": "#d7e7ef",
-            "sidebar_button_active_fg": "#10222b",
-            "content_bg": "#edf1f4",
-            "surface_bg": "#ffffff",
-            "surface_fg": "#152129",
-            "muted_fg": "#637782",
-            "border_color": "#c6d2d8",
-            "accent": "#0f7c8f",
-            "accent_soft": "#d6eef2",
-            "canvas_bg": "#e8eef1",
-            "banner_bg": "#f4f8fa",
-            "banner_fg": "#38515c",
-            "banner_border": "#c8d5db",
+            "app_bg": "#e7edf1",
+            "sidebar_bg": "#0f1c23",
+            "sidebar_fg": "#eff8fb",
+            "sidebar_muted_fg": "#9fb6c0",
+            "sidebar_border": "#223743",
+            "sidebar_button_bg": "#172831",
+            "sidebar_button_hover": "#21404c",
+            "sidebar_button_active_bg": "#d9ecf3",
+            "sidebar_button_active_fg": "#0d1c24",
+            "content_bg": "#edf3f6",
+            "surface_bg": "#fbfdfe",
+            "surface_fg": "#142129",
+            "muted_fg": "#5d7480",
+            "border_color": "#b7c8d0",
+            "accent": "#157f94",
+            "accent_soft": "#d8eef4",
+            "canvas_bg": "#e3ecf0",
+            "banner_bg": "#eef5f7",
+            "banner_fg": "#36505b",
+            "banner_border": "#bfd1d8",
             "nav_font": ("Segoe UI", 10),
             "title_font": ("Segoe UI", 16, "bold"),
             "heading_font": ("Segoe UI", 11, "bold"),
-            "layout_block_canvas_bg": "#e8eef1",
-            "layout_card_shell_bg": "#f6f9fb",
-            "layout_preview_grid_bg": "#eef2f5",
-            "layout_preview_cell_bg": "#ffffff",
-            "layout_preview_selected_bg": "#d6eef2",
-            "layout_preview_muted_fg": "#6c7f89",
-            "layout_preview_empty_fg": "#78909c",
-            "layout_preview_text_fg": "#152129",
-            "layout_preview_readonly_fg": "#0f7c8f",
-            "layout_preview_border": "#8b98a5",
-            "layout_preview_selected_border": "#0f7c8f",
+            "layout_block_canvas_bg": "#e3ecf0",
+            "layout_card_shell_bg": "#f4f9fb",
+            "layout_preview_grid_bg": "#e9f0f4",
+            "layout_preview_cell_bg": "#fcfeff",
+            "layout_preview_selected_bg": "#cde8f0",
+            "layout_preview_muted_fg": "#687d87",
+            "layout_preview_empty_fg": "#728994",
+            "layout_preview_text_fg": "#142129",
+            "layout_preview_readonly_fg": "#157f94",
+            "layout_preview_border": "#8198a3",
+            "layout_preview_selected_border": "#157f94",
             "layout_tooltip_bg": "#ffffff",
-            "layout_tooltip_fg": "#152129",
-            "layout_tooltip_border": "#c6d2d8",
+            "layout_tooltip_fg": "#142129",
+            "layout_tooltip_border": "#b7c8d0",
         }
 
     if normalized == "cyber_industrial_dark":
         return {
-            "app_bg": "#081016",
-            "sidebar_bg": "#0d171d",
-            "sidebar_fg": "#d9f7ff",
-            "sidebar_muted_fg": "#78a4b0",
-            "sidebar_border": "#1f3b47",
-            "sidebar_button_bg": "#102029",
-            "sidebar_button_hover": "#16313d",
-            "sidebar_button_active_bg": "#22d1ee",
-            "sidebar_button_active_fg": "#041015",
-            "content_bg": "#0a131a",
-            "surface_bg": "#101b22",
-            "surface_fg": "#e7f8fb",
-            "muted_fg": "#88a9b4",
-            "border_color": "#23414d",
-            "accent": "#22d1ee",
-            "accent_soft": "#123845",
-            "canvas_bg": "#081219",
-            "banner_bg": "#0d171d",
-            "banner_fg": "#9bc8d3",
-            "banner_border": "#1f3b47",
+            "app_bg": "#02060a",
+            "sidebar_bg": "#040b10",
+            "sidebar_fg": "#e1fcff",
+            "sidebar_muted_fg": "#7cbcc7",
+            "sidebar_border": "#0f6072",
+            "sidebar_button_bg": "#071118",
+            "sidebar_button_hover": "#0b2530",
+            "sidebar_button_active_bg": "#31f4ff",
+            "sidebar_button_active_fg": "#021115",
+            "content_bg": "#03090f",
+            "surface_bg": "#07131a",
+            "surface_fg": "#ebfdff",
+            "muted_fg": "#84adb8",
+            "border_color": "#166175",
+            "accent": "#31f4ff",
+            "accent_soft": "#094352",
+            "canvas_bg": "#020b12",
+            "banner_bg": "#051019",
+            "banner_fg": "#9be4ee",
+            "banner_border": "#0d5a6b",
             "nav_font": ("Segoe UI", 10),
-            "title_font": ("Segoe UI Semibold", 16),
-            "heading_font": ("Segoe UI Semibold", 11),
-            "layout_block_canvas_bg": "#09131a",
-            "layout_card_shell_bg": "#0c1820",
-            "layout_preview_grid_bg": "#081219",
-            "layout_preview_cell_bg": "#12212a",
-            "layout_preview_selected_bg": "#153240",
-            "layout_preview_muted_fg": "#88a5af",
-            "layout_preview_empty_fg": "#5f7a84",
-            "layout_preview_text_fg": "#e7f8fb",
-            "layout_preview_readonly_fg": "#58e5ff",
-            "layout_preview_border": "#2a505d",
-            "layout_preview_selected_border": "#22d1ee",
-            "layout_tooltip_bg": "#0d171d",
-            "layout_tooltip_fg": "#e7f8fb",
-            "layout_tooltip_border": "#2a505d",
+            "title_font": ("Bahnschrift SemiBold", 16),
+            "heading_font": ("Bahnschrift SemiBold", 11),
+            "layout_block_canvas_bg": "#030b12",
+            "layout_card_shell_bg": "#07131a",
+            "layout_preview_grid_bg": "#020e16",
+            "layout_preview_cell_bg": "#0d1d26",
+            "layout_preview_selected_bg": "#0f4d60",
+            "layout_preview_muted_fg": "#86afb9",
+            "layout_preview_empty_fg": "#5e7c86",
+            "layout_preview_text_fg": "#ebfdff",
+            "layout_preview_readonly_fg": "#73fbff",
+            "layout_preview_border": "#19708a",
+            "layout_preview_selected_border": "#31f4ff",
+            "layout_tooltip_bg": "#06111a",
+            "layout_tooltip_fg": "#ebfdff",
+            "layout_tooltip_border": "#19708a",
         }
+
+    if normalized == "journal":
+        return {
+            "app_bg": "#efe4cf",
+            "sidebar_bg": "#5a4738",
+            "sidebar_fg": "#f7efe2",
+            "sidebar_muted_fg": "#dbc9b0",
+            "sidebar_border": "#826b57",
+            "sidebar_button_bg": "#6a5341",
+            "sidebar_button_hover": "#7b614d",
+            "sidebar_button_active_bg": "#efe0c7",
+            "sidebar_button_active_fg": "#37271d",
+            "content_bg": "#f4ead8",
+            "surface_bg": "#fbf4e8",
+            "surface_fg": "#35271d",
+            "muted_fg": "#7b6555",
+            "border_color": "#baa489",
+            "accent": "#8f5e37",
+            "accent_soft": "#eadbc2",
+            "canvas_bg": "#ebe0ca",
+            "banner_bg": "#efe2ca",
+            "banner_fg": "#5e493a",
+            "banner_border": "#c6b094",
+            "nav_font": ("Cambria", 9),
+            "title_font": ("Georgia", 15, "bold"),
+            "heading_font": ("Cambria", 10, "bold"),
+            "layout_block_canvas_bg": "#ebdfc8",
+            "layout_card_shell_bg": "#f7efdf",
+            "layout_preview_grid_bg": "#f0e5d2",
+            "layout_preview_cell_bg": "#fcf6ea",
+            "layout_preview_selected_bg": "#e4cfb0",
+            "layout_preview_muted_fg": "#786350",
+            "layout_preview_empty_fg": "#927c67",
+            "layout_preview_text_fg": "#35271d",
+            "layout_preview_readonly_fg": "#8f5e37",
+            "layout_preview_border": "#aa9278",
+            "layout_preview_selected_border": "#8f5e37",
+            "layout_tooltip_bg": "#f8efdf",
+            "layout_tooltip_fg": "#35271d",
+            "layout_tooltip_border": "#baa489",
+        }
+
+    if normalized == "superhero":
+        return {
+            "app_bg": "#11161c",
+            "sidebar_bg": "#151d24",
+            "sidebar_fg": "#e8f1f5",
+            "sidebar_muted_fg": "#98acb6",
+            "sidebar_border": "#273742",
+            "sidebar_button_bg": "#1a242d",
+            "sidebar_button_hover": "#23313c",
+            "sidebar_button_active_bg": "#4fb3c9",
+            "sidebar_button_active_fg": "#071216",
+            "content_bg": "#12191f",
+            "surface_bg": "#182128",
+            "surface_fg": "#e8f0f4",
+            "muted_fg": "#8ca1ab",
+            "border_color": "#304450",
+            "accent": "#4fb3c9",
+            "accent_soft": "#203843",
+            "canvas_bg": "#10171d",
+            "banner_bg": "#151d24",
+            "banner_fg": "#a4b8c0",
+            "banner_border": "#2a3a46",
+            "nav_font": ("Segoe UI", 10),
+            "title_font": ("Segoe UI", 16, "semibold"),
+            "heading_font": ("Segoe UI", 11, "semibold"),
+            "layout_block_canvas_bg": "#11181f",
+            "layout_card_shell_bg": "#171f26",
+            "layout_preview_grid_bg": "#0e161c",
+            "layout_preview_cell_bg": "#1b2630",
+            "layout_preview_selected_bg": "#244654",
+            "layout_preview_muted_fg": "#8ea2ac",
+            "layout_preview_empty_fg": "#6d828c",
+            "layout_preview_text_fg": "#e8f0f4",
+            "layout_preview_readonly_fg": "#7dd2e5",
+            "layout_preview_border": "#38515d",
+            "layout_preview_selected_border": "#4fb3c9",
+            "layout_tooltip_bg": "#151d24",
+            "layout_tooltip_fg": "#e8f0f4",
+            "layout_tooltip_border": "#38515d",
+        }
+
+    return _build_theme_tokens(DEFAULT_THEME)
 
 
 def _qt_stylesheet_font_family(font_value):
@@ -168,7 +273,17 @@ def _qt_stylesheet_font_size(font_value, default_size=10):
 
 
 def _qt_stylesheet_font_weight(font_value):
-    if isinstance(font_value, (tuple, list)) and any(str(part).lower() == "bold" for part in font_value[2:]):
+    weight_parts = []
+    if isinstance(font_value, (tuple, list)):
+        if font_value:
+            weight_parts.append(str(font_value[0]).lower())
+        weight_parts.extend(str(part).lower() for part in font_value[2:])
+    else:
+        weight_parts.append(str(font_value).lower())
+
+    if any("semibold" in part or "demibold" in part for part in weight_parts):
+        return 600
+    if any("bold" in part for part in weight_parts):
         return 700
     return 400
 
@@ -255,8 +370,10 @@ def get_qt_stylesheet(theme_name=None, root=None, theme_tokens=None):
     heading_font_family = _qt_stylesheet_font_family(tokens["heading_font"])
     heading_font_size = _qt_stylesheet_font_size(tokens["heading_font"], default_size=11)
     heading_font_weight = _qt_stylesheet_font_weight(tokens["heading_font"])
-    accent_outline = _hex_to_rgba(tokens["accent"], 64)
-    accent_soft_overlay = _hex_to_rgba(tokens["accent"], 18)
+    sidebar_title_font_size = max(heading_font_size + 2, 13)
+    sidebar_title_font_weight = max(heading_font_weight, 600)
+    accent_outline = _hex_to_rgba(tokens["accent"], 84)
+    accent_soft_overlay = _hex_to_rgba(tokens["accent"], 24)
 
     return "\n".join(
         [
@@ -275,14 +392,15 @@ def get_qt_stylesheet(theme_name=None, root=None, theme_tokens=None):
             f"    background-color: {tokens['surface_bg']};",
             f"    color: {tokens['surface_fg']};",
             f"    border: 1px solid {tokens['border_color']};",
+            "    border-radius: 10px;",
             "}",
             "QGroupBox {",
             f"    font-family: \"{heading_font_family}\";",
             f"    font-size: {heading_font_size}pt;",
             f"    font-weight: {heading_font_weight};",
-            "    margin-top: 12px;",
-            "    padding-top: 10px;",
-            "    border-radius: 6px;",
+            "    margin-top: 14px;",
+            "    padding-top: 12px;",
+            "    border-radius: 10px;",
             "}",
             "QGroupBox::title {",
             "    subcontrol-origin: margin;",
@@ -299,20 +417,51 @@ def get_qt_stylesheet(theme_name=None, root=None, theme_tokens=None):
             f"    color: {tokens['muted_fg']};",
             "}",
                 "QLabel#sidebarTitleLabel {",
-                f"    font-family: \"{title_font_family}\";",
-                f"    font-size: {title_font_size}pt;",
-                f"    font-weight: {title_font_weight};",
+                f"    font-family: \"{heading_font_family}\";",
+                f"    font-size: {sidebar_title_font_size}pt;",
+                f"    font-weight: {sidebar_title_font_weight};",
                 f"    color: {tokens['sidebar_fg']};",
+                f"    background-color: {tokens['sidebar_button_bg']};",
+                f"    border: 1px solid {tokens['sidebar_border']};",
+                "    border-radius: 8px;",
+                "    padding: 6px 8px;",
                 "}",
                 "QLabel#sidebarSubtitleLabel {",
-                f"    color: {tokens['sidebar_muted_fg']};",
+                f"    font-family: \"{nav_font_family}\";",
+                f"    font-size: {nav_font_size}pt;",
+                "    font-weight: 600;",
+                f"    color: {tokens['sidebar_fg']};",
+                f"    background-color: {tokens['sidebar_button_bg']};",
+                f"    border: 1px solid {tokens['sidebar_border']};",
+                "    border-radius: 7px;",
+                "    padding: 3px 8px;",
+                "    margin-left: 4px;",
+                "    margin-right: 4px;",
                 "}",
+            "QMenuBar {",
+            f"    background-color: {tokens['sidebar_bg']};",
+            f"    color: {tokens['sidebar_fg']};",
+            f"    border-bottom: 1px solid {tokens['sidebar_border']};",
+            "}",
+            "QMenuBar::item {",
+            "    background: transparent;",
+            f"    color: {tokens['sidebar_fg']};",
+            "    padding: 6px 10px;",
+            "    border-radius: 6px;",
+            "}",
+            "QMenuBar::item:selected {",
+            f"    background-color: {tokens['sidebar_button_hover']};",
+            "}",
+            "QMenu::item:selected {",
+            f"    background-color: {tokens['accent_soft']};",
+            f"    color: {tokens['surface_fg']};",
+            "}",
             "QPushButton {",
             f"    background-color: {tokens['surface_bg']};",
             f"    color: {tokens['surface_fg']};",
             f"    border: 1px solid {tokens['border_color']};",
-            "    border-radius: 6px;",
-            "    padding: 7px 12px;",
+            "    border-radius: 8px;",
+            "    padding: 8px 14px;",
             "}",
             "QPushButton:hover {",
             f"    border-color: {tokens['accent']};",
@@ -331,6 +480,7 @@ def get_qt_stylesheet(theme_name=None, root=None, theme_tokens=None):
             f"    background-color: {tokens['sidebar_button_bg']};",
             f"    color: {tokens['sidebar_fg']};",
             f"    border: 1px solid {tokens['sidebar_border']};",
+            "    border-radius: 10px;",
             "    text-align: left;",
             f"    font-family: \"{nav_font_family}\";",
             f"    font-size: {nav_font_size}pt;",
@@ -338,17 +488,19 @@ def get_qt_stylesheet(theme_name=None, root=None, theme_tokens=None):
             "}",
             "QPushButton#navButton:hover {",
             f"    background-color: {tokens['sidebar_button_hover']};",
+            f"    border-color: {tokens['accent']};",
             "}",
             "QPushButton#navButton[active=\"true\"] {",
             f"    background-color: {tokens['sidebar_button_active_bg']};",
             f"    color: {tokens['sidebar_button_active_fg']};",
             f"    border-color: {tokens['accent']};",
+            "    padding-left: 14px;",
             "}",
                 "QPushButton#sidebarToggleButton {",
                 f"    background-color: {tokens['sidebar_button_bg']};",
                 f"    color: {tokens['sidebar_fg']};",
                 f"    border: 1px solid {tokens['sidebar_border']};",
-                "    border-radius: 6px;",
+                "    border-radius: 8px;",
                 "    padding: 4px 6px;",
                 "}",
                 "QPushButton#sidebarToggleButton:hover {",
@@ -359,7 +511,7 @@ def get_qt_stylesheet(theme_name=None, root=None, theme_tokens=None):
             f"    background-color: {tokens['surface_bg']};",
             f"    color: {tokens['surface_fg']};",
             f"    border: 1px solid {tokens['border_color']};",
-            "    border-radius: 6px;",
+            "    border-radius: 8px;",
             "    selection-background-color: %s;" % tokens["accent"],
             "    selection-color: %s;" % tokens["sidebar_button_active_fg"],
             "}",
@@ -389,10 +541,14 @@ def get_qt_stylesheet(theme_name=None, root=None, theme_tokens=None):
             f"    color: {tokens['muted_fg']};",
             f"    border: 1px solid {tokens['border_color']};",
             "    border-bottom: none;",
-            "    border-top-left-radius: 6px;",
-            "    border-top-right-radius: 6px;",
+            "    border-top-left-radius: 8px;",
+            "    border-top-right-radius: 8px;",
             "    padding: 8px 12px;",
             "    margin-right: 4px;",
+            "}",
+            "QTabBar::tab:hover {",
+            f"    background-color: {tokens['accent_soft']};",
+            f"    color: {tokens['surface_fg']};",
             "}",
             "QTabBar::tab:selected {",
             f"    background-color: {tokens['surface_bg']};",
@@ -404,6 +560,9 @@ def get_qt_stylesheet(theme_name=None, root=None, theme_tokens=None):
             f"    color: {tokens['banner_fg']};",
             f"    border-top: 1px solid {tokens['banner_border']};",
             "}",
+            "QStatusBar::item {",
+            "    border: none;",
+            "}",
             "QToolTip {",
             f"    background-color: {tokens['layout_tooltip_bg']};",
             f"    color: {tokens['layout_tooltip_fg']};",
@@ -413,7 +572,7 @@ def get_qt_stylesheet(theme_name=None, root=None, theme_tokens=None):
             "QScrollBar:vertical, QScrollBar:horizontal {",
             f"    background-color: {tokens['content_bg']};",
             f"    border: 1px solid {tokens['border_color']};",
-            "    border-radius: 6px;",
+            "    border-radius: 8px;",
             "    margin: 0;",
             "}",
             "QScrollBar::handle:vertical, QScrollBar::handle:horizontal {",

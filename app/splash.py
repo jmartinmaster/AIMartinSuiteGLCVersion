@@ -38,7 +38,7 @@ except ImportError:
     PYQT6_AVAILABLE = False
 
 __module_name__ = "Splash Screen"
-__version__ = "2.0.0"
+__version__ = "2.0.1"
 
 DEFAULT_SPLASH_DURATION_MS = 5000
 DEFAULT_SPLASH_WIDTH = 820
@@ -150,6 +150,9 @@ class MartinSplashScreen(QSplashScreen):
         tokens = self.theme_tokens
         width = DEFAULT_SPLASH_WIDTH
         height = DEFAULT_SPLASH_HEIGHT
+        left_panel_rect = QRect(28, 42, 240, 300)
+        runtime_label_rect = QRect(48, 288, 180, 38)
+        runtime_notice_rect = QRect(48, 352, 724, 50)
         pixmap = QPixmap(width, height)
         pixmap.fill(QColor(tokens["surface_bg"]))
 
@@ -159,9 +162,9 @@ class MartinSplashScreen(QSplashScreen):
         painter.fillRect(0, 0, width, height, QColor(tokens["surface_bg"]))
         painter.fillRect(0, 0, width, 12, QColor(tokens["accent"]))
         painter.fillRect(0, height - 8, width, 8, QColor(tokens["accent"]))
-        painter.fillRect(28, 42, 240, 300, QColor(tokens["accent_soft"]))
+        painter.fillRect(left_panel_rect, QColor(tokens["accent_soft"]))
         painter.setPen(QColor(tokens["border_color"]))
-        painter.drawRect(28, 42, 240, 300)
+        painter.drawRect(left_panel_rect)
         painter.drawRect(0, 0, width - 1, height - 1)
 
         logo_pixmap = QPixmap(self.logo_path)
@@ -200,11 +203,15 @@ class MartinSplashScreen(QSplashScreen):
         )
 
         painter.setPen(QColor(tokens["surface_fg"]))
-        painter.drawText(48, 312, "PyQt6 Runtime")
+        painter.drawText(
+            runtime_label_rect,
+            int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignBottom),
+            "PyQt6 Runtime",
+        )
 
         painter.setPen(QColor(tokens["muted_fg"]))
         painter.drawText(
-            QRect(48, 330, 724, 60),
+            runtime_notice_rect,
             int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop | Qt.TextFlag.TextWordWrap),
             "PyQt6 Notice: This application uses PyQt6 for the Qt 6 interface. See the About module for the full PyQt6 notice and licensing guidance.",
         )
