@@ -153,13 +153,13 @@ def _build_theme_tokens(theme_name):
 
 
 def _qt_stylesheet_font_family(font_value):
-    if isinstance(font_value, tuple) and font_value:
+    if isinstance(font_value, (tuple, list)) and font_value:
         return str(font_value[0])
     return str(font_value)
 
 
 def _qt_stylesheet_font_size(font_value, default_size=10):
-    if isinstance(font_value, tuple) and len(font_value) >= 2:
+    if isinstance(font_value, (tuple, list)) and len(font_value) >= 2:
         try:
             return int(font_value[1])
         except (TypeError, ValueError):
@@ -168,7 +168,7 @@ def _qt_stylesheet_font_size(font_value, default_size=10):
 
 
 def _qt_stylesheet_font_weight(font_value):
-    if isinstance(font_value, tuple) and any(str(part).lower() == "bold" for part in font_value[2:]):
+    if isinstance(font_value, (tuple, list)) and any(str(part).lower() == "bold" for part in font_value[2:]):
         return 700
     return 400
 

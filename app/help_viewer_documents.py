@@ -18,7 +18,7 @@ import os
 from app.utils import local_or_resource_path
 
 __module_name__ = "Help Viewer Documents"
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 
 DOC_GROUPS = {
     "user_guide": {
@@ -27,6 +27,7 @@ DOC_GROUPS = {
             ("Production Log", "docs/help/user_guide_production_log.md"),
             ("Rate Manager", "docs/help/user_guide_rate_manager.md"),
             ("Layout Manager", "docs/help/user_guide_layout_manager.md"),
+            ("Layout Manager: Form Creation and Editing", "docs/help/user_guide_layout_manager_form_authoring.md"),
             ("Settings Manager", "docs/help/user_guide_settings_manager.md"),
             ("Backup / Recovery", "docs/help/user_guide_recovery_viewer.md"),
             ("Update Manager", "docs/help/user_guide_update_manager.md"),
@@ -38,6 +39,7 @@ DOC_INDEX = [
     ("User Guide", "docs/help/user_guide.md"),
     ("App Icons", "docs/help/app_icons.md"),
     ("Form Definitions", "docs/help/form_definitions.md"),
+    ("Layout Manager Form Authoring", "docs/help/user_guide_layout_manager_form_authoring.md"),
     ("Layout JSON", "docs/help/layout_config.md"),
     ("Production Log Calculations", "docs/help/production_log_calculations.md"),
     ("Production Log JSON Architecture", "docs/production_log_json_architecture.md"),

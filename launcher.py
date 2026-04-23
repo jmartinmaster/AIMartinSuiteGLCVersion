@@ -43,7 +43,7 @@ from app.controllers.app_controller import Dispatcher
 from app.app_platform import SPLASH_LOGO_RELATIVE_PATH, apply_app_icon, apply_windows_app_id
 
 __module_name__ = "Dispatcher Core"
-__version__ = "2.2.0"
+__version__ = "2.2.1"
 LAYOUT_MANAGER_QT_SESSION_ENV = "AIMARTIN_LAYOUT_MANAGER_QT_SESSION"
 
 
@@ -186,12 +186,30 @@ def run_application(main_module=None, initial_module_name=None):
     apply_windows_app_id()
     application = create_qt_application(theme_name=theme_name)
     apply_app_icon(application)
+    startup_splash = None
+    try:
+        from app.splash import show_splash_screen
+
+        startup_splash = show_splash_screen(
+            duration=5000,
+            logo_path=resource_path(SPLASH_LOGO_RELATIVE_PATH),
+            theme_name=theme_name,
+        )
+    except Exception as exc:
+        log_exception("launcher.startup_splash", exc)
+
     host_shell = PyQt6HostShellView(
         theme_name=theme_name,
         runtime_settings=runtime_settings,
         initial_module_name=initial_module_name,
     )
     apply_app_icon(host_shell)
+    if startup_splash is not None:
+        try:
+            startup_splash.attach_host_shell(host_shell)
+        except Exception as exc:
+            log_exception("launcher.startup_splash.attach", exc)
+
     dispatcher = Dispatcher(
         host_shell,
         main_module=main_module,
@@ -215,8 +233,16 @@ def run_application(main_module=None, initial_module_name=None):
 
     try:
         host_shell.show()
+        application.processEvents()
+        if startup_splash is not None and not bool(getattr(startup_splash, "host_shell_ready", False)):
+            startup_splash.mark_host_shell_ready()
         return application.exec()
     finally:
+        if startup_splash is not None:
+            try:
+                startup_splash.close()
+            except Exception:
+                pass
         if sigint_coordinator is not None:
             sigint_coordinator.stop()
         if previous_sigint_handler is not None:

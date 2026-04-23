@@ -20,7 +20,7 @@ import sys
 from app.views.about_qt_view import AboutQtView
 
 __module_name__ = "About Qt Controller"
-__version__ = "1.1.0"
+__version__ = "1.1.1"
 
 
 class AboutQtController:
@@ -43,6 +43,12 @@ class AboutQtController:
             "License: GNU General Public License v3.0\n"
             "Location: Ludington, MI\n"
             "Environment: Windows / Portable Python 3.12"
+        )
+
+    def get_pyqt6_notice_text(self):
+        return (
+            "This application uses PyQt6, the Python bindings for Qt 6 from Riverbank Computing Limited.\n"
+            "PyQt6 and Qt are provided under their own licensing terms. Review the applicable PyQt6 and Qt licensing terms before repackaging or redistributing this application."
         )
 
     def _iter_manifest_modules(self):
@@ -109,6 +115,7 @@ class AboutQtController:
             "title": "PRODUCTION LOGGING CENTER",
             "subtitle": "GLC Edition",
             "info_text": self.get_info_text(),
+            "pyqt6_notice_text": self.get_pyqt6_notice_text(),
             "module_manifest": self.get_manifest_rows(),
             "can_repack": self.can_repack(),
             "footer_text": "Copyright © 2026 Jamie Martin",

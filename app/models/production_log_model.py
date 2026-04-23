@@ -189,6 +189,12 @@ DEFAULT_SECTIONS = (
         "section_type": "repeating",
         "behavior_profile": "production",
         "default_max_rows": 50,
+        "delete_row_policy": {
+            "show_delete_button": True,
+            "delete_button_label": "X",
+            "delete_button_tooltip": "Delete this row",
+            "require_delete_confirmation": False,
+        },
     },
     {
         "id": "downtime",
@@ -199,6 +205,12 @@ DEFAULT_SECTIONS = (
         "section_type": "repeating",
         "behavior_profile": "downtime",
         "default_max_rows": 25,
+        "delete_row_policy": {
+            "show_delete_button": True,
+            "delete_button_label": "X",
+            "delete_button_tooltip": "Delete this row",
+            "require_delete_confirmation": False,
+        },
     },
 )
 SUPPORTED_BEHAVIOR_PROFILES = ("header", "production", "downtime")
@@ -342,8 +354,13 @@ class ProductionLogModel:
                     normalized_section["default_max_rows"] = max(1, int(default_max_rows or 25))
                 except (TypeError, ValueError):
                     normalized_section["default_max_rows"] = 25
+                normalized_section["delete_row_policy"] = self._normalize_delete_row_policy(
+                    raw_section.get("delete_row_policy", normalized_section.get("delete_row_policy")),
+                    default_policy=normalized_section.get("delete_row_policy"),
+                )
             else:
                 normalized_section.pop("default_max_rows", None)
+                normalized_section.pop("delete_row_policy", None)
 
             normalized_sections.append(normalized_section)
             seen_ids.add(section_id)
@@ -354,6 +371,30 @@ class ProductionLogModel:
                 normalized_sections.append(deepcopy(default_section))
 
         return normalized_sections
+
+    def _normalize_delete_row_policy(self, policy, default_policy=None):
+        base_policy = dict(default_policy or {})
+        raw_policy = policy if isinstance(policy, dict) else {}
+        show_delete_button = bool(raw_policy.get("show_delete_button", base_policy.get("show_delete_button", True)))
+        delete_button_label = str(
+            raw_policy.get("delete_button_label", base_policy.get("delete_button_label", "X")) or "X"
+        ).strip() or "X"
+        delete_button_tooltip = str(
+            raw_policy.get("delete_button_tooltip", base_policy.get("delete_button_tooltip", "Delete this row"))
+            or "Delete this row"
+        ).strip() or "Delete this row"
+        require_delete_confirmation = bool(
+            raw_policy.get(
+                "require_delete_confirmation",
+                base_policy.get("require_delete_confirmation", False),
+            )
+        )
+        return {
+            "show_delete_button": show_delete_button,
+            "delete_button_label": delete_button_label,
+            "delete_button_tooltip": delete_button_tooltip,
+            "require_delete_confirmation": require_delete_confirmation,
+        }
 
     def get_sections(self, config=None):
         config_data = config or self.layout_config
@@ -371,6 +412,19 @@ class ProductionLogModel:
         if section_info:
             return section_info.get("name") or fallback_name or str(section_id or "").replace("_", " ").title()
         return fallback_name or str(section_id or "").replace("_", " ").title()
+
+    def get_delete_row_policy(self, section_id, config=None):
+        section_info = self.get_section_info(section_id, config=config)
+        section_type = str(section_info.get("section_type", "")).strip().lower()
+        if section_type != "repeating":
+            return {
+                "show_delete_button": False,
+                "delete_button_label": "X",
+                "delete_button_tooltip": "Delete this row",
+                "require_delete_confirmation": False,
+            }
+        policy = section_info.get("delete_row_policy") if isinstance(section_info.get("delete_row_policy"), dict) else {}
+        return self._normalize_delete_row_policy(policy)
 
     def get_routed_section_by_profile(self, behavior_profile, config=None, expected_type=None):
         normalized_profile = normalize_role_name(behavior_profile)

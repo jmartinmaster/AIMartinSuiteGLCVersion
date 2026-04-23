@@ -21,7 +21,7 @@ from app.theme_manager import get_qt_palette, get_qt_stylesheet, get_theme_token
 from app.host_ui_adapter import PyQt6HostUiAdapter
 
 __module_name__ = "PyQt6 Host Shell"
-__version__ = "0.1.1"
+__version__ = "0.1.2"
 
 try:
     from PyQt6.QtCore import QTimer
@@ -75,6 +75,8 @@ class PyQt6HostShellView(QMainWindow):
         self.persistent_module_names = set()
         self._load_persistent_module_names()
         self.navigation_state_listeners = []
+        self.startup_ready_listeners = []
+        self._startup_ready_emitted = False
         self.dispatcher = None
         self.update_coordinator = None
         self.active_module_name = None
@@ -256,6 +258,24 @@ class PyQt6HostShellView(QMainWindow):
     def remove_navigation_state_listener(self, listener):
         if listener in self.navigation_state_listeners:
             self.navigation_state_listeners.remove(listener)
+
+    def add_startup_ready_listener(self, listener):
+        if callable(listener) and listener not in self.startup_ready_listeners:
+            self.startup_ready_listeners.append(listener)
+
+    def remove_startup_ready_listener(self, listener):
+        if listener in self.startup_ready_listeners:
+            self.startup_ready_listeners.remove(listener)
+
+    def _emit_startup_ready(self):
+        if self._startup_ready_emitted:
+            return
+        self._startup_ready_emitted = True
+        for listener in list(self.startup_ready_listeners):
+            try:
+                listener()
+            except Exception:
+                pass
 
     def _notify_navigation_state(self, event_name, **payload):
         for listener in list(self.navigation_state_listeners):
@@ -442,6 +462,15 @@ class PyQt6HostShellView(QMainWindow):
         self.show_viewport_placeholder()
         self._refresh_nav_button_states()
         self.set_sidebar_collapsed(self.sidebar_collapsed)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if self._startup_ready_emitted:
+            return
+        if QTimer is not None:
+            QTimer.singleShot(0, self._emit_startup_ready)
+            return
+        self._emit_startup_ready()
 
     def _rebuild_module_catalog_from_navigation_items(self, grouped_items):
         module_catalog = []

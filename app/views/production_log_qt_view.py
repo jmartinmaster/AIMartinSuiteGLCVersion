@@ -51,7 +51,16 @@ def is_production_log_qt_runtime_available():
 class ProductionLogQtView(QMainWindow):
     ROW_ACTION_COLUMN = 0
 
-    def __init__(self, controller, payload, header_fields, production_fields, downtime_fields, parent_widget=None):
+    def __init__(
+        self,
+        controller,
+        payload,
+        header_fields,
+        production_fields,
+        downtime_fields,
+        row_delete_policies=None,
+        parent_widget=None,
+    ):
         if not PYQT6_AVAILABLE:
             raise RuntimeError("PyQt6 is not installed in the active Python environment.")
         super().__init__(parent_widget)
@@ -62,6 +71,7 @@ class ProductionLogQtView(QMainWindow):
         self.header_fields = list(header_fields or [])
         self.production_fields = list(production_fields or [])
         self.downtime_fields = list(downtime_fields or [])
+        self.row_delete_policies = dict(row_delete_policies or {})
         self.header_widgets = {}
         self.has_unsaved_changes = False
         self.last_saved_signature = None
@@ -392,13 +402,48 @@ class ProductionLogQtView(QMainWindow):
             return self.production_fields
         return self.downtime_fields
 
+    def _table_section_id(self, table):
+        if table is self.production_table:
+            return "production"
+        return "downtime"
+
+    def _get_row_delete_policy(self, table):
+        section_id = self._table_section_id(table)
+        policy = self.row_delete_policies.get(section_id) if isinstance(self.row_delete_policies, dict) else {}
+        if not isinstance(policy, dict):
+            policy = {}
+        return {
+            "show_delete_button": bool(policy.get("show_delete_button", True)),
+            "delete_button_label": str(policy.get("delete_button_label") or "X").strip() or "X",
+            "delete_button_tooltip": str(policy.get("delete_button_tooltip") or "Delete this row").strip()
+            or "Delete this row",
+            "require_delete_confirmation": bool(policy.get("require_delete_confirmation", False)),
+        }
+
+    def set_row_delete_policies(self, row_delete_policies):
+        self.row_delete_policies = dict(row_delete_policies or {})
+        self._refresh_row_action_buttons(self.production_table, self.production_fields)
+        self._refresh_row_action_buttons(self.downtime_table, self.downtime_fields)
+
     def _refresh_row_action_buttons(self, table, field_configs):
+        policy = self._get_row_delete_policy(table)
+        show_delete_button = bool(policy.get("show_delete_button", True))
+        delete_button_label = str(policy.get("delete_button_label") or "X")
+        delete_button_tooltip = str(policy.get("delete_button_tooltip") or "Delete this row")
+        require_delete_confirmation = bool(policy.get("require_delete_confirmation", False))
         for row_index in range(table.rowCount()):
-            delete_button = QPushButton("X")
+            if not show_delete_button:
+                table.setCellWidget(row_index, self.ROW_ACTION_COLUMN, None)
+                continue
+            delete_button = QPushButton(delete_button_label)
             delete_button.setMaximumWidth(26)
-            delete_button.setToolTip("Delete this row")
+            delete_button.setToolTip(delete_button_tooltip)
             delete_button.clicked.connect(
-                lambda _checked=False, current_table=table, current_row=row_index: self._remove_table_row(current_table, current_row)
+                lambda _checked=False, current_table=table, current_row=row_index, requires_confirm=require_delete_confirmation: self._remove_table_row(
+                    current_table,
+                    current_row,
+                    require_confirmation=requires_confirm,
+                )
             )
             table.setCellWidget(row_index, self.ROW_ACTION_COLUMN, delete_button)
 
@@ -566,9 +611,13 @@ class ProductionLogQtView(QMainWindow):
             return
         self._remove_table_row(self.downtime_table, int(selected_rows[0].row()))
 
-    def _remove_table_row(self, table, row_index):
+    def _remove_table_row(self, table, row_index, require_confirmation=False):
         if row_index < 0 or row_index >= table.rowCount():
             return
+        if require_confirmation:
+            section_name = self._table_section_id(table).replace("_", " ").title()
+            if not self.ask_yes_no("Delete Row", f"Delete selected {section_name} row?"):
+                return
         field_configs = self._table_field_configs(table)
         table.blockSignals(True)
         table.removeRow(row_index)

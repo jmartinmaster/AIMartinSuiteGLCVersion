@@ -37,6 +37,7 @@ class ProductionLogQtController:
         self.header_fields = self.model.get_section_field_configs("header", config=self.layout_config)
         self.production_fields = self.model.get_section_field_configs("production", config=self.layout_config)
         self.downtime_fields = self.model.get_section_field_configs("downtime", config=self.layout_config)
+        self.row_delete_policies = self._build_row_delete_policies()
         self.pending_drafts = []
         self.recovery_snapshots = []
         self.current_draft_path = None
@@ -82,6 +83,7 @@ class ProductionLogQtController:
             self.header_fields,
             self.production_fields,
             self.downtime_fields,
+            row_delete_policies=self.row_delete_policies,
             parent_widget=self.parent,
         )
 
@@ -108,6 +110,13 @@ class ProductionLogQtController:
         self.header_fields = self.model.get_section_field_configs("header", config=self.layout_config)
         self.production_fields = self.model.get_section_field_configs("production", config=self.layout_config)
         self.downtime_fields = self.model.get_section_field_configs("downtime", config=self.layout_config)
+        self.row_delete_policies = self._build_row_delete_policies()
+
+    def _build_row_delete_policies(self):
+        return {
+            "production": self.model.get_delete_row_policy("production", config=self.layout_config),
+            "downtime": self.model.get_delete_row_policy("downtime", config=self.layout_config),
+        }
 
     def _rebuild_view_payload(self):
         if self.embedded:

@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 __module_name__ = "About Qt View"
-__version__ = "1.0.1"
+__version__ = "1.0.2"
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
@@ -83,6 +83,15 @@ class AboutQtView(QMainWindow):
         info_label.setWordWrap(True)
         info_layout.addWidget(info_label)
         root_layout.addWidget(info_group)
+
+        pyqt6_notice_text = str(self.payload.get("pyqt6_notice_text") or "").strip()
+        if pyqt6_notice_text:
+            pyqt6_group = QGroupBox("PyQt6 Notice")
+            pyqt6_layout = QVBoxLayout(pyqt6_group)
+            pyqt6_label = QLabel(pyqt6_notice_text)
+            pyqt6_label.setWordWrap(True)
+            pyqt6_layout.addWidget(pyqt6_label)
+            root_layout.addWidget(pyqt6_group)
 
         controls_layout = QHBoxLayout()
         open_license_button = QPushButton("Open License")

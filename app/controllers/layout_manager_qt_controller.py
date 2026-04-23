@@ -16,12 +16,13 @@
 import json
 import time
 from pathlib import Path
+from PyQt6.QtCore import QTimer
 
 from app.models.layout_manager_model import LayoutManagerModel
 from app.views.layout_manager_qt_view import LayoutManagerQtView
 
 __module_name__ = "Layout Manager Qt Controller"
-__version__ = "0.3.1"
+__version__ = "0.6.0"
 
 
 class LayoutManagerQtController:
@@ -39,7 +40,11 @@ class LayoutManagerQtController:
         self.current_source_path = payload.get("source_path") or ""
         self.guardrails = payload.get("guardrails") or {}
         self.protected_row_field_lookup = payload.get("protected_row_field_lookup") or {}
+        self.last_refresh_ms = 0.0
         self.view = LayoutManagerQtView(controller=self, theme_tokens=payload.get("theme_tokens") or {})
+        self._initial_view_rendered = False
+        self._undo_stack = []
+        self._redo_stack = []
 
         if not self.current_config:
             self.current_config, self.current_source_path, self.current_form_info = self.model.load_current_config()
@@ -48,13 +53,28 @@ class LayoutManagerQtController:
 
         self.forms = []
         self.refresh_forms()
-        self.refresh_view(reason="Loaded layout manager session")
+        self.view.update_header(
+            form_info=self.current_form_info,
+            source_path=self.current_source_path,
+            reason="Loaded layout manager session",
+        )
+        self.view.set_dirty(self.dirty)
         self.write_state(status="running", message="Layout Manager Qt window is ready.")
 
     def show(self):
         self.view.show()
         self.view.raise_window()
+        if not self._initial_view_rendered:
+            self._initial_view_rendered = True
+            QTimer.singleShot(0, lambda: self.refresh_view(reason="Loaded layout manager session"))
         self.write_state(status="running", message="Layout Manager Qt window is visible.")
+
+    def _run_busy_action(self, message, callback):
+        self.view.set_busy_state(True, message)
+        try:
+            return callback()
+        finally:
+            self.view.set_busy_state(False)
 
     def apply_theme(self, theme_tokens):
         self.payload["theme_tokens"] = dict(theme_tokens or {})
@@ -66,14 +86,20 @@ class LayoutManagerQtController:
         self.view.set_forms(self.forms, self.current_form_info.get("id"))
 
     def refresh_view(self, reason=""):
+        started_at = time.perf_counter()
         serialized_config = self.model.serialize_config(self.current_config)
         preview_grid = self.model.build_preview_grid(self.current_config)
+        validation_summary = self.model.build_validation_summary(self.current_config)
+        import_export_metadata = self.model.build_import_export_metadata(self.current_config)
+        dependency_audit = self.model.build_form_dependency_audit(self.current_form_info.get("id"))
         self.guardrails = self.model.build_editor_guardrails(self.current_config)
         self.protected_row_field_lookup = self.model.get_protected_row_field_lookup(self.current_config)
         self.view.set_editor_text(serialized_config)
         self.view.render_block_authoring(self.current_config)
-        self.view.render_import_export_authoring(self.current_config)
+        self.view.render_import_export_authoring(self.current_config, metadata=import_export_metadata)
         self.view.render_preview_grid(preview_grid)
+        self.view.render_validation_summary(validation_summary)
+        self.view.render_form_dependency_audit(dependency_audit)
         self.view.render_structure(
             self.current_config,
             self.guardrails,
@@ -85,12 +111,14 @@ class LayoutManagerQtController:
             reason=reason,
         )
         self.view.set_dirty(self.dirty)
+        self.last_refresh_ms = round((time.perf_counter() - started_at) * 1000.0, 2)
 
     def write_state(self, status="running", message="", toast_event=None):
         state = {
             "status": status,
             "dirty": self.dirty,
             "change_token": self.change_token,
+            "last_refresh_ms": self.last_refresh_ms,
             "form_id": self.current_form_info.get("id"),
             "form_name": self.current_form_info.get("name"),
             "source_path": self.current_source_path,
@@ -129,6 +157,7 @@ class LayoutManagerQtController:
         self.write_state(message=message)
 
     def apply_editor_changes(self, message=None):
+        self._record_undo_state()
         config, _payload_details = self.model.resolve_editor_text(
             self.view.editor_text(),
             base_config=self.current_config,
@@ -136,16 +165,153 @@ class LayoutManagerQtController:
         self.current_config = config
         self.refresh_view(reason=message or "Applied editor changes")
         self.mark_dirty()
+        self._redo_stack.clear()
         return config
 
     def _load_editor_config(self):
         return self.model.parse_editor_text(self.view.editor_text(), base_config=self.current_config)
 
     def _apply_layout_update(self, updated_config, status_message):
+        self._record_undo_state()
         self.current_config = updated_config
         self.refresh_view(reason=status_message)
         self.mark_dirty()
         self.view.set_status(status_message)
+        self._redo_stack.clear()
+
+    def _record_undo_state(self):
+        self._undo_stack.append(self.model.serialize_config(self.current_config))
+        if len(self._undo_stack) > 50:
+            self._undo_stack = self._undo_stack[-50:]
+
+    def undo_last_change(self):
+        if not self._undo_stack:
+            self.view.set_status("Nothing to undo.")
+            return
+        self._redo_stack.append(self.model.serialize_config(self.current_config))
+        if len(self._redo_stack) > 50:
+            self._redo_stack = self._redo_stack[-50:]
+        previous_snapshot = self._undo_stack.pop()
+        self.current_config = self.model.parse_editor_text(previous_snapshot, base_config=self.current_config)
+        self.refresh_view(reason="Undid last change")
+        self.mark_dirty()
+
+    def redo_last_change(self):
+        if not self._redo_stack:
+            self.view.set_status("Nothing to redo.")
+            return
+        self._undo_stack.append(self.model.serialize_config(self.current_config))
+        if len(self._undo_stack) > 50:
+            self._undo_stack = self._undo_stack[-50:]
+        next_snapshot = self._redo_stack.pop()
+        self.current_config = self.model.parse_editor_text(next_snapshot, base_config=self.current_config)
+        self.refresh_view(reason="Redid last change")
+        self.mark_dirty()
+
+    def save_version_snapshot(self):
+        label = self.view.version_label_value() or "Manual Snapshot"
+        try:
+            config = self._load_editor_config()
+            snapshot_id = self.model.create_form_snapshot(self.current_form_info, config, label=label)
+            self.current_config = config
+            self.refresh_view(reason="Saved version snapshot")
+            self.view.set_status(f"Saved version snapshot: {snapshot_id}")
+            self._emit_host_toast("Saved layout version snapshot.", bootstyle="success")
+        except Exception as exc:
+            self.view.set_status(f"Snapshot error: {exc}", error=True)
+
+    def restore_latest_snapshot(self):
+        form_id = str(self.current_form_info.get("id") or "")
+        snapshots = self.model.list_form_snapshots(form_id=form_id)
+        if not snapshots:
+            self.view.set_status("No saved snapshots for this form.", error=True)
+            return
+        latest_snapshot = snapshots[0]
+        snapshot_id = str(latest_snapshot.get("snapshot_id") or "")
+        if not snapshot_id:
+            self.view.set_status("Latest snapshot was invalid.", error=True)
+            return
+        if not self.view.confirm("Restore Version", f"Restore latest snapshot '{snapshot_id}'?"):
+            return
+        try:
+            self._record_undo_state()
+            restored_config, snapshot = self.model.restore_form_snapshot(snapshot_id)
+            self.current_config = restored_config
+            self._redo_stack.clear()
+            self.refresh_view(reason="Restored version snapshot")
+            self.mark_dirty()
+            snapshot_label = snapshot.get("label") or snapshot_id
+            self.view.set_status(f"Restored snapshot: {snapshot_label}")
+            self._emit_host_toast("Restored layout version snapshot.", bootstyle="success")
+        except Exception as exc:
+            self.view.set_status(f"Snapshot restore error: {exc}", error=True)
+
+    def bulk_rename_row_fields(self):
+        section_name = self.view.current_row_section_name()
+        find_text = self.view.prompt_text("Bulk Rename", "Find text in labels:")
+        if not find_text:
+            return
+        replace_text = self.view.prompt_text("Bulk Rename", "Replace with:", default_text="")
+        try:
+            config = self._load_editor_config()
+            updated_config, status_message = self.model.bulk_rename_row_fields(
+                config,
+                section_name,
+                find_text,
+                replace_text or "",
+            )
+            self._apply_layout_update(updated_config, status_message)
+        except Exception as exc:
+            self.view.set_status(f"Bulk operation error: {exc}", error=True)
+
+    def bulk_delete_row_fields(self):
+        section_name = self.view.current_row_section_name()
+        contains_text = self.view.prompt_text("Bulk Delete", "Delete row fields where id/label contains:")
+        if not contains_text:
+            return
+        if not self.view.confirm(
+            "Bulk Delete",
+            f"Delete non-protected fields in {section_name} containing '{contains_text}'?",
+        ):
+            return
+        try:
+            config = self._load_editor_config()
+            updated_config, status_message = self.model.bulk_delete_row_fields(
+                config,
+                section_name,
+                contains_text,
+            )
+            self._apply_layout_update(updated_config, status_message)
+        except Exception as exc:
+            self.view.set_status(f"Bulk operation error: {exc}", error=True)
+
+    def bulk_convert_row_widgets(self):
+        section_name = self.view.current_row_section_name()
+        from_widget = self.view.prompt_text(
+            "Bulk Convert Widget",
+            "From widget (entry/display/checkbutton/combobox):",
+            default_text="entry",
+        )
+        if not from_widget:
+            return
+        to_widget = self.view.prompt_text(
+            "Bulk Convert Widget",
+            "To widget (entry/display/checkbutton/combobox):",
+            default_text="display",
+        )
+        if not to_widget:
+            return
+        try:
+            config = self._load_editor_config()
+            updated_config, status_message = self.model.bulk_convert_row_widgets(
+                config,
+                section_name,
+                from_widget,
+                to_widget,
+            )
+            self._apply_layout_update(updated_config, status_message)
+        except Exception as exc:
+            self.view.set_status(f"Bulk operation error: {exc}", error=True)
 
     def validate_editor(self):
         self.model.resolve_editor_text(
@@ -164,6 +330,85 @@ class LayoutManagerQtController:
 
     def on_mapping_section_changed(self, *_args):
         self.view.render_mapping_authoring(self.current_config)
+
+    def on_section_changed(self, *_args):
+        self.view.render_section_editor(self.current_config)
+
+    def add_section_from_structure(self):
+        section_id = self.view.prompt_text("Add Section", "Section ID (snake_case):")
+        if not section_id:
+            return
+        section_name = self.view.prompt_text("Add Section", "Section name:", default_text=section_id.replace("_", " ").title())
+        if not section_name:
+            return
+        section_type = self.view.prompt_text("Add Section", "Section type (single/repeating):", default_text="single") or "single"
+        behavior_profile = self.view.prompt_text("Add Section", "Behavior profile:", default_text=section_id) or section_id
+        section_values = {
+            "id": section_id,
+            "name": section_name,
+            "section_type": section_type,
+            "behavior_profile": behavior_profile,
+            "description": "",
+            "default_max_rows": "25",
+            "show_delete_button": True,
+            "delete_button_label": "X",
+            "delete_button_tooltip": "Delete this row",
+            "require_delete_confirmation": False,
+        }
+        try:
+            config = self._load_editor_config()
+            updated_config, status_message = self.model.add_section(config, section_values)
+            self._apply_layout_update(updated_config, status_message)
+            self.view.set_section_selection(section_id)
+        except Exception as exc:
+            self.view.set_status(f"Section edit error: {exc}", error=True)
+
+    def remove_section_from_structure(self):
+        section_id = self.view.current_section_id()
+        if not section_id:
+            self.view.set_status("Select a section to remove.", error=True)
+            return
+        if not self.view.confirm("Remove Section", f"Remove section '{section_id}'?"):
+            return
+        try:
+            config = self._load_editor_config()
+            updated_config, status_message = self.model.remove_section(config, section_id)
+            self._apply_layout_update(updated_config, status_message)
+        except Exception as exc:
+            self.view.set_status(f"Section edit error: {exc}", error=True)
+
+    def apply_section_from_structure(self):
+        section_id = self.view.current_section_id()
+        section_values = self.view.selected_section_values()
+        if not section_id or section_values is None:
+            self.view.set_status("Select a section to apply.", error=True)
+            return
+        try:
+            config = self._load_editor_config()
+            updated_config, status_message = self.model.update_section_metadata(config, section_id, section_values)
+            self._apply_layout_update(updated_config, status_message)
+        except Exception as exc:
+            self.view.set_status(f"Section edit error: {exc}", error=True)
+
+    def move_section_up_from_structure(self):
+        self._move_section_from_structure(-1)
+
+    def move_section_down_from_structure(self):
+        self._move_section_from_structure(1)
+
+    def _move_section_from_structure(self, direction):
+        section_id = self.view.current_section_id()
+        if not section_id:
+            self.view.set_status("Select a section to move.", error=True)
+            return
+        try:
+            config = self._load_editor_config()
+            updated_config, status_message = self.model.move_section(config, section_id, direction)
+            if status_message is not None:
+                self._apply_layout_update(updated_config, status_message)
+                self.view.set_section_selection(section_id)
+        except Exception as exc:
+            self.view.set_status(f"Section edit error: {exc}", error=True)
 
     def add_header_field_from_block(self):
         try:
@@ -286,16 +531,20 @@ class LayoutManagerQtController:
             self.view.set_status(f"Block edit error: {exc}", error=True)
 
     def apply_template_path_from_import_export(self):
+        self.view.set_import_export_progress(True, "Applying template path...")
         try:
             config = self._load_editor_config()
             updated_config, status_message = self.model.update_template_path(config, self.view.template_path_value())
             self._apply_layout_update(updated_config, status_message)
         except Exception as exc:
             self.view.set_status(f"Import/export error: {exc}", error=True)
+        finally:
+            self.view.set_import_export_progress(False)
 
     def apply_mapping_from_import_export(self):
         mapping_name = self.view.current_mapping_name()
         mapping_values = self.view.mapping_form_values()
+        self.view.set_import_export_progress(True, f"Applying {mapping_name} mapping...")
         try:
             config = self._load_editor_config()
             updated_config, status_message = self.model.update_mapping(
@@ -308,70 +557,112 @@ class LayoutManagerQtController:
             self._apply_layout_update(updated_config, status_message)
         except Exception as exc:
             self.view.set_status(f"Import/export error: {exc}", error=True)
+        finally:
+            self.view.set_import_export_progress(False)
 
     def reload_current(self):
-        config, source_path, form_info = self.model.load_current_config()
-        self.current_config = config
-        self.current_source_path = source_path
-        self.current_form_info = dict(form_info)
-        self.refresh_forms()
-        self.dirty = False
-        self.refresh_view(reason="Reloaded active layout from disk")
-        self.write_state(message="Reloaded active layout from disk.")
+        def _execute():
+            config, source_path, form_info = self.model.load_current_config()
+            self.current_config = config
+            self.current_source_path = source_path
+            self.current_form_info = dict(form_info)
+            self.refresh_forms()
+            self.dirty = False
+            self.refresh_view(reason="Reloaded active layout from disk")
+            self.write_state(message="Reloaded active layout from disk.")
+
+        self._run_busy_action("Reloading active layout...", _execute)
 
     def load_default(self):
-        config, source_path = self.model.load_default_config()
-        self.current_config = config
-        self.current_source_path = source_path
-        self.current_form_info = dict(self.model.get_active_form_info())
-        self.refresh_forms()
-        self.mark_dirty()
-        self.refresh_view(reason="Loaded default layout template")
-        self.write_state(message="Loaded default layout template.")
+        def _execute():
+            config, source_path = self.model.load_default_config()
+            self.current_config = config
+            self.current_source_path = source_path
+            self.current_form_info = dict(self.model.get_active_form_info())
+            self.refresh_forms()
+            self.mark_dirty()
+            self.refresh_view(reason="Loaded default layout template")
+            self.write_state(message="Loaded default layout template.")
+
+        self._run_busy_action("Loading default layout template...", _execute)
 
     def save_current(self):
-        config = self.apply_editor_changes(message="Prepared layout for save")
-        backup_info = self.model.save_config(config, form_info=self.current_form_info)
-        self.current_source_path = self.current_form_info.get("save_path", self.current_source_path)
-        backup_path = ""
-        if isinstance(backup_info, dict):
-            backup_path = backup_info.get("backup_path") or ""
-        message = "Saved current layout configuration."
-        if backup_path:
-            message = f"Saved current layout configuration. Backup: {backup_path}"
-        self.mark_clean(message)
-        self.refresh_forms()
-        self.refresh_view(reason="Saved current layout configuration")
-        self._emit_host_toast(message, bootstyle="success")
+        def _execute():
+            config = self.apply_editor_changes(message="Prepared layout for save")
+            backup_info = self.model.save_config(config, form_info=self.current_form_info)
+            self.current_source_path = self.current_form_info.get("save_path", self.current_source_path)
+            backup_path = ""
+            if isinstance(backup_info, dict):
+                backup_path = backup_info.get("backup_path") or ""
+            message = "Saved current layout configuration."
+            if backup_path:
+                message = f"Saved current layout configuration. Backup: {backup_path}"
+            self.mark_clean(message)
+            self.refresh_forms()
+            self.refresh_view(reason="Saved current layout configuration")
+            self._emit_host_toast(message, bootstyle="success")
+
+        self._run_busy_action("Saving layout configuration...", _execute)
 
     def activate_selected_form(self):
         form_id = self.view.current_form_id()
         if not form_id:
             self.view.set_status("Select a form to activate.", error=True)
             return
-        self.apply_editor_changes(message="Prepared layout before activation")
-        form_info = self.model.activate_form(form_id)
-        self.current_form_info = dict(form_info)
-        self.current_config, self.current_source_path, self.current_form_info = self.model.load_current_config()
-        self.refresh_forms()
-        action_message = f"Activated form '{self.current_form_info.get('name', form_id)}'."
-        self.mark_clean(action_message)
-        self.refresh_view(reason="Activated selected form")
-        self._emit_host_toast(action_message, bootstyle="success")
+
+        def _execute():
+            self.apply_editor_changes(message="Prepared layout before activation")
+            form_info = self.model.activate_form(form_id)
+            self.current_form_info = dict(form_info)
+            self.current_config, self.current_source_path, self.current_form_info = self.model.load_current_config()
+            self.refresh_forms()
+            action_message = f"Activated form '{self.current_form_info.get('name', form_id)}'."
+            self.mark_clean(action_message)
+            self.refresh_view(reason="Activated selected form")
+            self._emit_host_toast(action_message, bootstyle="success")
+
+        self._run_busy_action(f"Activating form '{form_id}'...", _execute)
 
     def create_form(self):
         name = self.view.prompt_text("Create Form", "Form name:")
         if not name:
             return
         description = self.view.prompt_text("Create Form", "Description:", default_text="") or ""
-        config = self.apply_editor_changes(message="Prepared layout for new form")
-        form_info = self.model.create_form_from_config(name, config, description=description, activate=False)
-        self.current_form_info = dict(form_info)
-        self.refresh_forms()
-        action_message = f"Created form '{form_info.get('name', name)}'."
-        self.mark_clean(action_message)
-        self.refresh_view(reason="Created new form from editor")
-        self._emit_host_toast(action_message, bootstyle="success")
+
+        def _execute():
+            config = self.apply_editor_changes(message="Prepared layout for new form")
+            form_info = self.model.create_form_from_config(name, config, description=description, activate=False)
+            self.current_form_info = dict(form_info)
+            self.refresh_forms()
+            action_message = f"Created form '{form_info.get('name', name)}'."
+            self.mark_clean(action_message)
+            self.refresh_view(reason="Created new form from editor")
+            self._emit_host_toast(action_message, bootstyle="success")
+
+        self._run_busy_action(f"Creating form '{name}'...", _execute)
+
+    def create_blank_form(self):
+        name = self.view.prompt_text("Create Blank Form", "Form name:")
+        if not name:
+            return
+        description = self.view.prompt_text("Create Blank Form", "Description:", default_text="") or ""
+
+        def _execute():
+            try:
+                form_info, blank_config = self.model.create_blank_form(name, description=description, activate=False)
+            except Exception as exc:
+                self.view.set_status(f"Create blank form failed: {exc}", error=True)
+                return
+            self.current_form_info = dict(form_info)
+            self.current_config = dict(blank_config)
+            self.current_source_path = form_info.get("save_path", self.current_source_path)
+            self.refresh_forms()
+            action_message = f"Created blank form '{form_info.get('name', name)}'."
+            self.mark_clean(action_message)
+            self.refresh_view(reason="Created blank form")
+            self._emit_host_toast(action_message, bootstyle="success")
+
+        self._run_busy_action(f"Creating blank form '{name}'...", _execute)
 
     def duplicate_form(self):
         source_form_id = self.view.current_form_id() or self.current_form_info.get("id")
@@ -383,13 +674,17 @@ class LayoutManagerQtController:
         if not name:
             return
         description = self.view.prompt_text("Duplicate Form", "Description:", default_text="") or ""
-        form_info = self.model.duplicate_form(source_form_id, name, description=description, activate=False)
-        self.current_form_info = dict(form_info)
-        self.refresh_forms()
-        action_message = f"Duplicated form '{name}'."
-        self.mark_clean(action_message)
-        self.refresh_view(reason="Duplicated selected form")
-        self._emit_host_toast(action_message, bootstyle="success")
+
+        def _execute():
+            form_info = self.model.duplicate_form(source_form_id, name, description=description, activate=False)
+            self.current_form_info = dict(form_info)
+            self.refresh_forms()
+            action_message = f"Duplicated form '{name}'."
+            self.mark_clean(action_message)
+            self.refresh_view(reason="Duplicated selected form")
+            self._emit_host_toast(action_message, bootstyle="success")
+
+        self._run_busy_action(f"Duplicating form '{source_form_id}'...", _execute)
 
     def rename_form(self):
         form_id = self.view.current_form_id() or self.current_form_info.get("id")
@@ -405,32 +700,59 @@ class LayoutManagerQtController:
             "Description:",
             default_text=self.current_form_info.get("description", ""),
         )
-        form_info = self.model.rename_form(form_id, name, description=description)
-        self.current_form_info = dict(form_info)
-        self.refresh_forms()
-        self.refresh_view(reason="Renamed selected form")
-        action_message = f"Renamed form to '{name}'."
-        self.view.set_status(action_message)
-        self._emit_host_toast(action_message, bootstyle="success")
+        def _execute():
+            form_info = self.model.rename_form(form_id, name, description=description)
+            self.current_form_info = dict(form_info)
+            self.refresh_forms()
+            self.refresh_view(reason="Renamed selected form")
+            action_message = f"Renamed form to '{name}'."
+            self.view.set_status(action_message)
+            self._emit_host_toast(action_message, bootstyle="success")
+
+        self._run_busy_action(f"Renaming form '{form_id}'...", _execute)
 
     def delete_form(self):
         form_id = self.view.current_form_id() or self.current_form_info.get("id")
         if not form_id:
             self.view.set_status("Select a form to delete.", error=True)
             return
-        form_name = self.current_form_info.get("name", form_id)
+        form_info = self.model.get_form_info(form_id)
+        form_name = form_info.get("name", form_id)
+        dependency_audit = self.model.build_form_dependency_audit(form_id)
+        dependent_drafts = dependency_audit.get("dependent_drafts") or []
+        if dependent_drafts:
+            draft_lines = [f"- {draft.get('filename')} ({draft.get('saved_at')})" for draft in dependent_drafts[:8]]
+            if len(dependent_drafts) > 8:
+                draft_lines.append(f"- ... and {len(dependent_drafts) - 8} more")
+            warning_message = "\n".join(
+                [
+                    f"Cannot delete '{form_name}' while pending Production Log drafts still depend on it.",
+                    "",
+                    dependency_audit.get("summary") or "",
+                    "",
+                    *draft_lines,
+                    "",
+                    "Clear or migrate those drafts first, then retry the delete.",
+                ]
+            )
+            self.view.set_status(f"Delete blocked for '{form_name}' because pending drafts still depend on it.", error=True)
+            self.view.show_warning("Delete Form Blocked", warning_message)
+            return
         if not self.view.confirm(
             "Delete Form",
             f"Delete '{form_name}'? This removes the stored layout form.",
         ):
             return
-        result = self.model.delete_form(form_id)
-        self.current_config, self.current_source_path, self.current_form_info = self.model.load_current_config()
-        self.refresh_forms()
-        action_message = result or f"Deleted form '{form_name}'."
-        self.mark_clean(action_message)
-        self.refresh_view(reason="Deleted selected form")
-        self._emit_host_toast(action_message, bootstyle="success")
+        def _execute():
+            result = self.model.delete_form(form_id)
+            self.current_config, self.current_source_path, self.current_form_info = self.model.load_current_config()
+            self.refresh_forms()
+            action_message = result or f"Deleted form '{form_name}'."
+            self.mark_clean(action_message)
+            self.refresh_view(reason="Deleted selected form")
+            self._emit_host_toast(action_message, bootstyle="success")
+
+        self._run_busy_action(f"Deleting form '{form_name}'...", _execute)
 
     def poll_commands(self):
         if not self.command_path.exists():

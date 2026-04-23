@@ -14,16 +14,26 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 import json
+import os
 import re
 from copy import deepcopy
+from datetime import datetime
+
+try:
+    from openpyxl import load_workbook
+except Exception:
+    load_workbook = None
 
 from app.layout_config_service import LayoutConfigService
+from app.persistence import write_json_with_backup
 from app.models.production_log_model import DEFAULT_DOWNTIME_ROW_FIELDS, DEFAULT_PRODUCTION_ROW_FIELDS
 from app.production_log_roles import PROTECTED_HEADER_ROLES, PROTECTED_ROW_ROLES, REQUIRED_MAPPING_ROLES, get_default_row_field_id, normalize_role_name, normalize_row_section_name, resolve_header_field_role, resolve_row_field_role
+from app.utils import external_path
 
 VALID_IMPORT_TRANSFORMS = ("value", "code_lookup", "stop_from_duration")
 VALID_EXPORT_TRANSFORMS = ("value", "code_number", "duration_minutes", "bool_int", "minutes_label")
 DEFAULT_MAPPING_MAX_ROWS = 25
+LAYOUT_VERSION_FILE = "data/config/layout_config_versions.json"
 DEFAULT_SECTIONS = (
     {
         "id": "header",
@@ -42,6 +52,12 @@ DEFAULT_SECTIONS = (
         "section_type": "repeating",
         "behavior_profile": "production",
         "default_max_rows": 50,
+        "delete_row_policy": {
+            "show_delete_button": True,
+            "delete_button_label": "X",
+            "delete_button_tooltip": "Delete this row",
+            "require_delete_confirmation": False,
+        },
     },
     {
         "id": "downtime",
@@ -52,6 +68,12 @@ DEFAULT_SECTIONS = (
         "section_type": "repeating",
         "behavior_profile": "downtime",
         "default_max_rows": 25,
+        "delete_row_policy": {
+            "show_delete_button": True,
+            "delete_button_label": "X",
+            "delete_button_tooltip": "Delete this row",
+            "require_delete_confirmation": False,
+        },
     },
 )
 
@@ -81,6 +103,8 @@ class LayoutManagerModel:
             "downtime_row_fields": {"start", "stop", "code", "cause", "time_calc"},
         }
         self.protected_row_roles = {section_name: set(PROTECTED_ROW_ROLES.get(section_name, set())) for section_name in self.row_field_sections}
+        self._import_export_metadata_cache = {}
+        self._template_workbook_stats_cache = {}
 
     @property
     def local_config(self):
@@ -205,8 +229,13 @@ class LayoutManagerModel:
                     normalized_section["default_max_rows"] = max(1, int(default_max_rows or DEFAULT_MAPPING_MAX_ROWS))
                 except (TypeError, ValueError):
                     normalized_section["default_max_rows"] = DEFAULT_MAPPING_MAX_ROWS
+                normalized_section["delete_row_policy"] = self._normalize_delete_row_policy(
+                    raw_section.get("delete_row_policy", normalized_section.get("delete_row_policy")),
+                    default_policy=normalized_section.get("delete_row_policy"),
+                )
             else:
                 normalized_section.pop("default_max_rows", None)
+                normalized_section.pop("delete_row_policy", None)
 
             normalized_sections.append(normalized_section)
             seen_ids.add(section_id)
@@ -217,6 +246,31 @@ class LayoutManagerModel:
                 normalized_sections.append(deepcopy(default_section))
 
         return normalized_sections
+
+    def _normalize_delete_row_policy(self, policy, default_policy=None):
+        base_policy = dict(default_policy or {})
+        raw_policy = policy if isinstance(policy, dict) else {}
+        show_delete_button = self._normalize_bool_value(
+            raw_policy.get("show_delete_button", base_policy.get("show_delete_button", True)),
+            default=True,
+        )
+        delete_button_label = str(
+            raw_policy.get("delete_button_label", base_policy.get("delete_button_label", "X")) or "X"
+        ).strip() or "X"
+        delete_button_tooltip = str(
+            raw_policy.get("delete_button_tooltip", base_policy.get("delete_button_tooltip", "Delete this row"))
+            or "Delete this row"
+        ).strip() or "Delete this row"
+        require_delete_confirmation = self._normalize_bool_value(
+            raw_policy.get("require_delete_confirmation", base_policy.get("require_delete_confirmation", False)),
+            default=False,
+        )
+        return {
+            "show_delete_button": show_delete_button,
+            "delete_button_label": delete_button_label,
+            "delete_button_tooltip": delete_button_tooltip,
+            "require_delete_confirmation": require_delete_confirmation,
+        }
 
     def get_sections(self, config=None):
         config_data = self.normalize_config(config) if isinstance(config, dict) else self._get_default_config_template()
@@ -310,7 +364,144 @@ class LayoutManagerModel:
             raise ValueError("Behavior profile cannot be empty.")
         target_section["behavior_profile"] = behavior_profile
 
+        if section_type == "repeating":
+            default_max_rows_text = str(
+                section_values.get("default_max_rows", target_section.get("default_max_rows", DEFAULT_MAPPING_MAX_ROWS))
+            ).strip()
+            try:
+                target_section["default_max_rows"] = max(1, int(default_max_rows_text or DEFAULT_MAPPING_MAX_ROWS))
+            except (TypeError, ValueError):
+                raise ValueError("Default max rows must be a positive integer.")
+
+            target_section["delete_row_policy"] = self._normalize_delete_row_policy(
+                {
+                    "show_delete_button": section_values.get(
+                        "show_delete_button",
+                        (target_section.get("delete_row_policy") or {}).get("show_delete_button", True),
+                    ),
+                    "delete_button_label": section_values.get(
+                        "delete_button_label",
+                        (target_section.get("delete_row_policy") or {}).get("delete_button_label", "X"),
+                    ),
+                    "delete_button_tooltip": section_values.get(
+                        "delete_button_tooltip",
+                        (target_section.get("delete_row_policy") or {}).get("delete_button_tooltip", "Delete this row"),
+                    ),
+                    "require_delete_confirmation": section_values.get(
+                        "require_delete_confirmation",
+                        (target_section.get("delete_row_policy") or {}).get("require_delete_confirmation", False),
+                    ),
+                },
+                default_policy=target_section.get("delete_row_policy"),
+            )
+        else:
+            target_section.pop("default_max_rows", None)
+            target_section.pop("delete_row_policy", None)
+
         return config, f"Updated section '{normalized_section_id}' metadata"
+
+    def move_section(self, config, section_id, direction):
+        normalized_section_id = str(section_id or "").strip().lower()
+        sections = config.get("sections") if isinstance(config.get("sections"), list) else []
+        index = next((position for position, section in enumerate(sections) if section.get("id") == normalized_section_id), None)
+        if index is None:
+            raise ValueError(f"Section '{normalized_section_id}' was not found.")
+        target_index = index + int(direction)
+        if target_index < 0 or target_index >= len(sections):
+            return config, None
+        sections[index], sections[target_index] = sections[target_index], sections[index]
+        config["sections"] = sections
+        return config, f"Reordered section '{normalized_section_id}'"
+
+    def add_section(self, config, section_values):
+        section_id = normalize_role_name(section_values.get("id"))
+        if not section_id:
+            raise ValueError("Section ID is required.")
+        sections = config.get("sections") if isinstance(config.get("sections"), list) else []
+        if any(str(section.get("id", "")).strip().lower() == section_id for section in sections):
+            raise ValueError(f"Section '{section_id}' already exists.")
+
+        section_name = str(section_values.get("name") or "").strip() or section_id.replace("_", " ").title()
+        section_description = str(section_values.get("description") or "").strip()
+        section_type = str(section_values.get("section_type") or "single").strip().lower()
+        if section_type not in {"single", "repeating"}:
+            raise ValueError("Section type must be 'single' or 'repeating'.")
+        behavior_profile = normalize_role_name(section_values.get("behavior_profile")) or section_id
+
+        if section_id == "header":
+            fields_key = "header_fields"
+        elif section_id == "production":
+            fields_key = "production_row_fields"
+        elif section_id == "downtime":
+            fields_key = "downtime_row_fields"
+        elif section_type == "repeating":
+            fields_key = f"{section_id}_row_fields"
+        else:
+            fields_key = f"{section_id}_fields"
+
+        section_payload = {
+            "id": section_id,
+            "name": section_name,
+            "fields_key": fields_key,
+            "section_type": section_type,
+            "behavior_profile": behavior_profile,
+        }
+        if section_description:
+            section_payload["description"] = section_description
+
+        if fields_key not in config or not isinstance(config.get(fields_key), list):
+            config[fields_key] = []
+
+        if section_type == "repeating":
+            max_rows_text = str(section_values.get("default_max_rows") or DEFAULT_MAPPING_MAX_ROWS).strip()
+            try:
+                section_payload["default_max_rows"] = max(1, int(max_rows_text or DEFAULT_MAPPING_MAX_ROWS))
+            except (TypeError, ValueError):
+                raise ValueError("Default max rows must be a positive integer.")
+            mapping_key = ""
+            if section_id == "production":
+                mapping_key = "production_mapping"
+            elif section_id == "downtime":
+                mapping_key = "downtime_mapping"
+            else:
+                mapping_key = f"{section_id}_mapping"
+            section_payload["mapping_key"] = mapping_key
+            if mapping_key not in config or not isinstance(config.get(mapping_key), dict):
+                config[mapping_key] = {
+                    "start_row": 1,
+                    "max_rows": section_payload["default_max_rows"],
+                    "columns": {},
+                }
+            section_payload["delete_row_policy"] = self._normalize_delete_row_policy(
+                {
+                    "show_delete_button": section_values.get("show_delete_button", True),
+                    "delete_button_label": section_values.get("delete_button_label", "X"),
+                    "delete_button_tooltip": section_values.get("delete_button_tooltip", "Delete this row"),
+                    "require_delete_confirmation": section_values.get("require_delete_confirmation", False),
+                }
+            )
+
+        sections.append(section_payload)
+        config["sections"] = self._normalize_sections({"sections": sections})
+        return config, f"Added section '{section_id}'"
+
+    def remove_section(self, config, section_id):
+        normalized_section_id = str(section_id or "").strip().lower()
+        if normalized_section_id in {"header", "production", "downtime"}:
+            raise ValueError(f"Section '{normalized_section_id}' is protected and cannot be removed.")
+        sections = config.get("sections") if isinstance(config.get("sections"), list) else []
+        target_section = next((section for section in sections if section.get("id") == normalized_section_id), None)
+        if target_section is None:
+            raise ValueError(f"Section '{normalized_section_id}' was not found.")
+
+        fields_key = str(target_section.get("fields_key") or "").strip()
+        mapping_key = str(target_section.get("mapping_key") or "").strip()
+        config["sections"] = [section for section in sections if section.get("id") != normalized_section_id]
+        if fields_key and fields_key in config and fields_key not in {"header_fields", "production_row_fields", "downtime_row_fields"}:
+            config.pop(fields_key, None)
+        if mapping_key and mapping_key in config and mapping_key not in {"production_mapping", "downtime_mapping"}:
+            config.pop(mapping_key, None)
+        return config, f"Removed section '{normalized_section_id}'"
 
     def _get_mapping_section_name(self, mapping_name):
         if mapping_name == "production_mapping":
@@ -578,6 +769,67 @@ class LayoutManagerModel:
         self.is_dirty = False
         return form_info
 
+    def _build_blank_row_fields(self, section_name, required_roles):
+        row_fields = []
+        for role_name in required_roles:
+            field_id = get_default_row_field_id(section_name, role_name) or f"{section_name}_{role_name}"
+            field_config = {
+                "id": field_id,
+                "label": role_name.replace("_", " ").title(),
+                "widget": "entry",
+                "width": 12,
+                "role": role_name,
+                "user_input": True,
+            }
+            if section_name == "production":
+                field_config["open_row_trigger"] = True
+            row_fields.append(field_config)
+        return row_fields
+
+    def _build_blank_mapping(self, mapping_name, row_fields):
+        columns = {}
+        for index, field in enumerate(row_fields, start=1):
+            field_id = str(field.get("id", "")).strip()
+            if not field_id:
+                continue
+            columns[field_id] = self._normalize_mapping_column_config(
+                mapping_name,
+                field_id,
+                {"column": f"COL_{index}"},
+                row_fields=row_fields,
+            )
+        return {
+            "start_row": 1,
+            "max_rows": DEFAULT_MAPPING_MAX_ROWS,
+            "columns": columns,
+        }
+
+    def build_blank_form_config(self):
+        default_config = self._get_default_config_template()
+        production_roles = REQUIRED_MAPPING_ROLES.get("production", ())
+        downtime_roles = REQUIRED_MAPPING_ROLES.get("downtime", ())
+        production_row_fields = self._build_blank_row_fields("production", production_roles)
+        downtime_row_fields = self._build_blank_row_fields("downtime", downtime_roles)
+
+        return {
+            "template_path": str(default_config.get("template_path", "")),
+            "header_fields": [],
+            "production_row_fields": production_row_fields,
+            "downtime_row_fields": downtime_row_fields,
+            "production_mapping": self._build_blank_mapping("production_mapping", production_row_fields),
+            "downtime_mapping": self._build_blank_mapping("downtime_mapping", downtime_row_fields),
+            "sections": self._normalize_sections({"sections": deepcopy(DEFAULT_SECTIONS)}),
+        }
+
+    def create_blank_form(self, name, description="", activate=False):
+        config = self.build_blank_form_config()
+        self.validate_config(config)
+        form_info = self.service.create_form(name, config, description=description, activate=activate)
+        self.current_source_path = self.service.config_path
+        self.current_save_path = self.service.save_path
+        self.is_dirty = False
+        return form_info, deepcopy(config)
+
     def rename_form(self, form_id, name, description=None):
         form_info = self.service.rename_form(form_id, name, description=description)
         self.current_source_path = self.service.config_path
@@ -597,6 +849,75 @@ class LayoutManagerModel:
         self.current_save_path = self.service.save_path
         self.is_dirty = False
         return result
+
+    def list_form_dependencies(self, form_id):
+        normalized_form_id = str(form_id or "").strip().lower()
+        if not normalized_form_id:
+            return []
+
+        pending_dir = external_path(os.path.join("data", "pending"))
+        if not os.path.isdir(pending_dir):
+            return []
+
+        dependent_drafts = []
+        for filename in os.listdir(pending_dir):
+            if not str(filename).lower().endswith(".json"):
+                continue
+            draft_path = os.path.join(pending_dir, filename)
+            if not os.path.isfile(draft_path):
+                continue
+            try:
+                with open(draft_path, "r", encoding="utf-8") as handle:
+                    payload = json.load(handle)
+                meta = payload.get("meta") if isinstance(payload, dict) else {}
+                if not isinstance(meta, dict):
+                    meta = {}
+                draft_form_id = str(meta.get("form_id") or "").strip().lower()
+                if draft_form_id != normalized_form_id:
+                    continue
+                saved_at = str(meta.get("saved_at") or "").strip()
+                if not saved_at:
+                    saved_at = datetime.fromtimestamp(os.path.getmtime(draft_path)).isoformat(timespec="seconds")
+                dependent_drafts.append(
+                    {
+                        "path": draft_path,
+                        "filename": str(filename),
+                        "saved_at": saved_at,
+                        "form_id": draft_form_id,
+                        "form_name": str(meta.get("form_name") or self.get_form_info(normalized_form_id).get("name") or normalized_form_id),
+                    }
+                )
+            except Exception:
+                continue
+
+        dependent_drafts.sort(key=lambda item: item.get("saved_at") or "", reverse=True)
+        return dependent_drafts
+
+    def build_form_dependency_audit(self, form_id):
+        normalized_form_id = str(form_id or "").strip().lower()
+        if not normalized_form_id:
+            return {
+                "form_id": "",
+                "dependent_drafts": [],
+                "draft_count": 0,
+                "summary": "No form selected.",
+            }
+
+        dependent_drafts = self.list_form_dependencies(normalized_form_id)
+        draft_count = len(dependent_drafts)
+        if draft_count == 0:
+            summary = "No pending Production Log drafts depend on this form."
+        elif draft_count == 1:
+            summary = "1 pending Production Log draft depends on this form."
+        else:
+            summary = f"{draft_count} pending Production Log drafts depend on this form."
+
+        return {
+            "form_id": normalized_form_id,
+            "dependent_drafts": dependent_drafts,
+            "draft_count": draft_count,
+            "summary": summary,
+        }
 
     def mark_dirty(self):
         self.is_dirty = True
@@ -1080,6 +1401,147 @@ class LayoutManagerModel:
         config["template_path"] = str(template_path_value or "").strip()
         return config, "Updated export template path"
 
+    def _versions_file_path(self):
+        return external_path(LAYOUT_VERSION_FILE)
+
+    def _load_version_store(self):
+        version_file = self._versions_file_path()
+        try:
+            with open(version_file, "r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+        except Exception:
+            payload = {}
+        snapshots = payload.get("snapshots") if isinstance(payload.get("snapshots"), list) else []
+        return {"snapshots": snapshots}
+
+    def _save_version_store(self, payload):
+        version_file = self._versions_file_path()
+        backup_dir = external_path("data/backups/layout_versions")
+        write_json_with_backup(version_file, payload, backup_dir=backup_dir, keep_count=30)
+
+    def create_form_snapshot(self, form_info, config, label=""):
+        snapshot_label = str(label or "").strip() or "Snapshot"
+        form_id = str((form_info or {}).get("id") or "active")
+        form_name = str((form_info or {}).get("name") or form_id)
+        timestamp = datetime.now().isoformat(timespec="seconds")
+        snapshot_id = f"{form_id}:{timestamp}"
+
+        store = self._load_version_store()
+        snapshots = list(store.get("snapshots") or [])
+        snapshots.append(
+            {
+                "snapshot_id": snapshot_id,
+                "form_id": form_id,
+                "form_name": form_name,
+                "label": snapshot_label,
+                "created_at": timestamp,
+                "config": self.normalize_config(deepcopy(config)),
+            }
+        )
+        snapshots = snapshots[-50:]
+        store["snapshots"] = snapshots
+        self._save_version_store(store)
+        return snapshot_id
+
+    def list_form_snapshots(self, form_id=None):
+        target_form_id = str(form_id or "").strip()
+        snapshots = list(self._load_version_store().get("snapshots") or [])
+        if target_form_id:
+            snapshots = [item for item in snapshots if str(item.get("form_id") or "") == target_form_id]
+        snapshots.sort(key=lambda item: str(item.get("created_at") or ""), reverse=True)
+        return snapshots
+
+    def get_form_snapshot(self, snapshot_id):
+        target_snapshot_id = str(snapshot_id or "").strip()
+        for snapshot in self.list_form_snapshots():
+            if str(snapshot.get("snapshot_id") or "") == target_snapshot_id:
+                return snapshot
+        raise ValueError("Snapshot was not found.")
+
+    def restore_form_snapshot(self, snapshot_id):
+        snapshot = self.get_form_snapshot(snapshot_id)
+        config = self.normalize_config(deepcopy(snapshot.get("config") or {}))
+        self.validate_config(config)
+        return config, snapshot
+
+    def bulk_rename_row_fields(self, config, section_name, find_text, replace_text):
+        fields = config.get(section_name)
+        if not isinstance(fields, list):
+            raise ValueError(f"Section '{section_name}' was not found.")
+        find_value = str(find_text or "").strip()
+        if not find_value:
+            raise ValueError("Find text cannot be empty.")
+        replace_value = str(replace_text or "")
+        updated_count = 0
+        for field in fields:
+            if not isinstance(field, dict):
+                continue
+            label_text = str(field.get("label") or "")
+            if find_value in label_text:
+                field["label"] = label_text.replace(find_value, replace_value)
+                updated_count += 1
+        if updated_count == 0:
+            raise ValueError("No row-field labels matched the find text.")
+        return config, f"Renamed {updated_count} row-field labels in {section_name}"
+
+    def bulk_delete_row_fields(self, config, section_name, contains_text):
+        fields = config.get(section_name)
+        if not isinstance(fields, list):
+            raise ValueError(f"Section '{section_name}' was not found.")
+        needle = str(contains_text or "").strip().lower()
+        if not needle:
+            raise ValueError("Match text cannot be empty.")
+
+        protected_ids = set(self.protected_row_field_ids.get(section_name, set()))
+        protected_roles = set(self.protected_row_roles.get(section_name, set()))
+        updated_fields = []
+        removed_count = 0
+        for field in fields:
+            if not isinstance(field, dict):
+                updated_fields.append(field)
+                continue
+            field_id = str(field.get("id") or "")
+            label_text = str(field.get("label") or "")
+            role_name = resolve_row_field_role(section_name, field_id, field.get("role"))
+            is_protected = field_id in protected_ids or role_name in protected_roles
+            is_match = needle in field_id.lower() or needle in label_text.lower()
+            if is_match and not is_protected:
+                removed_count += 1
+                continue
+            updated_fields.append(field)
+
+        if removed_count == 0:
+            raise ValueError("No non-protected row fields matched the delete filter.")
+        config[section_name] = updated_fields
+        return config, f"Deleted {removed_count} row fields from {section_name}"
+
+    def bulk_convert_row_widgets(self, config, section_name, from_widget, to_widget):
+        fields = config.get(section_name)
+        if not isinstance(fields, list):
+            raise ValueError(f"Section '{section_name}' was not found.")
+        source_widget = str(from_widget or "").strip().lower()
+        target_widget = str(to_widget or "").strip().lower()
+        if source_widget not in {"entry", "display", "checkbutton", "combobox"}:
+            raise ValueError("Source widget type is not supported.")
+        if target_widget not in {"entry", "display", "checkbutton", "combobox"}:
+            raise ValueError("Target widget type is not supported.")
+        if source_widget == target_widget:
+            raise ValueError("Source and target widget types are the same.")
+
+        updated_count = 0
+        for field in fields:
+            if not isinstance(field, dict):
+                continue
+            current_widget = str(field.get("widget") or "entry").strip().lower()
+            if current_widget == source_widget:
+                field["widget"] = target_widget
+                if target_widget != "combobox":
+                    field.pop("values", None)
+                updated_count += 1
+        if updated_count == 0:
+            raise ValueError(f"No row fields were using widget '{source_widget}'.")
+        return config, f"Converted {updated_count} row fields from {source_widget} to {target_widget}"
+
     def get_field_item_key(self, field_id):
         return f"field:{field_id}"
 
@@ -1158,6 +1620,191 @@ class LayoutManagerModel:
             "cells": cells,
             "row_sections": row_sections,
         }
+
+    def _build_import_export_cache_key(self, config):
+        config_data = self.normalize_config(config)
+        template_path = str(config_data.get("template_path") or "").strip()
+        payload = {
+            "template_path": template_path,
+            "template_signature": self._build_template_file_signature(template_path),
+            "production_row_fields": [
+                str((field or {}).get("id") or "")
+                for field in list(config_data.get("production_row_fields") or [])
+                if isinstance(field, dict)
+            ],
+            "downtime_row_fields": [
+                str((field or {}).get("id") or "")
+                for field in list(config_data.get("downtime_row_fields") or [])
+                if isinstance(field, dict)
+            ],
+            "production_mapping": config_data.get("production_mapping") if isinstance(config_data.get("production_mapping"), dict) else {},
+            "downtime_mapping": config_data.get("downtime_mapping") if isinstance(config_data.get("downtime_mapping"), dict) else {},
+        }
+        return json.dumps(payload, sort_keys=True, default=str)
+
+    def _build_template_file_signature(self, template_path):
+        normalized_path = str(template_path or "").strip()
+        if not normalized_path:
+            return ""
+        try:
+            stat_info = os.stat(normalized_path)
+        except OSError:
+            return f"{normalized_path}|missing"
+        return f"{normalized_path}|{int(stat_info.st_mtime)}|{int(stat_info.st_size)}"
+
+    def _build_template_workbook_stats(self, template_path):
+        normalized_path = str(template_path or "").strip()
+        if not normalized_path:
+            return {
+                "exists": False,
+                "mode": "none",
+                "sheet_count": 0,
+                "sheet_names": [],
+                "sampled_rows": 0,
+                "non_empty_rows": 0,
+            }
+
+        cache_key = self._build_template_file_signature(normalized_path)
+        cached_stats = self._template_workbook_stats_cache.get(cache_key)
+        if isinstance(cached_stats, dict):
+            return deepcopy(cached_stats)
+
+        if "|missing" in cache_key:
+            stats = {
+                "exists": False,
+                "mode": "missing",
+                "sheet_count": 0,
+                "sheet_names": [],
+                "sampled_rows": 0,
+                "non_empty_rows": 0,
+            }
+            self._template_workbook_stats_cache[cache_key] = deepcopy(stats)
+            return stats
+
+        if load_workbook is None:
+            stats = {
+                "exists": True,
+                "mode": "openpyxl-unavailable",
+                "sheet_count": 0,
+                "sheet_names": [],
+                "sampled_rows": 0,
+                "non_empty_rows": 0,
+            }
+            self._template_workbook_stats_cache[cache_key] = deepcopy(stats)
+            return stats
+
+        sheet_names = []
+        sampled_rows = 0
+        non_empty_rows = 0
+        workbook = None
+        try:
+            workbook = load_workbook(normalized_path, read_only=True, data_only=True)
+            worksheets = list(workbook.worksheets)
+            for worksheet in worksheets:
+                sheet_names.append(str(worksheet.title))
+                for row_values in worksheet.iter_rows(min_row=1, max_row=150, values_only=True):
+                    sampled_rows += 1
+                    if any(cell_value not in (None, "") for cell_value in row_values):
+                        non_empty_rows += 1
+        except Exception:
+            stats = {
+                "exists": True,
+                "mode": "stream-read-only-failed",
+                "sheet_count": 0,
+                "sheet_names": [],
+                "sampled_rows": 0,
+                "non_empty_rows": 0,
+            }
+            self._template_workbook_stats_cache[cache_key] = deepcopy(stats)
+            return stats
+        finally:
+            if workbook is not None:
+                try:
+                    workbook.close()
+                except Exception:
+                    pass
+
+        stats = {
+            "exists": True,
+            "mode": "stream-read-only",
+            "sheet_count": len(sheet_names),
+            "sheet_names": sheet_names,
+            "sampled_rows": sampled_rows,
+            "non_empty_rows": non_empty_rows,
+        }
+        self._template_workbook_stats_cache[cache_key] = deepcopy(stats)
+        if len(self._template_workbook_stats_cache) > 8:
+            self._template_workbook_stats_cache = {
+                latest_key: self._template_workbook_stats_cache[latest_key]
+                for latest_key in list(self._template_workbook_stats_cache.keys())[-8:]
+            }
+        return stats
+
+    def build_import_export_metadata(self, config):
+        config_data = self.normalize_config(config)
+        cache_key = self._build_import_export_cache_key(config_data)
+        cached_payload = self._import_export_metadata_cache.get(cache_key)
+        if isinstance(cached_payload, dict):
+            return deepcopy(cached_payload)
+
+        def _mapping_stats(mapping_name, row_section_name):
+            mapping = config_data.get(mapping_name) if isinstance(config_data.get(mapping_name), dict) else {}
+            columns = mapping.get("columns") if isinstance(mapping.get("columns"), dict) else {}
+            row_fields = config_data.get(row_section_name) if isinstance(config_data.get(row_section_name), list) else []
+
+            mapped_columns = 0
+            import_enabled_columns = 0
+            export_enabled_columns = 0
+            transform_overrides = 0
+
+            for raw_value in columns.values():
+                if isinstance(raw_value, dict):
+                    column_value = str(raw_value.get("column") or "").strip()
+                    import_enabled = self._normalize_bool_value(raw_value.get("import_enabled"), default=True)
+                    export_enabled = self._normalize_bool_value(raw_value.get("export_enabled"), default=True)
+                    import_transform = str(raw_value.get("import_transform") or "value").strip().lower()
+                    export_transform = str(raw_value.get("export_transform") or "value").strip().lower()
+                else:
+                    column_value = str(raw_value or "").strip()
+                    import_enabled = True
+                    export_enabled = True
+                    import_transform = "value"
+                    export_transform = "value"
+
+                if column_value:
+                    mapped_columns += 1
+                if import_enabled:
+                    import_enabled_columns += 1
+                if export_enabled:
+                    export_enabled_columns += 1
+                if import_transform != "value" or export_transform != "value":
+                    transform_overrides += 1
+
+            return {
+                "field_count": len(row_fields),
+                "start_row": int(mapping.get("start_row", 1) or 1),
+                "max_rows": int(mapping.get("max_rows", DEFAULT_MAPPING_MAX_ROWS) or DEFAULT_MAPPING_MAX_ROWS),
+                "mapped_columns": mapped_columns,
+                "import_enabled_columns": import_enabled_columns,
+                "export_enabled_columns": export_enabled_columns,
+                "transform_overrides": transform_overrides,
+            }
+
+        metadata = {
+            "template_path": str(config_data.get("template_path") or ""),
+            "production": _mapping_stats("production_mapping", "production_row_fields"),
+            "downtime": _mapping_stats("downtime_mapping", "downtime_row_fields"),
+            "workbook": self._build_template_workbook_stats(config_data.get("template_path")),
+        }
+
+        self._import_export_metadata_cache[cache_key] = deepcopy(metadata)
+        if len(self._import_export_metadata_cache) > 12:
+            self._import_export_metadata_cache = {
+                latest_key: self._import_export_metadata_cache[latest_key]
+                for latest_key in list(self._import_export_metadata_cache.keys())[-12:]
+            }
+
+        return metadata
 
     def _normalize_editor_payload(self, payload):
         if isinstance(payload, dict):
@@ -1273,3 +1920,66 @@ class LayoutManagerModel:
                 continue
             return value
         return None
+
+    def build_validation_summary(self, config):
+        config_data = self.normalize_config(config)
+        errors = []
+        warnings = []
+
+        try:
+            self.validate_config(config_data)
+        except Exception as exc:
+            errors.append(str(exc))
+
+        header_fields = config_data.get("header_fields") if isinstance(config_data.get("header_fields"), list) else []
+        production_fields = config_data.get("production_row_fields") if isinstance(config_data.get("production_row_fields"), list) else []
+        downtime_fields = config_data.get("downtime_row_fields") if isinstance(config_data.get("downtime_row_fields"), list) else []
+
+        def _duplicate_ids(field_list):
+            seen_ids = set()
+            duplicate_ids = []
+            for field in field_list:
+                if not isinstance(field, dict):
+                    continue
+                field_id = str(field.get("id") or "").strip()
+                if not field_id:
+                    continue
+                if field_id in seen_ids and field_id not in duplicate_ids:
+                    duplicate_ids.append(field_id)
+                seen_ids.add(field_id)
+            return duplicate_ids
+
+        for section_name, field_list in (
+            ("header_fields", header_fields),
+            ("production_row_fields", production_fields),
+            ("downtime_row_fields", downtime_fields),
+        ):
+            duplicates = _duplicate_ids(field_list)
+            if duplicates:
+                errors.append(f"{section_name} duplicate ids: {', '.join(duplicates)}")
+
+        try:
+            self.get_required_mapping_field_ids(production_fields, "production_row_fields")
+        except Exception as exc:
+            errors.append(str(exc))
+
+        try:
+            self.get_required_mapping_field_ids(downtime_fields, "downtime_row_fields")
+        except Exception as exc:
+            errors.append(str(exc))
+
+        total_fields = len(header_fields) + len(production_fields) + len(downtime_fields)
+        if total_fields == 0:
+            warnings.append("Layout has no editable fields.")
+
+        return {
+            "ok": len(errors) == 0,
+            "errors": errors,
+            "warnings": warnings,
+            "stats": {
+                "header_fields": len(header_fields),
+                "production_row_fields": len(production_fields),
+                "downtime_row_fields": len(downtime_fields),
+                "total_fields": total_fields,
+            },
+        }
