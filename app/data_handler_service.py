@@ -111,10 +111,11 @@ class DataHandlerService:
         raw_sections = config.get("sections") if isinstance(config, dict) else None
         if not isinstance(raw_sections, list):
             raw_sections = []
+        if not raw_sections:
+            raw_sections = [dict(section) for section in DEFAULT_SECTIONS]
 
         normalized_sections = []
         seen_ids = set()
-        default_by_id = {section["id"]: dict(section) for section in DEFAULT_SECTIONS}
 
         for raw_section in raw_sections:
             if not isinstance(raw_section, dict):
@@ -122,11 +123,11 @@ class DataHandlerService:
             section_id = str(raw_section.get("id", "")).strip().lower()
             if not section_id or section_id in seen_ids:
                 continue
-            normalized_section = dict(default_by_id.get(section_id, {"id": section_id}))
+            normalized_section = dict(raw_section)
             normalized_section["id"] = section_id
             normalized_section["name"] = str(
                 raw_section.get("name", normalized_section.get("name", section_id.replace("_", " ").title()))
-            ).strip() or normalized_section.get("name", section_id)
+            ).strip() or section_id.replace("_", " ").title()
 
             description_text = str(raw_section.get("description", normalized_section.get("description", ""))).strip()
             if description_text:
@@ -135,47 +136,40 @@ class DataHandlerService:
                 normalized_section.pop("description", None)
 
             fields_key = str(raw_section.get("fields_key", normalized_section.get("fields_key", ""))).strip()
-            if section_id == "header":
-                fields_key = "header_fields"
-            elif section_id == "production":
-                fields_key = "production_row_fields"
-            elif section_id == "downtime":
-                fields_key = "downtime_row_fields"
-            if not fields_key:
-                continue
-            normalized_section["fields_key"] = fields_key
+            if fields_key:
+                normalized_section["fields_key"] = fields_key
+            else:
+                normalized_section.pop("fields_key", None)
 
             mapping_key = str(raw_section.get("mapping_key", normalized_section.get("mapping_key", ""))).strip()
-            if section_id == "production":
-                mapping_key = "production_mapping"
-            elif section_id == "downtime":
-                mapping_key = "downtime_mapping"
             if mapping_key:
                 normalized_section["mapping_key"] = mapping_key
             else:
                 normalized_section.pop("mapping_key", None)
 
             section_type = str(raw_section.get("section_type", normalized_section.get("section_type", "single"))).strip().lower()
-            normalized_section["section_type"] = section_type if section_type in {"single", "repeating"} else normalized_section.get("section_type", "single")
+            normalized_section["section_type"] = section_type or "single"
 
             behavior_profile = str(raw_section.get("behavior_profile", normalized_section.get("behavior_profile", section_id))).strip().lower()
-            normalized_section["behavior_profile"] = behavior_profile or normalized_section.get("behavior_profile", section_id)
+            if behavior_profile:
+                normalized_section["behavior_profile"] = behavior_profile
+            else:
+                normalized_section.pop("behavior_profile", None)
 
             if normalized_section["section_type"] == "repeating":
-                default_max_rows = raw_section.get("default_max_rows", normalized_section.get("default_max_rows", DEFAULT_REPEATING_SECTION_MAX_ROWS))
-                try:
-                    normalized_section["default_max_rows"] = max(1, int(default_max_rows or DEFAULT_REPEATING_SECTION_MAX_ROWS))
-                except (TypeError, ValueError):
-                    normalized_section["default_max_rows"] = DEFAULT_REPEATING_SECTION_MAX_ROWS
+                default_max_rows = raw_section.get("default_max_rows", normalized_section.get("default_max_rows"))
+                if default_max_rows not in (None, ""):
+                    try:
+                        normalized_section["default_max_rows"] = max(1, int(default_max_rows))
+                    except (TypeError, ValueError):
+                        normalized_section["default_max_rows"] = default_max_rows
+                else:
+                    normalized_section.pop("default_max_rows", None)
             else:
                 normalized_section.pop("default_max_rows", None)
 
             normalized_sections.append(normalized_section)
             seen_ids.add(section_id)
-
-        for default_section in DEFAULT_SECTIONS:
-            if default_section["id"] not in seen_ids:
-                normalized_sections.append(dict(default_section))
 
         return normalized_sections
 

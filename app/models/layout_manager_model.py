@@ -26,8 +26,7 @@ except Exception:
 
 from app.layout_config_service import LayoutConfigService
 from app.persistence import write_json_with_backup
-from app.models.production_log_model import DEFAULT_DOWNTIME_ROW_FIELDS, DEFAULT_PRODUCTION_ROW_FIELDS
-from app.production_log_roles import PROTECTED_HEADER_ROLES, PROTECTED_ROW_ROLES, REQUIRED_MAPPING_ROLES, get_default_row_field_id, normalize_role_name, normalize_row_section_name, resolve_header_field_role, resolve_row_field_role
+from app.production_log_roles import PROTECTED_ROW_ROLES, REQUIRED_MAPPING_ROLES, get_default_row_field_id, normalize_role_name, normalize_row_section_name, resolve_header_field_role, resolve_row_field_role
 from app.utils import external_path
 
 VALID_IMPORT_TRANSFORMS = ("value", "code_lookup", "stop_from_duration")
@@ -87,7 +86,10 @@ class LayoutManagerModel:
         "production_mapping",
         "downtime_mapping",
     )
-    EDITOR_TOP_LEVEL_KEYS = REQUIRED_TOP_LEVEL_KEYS + ("sections",)
+    EDITOR_REQUIRED_TOP_LEVEL_KEYS = REQUIRED_TOP_LEVEL_KEYS + ("sections",)
+    EDITOR_OPTIONAL_TOP_LEVEL_KEYS = ("editor_presets",)
+    EDITOR_TOP_LEVEL_KEYS = EDITOR_REQUIRED_TOP_LEVEL_KEYS + EDITOR_OPTIONAL_TOP_LEVEL_KEYS
+    EDITOR_PRESET_SECTION_KEYS = ("header_fields", "production_row_fields", "downtime_row_fields")
 
     def __init__(self):
         self.service = LayoutConfigService()
@@ -95,8 +97,8 @@ class LayoutManagerModel:
         self.current_source_path = self.service.config_path
         self.current_save_path = self.service.save_path
         self._default_config_template = None
-        self.protected_field_ids = {"date", "cast_date", "shift", "hours", "goal_mph", "total_molds"}
-        self.protected_header_roles = set(PROTECTED_HEADER_ROLES)
+        self.protected_field_ids = set()
+        self.protected_header_roles = set()
         self.row_field_sections = ("production_row_fields", "downtime_row_fields")
         self.protected_row_field_ids = {
             "production_row_fields": {"shop_order", "part_number", "rate_lookup", "rate_override_enabled", "molds", "time_calc"},
@@ -149,25 +151,34 @@ class LayoutManagerModel:
             except Exception:
                 default_config = {}
             normalized_default = dict(default_config) if isinstance(default_config, dict) else {}
-            normalized_default["production_row_fields"] = self._merge_row_fields_with_defaults(
-                normalized_default.get("production_row_fields"),
-                DEFAULT_PRODUCTION_ROW_FIELDS,
-            )
-            normalized_default["downtime_row_fields"] = self._merge_row_fields_with_defaults(
-                normalized_default.get("downtime_row_fields"),
-                DEFAULT_DOWNTIME_ROW_FIELDS,
-            )
-            normalized_default.setdefault(
-                "production_mapping",
-                self._build_default_mapping("production_mapping", DEFAULT_PRODUCTION_ROW_FIELDS),
-            )
-            normalized_default.setdefault(
-                "downtime_mapping",
-                self._build_default_mapping("downtime_mapping", DEFAULT_DOWNTIME_ROW_FIELDS),
-            )
-            normalized_default.setdefault("header_fields", [])
             normalized_default["sections"] = self._normalize_sections(normalized_default)
-            normalized_default.setdefault("template_path", "")
+            if "header_fields" in normalized_default:
+                normalized_default["header_fields"] = self._normalize_header_fields(
+                    deepcopy(normalized_default.get("header_fields"))
+                )
+            if "production_row_fields" in normalized_default:
+                normalized_default["production_row_fields"] = self._normalize_row_fields(
+                    normalized_default.get("production_row_fields"),
+                    "production_row_fields",
+                )
+            if "downtime_row_fields" in normalized_default:
+                normalized_default["downtime_row_fields"] = self._normalize_row_fields(
+                    normalized_default.get("downtime_row_fields"),
+                    "downtime_row_fields",
+                )
+            if "production_mapping" in normalized_default:
+                normalized_default["production_mapping"] = self._normalize_mapping(
+                    "production_mapping",
+                    normalized_default.get("production_mapping"),
+                    row_fields=normalized_default.get("production_row_fields"),
+                )
+            if "downtime_mapping" in normalized_default:
+                normalized_default["downtime_mapping"] = self._normalize_mapping(
+                    "downtime_mapping",
+                    normalized_default.get("downtime_mapping"),
+                    row_fields=normalized_default.get("downtime_row_fields"),
+                )
+            normalized_default["template_path"] = str(normalized_default.get("template_path") or "")
             self._default_config_template = normalized_default
         return deepcopy(self._default_config_template)
 
@@ -175,10 +186,11 @@ class LayoutManagerModel:
         raw_sections = config.get("sections") if isinstance(config, dict) else None
         if not isinstance(raw_sections, list):
             raw_sections = []
+        if not raw_sections:
+            raw_sections = deepcopy(DEFAULT_SECTIONS)
 
         normalized_sections = []
         seen_ids = set()
-        default_by_id = {section["id"]: deepcopy(section) for section in DEFAULT_SECTIONS}
 
         for raw_section in raw_sections:
             if not isinstance(raw_section, dict):
@@ -186,9 +198,11 @@ class LayoutManagerModel:
             section_id = str(raw_section.get("id", "")).strip().lower()
             if not section_id or section_id in seen_ids:
                 continue
-            normalized_section = default_by_id.get(section_id, {"id": section_id})
+            normalized_section = deepcopy(raw_section)
             normalized_section["id"] = section_id
-            normalized_section["name"] = str(raw_section.get("name", normalized_section.get("name", section_id.replace("_", " ").title()))).strip() or normalized_section.get("name", section_id)
+            normalized_section["name"] = str(
+                raw_section.get("name", normalized_section.get("name", section_id.replace("_", " ").title()))
+            ).strip() or section_id.replace("_", " ").title()
 
             description_text = str(raw_section.get("description", normalized_section.get("description", ""))).strip()
             if description_text:
@@ -197,53 +211,48 @@ class LayoutManagerModel:
                 normalized_section.pop("description", None)
 
             fields_key = str(raw_section.get("fields_key", normalized_section.get("fields_key", ""))).strip()
-            if section_id == "header":
-                fields_key = "header_fields"
-            elif section_id == "production":
-                fields_key = "production_row_fields"
-            elif section_id == "downtime":
-                fields_key = "downtime_row_fields"
-            if not fields_key:
-                continue
-            normalized_section["fields_key"] = fields_key
+            if fields_key:
+                normalized_section["fields_key"] = fields_key
+            else:
+                normalized_section.pop("fields_key", None)
 
             mapping_key = str(raw_section.get("mapping_key", normalized_section.get("mapping_key", ""))).strip()
-            if section_id == "production":
-                mapping_key = "production_mapping"
-            elif section_id == "downtime":
-                mapping_key = "downtime_mapping"
             if mapping_key:
                 normalized_section["mapping_key"] = mapping_key
             else:
                 normalized_section.pop("mapping_key", None)
 
             section_type = str(raw_section.get("section_type", normalized_section.get("section_type", "single"))).strip().lower()
-            normalized_section["section_type"] = section_type if section_type in {"single", "repeating"} else normalized_section.get("section_type", "single")
+            normalized_section["section_type"] = section_type or "single"
 
-            behavior_profile = str(raw_section.get("behavior_profile", normalized_section.get("behavior_profile", section_id))).strip().lower()
-            normalized_section["behavior_profile"] = behavior_profile or normalized_section.get("behavior_profile", section_id)
+            behavior_profile = normalize_role_name(
+                raw_section.get("behavior_profile", normalized_section.get("behavior_profile", section_id))
+            )
+            if behavior_profile:
+                normalized_section["behavior_profile"] = behavior_profile
+            else:
+                normalized_section.pop("behavior_profile", None)
 
             if normalized_section["section_type"] == "repeating":
-                default_max_rows = raw_section.get("default_max_rows", normalized_section.get("default_max_rows", DEFAULT_MAPPING_MAX_ROWS))
-                try:
-                    normalized_section["default_max_rows"] = max(1, int(default_max_rows or DEFAULT_MAPPING_MAX_ROWS))
-                except (TypeError, ValueError):
-                    normalized_section["default_max_rows"] = DEFAULT_MAPPING_MAX_ROWS
-                normalized_section["delete_row_policy"] = self._normalize_delete_row_policy(
-                    raw_section.get("delete_row_policy", normalized_section.get("delete_row_policy")),
-                    default_policy=normalized_section.get("delete_row_policy"),
-                )
+                default_max_rows = raw_section.get("default_max_rows", normalized_section.get("default_max_rows"))
+                if default_max_rows not in (None, ""):
+                    try:
+                        normalized_section["default_max_rows"] = max(1, int(default_max_rows))
+                    except (TypeError, ValueError):
+                        normalized_section["default_max_rows"] = default_max_rows
+                else:
+                    normalized_section.pop("default_max_rows", None)
+                raw_policy = raw_section.get("delete_row_policy", normalized_section.get("delete_row_policy"))
+                if isinstance(raw_policy, dict):
+                    normalized_section["delete_row_policy"] = self._normalize_delete_row_policy(raw_policy)
+                else:
+                    normalized_section.pop("delete_row_policy", None)
             else:
                 normalized_section.pop("default_max_rows", None)
                 normalized_section.pop("delete_row_policy", None)
 
             normalized_sections.append(normalized_section)
             seen_ids.add(section_id)
-
-        for default_section in DEFAULT_SECTIONS:
-            section_id = default_section["id"]
-            if section_id not in seen_ids:
-                normalized_sections.append(deepcopy(default_section))
 
         return normalized_sections
 
@@ -321,7 +330,7 @@ class LayoutManagerModel:
         notes = [
             "Import and export only move fields that are both listed in the active section schema and enabled in the mapping or header toggle.",
             "Supported routing profiles are bounded to header, production, and downtime. Unsupported profiles fail closed.",
-            "Stale mapping columns that no longer match the row schema are removed during normalization, and manual JSON edits still validate against the current field ids.",
+            "Normalization preserves the current JSON shape and validation flags mapping or role issues without silently rebuilding removed sections or fields.",
         ]
         return {
             "routed_sections": routed_sections,
@@ -487,8 +496,6 @@ class LayoutManagerModel:
 
     def remove_section(self, config, section_id):
         normalized_section_id = str(section_id or "").strip().lower()
-        if normalized_section_id in {"header", "production", "downtime"}:
-            raise ValueError(f"Section '{normalized_section_id}' is protected and cannot be removed.")
         sections = config.get("sections") if isinstance(config.get("sections"), list) else []
         target_section = next((section for section in sections if section.get("id") == normalized_section_id), None)
         if target_section is None:
@@ -536,13 +543,7 @@ class LayoutManagerModel:
                 "import_transform": str(raw_value.get("import_transform", default_import_transform) or default_import_transform).strip() or default_import_transform,
                 "export_transform": str(raw_value.get("export_transform", default_export_transform) or default_export_transform).strip() or default_export_transform,
             }
-        return {
-            "column": str(raw_value or "").strip(),
-            "import_enabled": True,
-            "export_enabled": True,
-            "import_transform": default_import_transform,
-            "export_transform": default_export_transform,
-        }
+        return str(raw_value or "").strip()
 
     def _build_default_mapping(self, mapping_name, row_fields):
         return {
@@ -555,130 +556,228 @@ class LayoutManagerModel:
             },
         }
 
+    def _normalize_header_field_entry(self, field):
+        if not isinstance(field, dict):
+            return None
+        normalized_field = deepcopy(field)
+        normalized_field.pop("_original_id", None)
+        field_id = str(normalized_field.get("id", "")).strip()
+        role_name = resolve_header_field_role(field_id, normalized_field.get("role"))
+        if role_name:
+            normalized_field["role"] = role_name
+        else:
+            normalized_field.pop("role", None)
+
+        widget_name = str(normalized_field.get("widget", "entry") or "entry").strip().lower() or "entry"
+        if widget_name not in {"entry", "combobox"}:
+            widget_name = "entry"
+        if widget_name == "entry" and "widget" not in field:
+            normalized_field.pop("widget", None)
+        else:
+            normalized_field["widget"] = widget_name
+
+        normalized_field["import_enabled"] = self._normalize_bool_value(
+            normalized_field.get("import_enabled"),
+            default=True,
+        )
+        normalized_field["export_enabled"] = self._normalize_bool_value(
+            normalized_field.get("export_enabled"),
+            default=True,
+        )
+
+        state_name = str(normalized_field.get("state", "") or "").strip().lower()
+        if state_name in {"normal", "disabled", "readonly"}:
+            normalized_field["state"] = state_name
+        else:
+            normalized_field.pop("state", None)
+
+        options_source_name = str(normalized_field.get("options_source", "") or "").strip().lower()
+        if widget_name == "combobox":
+            if options_source_name == "downtime_codes":
+                normalized_field["options_source"] = options_source_name
+            else:
+                normalized_field.pop("options_source", None)
+            self._set_optional_list_field(normalized_field, "values", normalized_field.get("values"))
+        else:
+            normalized_field.pop("options_source", None)
+            normalized_field.pop("values", None)
+
+        return normalized_field
+
     def _normalize_header_fields(self, header_fields):
         if not isinstance(header_fields, list):
             return []
 
         normalized_fields = []
         for field in header_fields:
-            if not isinstance(field, dict):
+            normalized_field = self._normalize_header_field_entry(field)
+            if not isinstance(normalized_field, dict):
                 continue
-            normalized_field = deepcopy(field)
-            normalized_field["import_enabled"] = self._normalize_bool_value(normalized_field.get("import_enabled"), default=True)
-            normalized_field["export_enabled"] = self._normalize_bool_value(normalized_field.get("export_enabled"), default=True)
             normalized_fields.append(normalized_field)
         return normalized_fields
 
-    def _merge_row_fields_with_defaults(self, row_fields, default_row_fields):
-        if not isinstance(default_row_fields, list):
-            return list(row_fields) if isinstance(row_fields, list) else []
+    def _normalize_row_field_entry(self, field, section_name):
+        if not isinstance(field, dict):
+            return None
+        normalized_field = deepcopy(field)
+        field_id = str(normalized_field.get("id", "")).strip()
+        widget_name = str(normalized_field.get("widget", "entry") or "entry").strip().lower() or "entry"
+        normalized_field["widget"] = widget_name
+        role_name = resolve_row_field_role(section_name, field_id, normalized_field.get("role"))
+        if role_name:
+            normalized_field["role"] = role_name
+        else:
+            normalized_field.pop("role", None)
+        if widget_name == "combobox":
+            self._set_optional_list_field(normalized_field, "values", normalized_field.get("values"))
+        else:
+            normalized_field.pop("values", None)
+        normalized_field.pop("_original_id", None)
+        return normalized_field
+
+    def _normalize_row_fields(self, row_fields, section_name):
         if not isinstance(row_fields, list):
-            return deepcopy(default_row_fields)
+            return []
 
-        default_map = {}
-        for default_field in default_row_fields:
-            if isinstance(default_field, dict):
-                field_id = str(default_field.get("id", "")).strip()
-                if field_id:
-                    default_map[field_id] = default_field
-
-        merged_fields = []
+        normalized_fields = []
         seen_ids = set()
         for field in row_fields:
+            normalized_field = self._normalize_row_field_entry(field, section_name)
+            if not isinstance(normalized_field, dict):
+                continue
+            field_id = str(normalized_field.get("id", "")).strip()
+            if not field_id or field_id in seen_ids:
+                continue
+            normalized_fields.append(normalized_field)
+            seen_ids.add(field_id)
+
+        return normalized_fields
+
+    def _normalize_editor_presets(self, editor_presets):
+        if not isinstance(editor_presets, dict):
+            return {}
+
+        normalized_presets = {}
+        raw_header_presets = editor_presets.get("header_fields")
+        if isinstance(raw_header_presets, list):
+            normalized_presets["header_fields"] = self._normalize_header_fields(deepcopy(raw_header_presets))
+
+        for section_name in self.row_field_sections:
+            raw_row_presets = editor_presets.get(section_name)
+            if not isinstance(raw_row_presets, list):
+                continue
+            normalized_presets[section_name] = [
+                normalized_field
+                for normalized_field in (
+                    self._normalize_row_field_entry(field, section_name)
+                    for field in raw_row_presets
+                )
+                if isinstance(normalized_field, dict)
+            ]
+
+        return normalized_presets
+
+    def _merge_row_fields_with_defaults(self, row_fields, default_row_fields=None, section_name=""):
+        return self._normalize_row_fields(row_fields, section_name)
+
+    def _normalize_mapping(self, mapping_name, mapping, row_fields=None):
+        if not isinstance(mapping, dict):
+            return {}
+        normalized_mapping = {}
+        for key_name, value in mapping.items():
+            if key_name == "columns" and isinstance(value, dict):
+                normalized_columns = {}
+                for field_id, raw_column_value in value.items():
+                    normalized_field_id = str(field_id or "").strip()
+                    if not normalized_field_id:
+                        continue
+                    normalized_columns[normalized_field_id] = self._normalize_mapping_column_config(
+                        mapping_name,
+                        normalized_field_id,
+                        raw_column_value,
+                        row_fields=row_fields,
+                    )
+                normalized_mapping["columns"] = normalized_columns
+            else:
+                normalized_mapping[key_name] = deepcopy(value)
+        return normalized_mapping
+
+    def normalize_config(self, config):
+        if not isinstance(config, dict):
+            return self._get_default_config_template()
+
+        normalized = deepcopy(config)
+        normalized["sections"] = self._normalize_sections(normalized)
+        if "header_fields" in normalized:
+            normalized["header_fields"] = self._normalize_header_fields(
+                deepcopy(normalized.get("header_fields"))
+            )
+        if "production_row_fields" in normalized:
+            normalized["production_row_fields"] = self._normalize_row_fields(
+                normalized.get("production_row_fields"),
+                "production_row_fields",
+            )
+        if "downtime_row_fields" in normalized:
+            normalized["downtime_row_fields"] = self._normalize_row_fields(
+                normalized.get("downtime_row_fields"),
+                "downtime_row_fields",
+            )
+        if "production_mapping" in normalized:
+            normalized["production_mapping"] = self._normalize_mapping(
+                "production_mapping",
+                normalized.get("production_mapping"),
+                row_fields=normalized.get("production_row_fields"),
+            )
+        if "downtime_mapping" in normalized:
+            normalized["downtime_mapping"] = self._normalize_mapping(
+                "downtime_mapping",
+                normalized.get("downtime_mapping"),
+                row_fields=normalized.get("downtime_row_fields"),
+            )
+        if "editor_presets" in normalized:
+            normalized["editor_presets"] = self._normalize_editor_presets(normalized.get("editor_presets"))
+        if "template_path" in normalized:
+            normalized["template_path"] = str(normalized.get("template_path") or "")
+        return normalized
+
+    def _get_observed_header_roles(self, header_fields):
+        observed_roles = set()
+        for field in header_fields if isinstance(header_fields, list) else []:
             if not isinstance(field, dict):
                 continue
             field_id = str(field.get("id", "")).strip()
-            if not field_id or field_id in seen_ids:
+            role_name = resolve_header_field_role(field_id, field.get("role"))
+            if role_name:
+                observed_roles.add(role_name)
+        return observed_roles
+
+    def _get_observed_row_roles(self, row_fields, section_name):
+        observed_roles = set()
+        for field in row_fields if isinstance(row_fields, list) else []:
+            if not isinstance(field, dict):
                 continue
-            merged_field = deepcopy(default_map.get(field_id, {}))
-            merged_field.update(field)
-            merged_fields.append(merged_field)
-            seen_ids.add(field_id)
+            field_id = str(field.get("id", "")).strip()
+            role_name = resolve_row_field_role(section_name, field_id, field.get("role"))
+            if role_name:
+                observed_roles.add(role_name)
+        return observed_roles
 
-        for default_field in default_row_fields:
-            if not isinstance(default_field, dict):
-                continue
-            field_id = str(default_field.get("id", "")).strip()
-            if field_id and field_id not in seen_ids:
-                merged_fields.append(deepcopy(default_field))
-        return merged_fields
+    def validate_editor_payload_preserves_required_structure(self, payload, payload_details):
+        if not isinstance(payload, dict):
+            raise ValueError("Layout editor payload must be a JSON object.")
 
-    def _merge_mapping_with_defaults(self, mapping_name, mapping, default_mapping, row_fields=None):
-        if not isinstance(default_mapping, dict):
-            return dict(mapping) if isinstance(mapping, dict) else {}
-        merged_mapping = deepcopy(default_mapping)
-        if not isinstance(mapping, dict):
-            return merged_mapping
-        allowed_field_ids = {
-            str(field.get("id", "")).strip()
-            for field in row_fields if isinstance(row_fields, list) and isinstance(field, dict) and field.get("id")
-        }
-        default_columns = default_mapping.get("columns", {}) if isinstance(default_mapping.get("columns"), dict) else {}
-        for key_name, value in mapping.items():
-            if key_name == "columns" and isinstance(value, dict):
-                for field_id, raw_column_value in value.items():
-                    if allowed_field_ids and field_id not in allowed_field_ids:
-                        continue
-                    base_value = default_columns.get(field_id, "")
-                    normalized_value = self._normalize_mapping_column_config(
-                        mapping_name,
-                        field_id,
-                        raw_column_value if raw_column_value is not None else base_value,
-                        row_fields=row_fields,
-                    )
-                    merged_mapping.setdefault("columns", {})[field_id] = normalized_value
-            else:
-                merged_mapping[key_name] = deepcopy(value)
-        if isinstance(merged_mapping.get("columns"), dict):
-            for field_id, raw_column_value in list(merged_mapping["columns"].items()):
-                if allowed_field_ids and field_id not in allowed_field_ids:
-                    merged_mapping["columns"].pop(field_id, None)
-                    continue
-                merged_mapping["columns"][field_id] = self._normalize_mapping_column_config(
-                    mapping_name,
-                    field_id,
-                    raw_column_value,
-                    row_fields=row_fields,
-                )
-        merged_mapping.setdefault("max_rows", DEFAULT_MAPPING_MAX_ROWS)
-        return merged_mapping
+        mode = str((payload_details or {}).get("mode") or "full").strip().lower()
+        list_keys = {"sections", "header_fields", *self.row_field_sections}
+        object_keys = {"production_mapping", "downtime_mapping", "editor_presets"}
 
-    def normalize_config(self, config):
-        normalized = dict(config) if isinstance(config, dict) else {}
-        default_config = self._get_default_config_template()
+        for key_name, value in payload.items():
+            if key_name in list_keys and not isinstance(value, list):
+                raise ValueError(f"Layout JSON must keep '{key_name}' as a list.")
+            if key_name in object_keys and not isinstance(value, dict):
+                raise ValueError(f"Layout JSON must keep '{key_name}' as an object.")
 
-        for key_name in self.REQUIRED_TOP_LEVEL_KEYS:
-            if key_name not in normalized and key_name in default_config:
-                normalized[key_name] = deepcopy(default_config[key_name])
-
-        normalized["sections"] = self._normalize_sections(normalized)
-
-        normalized["header_fields"] = self._normalize_header_fields(
-            deepcopy(normalized.get("header_fields", default_config.get("header_fields", [])))
-        )
-        normalized["production_row_fields"] = self._merge_row_fields_with_defaults(
-            normalized.get("production_row_fields"),
-            default_config.get("production_row_fields", []),
-        )
-        normalized["downtime_row_fields"] = self._merge_row_fields_with_defaults(
-            normalized.get("downtime_row_fields"),
-            default_config.get("downtime_row_fields", []),
-        )
-        normalized["production_mapping"] = self._merge_mapping_with_defaults(
-            "production_mapping",
-            normalized.get("production_mapping"),
-            default_config.get("production_mapping", {}),
-            row_fields=normalized["production_row_fields"],
-        )
-        normalized["downtime_mapping"] = self._merge_mapping_with_defaults(
-            "downtime_mapping",
-            normalized.get("downtime_mapping"),
-            default_config.get("downtime_mapping", {}),
-            row_fields=normalized["downtime_row_fields"],
-        )
-        if "template_path" not in normalized and "template_path" in default_config:
-            normalized["template_path"] = default_config.get("template_path")
-        return normalized
+        if mode not in {"full", "section"}:
+            raise ValueError("Unrecognized editor payload mode.")
 
     def resolve_editor_text(self, text, base_config=None):
         raw_text = str(text or "").strip()
@@ -687,31 +786,14 @@ class LayoutManagerModel:
 
         try:
             payload = json.loads(raw_text)
-            extracted = False
         except json.JSONDecodeError as exc:
-            payload = self._extract_partial_sections(raw_text)
-            extracted = True
-            if not payload:
-                raise ValueError(f"Syntax error at line {exc.lineno}, column {exc.colno}: {exc.msg}") from exc
+            raise ValueError(f"Syntax error at line {exc.lineno}, column {exc.colno}: {exc.msg}") from exc
 
         normalized_payload, payload_details = self._normalize_editor_payload(payload)
-        if payload_details["mode"] == "full":
-            normalized_config = self.normalize_config(normalized_payload)
-            self.validate_config(normalized_config)
-            return normalized_config, payload_details
-
-        if base_config is None:
-            raise ValueError("Section payloads require a loaded layout before they can be merged.")
-
-        merged_config = self.normalize_config(base_config)
-        for section_name, section_value in normalized_payload.items():
-            merged_config[section_name] = deepcopy(section_value)
-        merged_config = self.normalize_config(merged_config)
-        self.validate_config(merged_config)
-
-        payload_details = dict(payload_details)
-        payload_details["extracted"] = extracted
-        return merged_config, payload_details
+        self.validate_editor_payload_preserves_required_structure(normalized_payload, payload_details)
+        normalized_config = self.normalize_config(normalized_payload)
+        self.validate_config(normalized_config)
+        return normalized_config, payload_details
 
     def load_current_config(self):
         form_info = self.service.get_active_form_info()
@@ -723,6 +805,11 @@ class LayoutManagerModel:
         self.is_dirty = False
         return config, source_path, form_info
 
+    def load_current_text(self):
+        form_info = self.service.get_active_form_info()
+        text, _source_path = self.service.load_form_text(form_info=form_info)
+        return text
+
     def load_form_config(self, form_id):
         form_info = self.service.get_form_info(form_id)
         config, source_path = self.service.load_form(form_info=form_info)
@@ -732,6 +819,11 @@ class LayoutManagerModel:
         self.current_save_path = form_info.get("save_path", source_path)
         self.is_dirty = False
         return config, source_path, form_info
+
+    def load_form_text(self, form_id):
+        form_info = self.service.get_form_info(form_id)
+        text, _source_path = self.service.load_form_text(form_info=form_info)
+        return text
 
     def load_default_config(self):
         config, source_path = self.service.load_default()
@@ -743,11 +835,26 @@ class LayoutManagerModel:
         self.is_dirty = False
         return config, source_path, active_form_info
 
+    def load_default_text(self):
+        text, _source_path = self.service.load_default_text()
+        return text
+
     def save_config(self, config, form_info=None):
         config = self.normalize_config(config)
         self.validate_config(config)
         resolved_form_info = dict(form_info) if isinstance(form_info, dict) else self.service.get_active_form_info()
         backup_info = self.service.save_config(config, form_info=resolved_form_info)
+        self.current_source_path = resolved_form_info.get("save_path", self.current_source_path)
+        self.current_save_path = resolved_form_info.get("save_path", self.current_save_path)
+        self.is_dirty = False
+        return backup_info
+
+    def save_config_text(self, text, config=None, form_info=None):
+        raw_text = str(text or "")
+        resolved_config = self.normalize_config(config) if isinstance(config, dict) else self.parse_editor_text(raw_text)
+        self.validate_config(resolved_config)
+        resolved_form_info = dict(form_info) if isinstance(form_info, dict) else self.service.get_active_form_info()
+        backup_info = self.service.save_config_text(raw_text, form_info=resolved_form_info)
         self.current_source_path = resolved_form_info.get("save_path", self.current_source_path)
         self.current_save_path = resolved_form_info.get("save_path", self.current_save_path)
         self.is_dirty = False
@@ -806,19 +913,23 @@ class LayoutManagerModel:
 
     def build_blank_form_config(self):
         default_config = self._get_default_config_template()
-        production_roles = REQUIRED_MAPPING_ROLES.get("production", ())
-        downtime_roles = REQUIRED_MAPPING_ROLES.get("downtime", ())
-        production_row_fields = self._build_blank_row_fields("production", production_roles)
-        downtime_row_fields = self._build_blank_row_fields("downtime", downtime_roles)
-
         return {
             "template_path": str(default_config.get("template_path", "")),
             "header_fields": [],
-            "production_row_fields": production_row_fields,
-            "downtime_row_fields": downtime_row_fields,
-            "production_mapping": self._build_blank_mapping("production_mapping", production_row_fields),
-            "downtime_mapping": self._build_blank_mapping("downtime_mapping", downtime_row_fields),
-            "sections": self._normalize_sections({"sections": deepcopy(DEFAULT_SECTIONS)}),
+            "production_row_fields": [],
+            "downtime_row_fields": [],
+            "production_mapping": {
+                "start_row": 1,
+                "max_rows": DEFAULT_MAPPING_MAX_ROWS,
+                "columns": {},
+            },
+            "downtime_mapping": {
+                "start_row": 1,
+                "max_rows": DEFAULT_MAPPING_MAX_ROWS,
+                "columns": {},
+            },
+            "sections": [],
+            "editor_presets": {},
         }
 
     def create_blank_form(self, name, description="", activate=False):
@@ -906,11 +1017,11 @@ class LayoutManagerModel:
         dependent_drafts = self.list_form_dependencies(normalized_form_id)
         draft_count = len(dependent_drafts)
         if draft_count == 0:
-            summary = "No pending Production Log drafts depend on this form."
+            summary = "No pending Form Loader drafts depend on this form."
         elif draft_count == 1:
-            summary = "1 pending Production Log draft depends on this form."
+            summary = "1 pending Form Loader draft depends on this form."
         else:
-            summary = f"{draft_count} pending Production Log drafts depend on this form."
+            summary = f"{draft_count} pending Form Loader drafts depend on this form."
 
         return {
             "form_id": normalized_form_id,
@@ -928,11 +1039,6 @@ class LayoutManagerModel:
     def validate_config(self, config):
         if not isinstance(config, dict):
             raise ValueError("Config must be a JSON object.")
-
-        required_top_level = list(self.REQUIRED_TOP_LEVEL_KEYS)
-        missing_keys = [key for key in required_top_level if key not in config]
-        if missing_keys:
-            raise ValueError(f"Missing required keys: {', '.join(missing_keys)}")
 
         if "sections" in config and not isinstance(config.get("sections"), list):
             raise ValueError("sections must be a list.")
@@ -965,38 +1071,30 @@ class LayoutManagerModel:
                     )
                 seen_supported_profiles[behavior_profile] = section_id
 
-        if not isinstance(config["header_fields"], list):
-            raise ValueError("header_fields must be a list.")
-
-        seen_header_roles = set()
-        for index, field in enumerate(config["header_fields"], start=1):
-            if not isinstance(field, dict):
-                raise ValueError(f"header_fields item {index} must be an object.")
-            field_missing = [key for key in ("id", "label", "row", "col") if key not in field]
-            if field_missing:
-                raise ValueError(f"header_fields item {index} is missing: {', '.join(field_missing)}")
-            field_id = str(field.get("id", "")).strip()
-            role_name = resolve_header_field_role(field_id, field.get("role"))
-            if role_name:
-                if role_name in seen_header_roles:
-                    raise ValueError(f"header_fields contains duplicate role '{role_name}'.")
-                seen_header_roles.add(role_name)
+        if "header_fields" in config:
+            self.validate_header_fields(config["header_fields"])
 
         for section_name in self.row_field_sections:
-            self.validate_row_fields(config.get(section_name), section_name)
+            if section_name in config:
+                self.validate_row_fields(config.get(section_name), section_name)
 
-        self.validate_mapping(
-            config["production_mapping"],
-            "production_mapping",
-            self.get_required_mapping_field_ids(config.get("production_row_fields", []), "production_row_fields"),
-            self.get_mapping_field_ids(config.get("production_row_fields", [])),
-        )
-        self.validate_mapping(
-            config["downtime_mapping"],
-            "downtime_mapping",
-            self.get_required_mapping_field_ids(config.get("downtime_row_fields", []), "downtime_row_fields"),
-            self.get_mapping_field_ids(config.get("downtime_row_fields", [])),
-        )
+        if "editor_presets" in config:
+            self.validate_editor_presets(config.get("editor_presets"))
+
+        if "production_mapping" in config:
+            self.validate_mapping(
+                config["production_mapping"],
+                "production_mapping",
+                self.get_required_mapping_field_ids(config.get("production_row_fields", []), "production_row_fields"),
+                self.get_mapping_field_ids(config.get("production_row_fields", [])),
+            )
+        if "downtime_mapping" in config:
+            self.validate_mapping(
+                config["downtime_mapping"],
+                "downtime_mapping",
+                self.get_required_mapping_field_ids(config.get("downtime_row_fields", []), "downtime_row_fields"),
+                self.get_mapping_field_ids(config.get("downtime_row_fields", [])),
+            )
 
     def get_mapping_field_ids(self, row_fields):
         field_ids = []
@@ -1007,6 +1105,71 @@ class LayoutManagerModel:
             if field_id:
                 field_ids.append(field_id)
         return field_ids
+
+    def validate_header_fields(self, header_fields, field_group_name="header_fields"):
+        if not isinstance(header_fields, list):
+            raise ValueError(f"{field_group_name} must be a list.")
+
+        allowed_widgets = {"entry", "combobox"}
+        allowed_states = {"", "normal", "disabled", "readonly"}
+        allowed_options_sources = {"", "downtime_codes"}
+        seen_ids = set()
+        seen_roles = set()
+        for index, field in enumerate(header_fields, start=1):
+            if not isinstance(field, dict):
+                raise ValueError(f"{field_group_name} item {index} must be an object.")
+            field_missing = [key for key in ("id", "label", "row", "col") if key not in field]
+            if field_missing:
+                raise ValueError(f"{field_group_name} item {index} is missing: {', '.join(field_missing)}")
+            field_id = str(field.get("id", "")).strip()
+            if not field_id:
+                raise ValueError(f"{field_group_name} item {index} has an empty id.")
+            if field_id in seen_ids:
+                raise ValueError(f"{field_group_name} contains duplicate field id '{field_id}'.")
+            seen_ids.add(field_id)
+
+            widget_name = str(field.get("widget", "entry") or "entry").strip().lower() or "entry"
+            if widget_name not in allowed_widgets:
+                raise ValueError(f"{field_group_name} field '{field_id}' has unsupported widget '{widget_name}'.")
+
+            state_name = str(field.get("state", "") or "").strip().lower()
+            if state_name not in allowed_states:
+                raise ValueError(f"{field_group_name} field '{field_id}' has unsupported state '{state_name}'.")
+
+            options_source_name = str(field.get("options_source", "") or "").strip().lower()
+            if options_source_name not in allowed_options_sources:
+                raise ValueError(
+                    f"{field_group_name} field '{field_id}' has unsupported options_source '{options_source_name}'."
+                )
+
+            if widget_name == "combobox":
+                values = field.get("values")
+                if values is not None and not isinstance(values, list):
+                    raise ValueError(f"{field_group_name} field '{field_id}' values must be a list.")
+
+            role_name = resolve_header_field_role(field_id, field.get("role"))
+            if role_name:
+                if role_name in seen_roles:
+                    raise ValueError(f"{field_group_name} contains duplicate role '{role_name}'.")
+                seen_roles.add(role_name)
+
+    def validate_editor_presets(self, editor_presets):
+        if not isinstance(editor_presets, dict):
+            raise ValueError("editor_presets must be an object.")
+
+        unknown_keys = [key for key in editor_presets.keys() if key not in self.EDITOR_PRESET_SECTION_KEYS]
+        if unknown_keys:
+            raise ValueError(
+                "editor_presets contains unsupported sections: "
+                f"{', '.join(sorted(str(key) for key in unknown_keys))}"
+            )
+
+        if "header_fields" in editor_presets:
+            self.validate_header_fields(editor_presets.get("header_fields"), field_group_name="editor_presets.header_fields")
+
+        for section_name in self.row_field_sections:
+            if section_name in editor_presets:
+                self.validate_row_fields(editor_presets.get(section_name), f"editor_presets.{section_name}")
 
     def get_required_mapping_field_ids(self, row_fields, section_name):
         normalized_section = normalize_row_section_name(section_name)
@@ -1023,17 +1186,10 @@ class LayoutManagerModel:
                 role_to_field_id[role_name] = field_id
 
         required_field_ids = []
-        missing_roles = []
         for role_name in required_roles:
             field_id = role_to_field_id.get(role_name)
             if field_id:
                 required_field_ids.append(field_id)
-            else:
-                missing_roles.append(role_name)
-
-        if missing_roles:
-            missing_text = ", ".join(missing_roles)
-            raise ValueError(f"{section_name} is missing required semantic roles: {missing_text}")
         return required_field_ids
 
     def validate_row_fields(self, row_fields, section_name):
@@ -1089,13 +1245,6 @@ class LayoutManagerModel:
                 raise ValueError(f"{mapping_name}.max_rows must be 1 or greater.")
         if not isinstance(mapping["columns"], dict):
             raise ValueError(f"{mapping_name}.columns must be an object.")
-        allowed_column_set = set(allowed_columns or required_columns)
-        unknown_columns = [column_name for column_name in mapping["columns"] if column_name not in allowed_column_set]
-        if unknown_columns:
-            raise ValueError(f"{mapping_name}.columns contains unknown fields: {', '.join(sorted(unknown_columns))}")
-        missing_columns = [column for column in required_columns if column not in mapping["columns"]]
-        if missing_columns:
-            raise ValueError(f"{mapping_name}.columns is missing: {', '.join(missing_columns)}")
         for field_id, column_config in mapping["columns"].items():
             if isinstance(column_config, dict):
                 column_name = str(column_config.get("column", "")).strip()
@@ -1130,35 +1279,237 @@ class LayoutManagerModel:
                 return field_id
             index += 1
 
-    def add_header_field(self, config):
+    def _mapping_name_for_section(self, section_name):
+        return "downtime_mapping" if section_name == "downtime_row_fields" else "production_mapping"
+
+    def _editor_preset_fields(self, config, section_name):
+        editor_presets = config.get("editor_presets") if isinstance(config.get("editor_presets"), dict) else {}
+        return editor_presets.get(section_name) if isinstance(editor_presets.get(section_name), list) else []
+
+    def _find_preset_field(self, config, section_name, template_field_id):
+        normalized_template_id = str(template_field_id or "").strip()
+        if not normalized_template_id:
+            return None, ""
+
+        custom_match = next(
+            (
+                deepcopy(field)
+                for field in self._editor_preset_fields(config, section_name)
+                if isinstance(field, dict) and str(field.get("id") or "").strip() == normalized_template_id
+            ),
+            None,
+        )
+        if custom_match is not None:
+            return custom_match, "custom"
+
+        default_config = self._get_default_config_template()
+        default_fields = default_config.get(section_name) if isinstance(default_config.get(section_name), list) else []
+        default_match = next(
+            (
+                deepcopy(field)
+                for field in default_fields
+                if isinstance(field, dict) and str(field.get("id") or "").strip() == normalized_template_id
+            ),
+            None,
+        )
+        if default_match is not None:
+            return default_match, "default"
+        return None, ""
+
+    def _list_available_field_templates(self, config, section_name):
+        current_config = self.normalize_config(config) if isinstance(config, dict) else {}
+        existing_ids = {
+            str(field.get("id") or "").strip()
+            for field in current_config.get(section_name, [])
+            if isinstance(field, dict)
+        }
+
+        templates = []
+        seen_ids = set(existing_ids)
+
+        def _append_templates(field_list, source_name):
+            for field in field_list if isinstance(field_list, list) else []:
+                if not isinstance(field, dict):
+                    continue
+                field_id = str(field.get("id") or "").strip()
+                if not field_id or field_id in seen_ids:
+                    continue
+                templates.append(
+                    {
+                        "id": field_id,
+                        "label": str(field.get("label") or field_id).strip() or field_id,
+                        "source": source_name,
+                    }
+                )
+                seen_ids.add(field_id)
+
+        _append_templates(self._editor_preset_fields(current_config, section_name), "custom")
+        default_config = self._get_default_config_template()
+        _append_templates(default_config.get(section_name), "default")
+        return templates
+
+    def list_available_header_field_templates(self, config):
+        return self._list_available_field_templates(config, "header_fields")
+
+    def list_available_row_field_templates(self, config, section_name):
+        return self._list_available_field_templates(config, section_name)
+
+    def add_header_field(self, config, insert_index=None):
         field_id = self.create_unique_field_id(config)
         next_row = max((int(field.get("row", 0)) for field in config.get("header_fields", [])), default=-1) + 1
-        config.setdefault("header_fields", []).append(
-            {
-                "id": field_id,
-                "label": field_id.replace("_", " ").title(),
-                "row": next_row,
-                "col": 0,
-                "width": 10,
-                "cell": "",
-            }
-        )
+        header_fields = config.setdefault("header_fields", [])
+        new_field = {
+            "id": field_id,
+            "label": field_id.replace("_", " ").title(),
+            "row": next_row,
+            "col": 0,
+            "width": 10,
+            "cell": "",
+        }
+        if insert_index is None:
+            header_fields.append(new_field)
+        else:
+            bounded_index = max(0, min(int(insert_index), len(header_fields)))
+            header_fields.insert(bounded_index, new_field)
         return config, f"Added header field '{field_id}'"
 
-    def add_row_field(self, config, section_name):
+    def add_preset_header_field(self, config, template_field_id, insert_index=None):
+        normalized_template_id = str(template_field_id or "").strip()
+        if not normalized_template_id:
+            raise ValueError("Preset field ID is required.")
+        template_field, _source_name = self._find_preset_field(config, "header_fields", normalized_template_id)
+        if template_field is None:
+            raise ValueError(f"Preset field '{normalized_template_id}' was not found for header_fields.")
+        existing_ids = {
+            str(field.get("id") or "").strip()
+            for field in config.get("header_fields", [])
+            if isinstance(field, dict)
+        }
+        if normalized_template_id in existing_ids:
+            raise ValueError(f"Field '{normalized_template_id}' already exists in header_fields.")
+
+        existing_roles = {
+            resolve_header_field_role(str(field.get("id") or "").strip(), field.get("role"))
+            for field in config.get("header_fields", [])
+            if isinstance(field, dict)
+        }
+        existing_roles.discard("")
+        template_role = resolve_header_field_role(
+            str(template_field.get("id") or "").strip(),
+            template_field.get("role"),
+        )
+        if template_role and template_role in existing_roles:
+            template_field.pop("role", None)
+
+        header_fields = config.setdefault("header_fields", [])
+        if insert_index is None:
+            header_fields.append(template_field)
+        else:
+            bounded_index = max(0, min(int(insert_index), len(header_fields)))
+            header_fields.insert(bounded_index, template_field)
+        return config, f"Added preset header field '{normalized_template_id}'"
+
+    def add_row_field(self, config, section_name, insert_index=None):
         section_title = section_name.replace("_", " ").replace(" fields", "").title()
         field_id = self.create_unique_field_id(config, section_name)
-        config.setdefault(section_name, []).append(
-            {
-                "id": field_id,
-                "label": field_id.replace("_", " ").title(),
-                "widget": "entry",
-                "width": 12,
-                "open_row_trigger": True,
-                "user_input": True,
-            }
-        )
+        row_fields = config.setdefault(section_name, [])
+        new_field = {
+            "id": field_id,
+            "label": field_id.replace("_", " ").title(),
+            "widget": "entry",
+            "width": 12,
+            "open_row_trigger": True,
+            "user_input": True,
+        }
+        if insert_index is None:
+            row_fields.append(new_field)
+        else:
+            bounded_index = max(0, min(int(insert_index), len(row_fields)))
+            row_fields.insert(bounded_index, new_field)
         return config, f"Added {section_title} field '{field_id}'"
+
+    def add_preset_row_field(self, config, section_name, template_field_id, insert_index=None):
+        normalized_template_id = str(template_field_id or "").strip()
+        if not normalized_template_id:
+            raise ValueError("Preset field ID is required.")
+        template_field, source_name = self._find_preset_field(config, section_name, normalized_template_id)
+        if template_field is None:
+            raise ValueError(f"Preset field '{normalized_template_id}' was not found for {section_name}.")
+        existing_ids = {
+            str(field.get("id") or "").strip()
+            for field in config.get(section_name, [])
+            if isinstance(field, dict)
+        }
+        if normalized_template_id in existing_ids:
+            raise ValueError(f"Field '{normalized_template_id}' already exists in {section_name}.")
+        row_fields = config.setdefault(section_name, [])
+        if insert_index is None:
+            row_fields.append(template_field)
+        else:
+            bounded_index = max(0, min(int(insert_index), len(row_fields)))
+            row_fields.insert(bounded_index, template_field)
+        mapping_name = self._mapping_name_for_section(section_name)
+        default_config = self._get_default_config_template()
+        default_mapping = default_config.get(mapping_name) if isinstance(default_config.get(mapping_name), dict) else {}
+        default_columns = default_mapping.get("columns") if isinstance(default_mapping.get("columns"), dict) else {}
+        mapping = config.setdefault(mapping_name, {})
+        columns = mapping.setdefault("columns", {})
+        if normalized_template_id in default_columns:
+            columns.setdefault(normalized_template_id, deepcopy(default_columns[normalized_template_id]))
+        elif source_name == "custom":
+            columns.setdefault(
+                normalized_template_id,
+                self._normalize_mapping_column_config(
+                    mapping_name,
+                    normalized_template_id,
+                    "",
+                    row_fields=row_fields,
+                ),
+            )
+        section_title = section_name.replace("_", " ").replace(" fields", "").title()
+        return config, f"Added preset {section_title} field '{normalized_template_id}'"
+
+    def replace_header_fields(self, config, header_fields):
+        normalized_fields = self._normalize_header_fields(deepcopy(header_fields))
+        self.validate_header_fields(normalized_fields)
+        config["header_fields"] = normalized_fields
+        return config, "Applied header field table edits"
+
+    def replace_row_fields(self, config, section_name, row_fields):
+        normalized_fields = []
+        source_field_ids = []
+        for raw_field in row_fields if isinstance(row_fields, list) else []:
+            normalized_field = self._normalize_row_field_entry(raw_field, section_name)
+            if not isinstance(normalized_field, dict):
+                continue
+            normalized_fields.append(normalized_field)
+            original_id = str((raw_field or {}).get("_original_id") or normalized_field.get("id") or "").strip()
+            source_field_ids.append(original_id)
+
+        self.validate_row_fields(normalized_fields, section_name)
+        config[section_name] = normalized_fields
+
+        mapping_name = self._mapping_name_for_section(section_name)
+        mapping = config.setdefault(mapping_name, {})
+        existing_columns = mapping.get("columns") if isinstance(mapping.get("columns"), dict) else {}
+        rebuilt_columns = {}
+        for field, source_field_id in zip(normalized_fields, source_field_ids):
+            field_id = str(field.get("id") or "").strip()
+            if not field_id:
+                continue
+            if source_field_id in existing_columns:
+                rebuilt_columns[field_id] = deepcopy(existing_columns[source_field_id])
+            elif field_id in existing_columns:
+                rebuilt_columns[field_id] = deepcopy(existing_columns[field_id])
+            else:
+                rebuilt_columns[field_id] = self._normalize_mapping_column_config(
+                    mapping_name,
+                    field_id,
+                    "",
+                    row_fields=normalized_fields,
+                )
+        mapping["columns"] = rebuilt_columns
+        return config, f"Applied {section_name} table edits"
 
     def move_header_field(self, config, field_id, direction):
         fields = config.get("header_fields", [])
@@ -1183,8 +1534,6 @@ class LayoutManagerModel:
         return config, f"Reordered field '{field_id}' in {section_name}"
 
     def remove_header_field(self, config, field_id):
-        if field_id in self.protected_field_ids:
-            raise ValueError(f"Field '{field_id}' is protected and cannot be removed.")
         fields = config.get("header_fields", [])
         updated_fields = [field for field in fields if field.get("id") != field_id]
         if len(updated_fields) == len(fields):
@@ -1193,28 +1542,40 @@ class LayoutManagerModel:
         return config, f"Removed field '{field_id}'"
 
     def remove_row_field(self, config, section_name, field_id):
-        field_role = ""
-        for field in config.get(section_name, []):
-            if field.get("id") == field_id:
-                field_role = resolve_row_field_role(section_name, field_id, field.get("role"))
-                break
-        if field_id in self.protected_row_field_ids.get(section_name, set()) or field_role in self.protected_row_roles.get(section_name, set()):
-            raise ValueError(f"Field '{field_id}' is protected and cannot be removed.")
         fields = config.get(section_name, [])
         updated_fields = [field for field in fields if field.get("id") != field_id]
         if len(updated_fields) == len(fields):
             raise ValueError(f"Field '{field_id}' was not found in {section_name}.")
         config[section_name] = updated_fields
+        mapping_name = self._mapping_name_for_section(section_name)
+        mapping = config.get(mapping_name)
+        columns = mapping.get("columns") if isinstance(mapping, dict) else None
+        if isinstance(columns, dict):
+            columns.pop(field_id, None)
         return config, f"Removed field '{field_id}' from {section_name}"
 
-    def update_header_field(self, config, field_id, row_value, col_value, cell_value, width_value, readonly_value, default_value, role_value, import_enabled_value, export_enabled_value):
+    def update_header_field(
+        self,
+        config,
+        field_id,
+        updated_field_id,
+        label_value,
+        row_value,
+        col_value,
+        cell_value,
+        width_value,
+        readonly_value,
+        default_value,
+        role_value,
+        import_enabled_value,
+        export_enabled_value,
+        widget_value,
+        state_value,
+        options_source_value,
+        values_value,
+    ):
         if not field_id:
             raise ValueError("Field ID is missing.")
-        row = int(str(row_value).strip())
-        col = int(str(col_value).strip())
-        width = int(str(width_value).strip())
-        cell = str(cell_value).strip()
-        default_text = str(default_value)
         target_field = None
         for field in config.get("header_fields", []):
             if field.get("id") == field_id:
@@ -1222,18 +1583,63 @@ class LayoutManagerModel:
                 break
         if target_field is None:
             raise ValueError(f"Field '{field_id}' was not found.")
+
+        renamed_field_id = str(updated_field_id or "").strip()
+        if not renamed_field_id:
+            raise ValueError("Field ID cannot be empty.")
+        label_text = str(label_value or "").strip()
+        if not label_text:
+            raise ValueError("Label cannot be empty.")
+        widget_name = str(widget_value or target_field.get("widget", "entry") or "entry").strip().lower() or "entry"
+        if widget_name not in {"entry", "combobox"}:
+            raise ValueError(f"Unsupported widget type '{widget_name}'.")
+
+        state_name = str(state_value or target_field.get("state", "") or "").strip().lower()
+        if state_name not in {"", "normal", "disabled", "readonly"}:
+            raise ValueError(f"Unsupported state '{state_name}'.")
+
+        options_source_name = str(options_source_value or target_field.get("options_source", "") or "").strip().lower()
+        if options_source_name not in {"", "downtime_codes"}:
+            raise ValueError(f"Unsupported options_source '{options_source_name}'.")
+
+        row = int(str(row_value).strip())
+        col = int(str(col_value).strip())
+        width = int(str(width_value).strip())
+        cell = str(cell_value).strip()
+        default_text = str(default_value)
+        for field in config.get("header_fields", []):
+            if field is target_field:
+                continue
+            if str(field.get("id") or "").strip() == renamed_field_id:
+                raise ValueError(f"Field ID '{renamed_field_id}' is already in use.")
+        target_field["id"] = renamed_field_id
+        target_field["label"] = label_text
         target_field["row"] = row
         target_field["col"] = col
+        if widget_name == "entry":
+            target_field.pop("widget", None)
+        else:
+            target_field["widget"] = widget_name
         target_field["import_enabled"] = self._normalize_bool_value(import_enabled_value, default=True)
         target_field["export_enabled"] = self._normalize_bool_value(export_enabled_value, default=True)
-        if field_id in self.protected_field_ids:
-            target_field["role"] = resolve_header_field_role(field_id, target_field.get("role"))
+        normalized_role = normalize_role_name(role_value)
+        if normalized_role:
+            target_field["role"] = normalized_role
         else:
-            normalized_role = normalize_role_name(role_value)
-            if normalized_role:
-                target_field["role"] = normalized_role
+            target_field.pop("role", None)
+        if state_name:
+            target_field["state"] = state_name
+        else:
+            target_field.pop("state", None)
+        if widget_name == "combobox":
+            if options_source_name:
+                target_field["options_source"] = options_source_name
             else:
-                target_field.pop("role", None)
+                target_field.pop("options_source", None)
+            self._set_optional_list_field(target_field, "values", values_value)
+        else:
+            target_field.pop("options_source", None)
+            target_field.pop("values", None)
         if target_field.get("id") == "cast_date":
             target_field["readonly"] = True
             target_field.pop("default", None)
@@ -1252,7 +1658,10 @@ class LayoutManagerModel:
                 target_field["default"] = default_text
             else:
                 target_field.pop("default", None)
-        return config, f"Updated field '{field_id}'"
+        normalized_fields = self._normalize_header_fields(deepcopy(config.get("header_fields", [])))
+        self.validate_header_fields(normalized_fields)
+        config["header_fields"] = normalized_fields
+        return config, f"Updated field '{renamed_field_id}'"
 
     def update_row_field(self, config, section_name, field_id, field_values):
         if not field_id:
@@ -1264,6 +1673,15 @@ class LayoutManagerModel:
                 break
         if target_field is None:
             raise ValueError(f"Field '{field_id}' was not found in {section_name}.")
+
+        renamed_field_id = str(field_values.get("id", target_field.get("id", field_id)) or "").strip()
+        if not renamed_field_id:
+            raise ValueError("Field ID cannot be empty.")
+        for field in config.get(section_name, []):
+            if field is target_field:
+                continue
+            if str(field.get("id") or "").strip() == renamed_field_id:
+                raise ValueError(f"Field ID '{renamed_field_id}' is already in use in {section_name}.")
 
         widget_name = str(field_values.get("widget", target_field.get("widget", "entry"))).strip().lower()
         if widget_name not in {"entry", "display", "checkbutton", "combobox"}:
@@ -1278,6 +1696,7 @@ class LayoutManagerModel:
         if width_value < 0:
             raise ValueError("Width cannot be negative.")
 
+        target_field["id"] = renamed_field_id
         target_field["label"] = label_text
         target_field["widget"] = widget_name
         if width_value > 0:
@@ -1285,15 +1704,11 @@ class LayoutManagerModel:
         else:
             target_field.pop("width", None)
 
-        normalized_role = resolve_row_field_role(section_name, field_id, field_values.get("role"))
-        if field_id in self.protected_row_field_ids.get(section_name, set()) or normalized_role in self.protected_row_roles.get(section_name, set()):
-            target_field["role"] = resolve_row_field_role(section_name, field_id, target_field.get("role"))
+        explicit_role = normalize_role_name(field_values.get("role"))
+        if explicit_role:
+            target_field["role"] = explicit_role
         else:
-            explicit_role = normalize_role_name(field_values.get("role"))
-            if explicit_role:
-                target_field["role"] = explicit_role
-            else:
-                target_field.pop("role", None)
+            target_field.pop("role", None)
 
         self._set_bool_field(target_field, "readonly", field_values.get("readonly"), default=False)
         self._set_bool_field(target_field, "derived", field_values.get("derived"), default=False)
@@ -1313,7 +1728,18 @@ class LayoutManagerModel:
         else:
             target_field.pop("values", None)
 
-        return config, f"Updated field '{field_id}' in {section_name}"
+        if renamed_field_id != field_id:
+            mapping_name = "downtime_mapping" if section_name == "downtime_row_fields" else "production_mapping"
+            mapping = config.get(mapping_name)
+            columns = mapping.get("columns") if isinstance(mapping, dict) else None
+            if isinstance(columns, dict) and field_id in columns:
+                if renamed_field_id in columns:
+                    raise ValueError(
+                        f"Cannot rename field '{field_id}' to '{renamed_field_id}' because {mapping_name}.columns already contains that key."
+                    )
+                columns[renamed_field_id] = columns.pop(field_id)
+
+        return config, f"Updated field '{renamed_field_id}' in {section_name}"
 
     def _normalize_bool_value(self, value, default=False):
         if isinstance(value, bool):
@@ -1371,18 +1797,20 @@ class LayoutManagerModel:
             raise ValueError(f"Mapping '{mapping_name}' was not found.")
         mapping["start_row"] = start_row
         mapping["max_rows"] = max_rows
+        mapping_columns = mapping.setdefault("columns", {})
         for key, value in column_values.items():
             if isinstance(value, dict):
                 cleaned_value = str(value.get("column", "")).strip()
                 if not cleaned_value:
-                    raise ValueError(f"Column '{key}' cannot be empty.")
+                    mapping_columns.pop(key, None)
+                    continue
                 import_transform = str(value.get("import_transform", "value") or "value").strip() or "value"
                 export_transform = str(value.get("export_transform", "value") or "value").strip() or "value"
                 if import_transform not in VALID_IMPORT_TRANSFORMS:
                     raise ValueError(f"Column '{key}' uses unsupported import transform '{import_transform}'.")
                 if export_transform not in VALID_EXPORT_TRANSFORMS:
                     raise ValueError(f"Column '{key}' uses unsupported export transform '{export_transform}'.")
-                mapping.setdefault("columns", {})[key] = {
+                mapping_columns[key] = {
                     "column": cleaned_value,
                     "import_enabled": self._normalize_bool_value(value.get("import_enabled"), default=True),
                     "export_enabled": self._normalize_bool_value(value.get("export_enabled"), default=True),
@@ -1393,8 +1821,9 @@ class LayoutManagerModel:
 
             cleaned_value = str(value).strip()
             if not cleaned_value:
-                raise ValueError(f"Column '{key}' cannot be empty.")
-            mapping.setdefault("columns", {})[key] = cleaned_value
+                mapping_columns.pop(key, None)
+                continue
+            mapping_columns[key] = cleaned_value
         return config, f"Updated mapping '{mapping_name}'"
 
     def update_template_path(self, config, template_path_value):
@@ -1492,8 +1921,6 @@ class LayoutManagerModel:
         if not needle:
             raise ValueError("Match text cannot be empty.")
 
-        protected_ids = set(self.protected_row_field_ids.get(section_name, set()))
-        protected_roles = set(self.protected_row_roles.get(section_name, set()))
         updated_fields = []
         removed_count = 0
         for field in fields:
@@ -1502,10 +1929,8 @@ class LayoutManagerModel:
                 continue
             field_id = str(field.get("id") or "")
             label_text = str(field.get("label") or "")
-            role_name = resolve_row_field_role(section_name, field_id, field.get("role"))
-            is_protected = field_id in protected_ids or role_name in protected_roles
             is_match = needle in field_id.lower() or needle in label_text.lower()
-            if is_match and not is_protected:
+            if is_match:
                 removed_count += 1
                 continue
             updated_fields.append(field)
@@ -1552,20 +1977,10 @@ class LayoutManagerModel:
         return f"mapping:{mapping_name}"
 
     def get_protected_row_field_lookup(self, config):
-        protected_lookup = {}
-        for section_name in self.row_field_sections:
-            protected_ids = set(self.protected_row_field_ids.get(section_name, set()))
-            for field in config.get(section_name, []) if isinstance(config.get(section_name), list) else []:
-                if not isinstance(field, dict):
-                    continue
-                field_id = str(field.get("id", "")).strip()
-                if not field_id:
-                    continue
-                role_name = resolve_row_field_role(section_name, field_id, field.get("role"))
-                if role_name in self.protected_row_roles.get(section_name, set()):
-                    protected_ids.add(field_id)
-            protected_lookup[section_name] = protected_ids
-        return protected_lookup
+        return {
+            section_name: set()
+            for section_name in self.row_field_sections
+        }
 
     def build_preview_grid(self, config):
         fields = config.get("header_fields", [])
@@ -1807,39 +2222,26 @@ class LayoutManagerModel:
         return metadata
 
     def _normalize_editor_payload(self, payload):
-        if isinstance(payload, dict):
-            recognized_keys = [key for key in self.EDITOR_TOP_LEVEL_KEYS if key in payload]
-            if all(key in payload for key in self.REQUIRED_TOP_LEVEL_KEYS):
-                applied_sections = [key for key in self.EDITOR_TOP_LEVEL_KEYS if key in payload]
-                return payload, {"mode": "full", "applied_sections": applied_sections}
-            if recognized_keys:
-                unknown_keys = [key for key in payload.keys() if key not in self.EDITOR_TOP_LEVEL_KEYS]
-                if unknown_keys:
-                    raise ValueError(
-                        f"Unknown top-level keys for section editor: {', '.join(sorted(str(key) for key in unknown_keys))}"
-                    )
-                return {key: payload[key] for key in recognized_keys}, {"mode": "section", "applied_sections": recognized_keys}
+        if not isinstance(payload, dict):
+            raise ValueError("JSON editor content must be a full layout JSON object.")
 
-            inferred_mapping_key = self._infer_mapping_key(payload)
-            if inferred_mapping_key is not None:
-                return {inferred_mapping_key: payload}, {"mode": "section", "applied_sections": [inferred_mapping_key]}
-
+        unknown_keys = [key for key in payload.keys() if key not in self.EDITOR_TOP_LEVEL_KEYS]
+        if unknown_keys:
             raise ValueError(
-                "JSON editor content must be a full layout config or a recognized top-level section payload."
+                f"Unknown top-level keys in layout JSON: {', '.join(sorted(str(key) for key in unknown_keys))}"
             )
 
-        if isinstance(payload, list):
-            inferred_section = self._infer_list_section(payload)
-            if inferred_section is None:
-                raise ValueError(
-                    "Could not infer which section this array belongs to. Wrap it in a key like header_fields or production_row_fields."
-                )
-            return {inferred_section: payload}, {"mode": "section", "applied_sections": [inferred_section]}
+        missing_keys = [key for key in self.EDITOR_REQUIRED_TOP_LEVEL_KEYS if key not in payload]
+        if missing_keys:
+            raise ValueError(
+                "JSON editor expects the full layout object with top-level keys: "
+                f"{', '.join(self.EDITOR_REQUIRED_TOP_LEVEL_KEYS)}"
+                f". Optional: {', '.join(self.EDITOR_OPTIONAL_TOP_LEVEL_KEYS)}"
+                f". Missing: {', '.join(missing_keys)}"
+            )
 
-        if isinstance(payload, str):
-            return {"template_path": payload}, {"mode": "section", "applied_sections": ["template_path"]}
-
-        raise ValueError("JSON editor content must be an object, array, or template_path string.")
+        applied_sections = [key for key in self.EDITOR_TOP_LEVEL_KEYS if key in payload]
+        return payload, {"mode": "full", "applied_sections": applied_sections}
 
     def _infer_list_section(self, payload):
         if not payload:
@@ -1901,7 +2303,7 @@ class LayoutManagerModel:
 
     def _extract_partial_sections(self, raw_text):
         extracted_sections = {}
-        for section_name in self.REQUIRED_TOP_LEVEL_KEYS:
+        for section_name in self.EDITOR_TOP_LEVEL_KEYS:
             extracted_value = self._extract_named_json_value(raw_text, section_name)
             if extracted_value is not None:
                 extracted_sections[section_name] = extracted_value

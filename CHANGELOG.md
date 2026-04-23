@@ -4,6 +4,24 @@ This changelog tracks the main branch release line for Production Logging Center
 
 Version headings below are aligned to the current `2.x` release line used by Dispatcher Core. Earlier work has been grouped into practical release milestones so the shipped feature history is easier to follow without rewriting older module version markers.
 
+## [2.2.1] - 2026-04-23
+
+### Changed
+
+- Promoted Dispatcher Core to `2.2.1` as the current source-side development checkpoint for the stored-form compatibility pass, section-driven Form Loader work, and release-documentation refresh.
+- Rebuilt the live `production_log` PyQt6 surface around a stored-form selector plus section-driven rendering for the supported `header`, `production`, and `downtime` behavior profiles.
+- Added guarded active-form switching so local and external form changes now share the same save, discard, or cancel flow, reset the selector cleanly on cancel, and keep draft metadata aligned with the active form.
+- Renamed user-facing runtime labels from `Production Log` / `Production Log Calculations` to `Form Loader` / `Form Calculations` while intentionally keeping the internal `production_log` family and workbook fallback sheet title compatibility-stable.
+- Changed the built-in default form identity to `temp_form_title` / `Temp Form Title` and added alias-backed compatibility for older `production_logging_center` references in stored form state and drafts.
+- Expanded Layout Manager authoring so stored-form selection, full-layout JSON saves, preset-field insertion, richer table editing, mapping assignment, and form-management actions work against the same layout contract Form Loader consumes.
+- Tightened layout normalization and save behavior so malformed JSON fails fast, current editor text can be saved directly when appropriate, and the runtime no longer silently rebuilds removed sections or fields during normalization.
+- Updated Recovery Viewer, Help Viewer, security labels, module registry text, contributor instructions, root README guidance, and current help/runbook docs to reflect the preferred `Form Loader` / `Form Calculations` aliases.
+
+### Notes
+
+- `2.2.1` is an odd patch development checkpoint and is not intended to be treated as a packaged stable-update target.
+- Focused validation passed through `Validate Changed UI Modules`, repeated `scripts/run_production_log_smoke.py`, targeted `py_compile`, and markdown problems-panel checks for the touched docs.
+
 ## [2.1.5] - 2026-04-12
 
 ### Changed

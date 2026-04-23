@@ -1,13 +1,53 @@
-# Production Log
+# Form Loader
 
-Use Production Log to enter the current shift data.
+Use Form Loader, the preferred user-facing name for the permanent internal `production_log` family, to enter the current shift data.
+
+- The active form selected through Layout Manager controls the layout and workbook mapping Form Loader uses.
+
+## Current Built-In Field Set
+
+The shipped built-in form currently exposes these header fields:
+
+- `Date`
+- `Cast Date`
+- `Bond`
+- `EFF %`
+- `Shift`
+- `Shift Hours`
+- `Target Time`
+- `MTD %`
+- `Goal MPH`
+- `Total Molds`
+- `Ret North`
+- `Start Time`
+- `End Time`
+- `Ret South`
+
+The shipped built-in form currently exposes these production row fields:
+
+- `Shop Order`
+- `Part Number`
+- `Rate`
+- `Override`
+- `Molds`
+- `Time`
+
+The shipped built-in form currently exposes these downtime row fields:
+
+- `Start`
+- `Stop`
+- `Code`
+- `Cause`
+- `Time`
+
+Those lists describe the current shipped form, not the full future design envelope. Layout Manager can still reorder supported fields, restyle them, and add custom fields, but special runtime behavior is only guaranteed for the currently supported Form Loader section profiles and semantic roles.
 
 - Header fields capture shift-level information such as date, cast date, shift, hours, goal MPH, and return counts.
 - The header includes a read-only Target Time field derived from shift hours, saved with the draft header data, and routed through the layout config for workbook export/import.
 - The header also includes Total Molds, which updates from the current production rows and is saved with the draft header data for workbook export.
 - Optional workbook-linked header fields can also display imported summary cells such as bond, percentages, and selected top-part values when they are configured in the layout.
 - Production rows capture shop order, part number, the active rate, a per-line override toggle for temporary corrections, and mold count.
-- Production Log automatically keeps one blank production row and one blank downtime row open while you type so you do not need separate add-row buttons during normal entry.
+- Form Loader automatically keeps one blank production row and one blank downtime row open while you type so you do not need separate add-row buttons during normal entry.
 - The footer shows a derived Ghost Time value based on the difference between shift time and the combined production-plus-downtime total.
 - Ghost Time shows missing time in red and extra time in green.
 - Ghost Time is an internal balancing aid in the app and is not expected to exist in imported or exported production logs.
@@ -33,11 +73,11 @@ Use Production Log to enter the current shift data.
 - The status line shows the latest draft name, current draft name, dirty/saved state, pending count, and recovery count.
 - Draft saves, imports, and exports use toast notifications for routine success messages.
 
-If you load a draft or import Excel while unsaved changes exist, Logging Center asks for confirmation before replacing the current session.
+If you load a draft or import Excel while unsaved changes exist, the app asks for confirmation before replacing the current session.
 
 ## Excel Import And Export Notes
 
-- Export uses the template path stored in `layout_config.json`.
+- Export uses the template path stored in the active form layout file, which may be the default `layout_config.json` or a selected stored form under `data/forms`.
 - Export writes into the configured base export folder and, when date organization is enabled, uses `YYYY/MM MonthName` subfolders.
 - If Export finds an older month folder such as `04`, it renames it to the newer format such as `04 April` before saving the workbook.
 - If the sheet is missing time, Export can prompt to auto-balance downtime before writing the workbook.

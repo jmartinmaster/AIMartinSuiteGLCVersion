@@ -19,7 +19,7 @@ from app.models.production_log_model import DEFAULT_CALCULATION_SETTINGS, DEFAUL
 from app.persistence import write_json_with_backup
 from app.utils import external_path
 
-__module_name__ = "Production Log Calculations"
+__module_name__ = "Form Calculations"
 __version__ = "1.0.0"
 
 EDITOR_SECTIONS = [
@@ -70,7 +70,7 @@ EDITOR_SECTIONS = [
                 "path": ("default_balance_mix_pct",),
                 "label": "Default Balance Mix %",
                 "kind": "entry",
-                "help": "Default weighted downtime distribution applied when Production Log opens or refreshes.",
+                "help": "Default weighted downtime distribution applied when Form Loader opens or refreshes.",
             },
             {
                 "key": "allow_overnight_downtime",

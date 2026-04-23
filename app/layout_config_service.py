@@ -18,7 +18,7 @@ import os
 
 from app.external_data_registry import ExternalDataRegistry
 from app.form_definition_registry import FormDefinitionRegistry
-from app.persistence import write_json_with_backup
+from app.persistence import write_json_with_backup, write_text_with_backup
 
 
 class LayoutConfigService:
@@ -76,6 +76,10 @@ class LayoutConfigService:
         with open(file_path, "r", encoding="utf-8") as handle:
             return json.load(handle)
 
+    def read_text(self, file_path):
+        with open(file_path, "r", encoding="utf-8") as handle:
+            return handle.read()
+
     def load_current(self):
         self._refresh_active_form_info()
         if not os.path.exists(self.config_path):
@@ -91,16 +95,42 @@ class LayoutConfigService:
         self.save_path = resolved_form_info["save_path"]
         return self.read_config(load_path), load_path
 
+    def load_form_text(self, form_id=None, form_info=None):
+        resolved_form_info = dict(form_info) if isinstance(form_info, dict) else self.get_form_info(form_id)
+        load_path = resolved_form_info["load_path"]
+        if not os.path.exists(load_path):
+            raise FileNotFoundError(f"Layout config was not found: {load_path}")
+        self.config_path = load_path
+        self.save_path = resolved_form_info["save_path"]
+        return self.read_text(load_path), load_path
+
     def load_default(self):
         if not os.path.exists(self.internal_config):
             raise FileNotFoundError(f"Default layout config was not found: {self.internal_config}")
         return self.read_config(self.internal_config), self.internal_config
+
+    def load_default_text(self):
+        if not os.path.exists(self.internal_config):
+            raise FileNotFoundError(f"Default layout config was not found: {self.internal_config}")
+        return self.read_text(self.internal_config), self.internal_config
 
     def save_config(self, config, form_info=None):
         resolved_form_info = dict(form_info) if isinstance(form_info, dict) else self._refresh_active_form_info()
         backup_info = write_json_with_backup(
             resolved_form_info["save_path"],
             config,
+            backup_dir=resolved_form_info["backup_dir"],
+            keep_count=12,
+        )
+        self.config_path = resolved_form_info["save_path"]
+        self.save_path = resolved_form_info["save_path"]
+        return backup_info
+
+    def save_config_text(self, text, form_info=None):
+        resolved_form_info = dict(form_info) if isinstance(form_info, dict) else self._refresh_active_form_info()
+        backup_info = write_text_with_backup(
+            resolved_form_info["save_path"],
+            str(text or ""),
             backup_dir=resolved_form_info["backup_dir"],
             keep_count=12,
         )

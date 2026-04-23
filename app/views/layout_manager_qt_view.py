@@ -21,6 +21,7 @@ import tempfile
 from pathlib import Path
 
 from launcher import create_qt_application
+from app.production_log_roles import HEADER_FIELD_ROLE_DEFAULTS, ROW_FIELD_ROLE_DEFAULTS
 from app.theme_manager import get_qt_palette, get_qt_stylesheet
 from PyQt6.QtGui import QFont, QFontDatabase, QKeySequence, QShortcut
 
@@ -28,9 +29,20 @@ __module_name__ = "Layout Manager Qt View"
 __version__ = "0.6.10"
 LAYOUT_MANAGER_QT_SESSION_ENV = "AIMARTIN_LAYOUT_MANAGER_QT_SESSION"
 REPO_ROOT = Path(__file__).resolve().parents[2]
+HEADER_ROLE_OPTIONS = [""] + sorted(set(HEADER_FIELD_ROLE_DEFAULTS.values()))
+HEADER_WIDGET_OPTIONS = ["entry", "combobox"]
+ROW_ROLE_OPTIONS = {
+    "production_row_fields": [""] + sorted(set(ROW_FIELD_ROLE_DEFAULTS["production"].values())),
+    "downtime_row_fields": [""] + sorted(set(ROW_FIELD_ROLE_DEFAULTS["downtime"].values())),
+}
+STICKY_OPTIONS = ["", "w", "e", "n", "s", "ew", "we", "ns", "nw", "ne", "sw", "se", "nsew"]
+STATE_OPTIONS = ["", "normal", "disabled", "readonly"]
+OPTIONS_SOURCE_OPTIONS = ["", "downtime_codes"]
+BOOTSTYLE_OPTIONS = ["", "primary", "secondary", "success", "info", "warning", "danger", "light", "dark"]
 
 from PyQt6.QtCore import QEvent, QSignalBlocker, Qt, QTimer
 from PyQt6.QtWidgets import (
+    QAbstractItemView,
     QApplication,
     QComboBox,
     QFormLayout,
@@ -79,6 +91,7 @@ class LayoutManagerQtView(QMainWindow):
         self._row_fields_cache_key = ""
         self._mapping_cache_key = ""
         self._table_render_tokens = {}
+        self._excel_column_choices = self._build_excel_column_choices(260)
         application = QApplication.instance()
         self._default_app_font = QFont(application.font()) if application is not None else QFont(self.font())
         self._build_ui()
@@ -249,8 +262,20 @@ class LayoutManagerQtView(QMainWindow):
         header_layout = QVBoxLayout(header_fields_tab)
         header_layout.setContentsMargins(8, 8, 8, 8)
         header_layout.setSpacing(8)
+        header_preset_row = QHBoxLayout()
+        header_preset_row.addWidget(QLabel("Preset"))
+        self.header_field_preset_combo = QComboBox()
+        self.header_field_preset_combo.setMinimumWidth(240)
+        header_preset_row.addWidget(self.header_field_preset_combo)
+        header_preset_add_button = QPushButton("Add Preset Field")
+        header_preset_add_button.clicked.connect(self.controller.add_selected_preset_header_field_from_block)
+        header_preset_row.addWidget(header_preset_add_button)
+        header_preset_row.addStretch(1)
+        header_layout.addLayout(header_preset_row)
+
         self.header_fields_table = QTableWidget()
-        self.header_fields_table.setColumnCount(11)
+        self._configure_authoring_table(self.header_fields_table)
+        self.header_fields_table.setColumnCount(15)
         self.header_fields_table.setHorizontalHeaderLabels(
             [
                 "id",
@@ -264,6 +289,10 @@ class LayoutManagerQtView(QMainWindow):
                 "role",
                 "import_enabled",
                 "export_enabled",
+                "widget",
+                "state",
+                "options_source",
+                "values",
             ]
         )
         self.header_fields_table.horizontalHeader().setStretchLastSection(True)
@@ -300,10 +329,18 @@ class LayoutManagerQtView(QMainWindow):
         self.row_section_combo.addItem("Downtime", "downtime_row_fields")
         self.row_section_combo.currentIndexChanged.connect(self.controller.on_row_section_changed)
         row_section_row.addWidget(self.row_section_combo)
+        row_section_row.addWidget(QLabel("Preset"))
+        self.row_field_preset_combo = QComboBox()
+        self.row_field_preset_combo.setMinimumWidth(240)
+        row_section_row.addWidget(self.row_field_preset_combo)
+        row_preset_add_button = QPushButton("Add Preset Column")
+        row_preset_add_button.clicked.connect(self.controller.add_selected_preset_row_field_from_block)
+        row_section_row.addWidget(row_preset_add_button)
         row_section_row.addStretch(1)
         row_layout.addLayout(row_section_row)
 
         self.row_fields_table = QTableWidget()
+        self._configure_authoring_table(self.row_fields_table)
         self.row_fields_table.setColumnCount(18)
         self.row_fields_table.setHorizontalHeaderLabels(
             [
@@ -331,7 +368,7 @@ class LayoutManagerQtView(QMainWindow):
         row_layout.addWidget(self.row_fields_table)
 
         row_actions = QHBoxLayout()
-        row_add_button = QPushButton("Add Row Field")
+        row_add_button = QPushButton("Add Blank Field")
         row_add_button.clicked.connect(self.controller.add_row_field_from_block)
         row_actions.addWidget(row_add_button)
         row_remove_button = QPushButton("Remove")
@@ -398,6 +435,17 @@ class LayoutManagerQtView(QMainWindow):
         self.mapping_section_combo.addItem("Downtime", "downtime_mapping")
         self.mapping_section_combo.currentIndexChanged.connect(self.controller.on_mapping_section_changed)
         mapping_selector_row.addWidget(self.mapping_section_combo)
+        mapping_selector_row.addWidget(QLabel("Column"))
+        self.mapping_column_selector = QComboBox()
+        self.mapping_column_selector.setEditable(True)
+        self.mapping_column_selector.setMinimumWidth(110)
+        mapping_selector_row.addWidget(self.mapping_column_selector)
+        mapping_assign_button = QPushButton("Assign Column")
+        mapping_assign_button.clicked.connect(self.controller.assign_selected_mapping_column_from_import_export)
+        mapping_selector_row.addWidget(mapping_assign_button)
+        mapping_clear_button = QPushButton("Clear Selected")
+        mapping_clear_button.clicked.connect(self.controller.clear_selected_mapping_column_from_import_export)
+        mapping_selector_row.addWidget(mapping_clear_button)
         mapping_selector_row.addWidget(QLabel("start_row"))
         self.mapping_start_row_input = QLineEdit()
         self.mapping_start_row_input.setFixedWidth(80)
@@ -410,6 +458,7 @@ class LayoutManagerQtView(QMainWindow):
         mapping_layout.addLayout(mapping_selector_row)
 
         self.mapping_table = QTableWidget()
+        self._configure_authoring_table(self.mapping_table)
         self.mapping_table.setColumnCount(6)
         self.mapping_table.setHorizontalHeaderLabels(
             [
@@ -458,6 +507,9 @@ class LayoutManagerQtView(QMainWindow):
         import_export_layout.addWidget(import_export_views_tabs, 1)
 
         self.tabs.addTab(import_export_tab, "Import / Export")
+        self.set_available_mapping_columns(self._excel_column_choices)
+        self.set_header_field_presets([])
+        self.set_row_field_presets([])
 
         preview_tab = QWidget()
         preview_layout = QVBoxLayout(preview_tab)
@@ -751,10 +803,137 @@ class LayoutManagerQtView(QMainWindow):
         for table_widget in self._navigable_tables:
             table_widget.installEventFilter(self)
 
+    def _configure_authoring_table(self, table_widget):
+        table_widget.setEditTriggers(
+            QAbstractItemView.EditTrigger.DoubleClicked
+            | QAbstractItemView.EditTrigger.EditKeyPressed
+            | QAbstractItemView.EditTrigger.AnyKeyPressed
+            | QAbstractItemView.EditTrigger.SelectedClicked
+        )
+        table_widget.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        table_widget.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectItems)
+
+    def _build_excel_column_choices(self, max_column_number=260):
+        choices = []
+        max_count = max(int(max_column_number or 0), 0)
+        for column_number in range(1, max_count + 1):
+            value = column_number
+            letters = []
+            while value > 0:
+                value, remainder = divmod(value - 1, 26)
+                letters.append(chr(ord("A") + remainder))
+            choices.append("".join(reversed(letters)))
+        return choices
+
+    def _dropdown_spec_for_cell(self, table_widget, column_index):
+        if table_widget is self.header_fields_table:
+            if column_index in (6, 9, 10):
+                return {"options": ["false", "true"], "editable": False}
+            if column_index == 8:
+                return {"options": HEADER_ROLE_OPTIONS, "editable": True}
+            if column_index == 11:
+                return {"options": HEADER_WIDGET_OPTIONS, "editable": False}
+            if column_index == 12:
+                return {"options": STATE_OPTIONS, "editable": False}
+            if column_index == 13:
+                return {"options": OPTIONS_SOURCE_OPTIONS, "editable": True}
+        if table_widget is self.row_fields_table:
+            if column_index == 2:
+                return {"options": ["entry", "display", "checkbutton", "combobox"], "editable": False}
+            if column_index == 4:
+                return {"options": ROW_ROLE_OPTIONS.get(self.current_row_section_name(), [""]), "editable": True}
+            if column_index in (5, 6, 7, 8, 9, 10, 11):
+                return {"options": ["false", "true"], "editable": False}
+            if column_index == 13:
+                return {"options": STICKY_OPTIONS, "editable": True}
+            if column_index == 14:
+                return {"options": STATE_OPTIONS, "editable": False}
+            if column_index == 15:
+                return {"options": OPTIONS_SOURCE_OPTIONS, "editable": True}
+            if column_index == 16:
+                return {"options": BOOTSTYLE_OPTIONS, "editable": True}
+        if table_widget is self.mapping_table:
+            if column_index == 1:
+                return {"options": self._excel_column_choices, "editable": True}
+            if column_index in (2, 3):
+                return {"options": ["false", "true"], "editable": False}
+            if column_index == 4:
+                return {"options": ["value", "code_lookup", "stop_from_duration"], "editable": False}
+            if column_index == 5:
+                return {"options": ["value", "code_number", "duration_minutes", "bool_int", "minutes_label"], "editable": False}
+        return None
+
+    def _clear_table_cell_widgets(self, table_widget):
+        for row_index in range(table_widget.rowCount()):
+            for column_index in range(table_widget.columnCount()):
+                if table_widget.cellWidget(row_index, column_index) is not None:
+                    table_widget.removeCellWidget(row_index, column_index)
+
+    def _set_combo_cell_value(self, table_widget, row_index, column_index, value, dropdown_spec):
+        combo_widget = table_widget.cellWidget(row_index, column_index)
+        if not isinstance(combo_widget, QComboBox):
+            combo_widget = QComboBox(table_widget)
+            table_widget.setCellWidget(row_index, column_index, combo_widget)
+        options = [str(option) for option in dropdown_spec.get("options", [])]
+        with QSignalBlocker(combo_widget):
+            combo_widget.setEditable(bool(dropdown_spec.get("editable")))
+            combo_widget.clear()
+            combo_widget.addItems(options)
+            text_value = str(value if value is not None else "")
+            if combo_widget.isEditable():
+                combo_widget.setEditText(text_value)
+            else:
+                normalized_value = text_value.strip().lower()
+                match_index = combo_widget.findText(normalized_value, Qt.MatchFlag.MatchFixedString)
+                if match_index < 0:
+                    match_index = combo_widget.findText(text_value, Qt.MatchFlag.MatchFixedString)
+                if match_index < 0:
+                    match_index = 0
+                combo_widget.setCurrentIndex(match_index)
+        backing_item = table_widget.item(row_index, column_index)
+        if backing_item is None:
+            backing_item = QTableWidgetItem(text_value)
+            table_widget.setItem(row_index, column_index, backing_item)
+        else:
+            backing_item.setText(text_value)
+
+    def _set_plain_cell_value(self, table_widget, row_index, column_index, value):
+        table_widget.removeCellWidget(row_index, column_index)
+        item = QTableWidgetItem(str(value if value is not None else ""))
+        table_widget.setItem(row_index, column_index, item)
+
     def eventFilter(self, watched, event):
         if watched in getattr(self, "_navigable_tables", ()) and event.type() == QEvent.Type.KeyPress:
             key_code = event.key()
             modifiers = event.modifiers()
+
+            if self._table_is_editable(watched):
+                if modifiers == Qt.KeyboardModifier.ControlModifier and key_code == Qt.Key.Key_C:
+                    self._copy_table_selection(watched)
+                    self.set_status("Copied selected table cells.")
+                    return True
+
+                if modifiers == Qt.KeyboardModifier.ControlModifier and key_code == Qt.Key.Key_X:
+                    self._cut_table_selection(watched)
+                    self.controller.mark_dirty()
+                    self.set_status("Cut selected table cells.")
+                    return True
+
+                if modifiers == Qt.KeyboardModifier.ControlModifier and key_code == Qt.Key.Key_V:
+                    self._paste_table_selection(watched)
+                    self.controller.mark_dirty()
+                    self.set_status("Pasted into selected table cells.")
+                    return True
+
+                if modifiers == Qt.KeyboardModifier.NoModifier and key_code in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
+                    self._delete_table_selection(watched)
+                    self.controller.mark_dirty()
+                    self.set_status("Cleared selected table cells.")
+                    return True
+
+                if modifiers == Qt.KeyboardModifier.ControlModifier and key_code in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                    self._apply_table_changes(watched)
+                    return True
 
             if modifiers == Qt.KeyboardModifier.ControlModifier and key_code in (
                 Qt.Key.Key_Left,
@@ -783,6 +962,17 @@ class LayoutManagerQtView(QMainWindow):
                     return True
 
         return super().eventFilter(watched, event)
+
+    def _apply_table_changes(self, table_widget):
+        if table_widget is self.header_fields_table:
+            self.controller.apply_header_field_from_block()
+            return
+        if table_widget is self.row_fields_table:
+            self.controller.apply_row_field_from_block()
+            return
+        if table_widget is self.mapping_table:
+            self.controller.apply_mapping_from_import_export()
+            return
 
     def _advance_table_cell(self, table_widget, key_code, step=1, wrap=False):
         row_count = int(table_widget.rowCount())
@@ -1013,6 +1203,53 @@ class LayoutManagerQtView(QMainWindow):
     def editor_text(self):
         return self.editor.toPlainText()
 
+    def set_header_field_presets(self, presets):
+        blocker = QSignalBlocker(self.header_field_preset_combo)
+        self.header_field_preset_combo.clear()
+        self.header_field_preset_combo.addItem("Select preset field...", "")
+        for preset in presets or []:
+            preset_id = str((preset or {}).get("id") or "").strip()
+            if not preset_id:
+                continue
+            preset_label = str((preset or {}).get("label") or preset_id).strip() or preset_id
+            preset_source = str((preset or {}).get("source") or "default").strip().lower()
+            source_label = "Custom" if preset_source == "custom" else "Built-in"
+            self.header_field_preset_combo.addItem(f"{preset_label} [{preset_id}] ({source_label})", preset_id)
+        del blocker
+
+    def current_header_field_preset_id(self):
+        return str(self.header_field_preset_combo.currentData() or "").strip()
+
+    def set_row_field_presets(self, presets):
+        blocker = QSignalBlocker(self.row_field_preset_combo)
+        self.row_field_preset_combo.clear()
+        self.row_field_preset_combo.addItem("Select preset column...", "")
+        for preset in presets or []:
+            preset_id = str((preset or {}).get("id") or "").strip()
+            if not preset_id:
+                continue
+            preset_label = str((preset or {}).get("label") or preset_id).strip() or preset_id
+            preset_source = str((preset or {}).get("source") or "default").strip().lower()
+            source_label = "Custom" if preset_source == "custom" else "Built-in"
+            self.row_field_preset_combo.addItem(f"{preset_label} [{preset_id}] ({source_label})", preset_id)
+        del blocker
+
+    def current_row_field_preset_id(self):
+        return str(self.row_field_preset_combo.currentData() or "").strip()
+
+    def set_available_mapping_columns(self, column_names):
+        blocker = QSignalBlocker(self.mapping_column_selector)
+        self.mapping_column_selector.clear()
+        for column_name in column_names or []:
+            self.mapping_column_selector.addItem(str(column_name or ""))
+        if self.mapping_column_selector.findText("") < 0:
+            self.mapping_column_selector.insertItem(0, "")
+        self.mapping_column_selector.setCurrentIndex(0)
+        del blocker
+
+    def current_mapping_column_choice(self):
+        return str(self.mapping_column_selector.currentText() or "").strip()
+
     def set_forms(self, forms, selected_form_id):
         blocker = QSignalBlocker(self.form_combo)
         self.form_combo.clear()
@@ -1118,8 +1355,7 @@ class LayoutManagerQtView(QMainWindow):
             for row_index in range(selected_range.topRow(), selected_range.bottomRow() + 1):
                 columns = []
                 for column_index in range(selected_range.leftColumn(), selected_range.rightColumn() + 1):
-                    item = table_widget.item(row_index, column_index)
-                    columns.append(str(item.text() if item is not None else ""))
+                    columns.append(self._cell_text(table_widget, row_index, column_index))
                 rows.append("\t".join(columns))
         QApplication.clipboard().setText("\n".join(rows))
 
@@ -1129,6 +1365,15 @@ class LayoutManagerQtView(QMainWindow):
 
     def _delete_table_selection(self, table_widget):
         for item in table_widget.selectedItems():
+            row_index = item.row()
+            column_index = item.column()
+            dropdown_spec = self._dropdown_spec_for_cell(table_widget, column_index)
+            if dropdown_spec is not None:
+                default_value = ""
+                if not dropdown_spec.get("editable"):
+                    default_value = str((dropdown_spec.get("options") or [""])[0])
+                self._set_table_text(table_widget, row_index, column_index, default_value)
+                continue
             item.setText("")
 
     def _paste_table_selection(self, table_widget):
@@ -1152,11 +1397,7 @@ class LayoutManagerQtView(QMainWindow):
                 target_column = column_index + column_offset
                 if target_column >= table_widget.columnCount():
                     break
-                item = table_widget.item(target_row, target_column)
-                if item is None:
-                    item = QTableWidgetItem("")
-                    table_widget.setItem(target_row, target_column, item)
-                item.setText(str(value or ""))
+                self._set_table_text(table_widget, target_row, target_column, str(value or ""))
 
     def set_dirty(self, dirty):
         self.dirty_value.setText("Yes" if dirty else "No")
@@ -1263,7 +1504,7 @@ class LayoutManagerQtView(QMainWindow):
     def render_form_dependency_audit(self, audit):
         payload = dict(audit or {})
         dependent_drafts = payload.get("dependent_drafts") if isinstance(payload.get("dependent_drafts"), list) else []
-        summary = str(payload.get("summary") or "No pending Production Log drafts depend on this form.")
+        summary = str(payload.get("summary") or "No pending Form Loader drafts depend on this form.")
         self.draft_dependency_value.setText(summary)
 
         if dependent_drafts:
@@ -1275,11 +1516,14 @@ class LayoutManagerQtView(QMainWindow):
                 detail_lines.append("")
             self.draft_dependency_details_view.setPlainText("\n".join(detail_lines).rstrip())
         else:
-            self.draft_dependency_details_view.setPlainText("No pending Production Log drafts currently reference the selected form.")
+            self.draft_dependency_details_view.setPlainText("No pending Form Loader drafts currently reference the selected form.")
 
     def _set_table_text(self, table_widget, row_index, column_index, value):
-        item = QTableWidgetItem(str(value if value is not None else ""))
-        table_widget.setItem(row_index, column_index, item)
+        dropdown_spec = self._dropdown_spec_for_cell(table_widget, column_index)
+        if dropdown_spec is not None:
+            self._set_combo_cell_value(table_widget, row_index, column_index, value, dropdown_spec)
+            return
+        self._set_plain_cell_value(table_widget, row_index, column_index, value)
 
     def _next_table_render_token(self, table_widget):
         table_key = id(table_widget)
@@ -1291,6 +1535,7 @@ class LayoutManagerQtView(QMainWindow):
         table_key, token_value = self._next_table_render_token(table_widget)
         total_rows = max(int(row_count or 0), 0)
         table_widget.setUpdatesEnabled(False)
+        self._clear_table_cell_widgets(table_widget)
         table_widget.clearContents()
         table_widget.setRowCount(total_rows)
         if total_rows == 0:
@@ -1322,14 +1567,30 @@ class LayoutManagerQtView(QMainWindow):
             return str(payload)
 
     def _cell_text(self, table_widget, row_index, column_index):
+        cell_widget = table_widget.cellWidget(row_index, column_index)
+        if isinstance(cell_widget, QComboBox):
+            return str(cell_widget.currentText()).strip()
         item = table_widget.item(row_index, column_index)
         return str(item.text()).strip() if item is not None else ""
 
     def _selected_row_index(self, table_widget):
         selected_items = table_widget.selectedItems()
         if not selected_items:
-            return -1
+            current_row = int(table_widget.currentRow())
+            return current_row if current_row >= 0 else -1
         return selected_items[0].row()
+
+    def selected_header_field_row_index(self):
+        return self._selected_row_index(self.header_fields_table)
+
+    def selected_row_field_row_index(self):
+        return self._selected_row_index(self.row_fields_table)
+
+    def selected_mapping_field_id(self):
+        row_index = self._selected_row_index(self.mapping_table)
+        if row_index < 0:
+            return ""
+        return self._cell_text(self.mapping_table, row_index, 0)
 
     def _mapping_name_to_row_section(self, mapping_name):
         return "downtime_row_fields" if mapping_name == "downtime_mapping" else "production_row_fields"
@@ -1359,6 +1620,19 @@ class LayoutManagerQtView(QMainWindow):
                 self._set_table_text(self.header_fields_table, row_index, 8, field.get("role", ""))
                 self._set_table_text(self.header_fields_table, row_index, 9, bool(field.get("import_enabled", True)))
                 self._set_table_text(self.header_fields_table, row_index, 10, bool(field.get("export_enabled", True)))
+                self._set_table_text(self.header_fields_table, row_index, 11, field.get("widget", "entry"))
+                self._set_table_text(self.header_fields_table, row_index, 12, field.get("state", ""))
+                self._set_table_text(self.header_fields_table, row_index, 13, field.get("options_source", ""))
+                values = field.get("values") if isinstance(field.get("values"), list) else []
+                self._set_table_text(
+                    self.header_fields_table,
+                    row_index,
+                    14,
+                    ", ".join(str(item).strip() for item in values if str(item).strip()),
+                )
+                id_item = self.header_fields_table.item(row_index, 0)
+                if id_item is not None:
+                    id_item.setData(Qt.ItemDataRole.UserRole, field.get("id", ""))
 
             self._render_table_rows_chunked(
                 self.header_fields_table,
@@ -1397,6 +1671,9 @@ class LayoutManagerQtView(QMainWindow):
                 self._set_table_text(self.row_fields_table, row_index, 16, field.get("bootstyle", ""))
                 values = field.get("values") if isinstance(field.get("values"), list) else []
                 self._set_table_text(self.row_fields_table, row_index, 17, ", ".join(str(item).strip() for item in values if str(item).strip()))
+                id_item = self.row_fields_table.item(row_index, 0)
+                if id_item is not None:
+                    id_item.setData(Qt.ItemDataRole.UserRole, field.get("id", ""))
 
             self._render_table_rows_chunked(
                 self.row_fields_table,
@@ -1496,17 +1773,78 @@ class LayoutManagerQtView(QMainWindow):
                 chunk_size=48,
             )
 
+    def header_field_table_values(self):
+        values = []
+        for row_index in range(self.header_fields_table.rowCount()):
+            item = self.header_fields_table.item(row_index, 0)
+            values.append(
+                {
+                    "_original_id": str(item.data(Qt.ItemDataRole.UserRole) or "").strip() if item is not None else "",
+                    "id": self._cell_text(self.header_fields_table, row_index, 0),
+                    "label": self._cell_text(self.header_fields_table, row_index, 1),
+                    "row": self._cell_text(self.header_fields_table, row_index, 2),
+                    "col": self._cell_text(self.header_fields_table, row_index, 3),
+                    "cell": self._cell_text(self.header_fields_table, row_index, 4),
+                    "width": self._cell_text(self.header_fields_table, row_index, 5),
+                    "readonly": self._cell_text(self.header_fields_table, row_index, 6),
+                    "default": self._cell_text(self.header_fields_table, row_index, 7),
+                    "role": self._cell_text(self.header_fields_table, row_index, 8),
+                    "import_enabled": self._cell_text(self.header_fields_table, row_index, 9),
+                    "export_enabled": self._cell_text(self.header_fields_table, row_index, 10),
+                    "widget": self._cell_text(self.header_fields_table, row_index, 11),
+                    "state": self._cell_text(self.header_fields_table, row_index, 12),
+                    "options_source": self._cell_text(self.header_fields_table, row_index, 13),
+                    "values": self._cell_text(self.header_fields_table, row_index, 14),
+                }
+            )
+        return values
+
+    def row_field_table_values(self):
+        values = []
+        for row_index in range(self.row_fields_table.rowCount()):
+            item = self.row_fields_table.item(row_index, 0)
+            values.append(
+                {
+                    "_original_id": str(item.data(Qt.ItemDataRole.UserRole) or "").strip() if item is not None else "",
+                    "id": self._cell_text(self.row_fields_table, row_index, 0),
+                    "label": self._cell_text(self.row_fields_table, row_index, 1),
+                    "widget": self._cell_text(self.row_fields_table, row_index, 2),
+                    "width": self._cell_text(self.row_fields_table, row_index, 3),
+                    "role": self._cell_text(self.row_fields_table, row_index, 4),
+                    "readonly": self._cell_text(self.row_fields_table, row_index, 5),
+                    "derived": self._cell_text(self.row_fields_table, row_index, 6),
+                    "math_trigger": self._cell_text(self.row_fields_table, row_index, 7),
+                    "open_row_trigger": self._cell_text(self.row_fields_table, row_index, 8),
+                    "user_input": self._cell_text(self.row_fields_table, row_index, 9),
+                    "expand": self._cell_text(self.row_fields_table, row_index, 10),
+                    "bold": self._cell_text(self.row_fields_table, row_index, 11),
+                    "default": self._cell_text(self.row_fields_table, row_index, 12),
+                    "sticky": self._cell_text(self.row_fields_table, row_index, 13),
+                    "state": self._cell_text(self.row_fields_table, row_index, 14),
+                    "options_source": self._cell_text(self.row_fields_table, row_index, 15),
+                    "bootstyle": self._cell_text(self.row_fields_table, row_index, 16),
+                    "values": self._cell_text(self.row_fields_table, row_index, 17),
+                }
+            )
+        return values
+
     def selected_header_field_id(self):
         row_index = self._selected_row_index(self.header_fields_table)
         if row_index < 0:
             return ""
-        return self._cell_text(self.header_fields_table, row_index, 0)
+        item = self.header_fields_table.item(row_index, 0)
+        if item is None:
+            return ""
+        original_id = str(item.data(Qt.ItemDataRole.UserRole) or "").strip()
+        return original_id or self._cell_text(self.header_fields_table, row_index, 0)
 
     def selected_header_field_values(self):
         row_index = self._selected_row_index(self.header_fields_table)
         if row_index < 0:
             return None
         return {
+            "id": self._cell_text(self.header_fields_table, row_index, 0),
+            "label": self._cell_text(self.header_fields_table, row_index, 1),
             "row": self._cell_text(self.header_fields_table, row_index, 2),
             "col": self._cell_text(self.header_fields_table, row_index, 3),
             "cell": self._cell_text(self.header_fields_table, row_index, 4),
@@ -1516,19 +1854,28 @@ class LayoutManagerQtView(QMainWindow):
             "role": self._cell_text(self.header_fields_table, row_index, 8),
             "import_enabled": self._cell_text(self.header_fields_table, row_index, 9),
             "export_enabled": self._cell_text(self.header_fields_table, row_index, 10),
+            "widget": self._cell_text(self.header_fields_table, row_index, 11),
+            "state": self._cell_text(self.header_fields_table, row_index, 12),
+            "options_source": self._cell_text(self.header_fields_table, row_index, 13),
+            "values": self._cell_text(self.header_fields_table, row_index, 14),
         }
 
     def selected_row_field_id(self):
         row_index = self._selected_row_index(self.row_fields_table)
         if row_index < 0:
             return ""
-        return self._cell_text(self.row_fields_table, row_index, 0)
+        item = self.row_fields_table.item(row_index, 0)
+        if item is None:
+            return ""
+        original_id = str(item.data(Qt.ItemDataRole.UserRole) or "").strip()
+        return original_id or self._cell_text(self.row_fields_table, row_index, 0)
 
     def selected_row_field_values(self):
         row_index = self._selected_row_index(self.row_fields_table)
         if row_index < 0:
             return None
         return {
+            "id": self._cell_text(self.row_fields_table, row_index, 0),
             "label": self._cell_text(self.row_fields_table, row_index, 1),
             "widget": self._cell_text(self.row_fields_table, row_index, 2),
             "width": self._cell_text(self.row_fields_table, row_index, 3),

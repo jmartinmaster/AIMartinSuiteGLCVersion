@@ -1307,7 +1307,7 @@ class Dispatcher:
     def open_production_log_draft(self, draft_path):
         draft_path = str(draft_path or "").strip()
         if not draft_path:
-            self.host_ui_adapter.show_warning("Production Log", "No draft path was provided.")
+            self.host_ui_adapter.show_warning("Form Loader", "No draft path was provided.")
             return False
 
         self.load_module("production_log", use_transition=False, ensure_authorized=False)
@@ -1316,8 +1316,8 @@ class Dispatcher:
             return bool(active_module.load_draft_path(draft_path))
 
         self.host_ui_adapter.show_warning(
-            "Production Log",
-            "The active Production Log session could not accept the requested draft.",
+            "Form Loader",
+            "The active Form Loader session could not accept the requested draft.",
         )
         return False
 

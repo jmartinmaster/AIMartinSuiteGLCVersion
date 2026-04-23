@@ -14,10 +14,10 @@ Use this runbook on a Windows packaging machine after building the next EXE rele
 1. Launch the newly built EXE from `dist/`.
 2. Confirm the splash screen appears and the app opens without an error dialog.
 3. Confirm the window title reports Dispatcher Core `2.1.4`.
-4. Confirm Production Log opens by default.
+4. Confirm Form Loader opens by default.
 5. Confirm the footer update banner is hidden while no update job is active.
 
-## Production Log Validation
+## Form Loader Validation
 
 1. Confirm `Refresh View`, `Resume Latest`, `Pending Drafts`, and `Delete Current Draft` are visible and responsive.
 2. Create a small draft, save it, delete a production row, reload the draft, and confirm the deletion persisted.
@@ -74,7 +74,7 @@ Use this runbook on a Windows packaging machine after building the next EXE rele
 
 ## Recovery And Settings Validation
 
-1. Open Backup / Recovery and restore a draft snapshot back into Production Log.
+1. Open Backup / Recovery and restore a draft snapshot back into Form Loader.
 2. Restore a configuration backup and confirm the record list refreshes after restore.
 3. If a form-layout or `form_definitions.json` backup is available, restore one and confirm the app refreshes the active-form state cleanly.
 4. Open Settings and attempt to save invalid downtime-code rows, then confirm validation blocks the save.

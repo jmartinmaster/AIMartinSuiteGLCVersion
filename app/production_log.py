@@ -13,7 +13,7 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-__module_name__ = "Production Log"
+__module_name__ = "Form Loader"
 __version__ = "1.3.0"
 
 
@@ -23,4 +23,4 @@ def get_ui(parent, dispatcher):
         from app.controllers.production_log_qt_controller import ProductionLogQtController
 
         return ProductionLogQtController(parent=parent, dispatcher=dispatcher)
-    raise RuntimeError("The Tk Production Log controller was removed from the live Phase 9 runtime. See shadow/app/controllers/production_log_controller.py.")
+    raise RuntimeError("The Tk Form Loader controller was removed from the live Phase 9 runtime. See shadow/app/controllers/production_log_controller.py.")

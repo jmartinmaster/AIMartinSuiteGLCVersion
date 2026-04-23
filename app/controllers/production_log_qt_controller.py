@@ -21,7 +21,7 @@ import webbrowser
 from app.models.production_log_model import BALANCE_DOWNTIME_CAUSE, ProductionLogModel
 from app.views.production_log_qt_view import ProductionLogQtView
 
-__module_name__ = "Production Log Qt Controller"
+__module_name__ = "Form Loader Qt Controller"
 __version__ = "1.3.0"
 
 
@@ -34,6 +34,7 @@ class ProductionLogQtController:
         self.payload = dict(payload)
         self.model = ProductionLogModel(data_registry=getattr(dispatcher, "external_data_registry", None))
         self.layout_config = self.model.load_layout_config()
+        self.sections = self.model.get_sections(config=self.layout_config)
         self.header_fields = self.model.get_section_field_configs("header", config=self.layout_config)
         self.production_fields = self.model.get_section_field_configs("production", config=self.layout_config)
         self.downtime_fields = self.model.get_section_field_configs("downtime", config=self.layout_config)
@@ -65,9 +66,9 @@ class ProductionLogQtController:
         recovery_snapshots = self.model.list_recovery_snapshots()
         latest_draft_name = str(pending_drafts[0].get("filename") or "None") if pending_drafts else "None"
         return {
-            "window_title": "Production Log - Production Logging Center",
-            "title": "Production Log",
-            "subtitle": "Primary Production Log editor for the shared PyQt6 workspace.",
+            "window_title": "Form Loader - Production Logging Center",
+            "title": "Form Loader",
+            "subtitle": "Primary form loader editor for the shared PyQt6 workspace.",
             "pending_draft_count": len(pending_drafts),
             "recovery_snapshot_count": len(recovery_snapshots),
             "latest_draft_name": latest_draft_name,
@@ -80,6 +81,7 @@ class ProductionLogQtController:
         self.view = ProductionLogQtView(
             self,
             self.payload,
+            self.sections,
             self.header_fields,
             self.production_fields,
             self.downtime_fields,
@@ -107,6 +109,7 @@ class ProductionLogQtController:
 
     def _reload_layout_fields(self):
         self.layout_config = self.model.load_layout_config()
+        self.sections = self.model.get_sections(config=self.layout_config)
         self.header_fields = self.model.get_section_field_configs("header", config=self.layout_config)
         self.production_fields = self.model.get_section_field_configs("production", config=self.layout_config)
         self.downtime_fields = self.model.get_section_field_configs("downtime", config=self.layout_config)
@@ -126,6 +129,84 @@ class ProductionLogQtController:
 
     def get_active_form_info(self):
         return dict(self.model.form_registry.get_active_form())
+
+    def list_available_forms(self):
+        return [dict(form_info) for form_info in self.model.form_registry.list_forms()]
+
+    def _refresh_form_selector(self, selected_form_id=None):
+        target_form_id = str(selected_form_id or self.model.form_id or "").strip()
+        self.view.set_form_options(self.list_available_forms(), target_form_id)
+
+    def _has_entered_form_data(self):
+        try:
+            return not self.model.is_form_blank(self.collect_ui_data())
+        except Exception:
+            return bool(self.view.has_unsaved_changes)
+
+    def _prompt_for_form_switch(self, target_form_id):
+        normalized_target_form_id = self.model.form_registry.canonical_form_id(target_form_id)
+        if normalized_target_form_id == self.model.form_id:
+            return "cancel"
+        if not self._has_entered_form_data():
+            return "discard"
+        current_form_name = self.model.get_active_form_name()
+        target_form_name = self.model.get_form_name_for_id(normalized_target_form_id)
+        return self.view.ask_form_switch_action(current_form_name, target_form_name)
+
+    def _resolve_notified_form_id(self, active_form_info=None, form_id=None):
+        raw_form_id = ""
+        if isinstance(active_form_info, dict):
+            raw_form_id = str(active_form_info.get("id") or "").strip()
+        if not raw_form_id:
+            raw_form_id = str(form_id or "").strip()
+        if not raw_form_id:
+            raw_form_id = str(self.model.form_registry.get_active_form().get("id") or self.model.form_id or "").strip()
+        return self.model.form_registry.canonical_form_id(raw_form_id or self.model.form_id)
+
+    def _cancel_external_form_switch(self, current_form_id):
+        normalized_current_form_id = self.model.form_registry.canonical_form_id(current_form_id or self.model.form_id)
+        self.model.form_registry.activate_form(normalized_current_form_id)
+        self._refresh_form_selector(normalized_current_form_id)
+        self.view.set_status("Form switch cancelled.")
+        self.write_state(status="ready", message="Form switch cancelled.")
+        if hasattr(self.dispatcher, "notify_active_form_changed"):
+            self.dispatcher.notify_active_form_changed(source_instance=self, active_form_info=self.get_active_form_info())
+        return False
+
+    def _switch_active_form(self, target_form_id, notify_others=True):
+        normalized_target_form_id = self.model.form_registry.canonical_form_id(target_form_id)
+        self.model.form_registry.activate_form(normalized_target_form_id)
+        self.reload_active_form()
+        self.view.set_status(f"Activated form {self.model.get_active_form_name()}.")
+        self.write_state(status="ready", message=f"Activated form {self.model.get_active_form_name()}.")
+        if notify_others and hasattr(self.dispatcher, "notify_active_form_changed"):
+            self.dispatcher.notify_active_form_changed(source_instance=self, active_form_info=self.get_active_form_info())
+        return True
+
+    def activate_selected_form(self):
+        target_form_id = str(self.view.current_form_id() or "").strip()
+        if not target_form_id:
+            self.view.show_info("Form Loader", "Select a stored form first.")
+            self._refresh_form_selector()
+            return False
+
+        normalized_target_form_id = self.model.form_registry.canonical_form_id(target_form_id)
+        if normalized_target_form_id == self.model.form_id:
+            self.view.set_status("Selected form is already active.")
+            self._refresh_form_selector()
+            return False
+
+        switch_action = self._prompt_for_form_switch(normalized_target_form_id)
+        if switch_action == "cancel":
+            self.view.set_status("Form switch cancelled.")
+            self._refresh_form_selector()
+            return False
+
+        if switch_action == "save" and not self.save_draft(is_auto=False):
+            self._refresh_form_selector()
+            return False
+
+        return self._switch_active_form(normalized_target_form_id, notify_others=True)
 
     def serialize_ui_data(self, data=None):
         payload = dict(data or self.collect_ui_data())
@@ -149,11 +230,12 @@ class ProductionLogQtController:
 
     def _initialize_form(self):
         self.view.set_form_name(self.model.get_active_form_name())
+        self._refresh_form_selector()
         self.balance_state = self.model.normalize_balance_state()
         self.current_draft_path = None
         self.view.set_form_data(self._default_header_payload(), [{}], [{}])
         self.view.mark_clean(self.collect_ui_data())
-        self.view.set_status("Production Log Qt editor ready.")
+        self.view.set_status("Form Loader ready.")
 
     def _default_header_payload(self):
         payload = {}
@@ -190,7 +272,7 @@ class ProductionLogQtController:
         latest_name = self.pending_drafts[0].get("filename") if self.pending_drafts else "None"
         self.view.set_draft_status(len(self.pending_drafts), len(self.recovery_snapshots), latest_name)
         if initial:
-            message = "Production Log viewport ready." if self.embedded else "Production Log Qt editor ready."
+            message = "Form Loader viewport ready." if self.embedded else "Form Loader ready."
         else:
             message = "Draft and recovery lists refreshed."
             self.view.set_status(message)
@@ -209,26 +291,27 @@ class ProductionLogQtController:
         self.calculate_metrics(silent=is_auto)
         data = self.collect_ui_data()
         if is_auto and not self.view.has_unsaved_changes:
-            return
+            return False
         if self.model.is_form_blank(data):
             if not is_auto:
-                self.view.show_info("Production Log", "Enter data before saving a draft.")
-            return
+                self.view.show_info("Form Loader", "Enter data before saving a draft.")
+            return False
         try:
             draft_path, _payload, _backup_info = self.model.save_draft_data(data, __version__, is_auto=is_auto)
         except Exception as exc:
             if not is_auto:
                 self.view.show_error("Draft Save Error", f"Could not save draft:\n{exc}")
-            return
+            return False
 
         self.current_draft_path = draft_path
         self.refresh_draft_lists(initial=False)
         self.view.mark_clean(data)
         if is_auto:
             self.write_state(status="ready", message=f"Auto-saved draft {os.path.basename(draft_path)}.")
-            return
+            return True
         self.show_toast("Draft Saved", f"Saved draft {os.path.basename(draft_path)}.")
         self.write_state(status="ready", message=f"Saved draft {os.path.basename(draft_path)}.")
+        return True
 
     def auto_save(self):
         if self.view.has_unsaved_changes:
@@ -242,6 +325,7 @@ class ProductionLogQtController:
         production_rows = list(payload.get("production") or []) or [{}]
         downtime_rows = list(payload.get("downtime") or []) or [{}]
         self.view.set_form_name(self.model.get_active_form_name())
+        self._refresh_form_selector()
         self.view.set_form_data(normalized_header, production_rows, downtime_rows)
         if mark_dirty_after_load:
             self.view.mark_dirty()
@@ -264,10 +348,10 @@ class ProductionLogQtController:
     def load_draft_path(self, draft_path, prompt_discard=True):
         draft_path = str(draft_path or "").strip()
         if not draft_path:
-            self.view.show_info("Production Log", "No draft path was provided.")
+            self.view.show_info("Form Loader", "No draft path was provided.")
             return False
         if not os.path.exists(draft_path):
-            self.view.show_error("Production Log", f"Draft not found:\n{draft_path}")
+            self.view.show_error("Form Loader", f"Draft not found:\n{draft_path}")
             return False
         if prompt_discard and not self.view.confirm_discard_unsaved_changes():
             return False
@@ -275,7 +359,7 @@ class ProductionLogQtController:
         try:
             payload = self.model.load_json(draft_path)
         except Exception as exc:
-            self.view.show_error("Production Log", f"Could not load draft:\n{exc}")
+            self.view.show_error("Form Loader", f"Could not load draft:\n{exc}")
             return False
 
         draft_form_id = self.model.resolve_draft_form_id(payload.get("meta", {}))
@@ -370,7 +454,7 @@ class ProductionLogQtController:
                 webbrowser.open(f"file://{path}")
             self.view.set_status(f"Opened {os.path.basename(path)}")
         except Exception as exc:
-            self.view.show_error("Production Log", f"Could not open path:\n{exc}")
+            self.view.show_error("Form Loader", f"Could not open path:\n{exc}")
 
     def open_pending_folder(self):
         self._open_path(self.model.get_pending_dir())
@@ -700,7 +784,7 @@ class ProductionLogQtController:
         self.calculate_metrics()
         ui_data = self.collect_ui_data()
         if self.model.is_form_blank(ui_data):
-            self.view.show_info("Production Log", "Enter data before exporting.")
+            self.view.show_info("Form Loader", "Enter data before exporting.")
             return
         shift = str(self._header_value_by_role(ui_data.get("header", {}), "shift_number", fallback_id="shift", default="0"))
         date_text = str(self._header_value_by_role(ui_data.get("header", {}), "log_date", fallback_id="date", default="00-00-00")).replace("/", "")
@@ -738,7 +822,7 @@ class ProductionLogQtController:
             self.current_draft_path = None
             self._apply_loaded_payload(data, draft_path=None, mark_dirty_after_load=True)
             self.calculate_metrics()
-            self.show_toast("Import Complete", "Imported workbook into Production Log.")
+            self.show_toast("Import Complete", "Imported workbook into Form Loader.")
             self._show_data_handler_warnings("import")
         except Exception as exc:
             self.view.show_error("Import Error", f"Failed to import Excel:\n{exc}")
@@ -749,7 +833,7 @@ class ProductionLogQtController:
     def handle_close(self):
         if self.embedded:
             return None
-        self.write_state(status="closed", message="Production Log Qt window closed.")
+        self.write_state(status="closed", message="Form Loader window closed.")
 
     def apply_theme(self):
         if self.dispatcher is not None:
@@ -757,14 +841,21 @@ class ProductionLogQtController:
         self.view.apply_theme(theme_tokens=self.payload.get("theme_tokens") or {})
 
     def on_active_form_changed(self, active_form_info=None, form_id=None):
-        _ = active_form_info
-        _ = form_id
-        try:
-            if self.view.has_unsaved_changes and not self.model.is_form_blank(self.collect_ui_data()):
-                self.save_draft(is_auto=True)
-        except Exception:
-            pass
-        self.reload_active_form()
+        target_form_id = self._resolve_notified_form_id(active_form_info=active_form_info, form_id=form_id)
+        current_form_id = self.model.form_registry.canonical_form_id(self.model.form_id)
+
+        if target_form_id == current_form_id:
+            self._refresh_form_selector(current_form_id)
+            return False
+
+        switch_action = self._prompt_for_form_switch(target_form_id)
+        if switch_action == "cancel":
+            return self._cancel_external_form_switch(current_form_id)
+
+        if switch_action == "save" and not self.save_draft(is_auto=False):
+            return self._cancel_external_form_switch(current_form_id)
+
+        return self._switch_active_form(target_form_id, notify_others=False)
 
     def on_calculation_settings_changed(self):
         self.model.refresh_calculation_settings()

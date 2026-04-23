@@ -169,7 +169,7 @@
         {
             "name": "production_log",
             "module_path": "app.production_log",
-            "display_name": "Production Log",
+            "display_name": "Form Loader",
             "navigation_visible": true,
             "navigation_group": "top",
             "launcher_visible": true,
@@ -180,7 +180,7 @@
         {
             "name": "production_log_calculations",
             "module_path": "app.production_log_calculations",
-            "display_name": "Production Log Calculations",
+            "display_name": "Form Calculations",
             "navigation_visible": true,
             "navigation_group": "middle",
             "launcher_visible": false,
@@ -195,7 +195,7 @@
         {
             "name": "production_log_roles",
             "module_path": "app.production_log_roles",
-            "display_name": "Production Log Roles",
+            "display_name": "Form Loader Roles",
             "navigation_visible": false,
             "persistable": false,
             "preload_enabled": false

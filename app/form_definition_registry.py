@@ -24,9 +24,10 @@ from app.utils import ensure_external_directory, external_path, local_or_resourc
 __module_name__ = "Form Definition Registry"
 __version__ = "1.0.0"
 
-DEFAULT_FORM_ID = "production_logging_center"
-DEFAULT_FORM_NAME = "Production Logging Center"
+DEFAULT_FORM_ID = "temp_form_title"
+DEFAULT_FORM_NAME = "Temp Form Title"
 DEFAULT_FORM_DESCRIPTION = "Default form definition backed by layout_config.json"
+LEGACY_DEFAULT_FORM_IDS = {"production_logging_center"}
 
 
 class FormDefinitionRegistry:
@@ -63,6 +64,12 @@ class FormDefinitionRegistry:
             normalized = f"form_{normalized}"
         return normalized[:64]
 
+    def canonical_form_id(self, value):
+        normalized = self.normalize_form_id(value)
+        if normalized in LEGACY_DEFAULT_FORM_IDS:
+            return DEFAULT_FORM_ID
+        return normalized
+
     def _build_default_relative_path(self, form_id):
         return os.path.join("data", "forms", f"{form_id}.json").replace("\\", "/")
 
@@ -70,8 +77,9 @@ class FormDefinitionRegistry:
         if not isinstance(record, dict):
             return None
 
-        proposed_id = record.get("id") or record.get("name")
-        form_id = self.normalize_form_id(proposed_id)
+        raw_form_id = str(record.get("id") or "").strip()
+        proposed_id = raw_form_id or record.get("name")
+        form_id = self.canonical_form_id(raw_form_id) if raw_form_id else self.normalize_form_id(proposed_id)
         if form_id in seen_ids:
             return None
 
@@ -118,7 +126,7 @@ class FormDefinitionRegistry:
             normalized_forms.insert(0, self._default_form_record())
             seen_ids.add(DEFAULT_FORM_ID)
 
-        active_form_id = self.normalize_form_id(candidate.get("active_form_id") or DEFAULT_FORM_ID)
+        active_form_id = self.canonical_form_id(candidate.get("active_form_id") or DEFAULT_FORM_ID)
         if active_form_id not in seen_ids:
             active_form_id = DEFAULT_FORM_ID
 
@@ -185,14 +193,14 @@ class FormDefinitionRegistry:
 
     def get_form(self, form_id=None):
         registry = self.get_registry()
-        requested_form_id = self.normalize_form_id(form_id or registry.get("active_form_id") or DEFAULT_FORM_ID)
+        requested_form_id = self.canonical_form_id(form_id or registry.get("active_form_id") or DEFAULT_FORM_ID)
         for form_record in registry.get("forms", []):
             if form_record.get("id") == requested_form_id:
                 return self.enrich_form_record(form_record, active_form_id=registry.get("active_form_id"))
         raise ValueError(f"Form definition '{requested_form_id}' was not found.")
 
     def _get_form_record_index(self, registry, form_id):
-        requested_form_id = self.normalize_form_id(form_id)
+        requested_form_id = self.canonical_form_id(form_id)
         for index, form_record in enumerate(registry.get("forms", [])):
             if form_record.get("id") == requested_form_id:
                 return index, form_record
@@ -211,7 +219,7 @@ class FormDefinitionRegistry:
 
     def activate_form(self, form_id):
         registry = self.get_registry()
-        requested_form_id = self.normalize_form_id(form_id)
+        requested_form_id = self.canonical_form_id(form_id)
         available_ids = {form_record.get("id") for form_record in registry.get("forms", [])}
         if requested_form_id not in available_ids:
             raise ValueError(f"Form definition '{requested_form_id}' was not found.")

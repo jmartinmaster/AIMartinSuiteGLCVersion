@@ -204,10 +204,10 @@ class RecoveryViewerQtController:
             draft_path = record["path"]
 
         if self._open_production_log_draft(draft_path):
-            self.view.set_status(f"Loaded {os.path.basename(draft_path)} into Production Log.")
+            self.view.set_status(f"Loaded {os.path.basename(draft_path)} into Form Loader.")
             return
 
-        self.view.show_error("Recovery Viewer", "The selected draft could not be loaded into Production Log.")
+        self.view.show_error("Recovery Viewer", "The selected draft could not be loaded into Form Loader.")
 
     def restore_config_record(self, record):
         if not self.view.ask_yes_no(
@@ -241,9 +241,9 @@ class RecoveryViewerQtController:
         try:
             restored_path = self.model.restore_snapshot_as_draft(record)
             self.refresh_records(selected_record_key=self._record_key(record))
-            if prompt_to_open and self.view.ask_yes_no("Open Restored Draft", "Draft snapshot restored. Open it in Production Log now?"):
+            if prompt_to_open and self.view.ask_yes_no("Open Restored Draft", "Draft snapshot restored. Open it in Form Loader now?"):
                 if not self._open_production_log_draft(restored_path):
-                    self.view.show_error("Restore Error", "The restored draft could not be opened in Production Log.")
+                    self.view.show_error("Restore Error", "The restored draft could not be opened in Form Loader.")
             else:
                 self.show_toast("Restore Complete", f"Restored draft snapshot to {record['restore_target']}.", "success")
             return restored_path

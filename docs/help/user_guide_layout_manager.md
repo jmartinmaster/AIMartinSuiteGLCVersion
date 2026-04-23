@@ -1,6 +1,6 @@
 # Layout Manager
 
-Use Layout Manager to control how the Production Log header and Excel mapping behave.
+Use Layout Manager to control the active form contract that Form Loader consumes, including sections, field schemas, and Excel mapping behavior.
 
 Layout Manager has six top-level tabs: JSON Editor, Block View, Import / Export, Preview, Structure, and Summary.
 
@@ -23,7 +23,11 @@ Large multi-pane workflows are flattened into inner tabs so editing surfaces do 
 - Load Default restores the packaged baseline layout into the editor.
 - Format JSON rewrites the current layout with consistent indentation.
 - Validate JSON checks the current layout before you save it.
-- Save writes the working layout to the local `layout_config.json`.
+- Save writes the working layout to the active form file. For the built-in default form that is `layout_config.json`. For custom stored forms that is `data/forms/<form_id>.json`.
+- Save now accepts only valid full-layout JSON. If the JSON is malformed, Save fails with a syntax error instead of extracting partial sections.
+- When Save succeeds from the JSON Editor and no visible Block View / Import / Export / Section Editor changes alter the layout, the file is written from the current editor text instead of being rebuilt from hidden defaults.
+- When Save detects visible Block View, Import / Export, or Section Editor edits that have not been manually applied yet, those edits are now auto-applied before the file is written.
+- Reloading or activating a form now opens the JSON Editor with the saved file text for that form instead of a regenerated JSON dump.
 - Undo and Redo let you step backward or forward through recent layout edits.
 - `Ctrl+S` triggers Save from anywhere in the Layout Manager window.
 - `Escape` clears the current inline focus interaction.
@@ -36,7 +40,7 @@ Large multi-pane workflows are flattened into inner tabs so editing surfaces do 
   - `Alt+Arrow` move three cells in the selected direction
   - `Ctrl+Arrow` move five cells in the selected direction
 
-Changes made here affect both the Production Log form layout and the Excel import/export mapping.
+Changes made here affect both the active Form Loader form layout and the Excel import/export mapping for that same form.
 
 ## Create A Form
 
@@ -49,23 +53,29 @@ Use this flow to create a new stored form from your current editor state:
 5. Enter an optional description.
 6. Confirm the prompts.
 
-The app creates a new form using the current in-editor layout, refreshes the form list, and shows a success toast.
+The app creates a new form using the current in-editor layout, refreshes the form list, and shows a success toast. That saved form uses the same schema Form Loader reads through the active form registry.
+
+In the dedicated Qt Layout Manager runtime, the new stored form is selected in the Stored Forms list but does not replace the currently loaded active form until you click `Activate`.
 
 To start from scratch instead of copying the current editor content:
 
 1. In the Stored Forms row, click Create Blank.
 2. Enter a form name and optional description.
-3. The app creates a minimal scaffold form with required repeating-row seed fields and mapping keys so the form is immediately valid and editable.
+3. The app creates an empty layout scaffold with the standard top-level containers so you can author the form structure yourself.
+
+That blank form is stored immediately, but it still requires `Activate` before the editor and Save target switch to it.
 
 Related form actions in the same row:
 
-- Activate: Switches the active form to the selected stored form.
+- Activate: Switches the app-wide active form to the selected stored form.
 - Create Blank: Creates a new minimal scaffold form (empty header section and required repeating-row seed fields) so you can author the layout from scratch in Block View.
-- Duplicate: Clones the selected form into a new named form.
+- Duplicate: Clones the selected form into a new named form. The duplicate stays stored-only until you click `Activate`.
 - Rename: Changes the selected form name and description.
 - Delete: Removes the selected stored form after confirmation.
 
 For a full guided walkthrough and practical authoring patterns, open the Help Viewer section `Layout Manager: Form Creation and Editing`.
+
+For the current one-stop vocabulary reference, open `Layout JSON and Runtime Reference` in the Help Viewer.
 
 ## Preview Metadata
 
@@ -118,6 +128,25 @@ Block View row field editing now supports the extended row-field properties used
 - bootstyle
 - values (for combobox fields)
 
+Block View apply behavior:
+
+- `Header Fields > Apply Selected` persists edits to `id`, `label`, position, widget, state, combobox options, and the remaining header-field properties.
+- `Header Fields > Add Preset Field` inserts a predefined header field from either the built-in default layout or your custom `editor_presets.header_fields` list. If the preset carries a built-in header role that already exists in the live header list, the added copy is inserted with that role cleared so it can be saved immediately.
+- `Row Fields > Apply Selected` persists edits to `id`, `label`, widget, and the remaining row-field properties.
+- `Ctrl+Enter` on an editable table applies the selected row or current mapping.
+- `Row Fields > Add Blank Field` inserts a new custom column after the current selection.
+- `Row Fields > Add Preset Column` inserts a predefined Production or Downtime column from the built-in default layout or your custom `editor_presets.production_row_fields` / `editor_presets.downtime_row_fields` list.
+- `Row Mapping > Assign Column` assigns the selected Excel column to the selected mapping row.
+- `Row Mapping > Clear Selected` removes the selected mapping row's current column assignment.
+
+Custom reusable presets can now be stored directly in the layout JSON:
+
+- Add an optional top-level `editor_presets` object.
+- Supported preset lists are `header_fields`, `production_row_fields`, and `downtime_row_fields`.
+- Each preset entry uses the same field-object shape as the matching live section, so your preset can carry default labels, roles, widget settings, combobox `values`, `options_source`, booleans, and other repeatable defaults.
+- Presets appear in the Block View selectors with `Built-in` or `Custom` labels.
+- Header roles are unique. Only one live header field may own a given non-empty role such as `shift_number` or `log_date`.
+
 Bulk actions are available in Block View for the currently selected row-field section:
 
 - Bulk Rename: replace label text across many row fields at once.
@@ -141,6 +170,24 @@ Right-click menus support fast editing in JSON and table/tree surfaces:
 - JSON Editor: standard text actions.
 - Editable tables: Copy, Cut, Paste, Delete.
 - Preview/Structure trees: Copy current row/node text.
+
+Keyboard editing shortcuts for editable tables:
+
+- `Ctrl+C`: Copy selected cells
+- `Ctrl+X`: Cut selected cells
+- `Ctrl+V`: Paste into the current cell/selection anchor
+- `Delete` or `Backspace`: Clear selected cells
+- `Ctrl+Enter`: Apply the selected row or current mapping
+
+Dropdown-backed table cells are now used for known enumerated values:
+
+- booleans such as `readonly`, `derived`, `import_enabled`, and `export_enabled`
+- header-field `widget`, `state`, and `options_source`
+- row-field `widget`
+- header-field and row-field `role`
+- row-field `sticky`, `state`, `options_source`, and `bootstyle`
+- mapping `import_transform` and `export_transform`
+- mapping `column` values through the Excel-column selector list
 
 ## Accessibility Options
 

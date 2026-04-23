@@ -5,7 +5,7 @@ Production Logging Center is a floor-focused desktop application for recording D
 
 Logging Center is built around four day-to-day jobs:
 
-1. Fill out the current shift production log.
+1. Fill out the current shift form in Form Loader.
 2. Save and recover draft work during the shift.
 3. Maintain part-number rate values used for time and efficiency calculations.
 4. Adjust the layout and settings without editing code.
@@ -17,9 +17,9 @@ It also includes a packaged-release Update Manager and direct access to the GPL 
 The module details now live under the smaller User Guide section chips in the Help Center so you can jump directly to the page you want instead of reading one long combined document.
 
 - Overview: this page, for the broad workflow and shared notes.
-- Production Log: shift entry, downtime balancing, drafts, and Excel import/export behavior.
-- Rate Manager: part-number rate maintenance used by Production Log calculations.
-- Layout Manager: header layout and workbook mapping editing.
+- Form Loader: shift entry, downtime balancing, drafts, and Excel import/export behavior.
+- Rate Manager: part-number rate maintenance used by Form Loader calculations.
+- Layout Manager: active-form sections, field schemas, and workbook mapping editing.
 - Settings Manager: defaults, theme behavior, persistence options, security access, and admin-only developer tools.
 - Backup / Recovery: draft recovery, backup restore, and recovery file handling.
 - Update Manager: Dispatcher Core version checks, payload downloads, and build-runtime notes.
@@ -28,7 +28,7 @@ Use the top User Guide chip first, then use the half-sized section chips directl
 
 ## Typical Workflow
 
-1. Open Production Log at the start of the shift.
+1. Open Form Loader at the start of the shift.
 2. Enter the date and shift information.
 3. Add production rows as jobs are run.
 4. Add downtime rows when stoppages occur.
@@ -39,7 +39,7 @@ Use the top User Guide chip first, then use the half-sized section chips directl
 
 ## Draft Recovery
 
-The draft status area at the top of Production Log helps prevent lost work without duplicating the full recovery page.
+The draft status area at the top of Form Loader helps prevent lost work without duplicating the full recovery page.
 
 - Resume Latest loads the newest draft in `data/pending`.
 - Pending Drafts opens a focused list of active draft files.
@@ -52,7 +52,7 @@ If you load a draft or import Excel while unsaved changes exist, Logging Center 
 
 ## Excel Import And Export Notes
 
-- Export uses the template path stored in `layout_config.json`.
+- Export uses the template path stored in the active form layout file, which may be the default `layout_config.json` or a selected stored form under `data/forms`.
 - Export writes into the configured base export folder and, when date organization is enabled, uses `YYYY/MM MonthName` subfolders.
 - If Export finds an older month folder such as `04`, it renames it to the newer format such as `04 April` before saving the workbook.
 - If the sheet is missing time, Export can prompt to auto-balance downtime before writing the workbook.
@@ -65,10 +65,10 @@ If you load a draft or import Excel while unsaved changes exist, Logging Center 
 
 ## Where To Edit JSON Files
 
-- `layout_config.json`: use Layout Manager when possible.
+- `layout_config.json` and `data/forms/<form_id>.json`: use Layout Manager when possible.
 - `settings.json`: use Settings Manager when possible.
 - `rates.json`: use Rate Manager when possible.
-- Draft files in `data/pending`: normally created and managed by Production Log.
+- Draft files in `data/pending`: normally created and managed by Form Loader.
 - Recovery copies are stored under `data/backups`, per-form layout backup folders, and `data/pending/history`.
 
 When you save settings, layout, or rates through the built-in tools, the suite now keeps extra restore copies automatically.

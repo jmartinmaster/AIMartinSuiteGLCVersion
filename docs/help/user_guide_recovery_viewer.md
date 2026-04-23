@@ -2,7 +2,7 @@
 
 Use Backup / Recovery to inspect saved drafts, recovery snapshots, form-aware layout backups, and JSON backup files.
 
-- Pending Drafts can be resumed directly into Production Log.
+- Pending Drafts can be resumed directly into Form Loader.
 - Recovery Snapshots can be restored back into `data/pending` and opened immediately.
 - Settings, form definitions, default-layout, custom-form layout, and rate backups can be restored back into their live JSON files.
 - Open Selected File and Open Containing Folder help when you want to inspect recovery files directly with the system default app or file browser.

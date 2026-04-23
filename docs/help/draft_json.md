@@ -1,9 +1,9 @@
 # Draft JSON Reference
 
-Draft files store in-progress Production Log work so a session can be resumed after interruption.
+Draft files store in-progress Form Loader work so a session can be resumed after interruption.
 
 - Default location: `data/pending`
-- Created by: Production Log manual and automatic draft saves
+- Created by: Form Loader manual and automatic draft saves
 
 Filename pattern is generated from header values:
 
@@ -53,7 +53,7 @@ Keys:
 ## header
 
 - Type: object
-- Purpose: Current values of the Production Log header fields
+- Purpose: Current values of the Form Loader header fields
 
 Example:
 
@@ -102,7 +102,7 @@ Example row:
 
 ## Recommended Editing Path
 
-Treat draft files as recovery data. In normal use they should be created, resumed, and deleted through Production Log rather than edited manually.
+Treat draft files as recovery data. In normal use they should be created, resumed, and deleted through Form Loader rather than edited manually.
 
 ## Save and Recovery Behavior
 

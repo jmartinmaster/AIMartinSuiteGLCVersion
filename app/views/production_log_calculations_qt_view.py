@@ -15,7 +15,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 from app.models.production_log_calculations_model import EDITOR_SECTIONS
 
-__module_name__ = "Production Log Calculations Qt View"
+__module_name__ = "Form Calculations Qt View"
 __version__ = "1.1.2"
 
 from PyQt6.QtCore import Qt
@@ -69,7 +69,7 @@ class ProductionLogCalculationsQtView(QMainWindow):
         self.show()
 
     def _build_ui(self):
-        self.setWindowTitle(str(self.payload.get("window_title") or "Production Log Calculations"))
+        self.setWindowTitle(str(self.payload.get("window_title") or "Form Calculations"))
         if not self.embedded:
             self._fit_window_to_screen(1200, 900)
 
@@ -78,7 +78,7 @@ class ProductionLogCalculationsQtView(QMainWindow):
         root_layout.setContentsMargins(16, 16, 16, 16)
         root_layout.setSpacing(10)
 
-        title_label = QLabel(str(self.payload.get("title") or "Production Log Calculations"))
+        title_label = QLabel(str(self.payload.get("title") or "Form Calculations"))
         title_label.setObjectName("pageTitle")
         root_layout.addWidget(title_label)
 
@@ -113,7 +113,7 @@ class ProductionLogCalculationsQtView(QMainWindow):
         guidance_note = QLabel(
             str(
                 self.payload.get("guidance_note")
-                or "Saved profile changes apply to Production Log recalculations and workbook import/export behavior."
+                or "Saved profile changes apply to Form Loader recalculations and workbook import/export behavior."
             )
         )
         guidance_note.setObjectName("mutedLabel")
@@ -133,7 +133,7 @@ class ProductionLogCalculationsQtView(QMainWindow):
         defaults_button.clicked.connect(self.controller.reset_defaults)
         action_row.addWidget(defaults_button)
 
-        open_button = QPushButton("Open Production Log")
+        open_button = QPushButton("Open Form Loader")
         open_button.clicked.connect(self.controller.open_production_log)
         action_row.addWidget(open_button)
 

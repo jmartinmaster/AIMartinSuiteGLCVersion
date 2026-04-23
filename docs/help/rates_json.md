@@ -21,15 +21,15 @@ Example:
 
 ## How It Is Used
 
-- Production Log looks up the entered part number in this file.
+- Form Loader looks up the entered part number in this file.
 - If a part number is found, its target rate is used to estimate row time.
-- If a part number is not found, the Production Log falls back to the current goal MPH.
-- The active row rate is shown in Production Log, and each line can temporarily override that value without changing `rates.json`.
+- If a part number is not found, Form Loader falls back to the current goal MPH.
+- The active row rate is shown in Form Loader, and each line can temporarily override that value without changing `rates.json`.
 
 ## Good Practices
 
 - Keep part numbers exactly as operators enter them.
-- Keep values as clean numeric text so Production Log can convert them safely.
+- Keep values as clean numeric text so Form Loader can convert them safely.
 - Avoid duplicate keys written in slightly different formats.
 - Avoid units or extra text such as `mph` in the stored value.
 

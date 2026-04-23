@@ -54,8 +54,8 @@ class AccessRight:
 
 
 ACCESS_RIGHTS = (
-    AccessRight("module:production_log", "Production Log", "Open and use Production Log."),
-    AccessRight("developer:production_log_calculations", "Production Log Calculations", "Change developer-only Production Log calculation behavior."),
+    AccessRight("module:production_log", "Form Loader", "Open and use Form Loader."),
+    AccessRight("developer:production_log_calculations", "Form Calculations", "Change developer-only Form Loader calculation behavior."),
     AccessRight("module:layout_manager", "Layout Manager", "Open and use Layout Manager."),
     AccessRight("module:rate_manager", "Rate Manager", "Open and use Rate Manager."),
     AccessRight("module:settings_manager", "Settings Manager", "Open and use Settings Manager."),

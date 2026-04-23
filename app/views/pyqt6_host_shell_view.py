@@ -877,11 +877,11 @@ class PyQt6HostShellView(QMainWindow):
         if self._invoke_viewport_module_action(
             "production_log",
             "show_pending",
-            "Open Draft is unavailable because the Production Log viewport is not available.",
+            "Open Draft is unavailable because the Form Loader viewport is not available.",
             ensure_loaded=True,
         ):
             return
-        self.host_ui_adapter.show_warning("Action Unavailable", "Open Draft is unavailable because the Production Log viewport could not be loaded.")
+        self.host_ui_adapter.show_warning("Action Unavailable", "Open Draft is unavailable because the Form Loader viewport could not be loaded.")
 
     def menu_save(self):
         active_module_name = str(self.active_module_name or "").strip()
@@ -889,10 +889,10 @@ class PyQt6HostShellView(QMainWindow):
             if self._invoke_viewport_module_action(
                 "production_log",
                 "save_draft",
-                "Save Draft is unavailable because the Production Log viewport is not available.",
+                "Save Draft is unavailable because the Form Loader viewport is not available.",
             ):
                 return
-            self.host_ui_adapter.show_warning("Action Unavailable", "Save Draft is unavailable because the Production Log viewport is not available.")
+            self.host_ui_adapter.show_warning("Action Unavailable", "Save Draft is unavailable because the Form Loader viewport is not available.")
             return
         if active_module_name == "internal_code_editor":
             if self._invoke_viewport_module_action(
@@ -905,28 +905,28 @@ class PyQt6HostShellView(QMainWindow):
             return
         self.host_ui_adapter.show_warning(
             "Action Unavailable",
-            "Save is currently implemented for the active Production Log or Internal Code Editor viewport.",
+            "Save is currently implemented for the active Form Loader or Internal Code Editor viewport.",
         )
 
     def menu_export(self):
         if self._invoke_viewport_module_action(
             "production_log",
             "export_to_excel",
-            "Export to Excel is unavailable because the Production Log viewport is not available.",
+            "Export to Excel is unavailable because the Form Loader viewport is not available.",
             ensure_loaded=True,
         ):
             return
-        self.host_ui_adapter.show_warning("Action Unavailable", "Export to Excel is unavailable because the Production Log viewport could not be loaded.")
+        self.host_ui_adapter.show_warning("Action Unavailable", "Export to Excel is unavailable because the Form Loader viewport could not be loaded.")
 
     def menu_import(self):
         if self._invoke_viewport_module_action(
             "production_log",
             "import_from_excel_ui",
-            "Import Excel is unavailable because the Production Log viewport is not available.",
+            "Import Excel is unavailable because the Form Loader viewport is not available.",
             ensure_loaded=True,
         ):
             return
-        self.host_ui_adapter.show_warning("Action Unavailable", "Import Excel is unavailable because the Production Log viewport could not be loaded.")
+        self.host_ui_adapter.show_warning("Action Unavailable", "Import Excel is unavailable because the Form Loader viewport could not be loaded.")
 
     def _module_entry(self, module_name):
         for entry in self.module_catalog:

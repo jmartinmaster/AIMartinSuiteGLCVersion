@@ -21,13 +21,13 @@ from datetime import datetime
 
 from app.downtime_codes import get_code_options
 from app.external_data_registry import ExternalDataRegistry
-from app.form_definition_registry import DEFAULT_FORM_ID, FormDefinitionRegistry
+from app.form_definition_registry import DEFAULT_FORM_ID, DEFAULT_FORM_NAME, FormDefinitionRegistry
 from app.persistence import write_json_with_backup
 from app.production_log_roles import HEADER_BLANK_IGNORE_ROLES, HEADER_DERIVED_ROLES, resolve_header_field_role, resolve_row_field_role, normalize_role_name
 from app.utils import external_path
 from app.data_handler_service import DEFAULT_SHIFT_TIME_SETTINGS, DataHandlerService
 
-__module_name__ = "Production Log"
+__module_name__ = "Form Loader"
 __version__ = "1.2.8"
 
 BALANCE_DOWNTIME_CAUSE = "Time Balance Adjustment"
@@ -222,7 +222,7 @@ class ProductionLogModel:
         self.form_registry = FormDefinitionRegistry()
         self.active_form_info = self.form_registry.get_active_form()
         self.form_id = self.active_form_info.get("id", DEFAULT_FORM_ID)
-        self.form_name = self.active_form_info.get("name", "Production Logging Center")
+        self.form_name = self.active_form_info.get("name", DEFAULT_FORM_NAME)
         self.config_path = self.active_form_info["load_path"]
         self.dt_codes = get_code_options()
         self.data_handler = DataHandlerService(form_id=self.form_id, data_registry=self.data_registry)
@@ -237,7 +237,7 @@ class ProductionLogModel:
         return dict(self.active_form_info)
 
     def get_active_form_name(self):
-        return str(self.active_form_info.get("name") or self.form_name or "Production Logging Center")
+        return str(self.active_form_info.get("name") or self.form_name or DEFAULT_FORM_NAME)
 
     def get_form_section_title(self, suffix_text):
         suffix = str(suffix_text or "").strip()
@@ -275,7 +275,7 @@ class ProductionLogModel:
         raw_form_id = ""
         if isinstance(meta, dict):
             raw_form_id = str(meta.get("form_id") or "").strip()
-        return self.form_registry.normalize_form_id(raw_form_id or DEFAULT_FORM_ID)
+        return self.form_registry.canonical_form_id(raw_form_id or DEFAULT_FORM_ID)
 
     def load_layout_config(self):
         with open(self.config_path, "r", encoding="utf-8") as handle:
@@ -285,27 +285,31 @@ class ProductionLogModel:
     def _normalize_layout_config(self, config):
         normalized = dict(config) if isinstance(config, dict) else {}
         normalized["sections"] = self._normalize_sections(normalized)
-        normalized["header_fields"] = self._normalize_header_field_configs(normalized.get("header_fields"))
-        normalized["production_row_fields"] = self._merge_row_field_configs(
-            normalized.get("production_row_fields"),
-            DEFAULT_PRODUCTION_ROW_FIELDS,
-            "production",
-        )
-        normalized["downtime_row_fields"] = self._merge_row_field_configs(
-            normalized.get("downtime_row_fields"),
-            DEFAULT_DOWNTIME_ROW_FIELDS,
-            "downtime",
-        )
+        if "header_fields" in normalized:
+            normalized["header_fields"] = self._normalize_header_field_configs(normalized.get("header_fields"))
+        if "production_row_fields" in normalized:
+            normalized["production_row_fields"] = self._merge_row_field_configs(
+                normalized.get("production_row_fields"),
+                DEFAULT_PRODUCTION_ROW_FIELDS,
+                "production",
+            )
+        if "downtime_row_fields" in normalized:
+            normalized["downtime_row_fields"] = self._merge_row_field_configs(
+                normalized.get("downtime_row_fields"),
+                DEFAULT_DOWNTIME_ROW_FIELDS,
+                "downtime",
+            )
         return normalized
 
     def _normalize_sections(self, config):
         raw_sections = config.get("sections") if isinstance(config, dict) else None
         if not isinstance(raw_sections, list):
             raw_sections = []
+        if not raw_sections:
+            raw_sections = deepcopy(DEFAULT_SECTIONS)
 
         normalized_sections = []
         seen_ids = set()
-        default_by_id = {section["id"]: deepcopy(section) for section in DEFAULT_SECTIONS}
 
         for raw_section in raw_sections:
             if not isinstance(raw_section, dict):
@@ -313,9 +317,11 @@ class ProductionLogModel:
             section_id = str(raw_section.get("id", "")).strip().lower()
             if not section_id or section_id in seen_ids:
                 continue
-            normalized_section = default_by_id.get(section_id, {"id": section_id})
+            normalized_section = deepcopy(raw_section)
             normalized_section["id"] = section_id
-            normalized_section["name"] = str(raw_section.get("name", normalized_section.get("name", section_id.replace("_", " ").title()))).strip() or normalized_section.get("name", section_id)
+            normalized_section["name"] = str(
+                raw_section.get("name", normalized_section.get("name", section_id.replace("_", " ").title()))
+            ).strip() or section_id.replace("_", " ").title()
 
             description_text = str(raw_section.get("description", normalized_section.get("description", ""))).strip()
             if description_text:
@@ -324,51 +330,49 @@ class ProductionLogModel:
                 normalized_section.pop("description", None)
 
             fields_key = str(raw_section.get("fields_key", normalized_section.get("fields_key", ""))).strip()
-            if section_id == "header":
-                fields_key = "header_fields"
-            elif section_id == "production":
-                fields_key = "production_row_fields"
-            elif section_id == "downtime":
-                fields_key = "downtime_row_fields"
-            normalized_section["fields_key"] = fields_key or normalized_section.get("fields_key", "")
+            if fields_key:
+                normalized_section["fields_key"] = fields_key
+            else:
+                normalized_section.pop("fields_key", None)
 
             mapping_key = str(raw_section.get("mapping_key", normalized_section.get("mapping_key", ""))).strip()
-            if section_id == "production":
-                mapping_key = "production_mapping"
-            elif section_id == "downtime":
-                mapping_key = "downtime_mapping"
             if mapping_key:
                 normalized_section["mapping_key"] = mapping_key
             else:
                 normalized_section.pop("mapping_key", None)
 
             section_type = str(raw_section.get("section_type", normalized_section.get("section_type", "single"))).strip().lower()
-            normalized_section["section_type"] = section_type if section_type in {"single", "repeating"} else normalized_section.get("section_type", "single")
+            normalized_section["section_type"] = section_type or "single"
 
             behavior_profile = str(raw_section.get("behavior_profile", normalized_section.get("behavior_profile", section_id))).strip().lower()
-            normalized_section["behavior_profile"] = behavior_profile or normalized_section.get("behavior_profile", section_id)
+            if behavior_profile:
+                normalized_section["behavior_profile"] = behavior_profile
+            else:
+                normalized_section.pop("behavior_profile", None)
 
             if normalized_section["section_type"] == "repeating":
-                default_max_rows = raw_section.get("default_max_rows", normalized_section.get("default_max_rows", 25))
-                try:
-                    normalized_section["default_max_rows"] = max(1, int(default_max_rows or 25))
-                except (TypeError, ValueError):
-                    normalized_section["default_max_rows"] = 25
-                normalized_section["delete_row_policy"] = self._normalize_delete_row_policy(
-                    raw_section.get("delete_row_policy", normalized_section.get("delete_row_policy")),
-                    default_policy=normalized_section.get("delete_row_policy"),
-                )
+                default_max_rows = raw_section.get("default_max_rows", normalized_section.get("default_max_rows"))
+                if default_max_rows not in (None, ""):
+                    try:
+                        normalized_section["default_max_rows"] = max(1, int(default_max_rows))
+                    except (TypeError, ValueError):
+                        normalized_section["default_max_rows"] = default_max_rows
+                else:
+                    normalized_section.pop("default_max_rows", None)
+                raw_policy = raw_section.get("delete_row_policy", normalized_section.get("delete_row_policy"))
+                if isinstance(raw_policy, dict):
+                    normalized_section["delete_row_policy"] = self._normalize_delete_row_policy(
+                        raw_policy,
+                        default_policy=normalized_section.get("delete_row_policy"),
+                    )
+                else:
+                    normalized_section.pop("delete_row_policy", None)
             else:
                 normalized_section.pop("default_max_rows", None)
                 normalized_section.pop("delete_row_policy", None)
 
             normalized_sections.append(normalized_section)
             seen_ids.add(section_id)
-
-        for default_section in DEFAULT_SECTIONS:
-            section_id = default_section["id"]
-            if section_id not in seen_ids:
-                normalized_sections.append(deepcopy(default_section))
 
         return normalized_sections
 
@@ -475,9 +479,8 @@ class ProductionLogModel:
 
     def _merge_row_field_configs(self, configured_fields, default_fields, section_name):
         if not isinstance(configured_fields, list):
-            return deepcopy(default_fields)
+            return []
 
-        default_map = {field["id"]: field for field in default_fields}
         merged_fields = []
         seen_ids = set()
         for field in configured_fields:
@@ -486,8 +489,7 @@ class ProductionLogModel:
             field_id = str(field.get("id", "")).strip()
             if not field_id or field_id in seen_ids:
                 continue
-            merged_field = dict(default_map.get(field_id, {}))
-            merged_field.update(field)
+            merged_field = dict(field)
             role_name = resolve_row_field_role(section_name, field_id, merged_field.get("role"))
             if role_name:
                 merged_field["role"] = role_name
@@ -496,24 +498,12 @@ class ProductionLogModel:
             merged_fields.append(merged_field)
             seen_ids.add(field_id)
 
-        for default_field in default_fields:
-            field_id = default_field["id"]
-            if field_id not in seen_ids:
-                merged_fields.append(deepcopy(default_field))
-
         return merged_fields
 
     def get_section_field_configs(self, section_name, config=None):
         config_data = config or self.load_layout_config()
         section_info = self.get_section_info(section_name, config=config_data)
         config_key = section_info.get("fields_key")
-        if not config_key:
-            key_map = {
-                "header": "header_fields",
-                "production": "production_row_fields",
-                "downtime": "downtime_row_fields",
-            }
-            config_key = key_map.get(section_name)
         if not config_key:
             return []
         field_configs = config_data.get(config_key, [])

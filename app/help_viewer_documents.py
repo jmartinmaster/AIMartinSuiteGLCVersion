@@ -24,7 +24,7 @@ DOC_GROUPS = {
     "user_guide": {
         "sections": [
             ("Overview", "docs/help/user_guide.md"),
-            ("Production Log", "docs/help/user_guide_production_log.md"),
+            ("Form Loader", "docs/help/user_guide_production_log.md"),
             ("Rate Manager", "docs/help/user_guide_rate_manager.md"),
             ("Layout Manager", "docs/help/user_guide_layout_manager.md"),
             ("Layout Manager: Form Creation and Editing", "docs/help/user_guide_layout_manager_form_authoring.md"),
@@ -41,8 +41,8 @@ DOC_INDEX = [
     ("Form Definitions", "docs/help/form_definitions.md"),
     ("Layout Manager Form Authoring", "docs/help/user_guide_layout_manager_form_authoring.md"),
     ("Layout JSON", "docs/help/layout_config.md"),
-    ("Production Log Calculations", "docs/help/production_log_calculations.md"),
-    ("Production Log JSON Architecture", "docs/production_log_json_architecture.md"),
+    ("Form Calculations", "docs/help/production_log_calculations.md"),
+    ("Form Loader JSON Architecture", "docs/production_log_json_architecture.md"),
     ("Settings JSON", "docs/help/settings_json.md"),
     ("Rates JSON", "docs/help/rates_json.md"),
     ("Draft JSON", "docs/help/draft_json.md"),

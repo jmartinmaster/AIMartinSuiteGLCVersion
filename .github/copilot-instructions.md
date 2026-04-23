@@ -51,12 +51,12 @@ AIMartinSuiteGLCVersion/
 ├── assets/                  # Icons and image assets
 ├── docs/                    # Canonical docs, migration plan, help center markdown files
 ├── templates/               # Excel template(s)
-├── layout_config.json       # Production Log layout definition
+├── layout_config.json       # Form Loader layout definition
 ├── rates.json               # Rate configuration
 └── build.py                 # PyInstaller build script (Windows EXE / Ubuntu DEB)
 ```
 
-The `app/` directory is flat for service/utility modules. All **dashboard modules** (Production Log, Rate Manager, etc.) follow strict MVC splits inside `app/controllers/`, `app/models/`, and `app/views/`.
+The `app/` directory is flat for service/utility modules. All **dashboard modules** (Form Loader, Rate Manager, etc.) follow strict MVC splits inside `app/controllers/`, `app/models/`, and `app/views/`.
 
 The canonical host-migration plan lives at `docs/Completed Plans/pyqt6_host_migration_master_plan.md`. Do not create separate migration plans for the same effort.
 
@@ -493,7 +493,7 @@ Extending an existing ttkbootstrap theme without a custom preset: the `_build_th
 
 | Module name | Display name | Key responsibility |
 |-------------|-------------|-------------------|
-| `production_log` | Production Log | Shift entry, draft save/load, Excel export |
+| `production_log` | Form Loader | Shift entry, draft save/load, Excel export |
 | `rate_manager` | Rate Manager | Mold-rate configuration editing |
 | `layout_manager` | Layout Manager | JSON layout config block/grid editor |
 | `settings_manager` | Settings Manager | App settings, theme, security admin |

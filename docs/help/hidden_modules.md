@@ -16,13 +16,13 @@ These modules are bundled with Logging Center but intentionally do not appear in
 ## Data Handler
 
 - Owns workbook import and export logic.
-- Normalizes Production Log header values used by draft JSON and Excel routing.
+- Normalizes Form Loader header values used by draft JSON and Excel routing.
 - Exists as a shared service module rather than a standalone page.
 
 ## Downtime Codes
 
 - Provides the default downtime-code map and normalization helpers.
-- Supports Settings Manager and Production Log without acting as its own screen.
+- Supports Settings Manager and Form Loader without acting as its own screen.
 
 ## Help Viewer
 

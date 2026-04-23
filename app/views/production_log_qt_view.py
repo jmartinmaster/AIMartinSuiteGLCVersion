@@ -13,15 +13,17 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
+from app.downtime_codes import get_code_options
 from app.theme_manager import get_qt_palette, get_qt_stylesheet
 
-__module_name__ = "Production Log Qt View"
+__module_name__ = "Form Loader Qt View"
 __version__ = "1.3.2"
 
 from PyQt6.QtCore import QTimer, Qt
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QApplication,
+    QComboBox,
     QDialog,
     QDialogButtonBox,
     QFileDialog,
@@ -50,11 +52,21 @@ def is_production_log_qt_runtime_available():
 
 class ProductionLogQtView(QMainWindow):
     ROW_ACTION_COLUMN = 0
+    SECTION_NAME_DEFAULTS = {
+        "header": "Header Fields",
+        "production": "Production Rows",
+        "downtime": "Downtime Rows",
+    }
+    REPEATING_SECTION_MIN_HEIGHTS = {
+        "production": 260,
+        "downtime": 240,
+    }
 
     def __init__(
         self,
         controller,
         payload,
+        sections,
         header_fields,
         production_fields,
         downtime_fields,
@@ -68,11 +80,21 @@ class ProductionLogQtView(QMainWindow):
         self.payload = dict(payload or {})
         self.theme_tokens = dict(self.payload.get("theme_tokens") or {})
         self.embedded = parent_widget is not None
+        self.sections = [dict(section) for section in list(sections or []) if isinstance(section, dict)]
         self.header_fields = list(header_fields or [])
         self.production_fields = list(production_fields or [])
         self.downtime_fields = list(downtime_fields or [])
+        self.section_field_configs = {
+            "header": self.header_fields,
+            "production": self.production_fields,
+            "downtime": self.downtime_fields,
+        }
+        self.section_info_by_profile = self._build_section_info_by_profile()
         self.row_delete_policies = dict(row_delete_policies or {})
         self.header_widgets = {}
+        self.repeating_sections = {}
+        self.production_table = None
+        self.downtime_table = None
         self.has_unsaved_changes = False
         self.last_saved_signature = None
         self.last_export_path = None
@@ -134,7 +156,7 @@ class ProductionLogQtView(QMainWindow):
         widget.resize(min(int(requested_width), max_width), min(int(requested_height), max_height))
 
     def _build_ui(self):
-        self.setWindowTitle(str(self.payload.get("window_title") or "Production Log"))
+        self.setWindowTitle(str(self.payload.get("window_title") or "Form Loader"))
         if self.embedded:
             self.setMinimumSize(0, 0)
         else:
@@ -155,11 +177,11 @@ class ProductionLogQtView(QMainWindow):
         content_layout.setContentsMargins(18, 18, 18, 18)
         content_layout.setSpacing(12)
 
-        title_label = QLabel(str(self.payload.get("title") or "Production Log"))
+        title_label = QLabel(str(self.payload.get("title") or "Form Loader"))
         title_label.setObjectName("pageTitle")
         content_layout.addWidget(title_label)
 
-        subtitle_label = QLabel(str(self.payload.get("subtitle") or "PyQt6 Production Log editor"))
+        subtitle_label = QLabel(str(self.payload.get("subtitle") or "PyQt6 Form Loader editor"))
         subtitle_label.setObjectName("mutedLabel")
         subtitle_label.setWordWrap(True)
         content_layout.addWidget(subtitle_label)
@@ -167,39 +189,20 @@ class ProductionLogQtView(QMainWindow):
         self.form_name_label = QLabel("Active Form: --")
         content_layout.addWidget(self.form_name_label)
 
-        header_group = QGroupBox("Header", central_widget)
-        header_layout = QGridLayout(header_group)
-        header_layout.setHorizontalSpacing(12)
-        header_layout.setVerticalSpacing(8)
-        max_grid_col = 0
-        for field in self.header_fields:
-            field_id = str(field.get("id") or "").strip()
-            if not field_id:
-                continue
-            label_text = str(field.get("label") or field_id.replace("_", " ").title())
-            grid_row = int(field.get("row") or 0)
-            grid_col = int(field.get("col") or 0)
-            max_grid_col = max(max_grid_col, grid_col + 1)
+        selector_group = QGroupBox("Form Selector", central_widget)
+        selector_layout = QHBoxLayout(selector_group)
+        selector_layout.setContentsMargins(8, 8, 8, 8)
+        selector_layout.setSpacing(8)
+        selector_layout.addWidget(QLabel("Stored Form"))
 
-            field_widget = QLineEdit(str(field.get("default") or ""), header_group)
-            if bool(field.get("readonly")):
-                field_widget.setReadOnly(True)
-            configured_width = int(field.get("width") or 0)
-            if configured_width > 0:
-                # Approximate Tk character-width hints in pixels for Qt line edits.
-                field_widget.setMinimumWidth(max(90, configured_width * 10))
+        self.form_selector_combo = QComboBox(selector_group)
+        self.form_selector_combo.setMinimumWidth(280)
+        selector_layout.addWidget(self.form_selector_combo, 1)
 
-            label_widget = QLabel(label_text + ":", header_group)
-            self.header_widgets[field_id] = field_widget
-            header_layout.addWidget(label_widget, grid_row, grid_col)
-            header_layout.addWidget(field_widget, grid_row, grid_col + 1)
-
-        for column_index in range(max_grid_col + 2):
-            if column_index % 2 == 1:
-                header_layout.setColumnStretch(column_index, 1)
-            else:
-                header_layout.setColumnStretch(column_index, 0)
-        content_layout.addWidget(header_group)
+        activate_form_button = QPushButton("Switch Form", selector_group)
+        activate_form_button.clicked.connect(self.controller.activate_selected_form)
+        selector_layout.addWidget(activate_form_button)
+        content_layout.addWidget(selector_group)
 
         controls_layout = QHBoxLayout()
 
@@ -256,55 +259,7 @@ class ProductionLogQtView(QMainWindow):
         controls_layout.addStretch(1)
         content_layout.addLayout(controls_layout)
 
-        production_title = QLabel("Production Rows")
-        production_title.setObjectName("sectionTitle")
-        content_layout.addWidget(production_title)
-
-        self.production_table = QTableWidget()
-        self.production_table.setMinimumHeight(260)
-        self.production_table.setColumnCount(len(self.production_fields) + 1)
-        self.production_table.setHorizontalHeaderLabels([""] + self._field_labels(self.production_fields))
-        self.production_table.setColumnWidth(self.ROW_ACTION_COLUMN, 36)
-        self.production_table.horizontalHeader().setStretchLastSection(True)
-        self.production_table.verticalHeader().setVisible(False)
-        self.production_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.production_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        content_layout.addWidget(self.production_table)
-
-        production_actions = QHBoxLayout()
-        add_production_button = QPushButton("Add Production Row")
-        add_production_button.clicked.connect(self._add_production_row)
-        production_actions.addWidget(add_production_button)
-        remove_production_button = QPushButton("Remove Selected")
-        remove_production_button.clicked.connect(self._remove_selected_production_row)
-        production_actions.addWidget(remove_production_button)
-        production_actions.addStretch(1)
-        content_layout.addLayout(production_actions)
-
-        downtime_title = QLabel("Downtime Rows")
-        downtime_title.setObjectName("sectionTitle")
-        content_layout.addWidget(downtime_title)
-
-        self.downtime_table = QTableWidget()
-        self.downtime_table.setMinimumHeight(240)
-        self.downtime_table.setColumnCount(len(self.downtime_fields) + 1)
-        self.downtime_table.setHorizontalHeaderLabels([""] + self._field_labels(self.downtime_fields))
-        self.downtime_table.setColumnWidth(self.ROW_ACTION_COLUMN, 36)
-        self.downtime_table.horizontalHeader().setStretchLastSection(True)
-        self.downtime_table.verticalHeader().setVisible(False)
-        self.downtime_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.downtime_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        content_layout.addWidget(self.downtime_table)
-
-        downtime_actions = QHBoxLayout()
-        add_downtime_button = QPushButton("Add Downtime Row")
-        add_downtime_button.clicked.connect(self._add_downtime_row)
-        downtime_actions.addWidget(add_downtime_button)
-        remove_downtime_button = QPushButton("Remove Selected")
-        remove_downtime_button.clicked.connect(self._remove_selected_downtime_row)
-        downtime_actions.addWidget(remove_downtime_button)
-        downtime_actions.addStretch(1)
-        content_layout.addLayout(downtime_actions)
+        self._build_dynamic_sections(content_layout)
 
         self.draft_status_label = QLabel("Drafts: 0 | Recovery: 0 | Latest: None")
         self.draft_status_label.setObjectName("mutedLabel")
@@ -324,7 +279,258 @@ class ProductionLogQtView(QMainWindow):
         self.setCentralWidget(central_widget)
         self.status_bar = QStatusBar(self)
         self.setStatusBar(self.status_bar)
-        self.status_bar.showMessage("Production Log Qt window ready.", 5000)
+        self.status_bar.showMessage("Form Loader window ready.", 5000)
+
+    def _build_section_info_by_profile(self):
+        section_info_by_profile = {}
+        for section in self.sections:
+            behavior_profile = str(section.get("behavior_profile") or section.get("id") or "").strip().lower()
+            if not behavior_profile or behavior_profile in section_info_by_profile:
+                continue
+            normalized_section = dict(section)
+            normalized_section["behavior_profile"] = behavior_profile
+            normalized_section["name"] = self._normalize_section_name(behavior_profile, section)
+            normalized_section["description"] = str(section.get("description") or "")
+            section_info_by_profile[behavior_profile] = normalized_section
+        return section_info_by_profile
+
+    def _normalize_section_name(self, section_id, section_info=None):
+        if isinstance(section_info, dict):
+            candidate = str(section_info.get("name") or section_info.get("id") or "").strip()
+            if candidate:
+                return candidate
+        return self.SECTION_NAME_DEFAULTS.get(section_id, "Section")
+
+    def _get_section_info(self, section_id, section_info=None):
+        resolved_section_id = str(section_id or "").strip().lower()
+        info = dict(self.section_info_by_profile.get(resolved_section_id) or {})
+        if isinstance(section_info, dict):
+            info.update(section_info)
+        info["behavior_profile"] = resolved_section_id
+        info["name"] = self._normalize_section_name(resolved_section_id, info)
+        info["description"] = str(info.get("description") or "")
+        if not str(info.get("section_type") or "").strip():
+            info["section_type"] = "single" if resolved_section_id == "header" else "repeating"
+        return info
+
+    def _get_section_display_name(self, section_id):
+        return str(self._get_section_info(section_id).get("name") or "Section")
+
+    def _get_section_field_configs(self, section_id):
+        return list(self.section_field_configs.get(str(section_id or "").strip().lower()) or [])
+
+    def _register_repeating_section(self, section_id, table, field_configs, section_name):
+        resolved_section_id = str(section_id or "").strip().lower()
+        self.repeating_sections[resolved_section_id] = {
+            "table": table,
+            "field_configs": list(field_configs or []),
+            "section_name": str(section_name or self._get_section_display_name(resolved_section_id)),
+        }
+        if resolved_section_id == "production":
+            self.production_table = table
+        elif resolved_section_id == "downtime":
+            self.downtime_table = table
+
+    def _get_repeating_section_runtime(self, section_id):
+        return self.repeating_sections.get(str(section_id or "").strip().lower()) or {}
+
+    def _get_section_table(self, section_id):
+        runtime_info = self._get_repeating_section_runtime(section_id)
+        table = runtime_info.get("table")
+        if table is not None:
+            return table
+        resolved_section_id = str(section_id or "").strip().lower()
+        if resolved_section_id == "production":
+            return self.production_table
+        if resolved_section_id == "downtime":
+            return self.downtime_table
+        return None
+
+    def _build_dynamic_sections(self, content_layout):
+        rendered_profiles = set()
+        for section in self.sections:
+            section_type = str(section.get("section_type") or "single").strip().lower()
+            behavior_profile = str(section.get("behavior_profile") or section.get("id") or "").strip().lower()
+            section_name = str(section.get("name") or section.get("id") or "Section").strip() or "Section"
+
+            if behavior_profile in rendered_profiles:
+                self._add_unsupported_section_notice(
+                    content_layout,
+                    section_name,
+                    f"Section profile '{behavior_profile}' is declared more than once and only one instance is currently supported.",
+                )
+                continue
+
+            if behavior_profile == "header" and section_type == "single":
+                rendered_profiles.add(behavior_profile)
+                self._build_header_section(content_layout, self._get_section_info("header", section))
+                continue
+
+            if behavior_profile == "production" and section_type == "repeating":
+                rendered_profiles.add(behavior_profile)
+                self._build_repeating_section(content_layout, "production", section)
+                continue
+
+            if behavior_profile == "downtime" and section_type == "repeating":
+                rendered_profiles.add(behavior_profile)
+                self._build_repeating_section(content_layout, "downtime", section)
+                continue
+
+            self._add_unsupported_section_notice(
+                content_layout,
+                section_name,
+                f"Section profile '{behavior_profile or 'unknown'}' with type '{section_type or 'unknown'}' is not yet rendered in Form Loader.",
+            )
+
+    def _add_section_heading(self, content_layout, title, description=None):
+        title_label = QLabel(str(title or "Section"))
+        title_label.setObjectName("sectionTitle")
+        content_layout.addWidget(title_label)
+        if str(description or "").strip():
+            description_label = QLabel(str(description or ""))
+            description_label.setObjectName("mutedLabel")
+            description_label.setWordWrap(True)
+            content_layout.addWidget(description_label)
+
+    def _build_header_section(self, content_layout, section_info):
+        section_info = self._get_section_info("header", section_info)
+        section_name = str(section_info.get("name") or self._get_section_display_name("header"))
+        description = str(section_info.get("description") or "")
+        self._add_section_heading(content_layout, section_name, description)
+
+        header_group = QGroupBox(section_name)
+        header_layout = QGridLayout(header_group)
+        header_layout.setHorizontalSpacing(12)
+        header_layout.setVerticalSpacing(8)
+        max_grid_col = 0
+        for field in self._get_section_field_configs("header"):
+            field_id = str(field.get("id") or "").strip()
+            if not field_id:
+                continue
+            label_text = str(field.get("label") or field_id.replace("_", " ").title())
+            grid_row = int(field.get("row") or 0)
+            grid_col = int(field.get("col") or 0)
+            max_grid_col = max(max_grid_col, grid_col + 1)
+
+            field_widget = self._create_header_field_widget(field, header_group)
+
+            label_widget = QLabel(label_text + ":", header_group)
+            self.header_widgets[field_id] = field_widget
+            header_layout.addWidget(label_widget, grid_row, grid_col)
+            header_layout.addWidget(field_widget, grid_row, grid_col + 1)
+
+        for column_index in range(max_grid_col + 2):
+            if column_index % 2 == 1:
+                header_layout.setColumnStretch(column_index, 1)
+            else:
+                header_layout.setColumnStretch(column_index, 0)
+        content_layout.addWidget(header_group)
+
+    def _header_field_options(self, field):
+        options = []
+        raw_values = field.get("values")
+        if isinstance(raw_values, list):
+            for raw_value in raw_values:
+                value_text = str(raw_value or "").strip()
+                if value_text and value_text not in options:
+                    options.append(value_text)
+        elif isinstance(raw_values, str):
+            for raw_value in raw_values.split(","):
+                value_text = str(raw_value or "").strip()
+                if value_text and value_text not in options:
+                    options.append(value_text)
+
+        options_source = str(field.get("options_source") or "").strip().lower()
+        if options_source == "downtime_codes":
+            for raw_value in get_code_options():
+                value_text = str(raw_value or "").strip()
+                if value_text and value_text not in options:
+                    options.append(value_text)
+        return options
+
+    def _create_header_field_widget(self, field, parent):
+        configured_width = int(field.get("width") or 0)
+        widget_name = str(field.get("widget") or "entry").strip().lower() or "entry"
+        state_name = str(field.get("state") or "").strip().lower()
+        default_text = str(field.get("default") or "")
+
+        if widget_name == "combobox":
+            field_widget = QComboBox(parent)
+            field_widget.addItems(self._header_field_options(field))
+            is_editable = state_name == "normal"
+            if not state_name and bool(field.get("readonly")):
+                is_editable = False
+            field_widget.setEditable(is_editable)
+            if configured_width > 0:
+                field_widget.setMinimumWidth(max(90, configured_width * 10))
+            if state_name == "disabled":
+                field_widget.setEnabled(False)
+            self._set_header_widget_value(field_widget, default_text)
+            return field_widget
+
+        field_widget = QLineEdit(default_text, parent)
+        if bool(field.get("readonly")) or state_name == "readonly":
+            field_widget.setReadOnly(True)
+        if state_name == "disabled":
+            field_widget.setEnabled(False)
+        if configured_width > 0:
+            field_widget.setMinimumWidth(max(90, configured_width * 10))
+        return field_widget
+
+    def _set_header_widget_value(self, widget, value):
+        text_value = str(value or "")
+        if isinstance(widget, QComboBox):
+            if widget.isEditable():
+                widget.setEditText(text_value)
+                return
+            match_index = widget.findText(text_value, Qt.MatchFlag.MatchFixedString)
+            if match_index < 0:
+                widget.addItem(text_value)
+                match_index = widget.count() - 1
+            widget.setCurrentIndex(match_index)
+            return
+        widget.setText(text_value)
+
+    def _create_repeating_table(self, field_configs):
+        table = QTableWidget()
+        table.setColumnCount(len(field_configs) + 1)
+        table.setHorizontalHeaderLabels([""] + self._field_labels(field_configs))
+        table.setColumnWidth(self.ROW_ACTION_COLUMN, 36)
+        table.horizontalHeader().setStretchLastSection(True)
+        table.verticalHeader().setVisible(False)
+        table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        return table
+
+    def _build_repeating_section(self, content_layout, section_id, section_info=None):
+        section_info = self._get_section_info(section_id, section_info)
+        section_name = str(section_info.get("name") or self._get_section_display_name(section_id))
+        description = str(section_info.get("description") or "")
+        field_configs = self._get_section_field_configs(section_id)
+        self._add_section_heading(content_layout, section_name, description)
+        table = self._create_repeating_table(field_configs)
+        table.setMinimumHeight(self.REPEATING_SECTION_MIN_HEIGHTS.get(section_id, 240))
+        self._register_repeating_section(section_id, table, field_configs, section_name)
+        content_layout.addWidget(table)
+
+        actions_layout = QHBoxLayout()
+        add_button = QPushButton("Add Row")
+        remove_button = QPushButton("Remove Selected")
+        add_button.clicked.connect(lambda _checked=False, current_section_id=section_id: self._focus_open_section(current_section_id))
+        remove_button.clicked.connect(
+            lambda _checked=False, current_section_id=section_id: self._remove_selected_section_row(current_section_id)
+        )
+        actions_layout.addWidget(add_button)
+        actions_layout.addWidget(remove_button)
+        actions_layout.addStretch(1)
+        content_layout.addLayout(actions_layout)
+
+    def _add_unsupported_section_notice(self, content_layout, section_name, message):
+        self._add_section_heading(content_layout, section_name)
+        notice_label = QLabel(str(message or "This section is not currently rendered."))
+        notice_label.setObjectName("mutedLabel")
+        notice_label.setWordWrap(True)
+        content_layout.addWidget(notice_label)
 
     def apply_theme(self, theme_tokens=None):
         if isinstance(theme_tokens, dict):
@@ -336,6 +542,16 @@ class ProductionLogQtView(QMainWindow):
 
     def _wire_live_edit_handlers(self):
         for widget in self.header_widgets.values():
+            if isinstance(widget, QComboBox):
+                try:
+                    widget.currentTextChanged.connect(self._queue_live_recalculate)
+                except Exception:
+                    pass
+                try:
+                    widget.currentTextChanged.connect(self.controller.on_header_field_focus_out)
+                except Exception:
+                    pass
+                continue
             try:
                 widget.textChanged.connect(self._queue_live_recalculate)
             except Exception:
@@ -344,14 +560,16 @@ class ProductionLogQtView(QMainWindow):
                 widget.editingFinished.connect(self.controller.on_header_field_focus_out)
             except Exception:
                 pass
-        try:
-            self.production_table.itemChanged.connect(self._handle_production_item_changed)
-        except Exception:
-            pass
-        try:
-            self.downtime_table.itemChanged.connect(self._handle_downtime_item_changed)
-        except Exception:
-            pass
+        if self.production_table is not None:
+            try:
+                self.production_table.itemChanged.connect(self._handle_production_item_changed)
+            except Exception:
+                pass
+        if self.downtime_table is not None:
+            try:
+                self.downtime_table.itemChanged.connect(self._handle_downtime_item_changed)
+            except Exception:
+                pass
 
     def _handle_production_item_changed(self, _item):
         self._handle_table_item_changed(self.production_table, self.production_fields)
@@ -391,21 +609,35 @@ class ProductionLogQtView(QMainWindow):
         return self._field_column_offset()
 
     def _row_has_content(self, table, field_configs, row_index):
-        for column_index, _field in enumerate(field_configs, start=self._field_column_offset()):
+        if table is None:
+            return False
+        for column_index, field in enumerate(field_configs, start=self._field_column_offset()):
+            if bool(field.get("derived")):
+                continue
             item = table.item(row_index, column_index)
             if item is not None and str(item.text() or "").strip():
                 return True
         return False
 
     def _table_field_configs(self, table):
-        if table is self.production_table:
-            return self.production_fields
-        return self.downtime_fields
+        section_id = self._table_section_id(table)
+        if not section_id:
+            return []
+        runtime_info = self._get_repeating_section_runtime(section_id)
+        field_configs = runtime_info.get("field_configs")
+        if field_configs:
+            return list(field_configs)
+        return self._get_section_field_configs(section_id)
 
     def _table_section_id(self, table):
+        for section_id, runtime_info in self.repeating_sections.items():
+            if runtime_info.get("table") is table:
+                return section_id
         if table is self.production_table:
             return "production"
-        return "downtime"
+        if table is self.downtime_table:
+            return "downtime"
+        return ""
 
     def _get_row_delete_policy(self, table):
         section_id = self._table_section_id(table)
@@ -422,10 +654,15 @@ class ProductionLogQtView(QMainWindow):
 
     def set_row_delete_policies(self, row_delete_policies):
         self.row_delete_policies = dict(row_delete_policies or {})
-        self._refresh_row_action_buttons(self.production_table, self.production_fields)
-        self._refresh_row_action_buttons(self.downtime_table, self.downtime_fields)
+        for runtime_info in self.repeating_sections.values():
+            table = runtime_info.get("table")
+            field_configs = list(runtime_info.get("field_configs") or [])
+            if table is not None:
+                self._refresh_row_action_buttons(table, field_configs)
 
     def _refresh_row_action_buttons(self, table, field_configs):
+        if table is None:
+            return
         policy = self._get_row_delete_policy(table)
         show_delete_button = bool(policy.get("show_delete_button", True))
         delete_button_label = str(policy.get("delete_button_label") or "X")
@@ -448,6 +685,8 @@ class ProductionLogQtView(QMainWindow):
             table.setCellWidget(row_index, self.ROW_ACTION_COLUMN, delete_button)
 
     def _ensure_open_row(self, table, field_configs):
+        if table is None:
+            return
         table.blockSignals(True)
         try:
             row_index = table.rowCount() - 1
@@ -461,6 +700,8 @@ class ProductionLogQtView(QMainWindow):
             table.blockSignals(False)
 
     def _focus_open_row(self, table, field_configs):
+        if table is None:
+            return
         self._ensure_open_row(table, field_configs)
         self._refresh_row_action_buttons(table, field_configs)
         if table.rowCount() <= 0:
@@ -473,6 +714,8 @@ class ProductionLogQtView(QMainWindow):
             table.editItem(item)
 
     def _set_table_rows(self, table, field_configs, rows):
+        if table is None:
+            return
         table.blockSignals(True)
         table.setRowCount(0)
         for row_data in rows:
@@ -482,6 +725,8 @@ class ProductionLogQtView(QMainWindow):
         table.blockSignals(False)
 
     def _append_row(self, table, field_configs, row_data=None):
+        if table is None:
+            return
         row_data = dict(row_data or {})
         row_index = table.rowCount()
         table.insertRow(row_index)
@@ -502,12 +747,11 @@ class ProductionLogQtView(QMainWindow):
         return mapping
 
     def set_table_field_value(self, section_name, row_index, field_id, value):
-        if section_name == "production":
-            table = self.production_table
-            field_map = self._field_index_map(self.production_fields)
-        else:
-            table = self.downtime_table
-            field_map = self._field_index_map(self.downtime_fields)
+        normalized_section_name = str(section_name or "").strip().lower()
+        table = self._get_section_table(normalized_section_name)
+        field_map = self._field_index_map(self._get_section_field_configs(normalized_section_name))
+        if table is None:
+            return
         column_index = field_map.get(str(field_id or "").strip())
         if column_index is None:
             return
@@ -529,13 +773,13 @@ class ProductionLogQtView(QMainWindow):
         if widget is None:
             return
         widget.blockSignals(True)
-        widget.setText(str(value or ""))
+        self._set_header_widget_value(widget, value)
         widget.blockSignals(False)
 
     def ask_import_file_path(self):
         file_path, _selected = QFileDialog.getOpenFileName(
             self,
-            "Import Production Log Workbook",
+            "Import Form Loader Workbook",
             "",
             "Excel Workbooks (*.xlsx *.xlsm *.xls);;All Files (*)",
         )
@@ -546,6 +790,8 @@ class ProductionLogQtView(QMainWindow):
         self.ghost_label.setText(f"Ghost Time: {int(ghost_minutes)} min")
 
     def _collect_rows(self, table, field_configs):
+        if table is None:
+            return []
         rows = []
         for row_index in range(table.rowCount()):
             row_payload = {}
@@ -557,7 +803,7 @@ class ProductionLogQtView(QMainWindow):
                 item = table.item(row_index, column_index)
                 value = str(item.text()) if item is not None else ""
                 row_payload[field_id] = value
-                if value.strip():
+                if not bool(field.get("derived")) and value.strip():
                     has_content = True
             if has_content:
                 rows.append(row_payload)
@@ -566,11 +812,14 @@ class ProductionLogQtView(QMainWindow):
     def collect_form_data(self):
         header_payload = {}
         for field_id, widget in self.header_widgets.items():
-            header_payload[field_id] = str(widget.text())
+            if isinstance(widget, QComboBox):
+                header_payload[field_id] = str(widget.currentText())
+            else:
+                header_payload[field_id] = str(widget.text())
         return {
             "header": header_payload,
-            "production": self._collect_rows(self.production_table, self.production_fields),
-            "downtime": self._collect_rows(self.downtime_table, self.downtime_fields),
+            "production": self._collect_rows(self._get_section_table("production"), self._get_section_field_configs("production")),
+            "downtime": self._collect_rows(self._get_section_table("downtime"), self._get_section_field_configs("downtime")),
         }
 
     def set_form_data(self, header_payload, production_rows, downtime_rows):
@@ -578,14 +827,64 @@ class ProductionLogQtView(QMainWindow):
         self._suspend_dirty_tracking = True
         for field_id, widget in self.header_widgets.items():
             widget.blockSignals(True)
-            widget.setText(str(header_payload.get(field_id, "")))
+            self._set_header_widget_value(widget, header_payload.get(field_id, ""))
             widget.blockSignals(False)
-        self._set_table_rows(self.production_table, self.production_fields, list(production_rows or []))
-        self._set_table_rows(self.downtime_table, self.downtime_fields, list(downtime_rows or []))
+        self._set_table_rows(
+            self._get_section_table("production"),
+            self._get_section_field_configs("production"),
+            list(production_rows or []),
+        )
+        self._set_table_rows(
+            self._get_section_table("downtime"),
+            self._get_section_field_configs("downtime"),
+            list(downtime_rows or []),
+        )
         self._suspend_dirty_tracking = False
 
     def set_form_name(self, form_name):
         self.form_name_label.setText(f"Active Form: {str(form_name or '--')}")
+
+    def set_form_options(self, forms, selected_form_id=None):
+        combo = getattr(self, "form_selector_combo", None)
+        if combo is None:
+            return
+        previous_block_state = combo.blockSignals(True)
+        combo.clear()
+        for form_info in forms:
+            form_name = str(form_info.get("name") or form_info.get("id") or "Unnamed Form")
+            combo.addItem(form_name, form_info.get("id"))
+        if selected_form_id:
+            match_index = combo.findData(selected_form_id)
+            if match_index >= 0:
+                combo.setCurrentIndex(match_index)
+        combo.blockSignals(previous_block_state)
+
+    def current_form_id(self):
+        combo = getattr(self, "form_selector_combo", None)
+        if combo is None:
+            return None
+        return combo.currentData()
+
+    def _focus_open_section(self, section_id):
+        normalized_section_id = str(section_id or "").strip().lower()
+        self._focus_open_row(
+            self._get_section_table(normalized_section_id),
+            self._get_section_field_configs(normalized_section_id),
+        )
+
+    def _remove_selected_section_row(self, section_id):
+        normalized_section_id = str(section_id or "").strip().lower()
+        table = self._get_section_table(normalized_section_id)
+        if table is None:
+            return
+        selection_model = table.selectionModel()
+        if selection_model is None:
+            return
+        selected_rows = selection_model.selectedRows()
+        if not selected_rows:
+            return
+        require_confirmation = bool(self._get_row_delete_policy(table).get("require_delete_confirmation", False))
+        self._remove_table_row(table, int(selected_rows[0].row()), require_confirmation=require_confirmation)
 
     def set_draft_status(self, pending_count, recovery_count, latest_name):
         latest_text = str(latest_name or "None")
@@ -594,28 +893,22 @@ class ProductionLogQtView(QMainWindow):
         )
 
     def _add_production_row(self):
-        self._focus_open_row(self.production_table, self.production_fields)
+        self._focus_open_section("production")
 
     def _remove_selected_production_row(self):
-        selected_rows = self.production_table.selectionModel().selectedRows()
-        if not selected_rows:
-            return
-        self._remove_table_row(self.production_table, int(selected_rows[0].row()))
+        self._remove_selected_section_row("production")
 
     def _add_downtime_row(self):
-        self._focus_open_row(self.downtime_table, self.downtime_fields)
+        self._focus_open_section("downtime")
 
     def _remove_selected_downtime_row(self):
-        selected_rows = self.downtime_table.selectionModel().selectedRows()
-        if not selected_rows:
-            return
-        self._remove_table_row(self.downtime_table, int(selected_rows[0].row()))
+        self._remove_selected_section_row("downtime")
 
     def _remove_table_row(self, table, row_index, require_confirmation=False):
         if row_index < 0 or row_index >= table.rowCount():
             return
         if require_confirmation:
-            section_name = self._table_section_id(table).replace("_", " ").title()
+            section_name = self._get_section_display_name(self._table_section_id(table))
             if not self.ask_yes_no("Delete Row", f"Delete selected {section_name} row?"):
                 return
         field_configs = self._table_field_configs(table)
@@ -659,7 +952,7 @@ class ProductionLogQtView(QMainWindow):
         def load_selected_draft():
             selected_rows = table.selectionModel().selectedRows()
             if not selected_rows:
-                self.show_info("Production Log", "Select a pending draft first.")
+                self.show_info("Form Loader", "Select a pending draft first.")
                 return
             selected_index = int(selected_rows[0].row())
             if selected_index < 0 or selected_index >= len(pending_drafts):
@@ -722,7 +1015,7 @@ class ProductionLogQtView(QMainWindow):
         def restore_selected_snapshot():
             selected_rows = table.selectionModel().selectedRows()
             if not selected_rows:
-                self.show_info("Production Log", "Select a recovery snapshot first.")
+                self.show_info("Form Loader", "Select a recovery snapshot first.")
                 return
             selected_index = int(selected_rows[0].row())
             if selected_index < 0 or selected_index >= len(recovery_snapshots):
@@ -780,6 +1073,27 @@ class ProductionLogQtView(QMainWindow):
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         ) == QMessageBox.StandardButton.Yes
+
+    def ask_form_switch_action(self, current_form_name, target_form_name):
+        dialog = QMessageBox(self)
+        dialog.setIcon(QMessageBox.Icon.Warning)
+        dialog.setWindowTitle("Switch Form")
+        dialog.setText(f"Switch from {str(current_form_name or 'the current form')} to {str(target_form_name or 'the selected form')}?")
+        dialog.setInformativeText(
+            "You have entered data in the current form. Save a draft before switching, discard the current form data, or cancel the switch."
+        )
+        dialog.setStandardButtons(
+            QMessageBox.StandardButton.Save
+            | QMessageBox.StandardButton.Discard
+            | QMessageBox.StandardButton.Cancel
+        )
+        dialog.setDefaultButton(QMessageBox.StandardButton.Cancel)
+        result = dialog.exec()
+        if result == QMessageBox.StandardButton.Save:
+            return "save"
+        if result == QMessageBox.StandardButton.Discard:
+            return "discard"
+        return "cancel"
 
     def set_status(self, message):
         self.status_bar.showMessage(str(message), 5000)

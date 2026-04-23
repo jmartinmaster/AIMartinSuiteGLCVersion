@@ -89,11 +89,11 @@
 
 - `default_shift_hours`
   - Type: number
-  - Purpose: Default shift hours loaded into Production Log.
+  - Purpose: Default shift hours loaded into Form Loader.
 
 - `default_goal_mph`
   - Type: number
-  - Purpose: Default goal molds per hour loaded into Production Log.
+  - Purpose: Default goal molds per hour loaded into Form Loader.
 
 - `module_whitelist`
   - Type: array of strings
@@ -106,7 +106,7 @@
 
 - `downtime_codes`
   - Type: object
-  - Purpose: Optional label overrides for downtime code numbers used by Production Log and Excel import/export. Extra numeric codes can be added here in addition to the defaults.
+  - Purpose: Optional label overrides for downtime code numbers used by Form Loader and Excel import/export. Extra numeric codes can be added here in addition to the defaults.
 
 ## Recommended Editing Path
 

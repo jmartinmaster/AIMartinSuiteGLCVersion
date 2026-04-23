@@ -10,7 +10,7 @@ Use Rate Manager to maintain molds-per-hour targets for part numbers.
 - Delete removes the selected rate entry.
 - The table is the working list of stored part-number rates.
 
-These rates are used by Production Log when calculating per-row time and overall shift efficiency.
+These rates are used by Form Loader when calculating per-row time and overall shift efficiency.
 
 ## JSON Relationship
 

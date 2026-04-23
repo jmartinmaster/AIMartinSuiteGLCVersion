@@ -18,7 +18,7 @@ import os
 from datetime import datetime
 
 from app.external_data_registry import ExternalDataRegistry
-from app.form_definition_registry import DEFAULT_FORM_ID, FormDefinitionRegistry
+from app.form_definition_registry import DEFAULT_FORM_ID, DEFAULT_FORM_NAME, FormDefinitionRegistry
 from app.persistence import write_json_with_backup
 from app.utils import external_path
 
@@ -210,7 +210,7 @@ class RecoveryViewerModel:
             return str(form_info.get("name") or form_info.get("id") or "Form")
         except Exception:
             if str(form_id or "").strip() in {"", DEFAULT_FORM_ID}:
-                return "Production Logging Center"
+                return DEFAULT_FORM_NAME
             return str(form_id or "Form").replace("_", " ").title()
 
     def read_saved_at(self, path):

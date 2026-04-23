@@ -1,10 +1,12 @@
 # production_log_calculations.json Reference
 
-`production_log_calculations.json` controls runtime behavior for Production Log calculations.
+`production_log_calculations.json` controls runtime behavior for Form Loader calculations.
 
-This file is separate from `layout_config.json` on purpose:
+The file keeps the permanent internal `production_log_calculations` family name for compatibility, while `Form Calculations` is the preferred user-facing alias.
 
-- `layout_config.json` controls what the UI renders and how workbook columns are mapped.
+This file is separate from the active form layout contract on purpose:
+
+- The active layout file, either `layout_config.json` or a stored form under `data/forms`, controls what the UI renders and how workbook columns are mapped.
 - `production_log_calculations.json` controls how values are interpreted, rounded, normalized, and calculated.
 
 See also:
@@ -47,7 +49,7 @@ See also:
 
 ## Named Formulas
 
-The `formulas` object contains named expressions used by the live Production Log runtime and by workbook import/export transforms.
+The `formulas` object contains named expressions used by the live Form Loader runtime and by workbook import/export transforms.
 
 Current formula names:
 
@@ -134,10 +136,10 @@ Not allowed:
 - Comprehensions
 - Lambdas or arbitrary Python function calls
 
-If a formula uses unsupported syntax or references an unknown name, Logging Center falls back to the default behavior for that calculation.
+If a formula uses unsupported syntax or references an unknown name, the app falls back to the default behavior for that calculation.
 
 ## Recommended Editing Path
 
-Use Production Log Calculations for normal edits. It loads the active profile, previews the resolved behavior, and writes a backup before saving.
+Use Form Calculations for normal edits. It loads the active profile, previews the resolved behavior, and writes a backup before saving.
 
 Use Layout Manager when you need to change field order, widget types, workbook mappings, or semantic `role` values.

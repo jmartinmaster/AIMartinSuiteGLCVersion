@@ -1,12 +1,12 @@
 # Plan: Application-Wide NVDA Accessibility Verification
 
-> **Status**: Blocked pending Production Log modernization and rename prerequisites.
+> **Status**: Blocked pending Form Loader prerequisite closure.
 >
 > **Scope**: Adjust, verify, and document NVDA accessibility behavior across the full PyQt6 application shell and module set, including shared-viewport modules, dedicated-window exceptions, dialogs, status surfaces, and workflow transitions.
 >
-> **Primary Gate**: Do not execute the final NVDA validation pass until the Production Log upgrade, layout-system adoption, and Production Log rename work are complete.
+> **Primary Gate**: Do not execute the final NVDA validation pass until the internal `production_log` upgrade, layout-system adoption, and preferred `Form Loader` alias/documentation work are complete.
 >
-> **Planning Note**: This work also requires dedicated planning sessions before implementation or remediation begins. Once the prerequisite Production Log work is complete, start with a planning chat to freeze verification scope, audit order, evidence format, and remediation handling before running the formal NVDA pass.
+> **Planning Note**: This work also requires dedicated planning sessions before implementation or remediation begins. Once the prerequisite Form Loader work is complete, start with a planning chat to freeze verification scope, audit order, evidence format, and remediation handling before running the formal NVDA pass.
 
 ---
 
@@ -25,10 +25,10 @@ This plan exists so NVDA work is tracked at the correct scope.
 The earlier Layout Manager plan incorrectly carried NVDA as its final closure gate. That is no longer the right boundary.
 
 - Layout Manager accessibility implementation is already delivered at component scope.
-- The remaining verification is application-wide and must include Production Log, shell navigation, dialogs, status messaging, and cross-module workflow behavior.
-- The largest unresolved variable is the Production Log upgrade and rename effort, which can materially change control labels, workflow order, layout usage, and screen-reader expectations.
+- The remaining verification is application-wide and must include Form Loader, shell navigation, dialogs, status messaging, and cross-module workflow behavior.
+- The largest unresolved variable is the internal `production_log` upgrade and preferred-alias cleanup effort, which can materially change control labels, workflow order, layout usage, and screen-reader expectations.
 
-Until that Production Log work is finished, any final NVDA validation pass would be incomplete and likely need to be rerun.
+Until that Form Loader work is finished, any final NVDA validation pass would be incomplete and likely need to be rerun.
 
 ---
 
@@ -36,9 +36,9 @@ Until that Production Log work is finished, any final NVDA validation pass would
 
 This plan stays blocked until the following are complete:
 
-1. The Production Log upgrade plan is implemented and validated.
-2. Production Log supports the new layout system expected by the upgraded workflow.
-3. The Production Log rename is finalized and reflected in runtime labels, help documentation, and navigation text.
+1. The internal `production_log` upgrade plan is implemented and validated.
+2. Form Loader supports the new layout system expected by the upgraded workflow.
+3. The preferred `Form Loader` alias is reflected in runtime labels, help documentation, and navigation text while internal `production_log` identifiers remain stable.
 4. Shared module labels, status text, and user-facing terminology are stable enough to produce durable NVDA evidence.
 
 See the prerequisite plan:
@@ -52,7 +52,7 @@ See the prerequisite plan:
 When unblocked, NVDA verification must cover the full application surface, including:
 
 - Host shell navigation, sidebar labels, focus order, and non-blocking toast/status behavior
-- Production Log workflows after modernization and rename
+- Form Loader workflows after modernization and preferred-alias cleanup
 - Layout Manager dedicated runtime flows
 - Settings Manager, Recovery Viewer, Update Manager, Help Viewer, Rate Manager, About, and related dialogs
 - Cross-module transitions where focus or announced context can be lost
@@ -65,7 +65,7 @@ When unblocked, NVDA verification must cover the full application surface, inclu
 ### Phase 0: Accessibility Baseline Freeze
 **Goal**: Freeze the app state that NVDA evidence will be gathered against.
 
-- Confirm Production Log modernization/rename is complete
+- Confirm Form Loader modernization and preferred-alias cleanup are complete
 - Confirm module labels and user-facing names are stable
 - Confirm help/documentation wording is aligned with runtime text
 
@@ -81,8 +81,8 @@ When unblocked, NVDA verification must cover the full application surface, inclu
 
 **Validation**: Manual NVDA smoke pass through startup, navigation, and common dialogs.
 
-### Phase 2: Production Log NVDA Pass
-**Goal**: Verify the upgraded Production Log after layout-system adoption and rename.
+### Phase 2: Form Loader NVDA Pass
+**Goal**: Verify the upgraded Form Loader after layout-system adoption and preferred-alias cleanup.
 
 - Header workflow
 - Repeating-row workflows
@@ -90,7 +90,7 @@ When unblocked, NVDA verification must cover the full application surface, inclu
 - Import/export flows
 - Validation, calculation, and status messaging
 
-**Validation**: Manual NVDA walkthrough of the full Production Log authoring and export loop.
+**Validation**: Manual NVDA walkthrough of the full Form Loader authoring and export loop.
 
 ### Phase 3: Module Sweep
 **Goal**: Verify the rest of the application modules against stable terminology and focus behavior.
@@ -122,21 +122,21 @@ When unblocked, NVDA verification must cover the full application surface, inclu
 - Residual risk list, if any
 - Sign-off that accessibility evidence matches the renamed, upgraded application state
 
-**Validation**: Final end-to-end NVDA pass across startup, navigation, Production Log, supporting modules, and shutdown.
+**Validation**: Final end-to-end NVDA pass across startup, navigation, Form Loader, supporting modules, and shutdown.
 
 ---
 
 ## Acceptance Criteria
 
-- Production Log modernization, layout-system support, and rename are complete before formal NVDA execution begins.
+- Form Loader modernization, layout-system support, and preferred-alias cleanup are complete before formal NVDA execution begins.
 - NVDA verification covers the full program, not just isolated module slices.
 - Focus order, labels, status messaging, and confirmation flows are documented with manual verification notes.
 - Any issues discovered during the pass are either fixed or explicitly tracked as residual risks.
-- The resulting evidence reflects the final renamed Production Log and stable post-upgrade application state.
+- The resulting evidence reflects the final Form Loader wording and stable post-upgrade application state.
 
 ---
 
 ## Notes
 
-- This plan is intentionally blocked until the Production Log prerequisite plan is complete.
+- This plan is intentionally blocked until the Form Loader prerequisite plan is complete.
 - Layout Manager component-level accessibility work is already delivered; it should be revalidated here only as part of the full application pass.

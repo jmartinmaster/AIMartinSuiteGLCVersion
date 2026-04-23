@@ -15,7 +15,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 import re
 
-__module_name__ = "Production Log Roles"
+__module_name__ = "Form Loader Roles"
 __version__ = "1.0.0"
 
 HEADER_FIELD_ROLE_DEFAULTS = {

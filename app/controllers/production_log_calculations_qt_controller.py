@@ -19,7 +19,7 @@ from app.views.production_log_calculations_qt_view import ProductionLogCalculati
 INFO = "info"
 SUCCESS = "success"
 
-__module_name__ = "Production Log Calculations Qt Controller"
+__module_name__ = "Form Calculations Qt Controller"
 __version__ = "1.1.2"
 
 
@@ -43,14 +43,14 @@ class ProductionLogCalculationsQtController:
         dispatcher = self.dispatcher
         theme_tokens = dict(getattr(getattr(dispatcher, "view", None), "theme_tokens", {}) or {})
         return {
-            "window_title": "Production Log Calculations - Production Logging Center",
-            "title": "Production Log Calculations",
+            "window_title": "Form Calculations - Production Logging Center",
+            "title": "Form Calculations",
             "subtitle": (
-                "Developer-only controls for Production Log calculation behavior. Per-part rates still come from "
+                "Developer-only controls for Form Loader calculation behavior. Per-part rates still come from "
                 "Rate Manager, while named formulas drive the live runtime and workbook import/export paths."
             ),
             "guidance_note": (
-                "Saved changes apply to Production Log recalculations, target-time normalization, and workbook "
+                "Saved changes apply to Form Loader recalculations, target-time normalization, and workbook "
                 "import/export transforms. Stored draft inputs remain intact, but recalculated minute fields "
                 "reflect the active profile."
             ),
@@ -66,7 +66,7 @@ class ProductionLogCalculationsQtController:
         settings = self.model.reload_settings()
         self.view.set_form_values(self.model.flatten_settings_for_form(settings))
         self.view.set_preview_lines(self.build_preview_lines(settings))
-        message = "Production Log Calculations ready." if initial else "Loaded active calculation profile."
+        message = "Form Calculations ready." if initial else "Loaded active calculation profile."
         self.view.set_status(message, INFO)
 
     def reload_from_disk(self):
@@ -91,10 +91,10 @@ class ProductionLogCalculationsQtController:
         self.view.set_preview_lines(self.build_preview_lines(settings))
         if self.dispatcher is not None:
             self.dispatcher.notify_production_log_calculation_settings_changed()
-        self.view.set_status("Saved the developer calculation profile and refreshed open Production Log pages.", SUCCESS)
+        self.view.set_status("Saved the developer calculation profile and refreshed open Form Loader pages.", SUCCESS)
         self.show_toast(
-            "Production Log Calculations",
-            "Saved calculation behavior and refreshed open Production Log pages.",
+            "Form Calculations",
+            "Saved calculation behavior and refreshed open Form Loader pages.",
             SUCCESS,
         )
 
@@ -111,7 +111,7 @@ class ProductionLogCalculationsQtController:
         if self.dispatcher is not None:
             self.dispatcher.load_module("production_log")
             return
-        self.view.show_info("Open Production Log", "Host navigation is unavailable.")
+        self.view.show_info("Open Form Loader", "Host navigation is unavailable.")
 
     def build_preview_lines(self, settings):
         fallback_mode = settings.get("missing_rate_fallback_mode", "header_goal")

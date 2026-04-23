@@ -2,6 +2,8 @@
 
 Use this guide for a practical start-to-finish authoring workflow when creating or editing stored forms.
 
+The form saved here is the same layout contract that Form Loader loads through the active form registry.
+
 ## Quick Start Flow
 
 1. Open Layout Manager.
@@ -55,7 +57,7 @@ Use this guide for a practical start-to-finish authoring workflow when creating 
 ## Row Field Tips
 
 - Use role values for semantic behavior and future-proofing.
-- Keep protected core fields intact.
+- Keep section keys, field ids, roles, widgets, and mapping transforms aligned with the syntax Layout Manager and Form Loader recognize.
 - Use bulk actions to accelerate repetitive edits:
   - Bulk Rename
   - Bulk Delete Match
