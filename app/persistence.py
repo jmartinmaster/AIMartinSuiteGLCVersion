@@ -22,6 +22,8 @@ from datetime import datetime
 __module_name__ = "Persistence Helpers"
 __version__ = "1.0.9"
 
+_WARNED_BACKUP_FAILURES = set()
+
 
 def ensure_directory(path):
     os.makedirs(path, exist_ok=True)
@@ -67,6 +69,31 @@ def _prune_versioned_backups(target_path, backup_dir, keep_count):
             pass
 
 
+def _warn_backup_failure(context, source_path, destination_path, exc):
+    warning_key = (context, os.path.abspath(destination_path))
+    if warning_key in _WARNED_BACKUP_FAILURES:
+        return
+    _WARNED_BACKUP_FAILURES.add(warning_key)
+    print(
+        f"[persistence.{context}] Backup copy skipped: "
+        f"{source_path} -> {destination_path} ({exc})"
+    )
+
+
+def _copy_backup_with_fallback(source_path, destination_path, context):
+    try:
+        shutil.copy2(source_path, destination_path)
+        return True
+    except Exception as first_exc:
+        try:
+            shutil.copyfile(source_path, destination_path)
+            _warn_backup_failure(context, source_path, destination_path, first_exc)
+            return True
+        except Exception as second_exc:
+            _warn_backup_failure(context, source_path, destination_path, second_exc)
+            return False
+
+
 def write_json_with_backup(target_path, payload, backup_dir=None, keep_count=10, indent=4):
     target_path = os.path.abspath(target_path)
     target_dir = os.path.dirname(target_path) or os.path.abspath(".")
@@ -77,12 +104,12 @@ def write_json_with_backup(target_path, payload, backup_dir=None, keep_count=10,
 
     if os.path.exists(target_path):
         adjacent_backup_path = f"{target_path}.bak"
-        shutil.copy2(target_path, adjacent_backup_path)
+        _copy_backup_with_fallback(target_path, adjacent_backup_path, "write_json_with_backup")
 
         if backup_dir:
             backup_dir = ensure_directory(os.path.abspath(backup_dir))
             versioned_backup_path = _build_versioned_backup_path(target_path, backup_dir)
-            shutil.copy2(target_path, versioned_backup_path)
+            _copy_backup_with_fallback(target_path, versioned_backup_path, "write_json_with_backup")
             _prune_versioned_backups(target_path, backup_dir, keep_count)
 
     fd, temp_path = tempfile.mkstemp(prefix="martin_", suffix=".json.tmp", dir=target_dir)
@@ -114,12 +141,12 @@ def write_text_with_backup(target_path, text, backup_dir=None, keep_count=10, en
 
     if os.path.exists(target_path):
         adjacent_backup_path = f"{target_path}.bak"
-        shutil.copy2(target_path, adjacent_backup_path)
+        _copy_backup_with_fallback(target_path, adjacent_backup_path, "write_text_with_backup")
 
         if backup_dir:
             backup_dir = ensure_directory(os.path.abspath(backup_dir))
             versioned_backup_path = _build_versioned_backup_path(target_path, backup_dir)
-            shutil.copy2(target_path, versioned_backup_path)
+            _copy_backup_with_fallback(target_path, versioned_backup_path, "write_text_with_backup")
             _prune_versioned_backups(target_path, backup_dir, keep_count)
 
     suffix = os.path.splitext(target_path)[1] or ".tmp"

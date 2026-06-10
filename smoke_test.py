@@ -27,7 +27,7 @@ if target_method:
     print(f"Found potential Qt auth method: {target_method}")
     original_method = getattr(gatekeeper, target_method)
     def mocked_method(*args, **kwargs):
-        nonlocal reached_qt
+        global reached_qt
         reached_qt = True
         print(f"Mocked {target_method} hit.")
         return True

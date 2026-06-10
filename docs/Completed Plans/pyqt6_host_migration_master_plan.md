@@ -3,6 +3,7 @@
 ## Status
 - Canonical migration record for the completed PyQt6 host-shell and module migration effort.
 - Migration status: completed through Phase 12 in this checkout.
+- Maintenance check (2026-06-10): status remains completed; current feature and documentation planning continues in active plan documents and `docs/PLANNING_INDEX.md`.
 - Future feature and update planning should live outside this document; use this file as the architecture baseline and historical closeout record.
 - Phase 0 COMPLETED.
 - Phase 1 Part 1 COMPLETED: dispatcher contract groundwork landed for `get_ui(parent, dispatcher)`, lifecycle hooks, container-neutral active-module state, and explicit active-form signaling.

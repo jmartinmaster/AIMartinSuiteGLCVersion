@@ -92,6 +92,14 @@ class LayoutManagerQtView(QMainWindow):
         self._mapping_cache_key = ""
         self._table_render_tokens = {}
         self._excel_column_choices = self._build_excel_column_choices(260)
+        self._row_section_to_mapping = {
+            "production_row_fields": "production_mapping",
+            "downtime_row_fields": "downtime_mapping",
+        }
+        self._mapping_to_row_section = {
+            "production_mapping": "production_row_fields",
+            "downtime_mapping": "downtime_row_fields",
+        }
         application = QApplication.instance()
         self._default_app_font = QFont(application.font()) if application is not None else QFont(self.font())
         self._build_ui()
@@ -238,8 +246,8 @@ class LayoutManagerQtView(QMainWindow):
         self.tabs = QTabWidget()
         self.tabs.setMinimumHeight(760)
 
-        json_editor_tab = QWidget()
-        json_editor_layout = QVBoxLayout(json_editor_tab)
+        self.json_editor_tab = QWidget()
+        json_editor_layout = QVBoxLayout(self.json_editor_tab)
         json_editor_layout.setContentsMargins(8, 8, 8, 8)
         json_editor_layout.setSpacing(8)
         editor_group = QGroupBox("JSON Editor")
@@ -248,7 +256,7 @@ class LayoutManagerQtView(QMainWindow):
         self.editor.textChanged.connect(self._handle_editor_changed)
         editor_group_layout.addWidget(self.editor)
         json_editor_layout.addWidget(editor_group)
-        self.tabs.addTab(json_editor_tab, "JSON Editor")
+        self.tabs.addTab(self.json_editor_tab, "JSON Editor")
 
         block_tab = QWidget()
         block_layout = QVBoxLayout(block_tab)
@@ -325,8 +333,6 @@ class LayoutManagerQtView(QMainWindow):
         row_section_row = QHBoxLayout()
         row_section_row.addWidget(QLabel("Section"))
         self.row_section_combo = QComboBox()
-        self.row_section_combo.addItem("Production", "production_row_fields")
-        self.row_section_combo.addItem("Downtime", "downtime_row_fields")
         self.row_section_combo.currentIndexChanged.connect(self.controller.on_row_section_changed)
         row_section_row.addWidget(self.row_section_combo)
         row_section_row.addWidget(QLabel("Preset"))
@@ -431,8 +437,6 @@ class LayoutManagerQtView(QMainWindow):
         mapping_selector_row = QHBoxLayout()
         mapping_selector_row.addWidget(QLabel("Mapping"))
         self.mapping_section_combo = QComboBox()
-        self.mapping_section_combo.addItem("Production", "production_mapping")
-        self.mapping_section_combo.addItem("Downtime", "downtime_mapping")
         self.mapping_section_combo.currentIndexChanged.connect(self.controller.on_mapping_section_changed)
         mapping_selector_row.addWidget(self.mapping_section_combo)
         mapping_selector_row.addWidget(QLabel("Column"))
@@ -725,6 +729,7 @@ class LayoutManagerQtView(QMainWindow):
         summary_layout.addRow("Font Profile", self.font_profile_combo)
 
         self.tabs.addTab(summary_tab, "Summary")
+        self.tabs.currentChanged.connect(self._handle_main_tab_changed)
         content_layout.addWidget(self.tabs, 1)
 
         content_layout.addStretch(1)
@@ -1195,6 +1200,21 @@ class LayoutManagerQtView(QMainWindow):
             return
         self.controller.mark_dirty()
 
+    def _handle_main_tab_changed(self, *_args):
+        current_widget = self.tabs.currentWidget()
+        if current_widget is not self.json_editor_tab:
+            return
+        self.finalize_block_table_edits()
+        self.controller.sync_block_view_to_editor()
+
+    def finalize_block_table_edits(self):
+        for table_widget in (self.header_fields_table, self.row_fields_table, self.mapping_table):
+            focus_widget = table_widget.focusWidget()
+            if focus_widget is not None:
+                focus_widget.clearFocus()
+            table_widget.clearFocus()
+        QApplication.processEvents()
+
     def set_editor_text(self, text):
         self._updating_editor = True
         self.editor.setPlainText(text)
@@ -1593,15 +1613,119 @@ class LayoutManagerQtView(QMainWindow):
         return self._cell_text(self.mapping_table, row_index, 0)
 
     def _mapping_name_to_row_section(self, mapping_name):
-        return "downtime_row_fields" if mapping_name == "downtime_mapping" else "production_row_fields"
+        normalized_mapping_name = str(mapping_name or "").strip()
+        if normalized_mapping_name in self._mapping_to_row_section:
+            return self._mapping_to_row_section[normalized_mapping_name]
+        if normalized_mapping_name.endswith("_mapping"):
+            return f"{normalized_mapping_name[:-8]}_row_fields"
+        return "production_row_fields"
+
+    def _build_repeating_section_bindings(self, config):
+        sections = config.get("sections") if isinstance(config, dict) and isinstance(config.get("sections"), list) else []
+        bindings = []
+        seen_fields_keys = set()
+        seen_mapping_keys = set()
+
+        for section in sections:
+            if not isinstance(section, dict):
+                continue
+            if str(section.get("section_type") or "single").strip().lower() != "repeating":
+                continue
+            fields_key = str(section.get("fields_key") or "").strip()
+            mapping_key = str(section.get("mapping_key") or "").strip()
+            if not fields_key or not mapping_key:
+                continue
+            if fields_key in seen_fields_keys or mapping_key in seen_mapping_keys:
+                continue
+            section_name = str(section.get("name") or section.get("id") or fields_key).strip() or fields_key
+            bindings.append(
+                {
+                    "section_name": section_name,
+                    "fields_key": fields_key,
+                    "mapping_key": mapping_key,
+                }
+            )
+            seen_fields_keys.add(fields_key)
+            seen_mapping_keys.add(mapping_key)
+
+        if bindings:
+            return bindings
+
+        return [
+            {
+                "section_name": "Production",
+                "fields_key": "production_row_fields",
+                "mapping_key": "production_mapping",
+            },
+            {
+                "section_name": "Downtime",
+                "fields_key": "downtime_row_fields",
+                "mapping_key": "downtime_mapping",
+            },
+        ]
+
+    def _refresh_repeating_section_selectors(self, config):
+        current_row_section = str(self.row_section_combo.currentData() or "").strip()
+        current_mapping_name = str(self.mapping_section_combo.currentData() or "").strip()
+        bindings = self._build_repeating_section_bindings(config)
+
+        self._row_section_to_mapping = {
+            binding["fields_key"]: binding["mapping_key"]
+            for binding in bindings
+        }
+        self._mapping_to_row_section = {
+            binding["mapping_key"]: binding["fields_key"]
+            for binding in bindings
+        }
+
+        row_blocker = QSignalBlocker(self.row_section_combo)
+        mapping_blocker = QSignalBlocker(self.mapping_section_combo)
+        self.row_section_combo.clear()
+        self.mapping_section_combo.clear()
+        for binding in bindings:
+            section_name = str(binding.get("section_name") or binding.get("fields_key") or "Section")
+            fields_key = str(binding.get("fields_key") or "")
+            mapping_key = str(binding.get("mapping_key") or "")
+            self.row_section_combo.addItem(f"{section_name} [{fields_key}]", fields_key)
+            self.mapping_section_combo.addItem(f"{section_name} [{mapping_key}]", mapping_key)
+
+        row_index = self.row_section_combo.findData(current_row_section)
+        if row_index < 0:
+            row_index = 0 if self.row_section_combo.count() > 0 else -1
+        if row_index >= 0:
+            self.row_section_combo.setCurrentIndex(row_index)
+
+        mapping_index = self.mapping_section_combo.findData(current_mapping_name)
+        if mapping_index < 0 and row_index >= 0:
+            selected_row_section = str(self.row_section_combo.currentData() or "").strip()
+            preferred_mapping = self._row_section_to_mapping.get(selected_row_section, "")
+            mapping_index = self.mapping_section_combo.findData(preferred_mapping)
+        if mapping_index < 0:
+            mapping_index = 0 if self.mapping_section_combo.count() > 0 else -1
+        if mapping_index >= 0:
+            self.mapping_section_combo.setCurrentIndex(mapping_index)
+
+        del row_blocker
+        del mapping_blocker
 
     def current_row_section_name(self):
-        return str(self.row_section_combo.currentData() or "production_row_fields")
+        current_value = str(self.row_section_combo.currentData() or "").strip()
+        if current_value:
+            return current_value
+        if self.row_section_combo.count() > 0:
+            return str(self.row_section_combo.itemData(0) or "production_row_fields")
+        return "production_row_fields"
 
     def current_mapping_name(self):
-        return str(self.mapping_section_combo.currentData() or "production_mapping")
+        current_value = str(self.mapping_section_combo.currentData() or "").strip()
+        if current_value:
+            return current_value
+        if self.mapping_section_combo.count() > 0:
+            return str(self.mapping_section_combo.itemData(0) or "production_mapping")
+        return "production_mapping"
 
     def render_block_authoring(self, config):
+        self._refresh_repeating_section_selectors(config)
         header_fields = list(config.get("header_fields") or [])
         header_cache_key = self._cache_key(header_fields)
         if header_cache_key != self._header_fields_cache_key:
@@ -1683,6 +1807,7 @@ class LayoutManagerQtView(QMainWindow):
             )
 
     def render_import_export_authoring(self, config, metadata=None):
+        self._refresh_repeating_section_selectors(config)
         self.template_path_input.setText(str(config.get("template_path") or ""))
         self.render_import_export_metadata(metadata)
         self.render_mapping_authoring(config)

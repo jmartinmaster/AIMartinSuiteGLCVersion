@@ -25,6 +25,7 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QStatusBar,
+    QTabWidget,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -43,6 +44,14 @@ class RecoveryViewerQtView(QMainWindow):
         self.payload = dict(payload or {})
         self.theme_tokens = dict(self.payload.get("theme_tokens") or {})
         self.embedded = parent_widget is not None
+        self._tab_definitions = (
+            ("draft", "Pending Drafts"),
+            ("snapshot", "Recovery Snapshots"),
+            ("config_backup", "Config Backups"),
+        )
+        self._tab_base_labels = {record_type: label for record_type, label in self._tab_definitions}
+        self._tables_by_record_type = {}
+        self._tab_row_to_global_index = {}
         self._build_ui()
         self._attach_to_parent_container(parent_widget)
 
@@ -106,20 +115,29 @@ class RecoveryViewerQtView(QMainWindow):
         controls_layout.addStretch(1)
         root_layout.addLayout(controls_layout)
 
-        self.table = QTableWidget()
-        self.table.setColumnCount(5)
-        self.table.setHorizontalHeaderLabels(["Type", "File", "Form", "Saved", "Restore Target"])
-        self.table.horizontalHeader().setStretchLastSection(True)
-        self.table.verticalHeader().setVisible(False)
-        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
-        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        root_layout.addWidget(self.table, 1)
+        self.tabs = QTabWidget()
+        for record_type, tab_label in self._tab_definitions:
+            table = self._create_table_widget()
+            self._tables_by_record_type[record_type] = table
+            self._tab_row_to_global_index[record_type] = []
+            self.tabs.addTab(table, tab_label)
+        root_layout.addWidget(self.tabs, 1)
 
         self.setCentralWidget(central_widget)
         self.status_bar = QStatusBar(self)
         self.setStatusBar(self.status_bar)
         self.status_bar.showMessage("Recovery Viewer ready.", 5000)
+
+    def _create_table_widget(self):
+        table = QTableWidget()
+        table.setColumnCount(5)
+        table.setHorizontalHeaderLabels(["Type", "File", "Form", "Saved", "Restore Target"])
+        table.horizontalHeader().setStretchLastSection(True)
+        table.verticalHeader().setVisible(False)
+        table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        return table
 
     def _available_screen_geometry(self):
         window_handle = self.windowHandle()
@@ -144,29 +162,65 @@ class RecoveryViewerQtView(QMainWindow):
         self.resize(min(int(requested_width), max_width), min(int(requested_height), max_height))
 
     def refresh_table(self, records):
-        self.table.setRowCount(len(records))
-        for row_index, record in enumerate(records):
-            self.table.setItem(row_index, 0, QTableWidgetItem(str(record.get("kind") or "")))
-            self.table.setItem(row_index, 1, QTableWidgetItem(str(record.get("name") or "")))
-            self.table.setItem(row_index, 2, QTableWidgetItem(str(record.get("form_name") or "System")))
-            self.table.setItem(row_index, 3, QTableWidgetItem(str(record.get("saved_at") or "")))
-            self.table.setItem(row_index, 4, QTableWidgetItem(str(record.get("restore_target") or "")))
+        records = list(records or [])
+        for tab_index, (record_type, _) in enumerate(self._tab_definitions):
+            table = self._tables_by_record_type[record_type]
+            row_to_global_index = []
+            table_records = [
+                (global_index, record)
+                for global_index, record in enumerate(records)
+                if str(record.get("record_type") or "") == record_type
+            ]
+            table.setRowCount(len(table_records))
+            for row_index, (global_index, record) in enumerate(table_records):
+                row_to_global_index.append(global_index)
+                table.setItem(row_index, 0, QTableWidgetItem(str(record.get("kind") or "")))
+                table.setItem(row_index, 1, QTableWidgetItem(str(record.get("name") or "")))
+                table.setItem(row_index, 2, QTableWidgetItem(str(record.get("form_name") or "System")))
+                table.setItem(row_index, 3, QTableWidgetItem(str(record.get("saved_at") or "")))
+                table.setItem(row_index, 4, QTableWidgetItem(str(record.get("restore_target") or "")))
+            self._tab_row_to_global_index[record_type] = row_to_global_index
+            base_label = self._tab_base_labels.get(record_type, record_type)
+            self.tabs.setTabText(tab_index, f"{base_label} ({len(table_records)})")
         self.status_bar.showMessage(f"Loaded {len(records)} recovery item(s).", 5000)
 
+    def _current_tab_record_type(self):
+        current_index = self.tabs.currentIndex()
+        if current_index < 0 or current_index >= len(self._tab_definitions):
+            return None
+        return self._tab_definitions[current_index][0]
+
     def get_selected_index(self):
-        selected_rows = self.table.selectionModel().selectedRows()
+        record_type = self._current_tab_record_type()
+        if record_type is None:
+            return None
+        table = self._tables_by_record_type[record_type]
+        selected_rows = table.selectionModel().selectedRows()
         if not selected_rows:
             return None
-        return int(selected_rows[0].row())
+        row_index = int(selected_rows[0].row())
+        row_to_global_index = self._tab_row_to_global_index.get(record_type) or []
+        if row_index < 0 or row_index >= len(row_to_global_index):
+            return None
+        return int(row_to_global_index[row_index])
 
     def set_selected_index(self, index):
-        self.table.clearSelection()
+        for table in self._tables_by_record_type.values():
+            table.clearSelection()
         if index is None:
             return
-        row_index = int(index)
-        if row_index < 0 or row_index >= self.table.rowCount():
+        global_index = int(index)
+        if global_index < 0:
             return
-        self.table.selectRow(row_index)
+        for tab_index, (record_type, _) in enumerate(self._tab_definitions):
+            row_to_global_index = self._tab_row_to_global_index.get(record_type) or []
+            if global_index not in row_to_global_index:
+                continue
+            row_index = row_to_global_index.index(global_index)
+            table = self._tables_by_record_type[record_type]
+            self.tabs.setCurrentIndex(tab_index)
+            table.selectRow(row_index)
+            return
 
     def set_status(self, message):
         self.status_bar.showMessage(str(message), 5000)

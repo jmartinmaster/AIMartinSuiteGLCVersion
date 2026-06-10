@@ -241,11 +241,23 @@ class LayoutManagerQtController:
         self._redo_stack.clear()
         return config
 
+    def sync_block_view_to_editor(self):
+        try:
+            parsed_config, composed_config = self._compose_save_config(self.view.editor_text())
+        except Exception:
+            return
+        if composed_config == self.current_config:
+            return
+        serialized_config = self.model.serialize_config(composed_config)
+        self.current_config = composed_config
+        self.refresh_view(reason="Synced block view changes into JSON editor", editor_text_override=serialized_config)
+        self.mark_dirty()
+
     def _load_editor_config(self):
         return self.model.parse_editor_text(self.view.editor_text(), base_config=self.current_config)
 
     def _mapping_name_for_row_section(self, section_name):
-        return "downtime_mapping" if section_name == "downtime_row_fields" else "production_mapping"
+        return self.model._mapping_name_for_section(section_name, config=self.current_config)
 
     def _current_row_field_rename_map(self, row_fields):
         rename_map = {}
@@ -868,6 +880,7 @@ class LayoutManagerQtController:
     def save_current(self):
         def _execute():
             try:
+                self.view.finalize_block_table_edits()
                 editor_text = self.view.editor_text()
                 parsed_config, composed_config = self._compose_save_config(editor_text)
                 serialized_config = self.model.serialize_config(composed_config)

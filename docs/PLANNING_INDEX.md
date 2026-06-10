@@ -2,7 +2,7 @@
 
 > **Purpose**: Centralized reference for all active and completed project plans.
 >
-> **Last Updated**: April 23, 2026
+> **Last Updated**: June 10, 2026
 
 ---
 
@@ -15,7 +15,7 @@
 | Migration & Cleanup | Post-Migration Tk Cleanup and Parity Sweep | **Completed** | 1-6 | `docs/Completed Plans/` |
 | Module Enhancements | Layout Manager Future Enhancements | **Completed** | 1-8 | `docs/Completed Plans/` |
 | Module Enhancements | Form Loader (production_log) Upgrade, Layout-System Support, and Preferred Alias Rollout | **In progress** | 1-5 planned | `docs/Plans in Progress or not started/` |
-| Accessibility | Application-Wide NVDA Accessibility Verification | **Blocked** | 0-5 planned | `docs/Plans in Progress or not started/` |
+| Accessibility | Application-Wide NVDA Accessibility Verification | **Deferred (Low Priority)** | 0-5 planned | `docs/Plans in Progress or not started/` |
 
 ---
 
@@ -68,14 +68,14 @@
 ## Active Plans (In Progress or Backlog)
 
 ### [Form Loader (production_log) Upgrade, Layout-System Support, and Preferred Alias Rollout](docs/Plans%20in%20Progress%20or%20not%20started/Production%20Log%20Upgrade,%20Layout-System%20Support,%20and%20Rename.md)
-- **Status**: In progress — the dynamic-renderer tranche and first live Form Loader/Form Calculations alias rollout are validated, and the next active slice is remaining documentation/runbook cleanup plus plan closure follow-up.
+- **Status**: In progress — dynamic-renderer and first alias rollout are validated; highest-priority active slice is custom section/header runtime completion so Layout Manager JSON can produce complete forms without profile hardcoding.
 - **Scope**: Execute the permanent internal `production_log` upgrade in sequenced tranches, keep layout-system support aligned with the live runtime contract, and finish the preferred `Form Loader` alias rollout without renaming compatibility-sensitive internal identifiers.
 - **Baseline**: Form Loader now has validated selector-driven switching, section-driven rendering, guarded external active-form handling, recorded smoke coverage, and the first live preferred-alias rollout in the PyQt6 runtime.
 - **Key Constraints**: Internal `production_log` family names stay permanent; user-facing wording should prefer `Form Loader` / `Form Calculations`; draft and form compatibility cannot be treated as an afterthought.
 - **Completion Criteria**: Upgraded Form Loader is stable enough to serve as the baseline for the application-wide NVDA verification plan.
 
 ### [Application-Wide NVDA Accessibility Verification](docs/Plans%20in%20Progress%20or%20not%20started/Application-Wide%20NVDA%20Accessibility%20Verification.md)
-- **Status**: Blocked pending Form Loader prerequisite closure.
+- **Status**: Deferred (low priority) pending Form Loader prerequisite closure.
 - **Scope**: Verify NVDA accessibility across the full program after the upgraded Form Loader flows and related labels/workflows have stabilized.
 - **Baseline**: Layout Manager component-level accessibility work is already delivered, but final NVDA evidence must reflect the post-upgrade full application state.
 - **Key Constraints**: Do not run the final NVDA evidence pass against the pre-upgrade or pre-alias-cleanup Form Loader state.
@@ -99,17 +99,18 @@
 - Do not extract new plans from historical artifacts. Update the canonical active plan instead.
 
 ### Validation Continuity
-- **Canonical Validation Tools**: `scripts/validate_pyqt6_phase_gate.py` (19 checks) and `scripts/validate_module_loads.py` (module status).
-- **Keep Updated**: These validators must reflect the current completed architecture, not pre-migration state.
+- **Canonical Validation Path**: Use the best available local path in this checkout: focused `py_compile`, available VS Code validation tasks, and direct manual smoke runs.
+- **If Legacy Validators Exist**: `scripts/validate_pyqt6_phase_gate.py` and `scripts/validate_module_loads.py` remain the target validator surface and should be kept aligned with completed PyQt6 architecture.
+- **Keep Updated**: Validation guidance must match the current repository snapshot and should not assume optional scripts are always present.
 
 ---
 
 ## Next Steps
 
-### Immediate (Week of April 21, 2026)
-1. ✅ Clean up plan organization: Layout Manager enhancements archived to `docs/Completed Plans/`, and follow-on Form Loader and application-wide NVDA plans split into active planning.
-2. ✅ Update plan index: This document now serves as the central reference.
-3. **TODO**: Finish the remaining Form Loader markdown/runbook sweep and close the preferred-alias compatibility checklist that now gates the application-wide NVDA pass.
+### Immediate (June 2026)
+1. Execute custom section/header runtime completion across Form Loader and Layout Manager.
+2. Finish Form Loader markdown/runbook cleanup and preferred-alias compatibility checklist closure after the custom-section tranche stabilizes.
+3. Keep planning and delegation docs tidy by archiving transient smoke and review artifacts out of active roots.
 
 ### Medium Term (1-2 months)
 1. Execute the remaining Form Loader / `production_log` upgrade, layout-system support, and preferred-alias documentation work.

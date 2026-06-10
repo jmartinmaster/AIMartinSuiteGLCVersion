@@ -70,6 +70,10 @@ class ProductionLogQtView(QMainWindow):
         header_fields,
         production_fields,
         downtime_fields,
+        section_field_configs=None,
+        header_section_id="header",
+        production_section_id="production",
+        downtime_section_id="downtime",
         row_delete_policies=None,
         parent_widget=None,
     ):
@@ -81,15 +85,24 @@ class ProductionLogQtView(QMainWindow):
         self.theme_tokens = dict(self.payload.get("theme_tokens") or {})
         self.embedded = parent_widget is not None
         self.sections = [dict(section) for section in list(sections or []) if isinstance(section, dict)]
+        self.header_section_id = str(header_section_id or "header").strip().lower() or "header"
+        self.production_section_id = str(production_section_id or "production").strip().lower() or "production"
+        self.downtime_section_id = str(downtime_section_id or "downtime").strip().lower() or "downtime"
         self.header_fields = list(header_fields or [])
         self.production_fields = list(production_fields or [])
         self.downtime_fields = list(downtime_fields or [])
         self.section_field_configs = {
-            "header": self.header_fields,
-            "production": self.production_fields,
-            "downtime": self.downtime_fields,
+            str(section_id).strip().lower(): [dict(field) for field in list(field_configs or []) if isinstance(field, dict)]
+            for section_id, field_configs in dict(section_field_configs or {}).items()
+            if str(section_id or "").strip()
         }
-        self.section_info_by_profile = self._build_section_info_by_profile()
+        if self.header_section_id not in self.section_field_configs:
+            self.section_field_configs[self.header_section_id] = list(self.header_fields)
+        if self.production_section_id not in self.section_field_configs:
+            self.section_field_configs[self.production_section_id] = list(self.production_fields)
+        if self.downtime_section_id not in self.section_field_configs:
+            self.section_field_configs[self.downtime_section_id] = list(self.downtime_fields)
+        self.section_info_by_id = self._build_section_info_by_id()
         self.row_delete_policies = dict(row_delete_policies or {})
         self.header_widgets = {}
         self.repeating_sections = {}
@@ -228,18 +241,19 @@ class ProductionLogQtView(QMainWindow):
         self.setStatusBar(self.status_bar)
         self.status_bar.showMessage("Form Loader window ready.", 5000)
 
-    def _build_section_info_by_profile(self):
-        section_info_by_profile = {}
+    def _build_section_info_by_id(self):
+        section_info_by_id = {}
         for section in self.sections:
-            behavior_profile = str(section.get("behavior_profile") or section.get("id") or "").strip().lower()
-            if not behavior_profile or behavior_profile in section_info_by_profile:
+            section_id = str(section.get("id") or section.get("behavior_profile") or "").strip().lower()
+            if not section_id or section_id in section_info_by_id:
                 continue
             normalized_section = dict(section)
-            normalized_section["behavior_profile"] = behavior_profile
-            normalized_section["name"] = self._normalize_section_name(behavior_profile, section)
+            normalized_section["id"] = section_id
+            normalized_section["behavior_profile"] = str(section.get("behavior_profile") or section_id).strip().lower()
+            normalized_section["name"] = self._normalize_section_name(section_id, section)
             normalized_section["description"] = str(section.get("description") or "")
-            section_info_by_profile[behavior_profile] = normalized_section
-        return section_info_by_profile
+            section_info_by_id[section_id] = normalized_section
+        return section_info_by_id
 
     def _normalize_section_name(self, section_id, section_info=None):
         if isinstance(section_info, dict):
@@ -250,14 +264,16 @@ class ProductionLogQtView(QMainWindow):
 
     def _get_section_info(self, section_id, section_info=None):
         resolved_section_id = str(section_id or "").strip().lower()
-        info = dict(self.section_info_by_profile.get(resolved_section_id) or {})
+        info = dict(self.section_info_by_id.get(resolved_section_id) or {})
         if isinstance(section_info, dict):
             info.update(section_info)
+        if not str(info.get("id") or "").strip():
+            info["id"] = resolved_section_id
         info["behavior_profile"] = resolved_section_id
         info["name"] = self._normalize_section_name(resolved_section_id, info)
         info["description"] = str(info.get("description") or "")
         if not str(info.get("section_type") or "").strip():
-            info["section_type"] = "single" if resolved_section_id == "header" else "repeating"
+            info["section_type"] = "single" if resolved_section_id == self.header_section_id else "repeating"
         return info
 
     def _get_section_display_name(self, section_id):
@@ -294,39 +310,30 @@ class ProductionLogQtView(QMainWindow):
         return None
 
     def _build_dynamic_sections(self, content_layout):
-        rendered_profiles = set()
         for section in self.sections:
+            section_id = str(section.get("id") or section.get("behavior_profile") or "").strip().lower()
             section_type = str(section.get("section_type") or "single").strip().lower()
-            behavior_profile = str(section.get("behavior_profile") or section.get("id") or "").strip().lower()
             section_name = str(section.get("name") or section.get("id") or "Section").strip() or "Section"
-
-            if behavior_profile in rendered_profiles:
+            if not section_id:
                 self._add_unsupported_section_notice(
                     content_layout,
                     section_name,
-                    f"Section profile '{behavior_profile}' is declared more than once and only one instance is currently supported.",
+                    "Section is missing an id and cannot be rendered.",
                 )
                 continue
 
-            if behavior_profile == "header" and section_type == "single":
-                rendered_profiles.add(behavior_profile)
-                self._build_header_section(content_layout, self._get_section_info("header", section))
+            if section_type == "single":
+                self._build_header_section(content_layout, section_id, self._get_section_info(section_id, section))
                 continue
 
-            if behavior_profile == "production" and section_type == "repeating":
-                rendered_profiles.add(behavior_profile)
-                self._build_repeating_section(content_layout, "production", section)
-                continue
-
-            if behavior_profile == "downtime" and section_type == "repeating":
-                rendered_profiles.add(behavior_profile)
-                self._build_repeating_section(content_layout, "downtime", section)
+            if section_type == "repeating":
+                self._build_repeating_section(content_layout, section_id, section)
                 continue
 
             self._add_unsupported_section_notice(
                 content_layout,
                 section_name,
-                f"Section profile '{behavior_profile or 'unknown'}' with type '{section_type or 'unknown'}' is not yet rendered in Form Loader.",
+                f"Section id '{section_id}' with type '{section_type or 'unknown'}' is not yet rendered in Form Loader.",
             )
 
     def _create_action_button(self, title, callback, enabled=True):
@@ -427,9 +434,9 @@ class ProductionLogQtView(QMainWindow):
             description_label.setWordWrap(True)
             content_layout.addWidget(description_label)
 
-    def _build_header_section(self, content_layout, section_info):
-        section_info = self._get_section_info("header", section_info)
-        section_name = str(section_info.get("name") or self._get_section_display_name("header"))
+    def _build_header_section(self, content_layout, section_id, section_info):
+        section_info = self._get_section_info(section_id, section_info)
+        section_name = str(section_info.get("name") or self._get_section_display_name(section_id))
         description = str(section_info.get("description") or "")
         self._add_section_heading(content_layout, section_name, description)
 
@@ -438,7 +445,7 @@ class ProductionLogQtView(QMainWindow):
         header_layout.setHorizontalSpacing(12)
         header_layout.setVerticalSpacing(8)
         max_grid_col = 0
-        for field in self._get_section_field_configs("header"):
+        for field in self._get_section_field_configs(section_id):
             field_id = str(field.get("id") or "").strip()
             if not field_id:
                 continue
@@ -596,16 +603,20 @@ class ProductionLogQtView(QMainWindow):
                 widget.editingFinished.connect(self.controller.on_header_field_focus_out)
             except Exception:
                 pass
-        if self.production_table is not None:
+        for runtime_info in self.repeating_sections.values():
+            table = runtime_info.get("table") if isinstance(runtime_info, dict) else None
+            field_configs = list(runtime_info.get("field_configs") or []) if isinstance(runtime_info, dict) else []
+            if table is None:
+                continue
             try:
-                self.production_table.itemChanged.connect(self._handle_production_item_changed)
+                table.itemChanged.connect(
+                    lambda _item, current_table=table, current_fields=field_configs: self._handle_table_item_changed(
+                        current_table,
+                        current_fields,
+                    )
+                )
             except Exception:
-                pass
-        if self.downtime_table is not None:
-            try:
-                self.downtime_table.itemChanged.connect(self._handle_downtime_item_changed)
-            except Exception:
-                pass
+                continue
 
     def _handle_production_item_changed(self, _item):
         self._handle_table_item_changed(self.production_table, self.production_fields)
@@ -852,11 +863,21 @@ class ProductionLogQtView(QMainWindow):
                 header_payload[field_id] = str(widget.currentText())
             else:
                 header_payload[field_id] = str(widget.text())
-        return {
+        repeating_payload = {}
+        for section_id, runtime_info in self.repeating_sections.items():
+            table = runtime_info.get("table") if isinstance(runtime_info, dict) else None
+            field_configs = list(runtime_info.get("field_configs") or []) if isinstance(runtime_info, dict) else []
+            repeating_payload[section_id] = self._collect_rows(table, field_configs)
+
+        production_rows = list(repeating_payload.get(self.production_section_id) or [])
+        downtime_rows = list(repeating_payload.get(self.downtime_section_id) or [])
+        payload = {
             "header": header_payload,
-            "production": self._collect_rows(self._get_section_table("production"), self._get_section_field_configs("production")),
-            "downtime": self._collect_rows(self._get_section_table("downtime"), self._get_section_field_configs("downtime")),
+            "production": production_rows,
+            "downtime": downtime_rows,
         }
+        payload.update(repeating_payload)
+        return payload
 
     def set_form_data(self, header_payload, production_rows, downtime_rows):
         header_payload = dict(header_payload or {})
@@ -866,13 +887,13 @@ class ProductionLogQtView(QMainWindow):
             self._set_header_widget_value(widget, header_payload.get(field_id, ""))
             widget.blockSignals(False)
         self._set_table_rows(
-            self._get_section_table("production"),
-            self._get_section_field_configs("production"),
+            self._get_section_table(self.production_section_id),
+            self._get_section_field_configs(self.production_section_id),
             list(production_rows or []),
         )
         self._set_table_rows(
-            self._get_section_table("downtime"),
-            self._get_section_field_configs("downtime"),
+            self._get_section_table(self.downtime_section_id),
+            self._get_section_field_configs(self.downtime_section_id),
             list(downtime_rows or []),
         )
         self._suspend_dirty_tracking = False
@@ -929,16 +950,16 @@ class ProductionLogQtView(QMainWindow):
         )
 
     def _add_production_row(self):
-        self._focus_open_section("production")
+        self._focus_open_section(self.production_section_id)
 
     def _remove_selected_production_row(self):
-        self._remove_selected_section_row("production")
+        self._remove_selected_section_row(self.production_section_id)
 
     def _add_downtime_row(self):
-        self._focus_open_section("downtime")
+        self._focus_open_section(self.downtime_section_id)
 
     def _remove_selected_downtime_row(self):
-        self._remove_selected_section_row("downtime")
+        self._remove_selected_section_row(self.downtime_section_id)
 
     def _remove_table_row(self, table, row_index, require_confirmation=False):
         if row_index < 0 or row_index >= table.rowCount():

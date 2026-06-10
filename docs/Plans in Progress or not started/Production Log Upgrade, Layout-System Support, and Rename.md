@@ -4,7 +4,7 @@
 >
 > **Scope**: Carefully plan and execute the next internal `production_log` upgrade in sequenced tranches so the module can support the newer layout-system direction, absorb the upcoming feature changes, and complete the preferred `Form Loader` alias rollout without breaking runtime behavior, draft compatibility, or downstream verification work.
 >
-> **Relationship To Accessibility Planning**: Completion of this plan remains the gate that unblocks the application-wide NVDA verification plan.
+> **Relationship To Accessibility Planning**: NVDA verification remains downstream of this work and is currently a lower-priority deferred track.
 >
 > **Planning Note**: This document now records both the completed dynamic-renderer tranche and the settled rename decisions for the first live rollout. The runtime now exposes `Form Loader` and `Form Calculations` across the active PyQt6 surfaces while intentionally keeping compatibility-sensitive internal `production_log` identifiers and the workbook fallback sheet title stable.
 
@@ -12,9 +12,9 @@
 
 ## Intent
 
-Form Loader is now the main blocker for the final NVDA pass.
+Form Loader and Layout Manager must now converge on a complete custom-form contract where authoring JSON can produce full operator-ready forms with custom sections and custom headers without profile-specific hardcoding.
 
-This plan exists to separate that prerequisite work from the accessibility-verification plan and to ensure the upgrade is designed deliberately before implementation starts.
+This plan now prioritizes closing the custom section/header runtime gap first. NVDA verification remains important but is intentionally deferred until this form-authoring/runtime contract is complete and stable.
 
 ---
 
@@ -43,6 +43,34 @@ The current planning decision was to land the layout-driven rebuild first, then 
 - Draft metadata is already form-aware through stored `form_id` and `form_name` values, which gives the upgrade a compatibility path for selector-driven form switching.
 - The public layout-config help reference is partially behind the live section-driven runtime and should not be treated as the only contract source during implementation planning.
 - The preferred `Form Loader` alias is now live in runtime/help surfaces, while permanent internal `production_log` identifiers remain unchanged.
+
+## Capability Snapshot (June 2026)
+
+Current strengths:
+
+- Layout Manager can create, rename, reorder, and remove arbitrary sections and can persist custom `fields_key`, `mapping_key`, `section_type`, and `behavior_profile` metadata.
+- Layout Manager can generate custom section keys and mapping objects for non-default sections (`<section_id>_fields`, `<section_id>_row_fields`, `<section_id>_mapping`).
+- Form Loader already renders sections in `sections[]` order and respects section names/descriptions for supported profiles.
+- Data handler and model layers normalize unknown profiles safely and avoid silent crashes.
+
+Current blockers for complete custom-form generation:
+
+- Form Loader rendering is still behavior-profile hardcoded to `header`, `production`, and `downtime` in the live Qt view.
+- Form Loader controller/runtime wiring still loads only default field groups (`header_fields`, `production_row_fields`, `downtime_row_fields`) instead of fully dynamic section key routing.
+- Layout Manager authoring controls still hardcode row/mapping selectors to production and downtime in key surfaces.
+- Validation and guardrail helpers still enforce uniqueness and routing assumptions around the three supported profiles.
+- Import/export routing remains bounded to implemented profiles, so custom repeating sections cannot fully participate in workbook paths yet.
+
+## Priority Pivot (June 2026)
+
+The highest-priority tranche is now custom section/header completion for runtime parity between Layout Manager authoring and Form Loader rendering.
+
+Scope of this tranche:
+
+- Make Form Loader runtime section-key driven for both single and repeating sections.
+- Expand Layout Manager authoring surfaces to dynamically target all repeating sections declared in `sections[]`.
+- Add bounded, explicit import/export behavior for custom repeating sections (either supported generic routing or intentionally documented no-op behavior).
+- Keep compatibility with existing default profiles and existing drafts/forms.
 
 ---
 
@@ -237,6 +265,22 @@ Validation completed for the first runtime rename rollout:
 - `Validate Changed UI Modules` task passed for `production_log`, `layout_manager`, and `help_viewer`.
 - `scripts/run_production_log_smoke.py` passed after the default-form compatibility migration.
 - `scripts/run_production_log_smoke.py` passed again after the live `Form Loader` / `Form Calculations` view-label cleanup.
+
+### Phase 6: Custom Section/Header Runtime Completion (New Priority)
+
+- Replace profile-specific Form Loader section rendering branches with section-key driven builders for:
+	- single sections (`fields_key`-bound)
+	- repeating sections (`fields_key` + `mapping_key` + section-level row policy)
+- Update Layout Manager row-field and mapping selectors to enumerate repeating sections dynamically from `sections[]`.
+- Expand validation/guardrails to permit broader custom profile usage while preserving strict safety checks.
+- Define and implement import/export behavior for custom repeating sections.
+- Preserve compatibility for legacy/default forms and existing draft payloads.
+
+### Phase 7: Documentation And Operational Closure
+
+- Update maintainer and help docs to reflect complete custom section/header capabilities.
+- Record explicit compatibility and migration notes for existing forms.
+- Keep NVDA verification deferred until this tranche is validated and stabilized.
 
 ---
 

@@ -302,7 +302,9 @@ class DataHandlerService:
 
     def is_behavior_profile_implemented(self, behavior_profile):
         normalized_profile = str(behavior_profile or "").strip().lower()
-        return normalized_profile in IMPLEMENTED_BEHAVIOR_PROFILES
+        if not normalized_profile:
+            return False
+        return True
 
     def get_declared_sections(self, config=None, expected_type=None):
         sections = []
@@ -355,15 +357,27 @@ class DataHandlerService:
             seen_keys.add(warning_key)
 
     def get_routed_section(self, behavior_profile, config=None, expected_type=None):
-        normalized_profile = str(behavior_profile or "").strip().lower()
-        if not self.is_behavior_profile_implemented(normalized_profile):
+        normalized_key = str(behavior_profile or "").strip().lower()
+        if not normalized_key:
             return {}
 
-        matching_sections = []
-        for section in self.get_declared_sections(config=config, expected_type=expected_type):
-            if str(section.get("behavior_profile", "")).strip().lower() != normalized_profile:
-                continue
-            matching_sections.append(section)
+        declared_sections = self.get_declared_sections(config=config, expected_type=expected_type)
+
+        id_matches = [
+            section
+            for section in declared_sections
+            if str(section.get("id") or "").strip().lower() == normalized_key
+        ]
+        if len(id_matches) == 1:
+            return id_matches[0]
+        if len(id_matches) > 1:
+            return {}
+
+        matching_sections = [
+            section
+            for section in declared_sections
+            if str(section.get("behavior_profile") or "").strip().lower() == normalized_key
+        ]
 
         if len(matching_sections) != 1:
             return {}
@@ -400,8 +414,11 @@ class DataHandlerService:
         return [field.get("id") for field in self.get_header_fields() if field.get("id")]
 
     def get_section_field_configs(self, section_name):
-        expected_type = "single" if section_name == "header" else "repeating"
-        section_config = self.get_routed_section(section_name, expected_type=expected_type)
+        normalized_section_name = str(section_name or "").strip().lower()
+        expected_type = None
+        if normalized_section_name == "header":
+            expected_type = "single"
+        section_config = self.get_routed_section(normalized_section_name, expected_type=expected_type)
         field_key = section_config.get("fields_key")
         if not field_key:
             return []
@@ -409,16 +426,16 @@ class DataHandlerService:
         return [dict(field) for field in fields if isinstance(field, dict) and field.get("id")]
 
     def get_routed_repeating_section_profiles(self):
-        routed_profiles = []
-        seen_profiles = set()
+        routed_section_ids = []
+        seen_section_ids = set()
         for section in self.get_declared_sections(expected_type="repeating"):
-            behavior_profile = str(section.get("behavior_profile") or section.get("id") or "").strip().lower()
-            if behavior_profile in seen_profiles:
+            section_id = str(section.get("id") or "").strip().lower()
+            if not section_id or section_id in seen_section_ids:
                 continue
-            if self.get_routed_section(behavior_profile, expected_type="repeating"):
-                routed_profiles.append(behavior_profile)
-                seen_profiles.add(behavior_profile)
-        return routed_profiles
+            if self.get_routed_section(section_id, expected_type="repeating"):
+                routed_section_ids.append(section_id)
+                seen_section_ids.add(section_id)
+        return routed_section_ids
 
     def get_section_field_role(self, section_name, field_id):
         for field in self.get_section_field_configs(section_name):

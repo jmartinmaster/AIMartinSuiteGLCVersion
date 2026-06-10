@@ -35,9 +35,13 @@ class ProductionLogQtController:
         self.model = ProductionLogModel(data_registry=getattr(dispatcher, "external_data_registry", None))
         self.layout_config = self.model.load_layout_config()
         self.sections = self.model.get_sections(config=self.layout_config)
-        self.header_fields = self.model.get_section_field_configs("header", config=self.layout_config)
-        self.production_fields = self.model.get_section_field_configs("production", config=self.layout_config)
-        self.downtime_fields = self.model.get_section_field_configs("downtime", config=self.layout_config)
+        self.header_section_id = self._resolve_section_id("header", expected_type="single", fallback="header")
+        self.production_section_id = self._resolve_section_id("production", expected_type="repeating", fallback="production")
+        self.downtime_section_id = self._resolve_section_id("downtime", expected_type="repeating", fallback="downtime")
+        self.section_field_configs = self._build_section_field_configs()
+        self.header_fields = list(self.section_field_configs.get(self.header_section_id) or [])
+        self.production_fields = list(self.section_field_configs.get(self.production_section_id) or [])
+        self.downtime_fields = list(self.section_field_configs.get(self.downtime_section_id) or [])
         self.row_delete_policies = self._build_row_delete_policies()
         self.pending_drafts = []
         self.recovery_snapshots = []
@@ -85,6 +89,10 @@ class ProductionLogQtController:
             self.header_fields,
             self.production_fields,
             self.downtime_fields,
+            section_field_configs=self.section_field_configs,
+            header_section_id=self.header_section_id,
+            production_section_id=self.production_section_id,
+            downtime_section_id=self.downtime_section_id,
             row_delete_policies=self.row_delete_policies,
             parent_widget=self.parent,
         )
@@ -110,16 +118,44 @@ class ProductionLogQtController:
     def _reload_layout_fields(self):
         self.layout_config = self.model.load_layout_config()
         self.sections = self.model.get_sections(config=self.layout_config)
-        self.header_fields = self.model.get_section_field_configs("header", config=self.layout_config)
-        self.production_fields = self.model.get_section_field_configs("production", config=self.layout_config)
-        self.downtime_fields = self.model.get_section_field_configs("downtime", config=self.layout_config)
+        self.header_section_id = self._resolve_section_id("header", expected_type="single", fallback="header")
+        self.production_section_id = self._resolve_section_id("production", expected_type="repeating", fallback="production")
+        self.downtime_section_id = self._resolve_section_id("downtime", expected_type="repeating", fallback="downtime")
+        self.section_field_configs = self._build_section_field_configs()
+        self.header_fields = list(self.section_field_configs.get(self.header_section_id) or [])
+        self.production_fields = list(self.section_field_configs.get(self.production_section_id) or [])
+        self.downtime_fields = list(self.section_field_configs.get(self.downtime_section_id) or [])
         self.row_delete_policies = self._build_row_delete_policies()
 
+    def _resolve_section_id(self, behavior_profile, expected_type=None, fallback=""):
+        section = self.model.get_routed_section_by_profile(behavior_profile, config=self.layout_config, expected_type=expected_type)
+        section_id = str(section.get("id") or "").strip().lower() if isinstance(section, dict) else ""
+        if section_id:
+            return section_id
+        return str(fallback or behavior_profile or "").strip().lower()
+
+    def _build_section_field_configs(self):
+        section_field_configs = {}
+        for section in self.sections:
+            if not isinstance(section, dict):
+                continue
+            section_id = str(section.get("id") or "").strip().lower()
+            if not section_id:
+                continue
+            section_field_configs[section_id] = self.model.get_section_field_configs(section_id, config=self.layout_config)
+        return section_field_configs
+
     def _build_row_delete_policies(self):
-        return {
-            "production": self.model.get_delete_row_policy("production", config=self.layout_config),
-            "downtime": self.model.get_delete_row_policy("downtime", config=self.layout_config),
-        }
+        policies = {}
+        for section in self.sections:
+            if not isinstance(section, dict):
+                continue
+            section_id = str(section.get("id") or "").strip().lower()
+            section_type = str(section.get("section_type") or "single").strip().lower()
+            if not section_id or section_type != "repeating":
+                continue
+            policies[section_id] = self.model.get_delete_row_policy(section_id, config=self.layout_config)
+        return policies
 
     def _rebuild_view_payload(self):
         if self.embedded:

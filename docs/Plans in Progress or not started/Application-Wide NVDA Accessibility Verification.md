@@ -1,6 +1,6 @@
 # Plan: Application-Wide NVDA Accessibility Verification
 
-> **Status**: Blocked pending Form Loader prerequisite closure.
+> **Status**: Deferred (low priority) pending Form Loader prerequisite closure.
 >
 > **Scope**: Adjust, verify, and document NVDA accessibility behavior across the full PyQt6 application shell and module set, including shared-viewport modules, dedicated-window exceptions, dialogs, status surfaces, and workflow transitions.
 >
@@ -138,5 +138,5 @@ When unblocked, NVDA verification must cover the full application surface, inclu
 
 ## Notes
 
-- This plan is intentionally blocked until the Form Loader prerequisite plan is complete.
+- This plan is intentionally deferred while Form Loader and Layout Manager custom section/header completion work remains active.
 - Layout Manager component-level accessibility work is already delivered; it should be revalidated here only as part of the full application pass.

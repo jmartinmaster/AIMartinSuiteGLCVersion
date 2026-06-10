@@ -750,17 +750,27 @@ class ProductionLogModel:
             value for key, value in header.items()
             if self.get_header_field_role(key, config=layout_config) not in HEADER_BLANK_IGNORE_ROLES and str(value).strip()
         ]
-        production_fields = self.get_open_row_field_ids("production")
-        downtime_fields = self.get_open_row_field_ids("downtime")
-        production_has_data = any(
-            any(str(row.get(key, "")).strip() for key in production_fields)
-            for row in data.get("production", [])
-        )
-        downtime_has_data = any(
-            any(str(row.get(key, "")).strip() for key in downtime_fields)
-            for row in data.get("downtime", [])
-        )
-        return not significant_header_values and not production_has_data and not downtime_has_data
+        repeating_has_data = False
+        for section in self.get_sections(config=layout_config):
+            if not isinstance(section, dict):
+                continue
+            section_type = str(section.get("section_type") or "single").strip().lower()
+            if section_type != "repeating":
+                continue
+            section_id = str(section.get("id") or "").strip().lower()
+            if not section_id:
+                continue
+            open_row_fields = self.get_open_row_field_ids(section_id, config=layout_config)
+            section_rows = list(data.get(section_id) or [])
+            if not section_rows and section_id == "production":
+                section_rows = list(data.get("production") or [])
+            if not section_rows and section_id == "downtime":
+                section_rows = list(data.get("downtime") or [])
+            if any(any(str(row.get(key, "")).strip() for key in open_row_fields) for row in section_rows):
+                repeating_has_data = True
+                break
+
+        return not significant_header_values and not repeating_has_data
 
     def load_settings(self):
         default_settings = {
