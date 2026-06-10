@@ -655,11 +655,17 @@ class ProductionLogQtView(QMainWindow):
                 return column_index
         return self._field_column_offset()
 
+    def _field_counts_as_user_content(self, field):
+        if bool(field.get("derived")):
+            return False
+        # Only fields explicitly marked for user entry/open-row behavior should drive row growth.
+        return bool(field.get("open_row_trigger")) or bool(field.get("user_input"))
+
     def _row_has_content(self, table, field_configs, row_index):
         if table is None:
             return False
         for column_index, field in enumerate(field_configs, start=self._field_column_offset()):
-            if bool(field.get("derived")):
+            if not self._field_counts_as_user_content(field):
                 continue
             item = table.item(row_index, column_index)
             if item is not None and str(item.text() or "").strip():
@@ -842,7 +848,6 @@ class ProductionLogQtView(QMainWindow):
         rows = []
         for row_index in range(table.rowCount()):
             row_payload = {}
-            has_content = False
             for column_index, field in enumerate(field_configs, start=self._field_column_offset()):
                 field_id = str(field.get("id") or "").strip()
                 if not field_id:
@@ -850,8 +855,7 @@ class ProductionLogQtView(QMainWindow):
                 item = table.item(row_index, column_index)
                 value = str(item.text()) if item is not None else ""
                 row_payload[field_id] = value
-                if not bool(field.get("derived")) and value.strip():
-                    has_content = True
+            has_content = self._row_has_content(table, field_configs, row_index)
             if has_content:
                 rows.append(row_payload)
         return rows

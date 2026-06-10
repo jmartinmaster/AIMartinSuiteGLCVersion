@@ -396,6 +396,12 @@ Place a `.py` file matching a module name in the external override `app/` folder
 
 ---
 
+## Accessibility And ADA Progress
+
+- ADA-aligned accessibility improvements are in progress and are being integrated incrementally across the application.
+- Accessibility work is currently not the primary release focus, but it is being folded into ongoing module and documentation updates over time.
+- Suggestions, testing feedback, and direct contribution work related to accessibility are welcome.
+
 ## License
 
 This project is licensed under the **GNU General Public License v3.0**. See the [LICENSE](LICENSE) file for the full text.

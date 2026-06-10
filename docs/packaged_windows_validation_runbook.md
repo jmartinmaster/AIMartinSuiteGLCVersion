@@ -6,14 +6,14 @@ Use this runbook on a Windows packaging machine after building the next EXE rele
 
 1. Open a Windows machine with the project checkout and its packaging dependencies installed.
 2. From the project root, build the EXE with `python build.py`.
-3. Confirm a versioned EXE for Dispatcher Core `2.1.4` appears in `dist/` and that older EXEs, if any, were archived to `dist/Old_exe`.
+3. Confirm a versioned EXE for Dispatcher Core `2.2.1` appears in `dist/` and that older EXEs, if any, were archived to `dist/Old_exe`.
 4. Close any previously running copy of the application before starting validation.
 
 ## Baseline Startup
 
 1. Launch the newly built EXE from `dist/`.
 2. Confirm the splash screen appears and the app opens without an error dialog.
-3. Confirm the window title reports Dispatcher Core `2.1.4`.
+3. Confirm the window title reports Dispatcher Core `2.2.1`.
 4. Confirm Form Loader opens by default.
 5. Confirm the footer update banner is hidden while no update job is active.
 
@@ -24,6 +24,8 @@ Use this runbook on a Windows packaging machine after building the next EXE rele
 3. Add downtime rows, change the Balance Mix control, run Balance Downtime, and confirm the ghost-time display and summary charts update correctly.
 4. Export a workbook and confirm `Open Last Export` plus `Print Last Export` enable only after the export succeeds.
 5. Confirm the module does not show the earlier blank region above `Draft Status` in the shared shell.
+6. Confirm each repeating section starts with one open row and does not auto-grow before user entry.
+7. Confirm the production table does not show an unintended duplicate `Time` column on blank startup rows.
 
 ## Security And Admin Validation
 
@@ -87,7 +89,7 @@ Use this runbook on a Windows packaging machine after building the next EXE rele
 2. Confirm the newer EXE downloads beside the current one instead of overwriting it in place.
 3. Confirm stale external module overrides are cleaned up before handoff when expected.
 4. Confirm the newer EXE launches successfully.
-5. Confirm the app later offers cleanup of older EXE copies and ignores the running `2.1.4` build itself.
+5. Confirm the app later offers cleanup of older EXE copies and ignores the running `2.2.1` build itself.
 
 ## Sign-Off
 

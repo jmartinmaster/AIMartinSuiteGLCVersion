@@ -9,6 +9,9 @@ Version headings below are aligned to the current `2.x` release line used by Dis
 ### Changed
 
 - Promoted Dispatcher Core to `2.2.1` as the current source-side development checkpoint for the stored-form compatibility pass, section-driven Form Loader work, and release-documentation refresh.
+- Fixed Form Loader repeating-row auto-growth in the PyQt6 runtime by treating only user-entry/open-row-trigger fields as row content when deciding whether to append or prune rows.
+- Removed the unintended extra `Time` display column from the active `production_logging_center_copy` form definition to keep the production row table aligned with the intended operator workflow.
+- Added user-facing documentation notes that ADA-aligned accessibility improvements are in progress, are being integrated gradually, and welcome suggestions or contribution support.
 - Rebuilt the live `production_log` PyQt6 surface around a stored-form selector plus section-driven rendering for the supported `header`, `production`, and `downtime` behavior profiles.
 - Added guarded active-form switching so local and external form changes now share the same save, discard, or cancel flow, reset the selector cleanly on cancel, and keep draft metadata aligned with the active form.
 - Renamed user-facing runtime labels from `Production Log` / `Production Log Calculations` to `Form Loader` / `Form Calculations` while intentionally keeping the internal `production_log` family and workbook fallback sheet title compatibility-stable.

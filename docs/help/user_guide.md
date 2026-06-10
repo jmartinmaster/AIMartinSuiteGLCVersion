@@ -12,6 +12,12 @@ Logging Center is built around four day-to-day jobs:
 
 It also includes a packaged-release Update Manager and direct access to the GPL license from the Help Center and About screen.
 
+## Accessibility And ADA Progress
+
+- ADA-aligned accessibility improvements are a work in progress across the application.
+- Accessibility work is currently being integrated gradually while higher-priority functional updates continue.
+- User suggestions, operator feedback, and contribution help for accessibility improvements are welcome.
+
 ## Main Areas Of The Program
 
 The module details now live under the smaller User Guide section chips in the Help Center so you can jump directly to the page you want instead of reading one long combined document.

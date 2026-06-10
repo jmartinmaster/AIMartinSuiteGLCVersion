@@ -2,9 +2,9 @@
 
 Status: Deferred future feature guidance.
 
-This note remains relevant as future architecture guidance. It is not part of the completed PyQt6 migration plan or the `2.1.4` release checklist.
+This note remains relevant as future architecture guidance. It is not part of the completed PyQt6 migration plan or the `2.2.1` release checklist.
 
-## Current `2.1.4` Baseline
+## Current `2.2.1` Baseline
 
 - Authentication is still centered on a single admin-oriented vault and session flow.
 - Dispatcher access control still relies on protected-module gating instead of per-right authorization.

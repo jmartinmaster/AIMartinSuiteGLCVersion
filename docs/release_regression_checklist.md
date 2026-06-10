@@ -1,6 +1,6 @@
 # Release Regression Checklist
 
-Use this checklist before packaging or publishing Dispatcher Core `2.1.4` or the next release cut from the same MVC baseline.
+Use this checklist before packaging or publishing Dispatcher Core `2.2.1` (current) or the next release cut from the same MVC baseline.
 
 ## Source Gate
 
