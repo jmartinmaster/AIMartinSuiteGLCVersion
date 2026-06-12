@@ -129,19 +129,24 @@ class MartinSplashScreen(QSplashScreen):
     def _font_from_token(self, token_name, fallback_size, bold=False):
         font_value = self.theme_tokens.get(token_name)
         font = QFont()
+        fallback_point_size = max(int(fallback_size or 10), 1)
         if isinstance(font_value, (tuple, list)) and font_value:
             font.setFamily(str(font_value[0]))
+            point_size = fallback_point_size
             if len(font_value) >= 2:
                 try:
-                    font.setPointSize(int(font_value[1]))
+                    point_size = int(font_value[1])
                 except (TypeError, ValueError):
-                    font.setPointSize(int(fallback_size))
+                    point_size = fallback_point_size
+            if point_size <= 0:
+                point_size = fallback_point_size
+            font.setPointSize(point_size)
             font.setBold(any(str(part).lower() == "bold" for part in font_value[2:]))
         else:
-            font.setPointSize(int(fallback_size))
+            font.setPointSize(fallback_point_size)
             font.setBold(bool(bold))
         if font.pointSize() <= 0:
-            font.setPointSize(int(fallback_size))
+            font.setPointSize(fallback_point_size)
         if bold:
             font.setBold(True)
         return font

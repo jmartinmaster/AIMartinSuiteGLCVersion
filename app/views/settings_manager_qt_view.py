@@ -574,7 +574,14 @@ class SettingsManagerQtView(QMainWindow):
 
     def set_downtime_code_rows(self, code_map):
         code_map = code_map if isinstance(code_map, dict) else {}
-        ordered_items = sorted(code_map.items(), key=lambda item: int(item[0]) if str(item[0]).isdigit() else str(item[0]))
+
+        def _code_sort_key(item):
+            code_text = str(item[0])
+            if code_text.isdigit():
+                return (0, int(code_text))
+            return (1, code_text)
+
+        ordered_items = sorted(code_map.items(), key=_code_sort_key)
         self.downtime_codes_table.setRowCount(0)
         for code, label in ordered_items:
             self.add_downtime_code_row(str(code), str(label))

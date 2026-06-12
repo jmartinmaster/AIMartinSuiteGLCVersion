@@ -19,6 +19,7 @@ from types import SimpleNamespace
 from app.module_registry import ModuleRegistry
 from app.theme_manager import get_qt_palette, get_qt_stylesheet, get_theme_tokens, normalize_theme
 from app.host_ui_adapter import PyQt6HostUiAdapter
+from app.app_logging import log_exception
 
 __module_name__ = "PyQt6 Host Shell"
 __version__ = "0.1.3"
@@ -856,7 +857,15 @@ class PyQt6HostShellView(QMainWindow):
         action = QAction(str(title), self)
         if shortcut is not None:
             action.setShortcut(shortcut)
-        action.triggered.connect(callback)
+
+        def _safe_triggered(_checked=False):
+            try:
+                callback()
+            except Exception as exc:
+                log_exception(f"pyqt6_host_shell.menu_action.{title}", exc)
+                self.host_ui_adapter.show_error("Action Error", f"{title} failed: {exc}")
+
+        action.triggered.connect(_safe_triggered)
         menu.addAction(action)
         return action
 

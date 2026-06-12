@@ -16,6 +16,7 @@
 import json
 import os
 import re
+from copy import deepcopy
 
 from app.external_data_registry import ExternalDataRegistry
 from app.persistence import write_json_with_backup
@@ -71,7 +72,71 @@ class FormDefinitionRegistry:
         return normalized
 
     def _build_default_relative_path(self, form_id):
-        return os.path.join("data", "forms", f"{form_id}.json").replace("\\", "/")
+        return os.path.join("data", "forms", form_id, "layout.json").replace("\\", "/")
+
+    def _build_default_calculations_relative_path(self, form_id):
+        return os.path.join("data", "forms", form_id, "calculations.json").replace("\\", "/")
+
+    def _build_calculation_backup_dir(self, form_id):
+        return ensure_external_directory(os.path.join("data", "backups", "form_calculations", form_id))
+
+    def _build_default_calculation_payload(self):
+        try:
+            from app.models.production_log_model import DEFAULT_CALCULATION_SETTINGS
+
+            return deepcopy(DEFAULT_CALCULATION_SETTINGS)
+        except Exception:
+            return {}
+
+    def _ensure_calculation_metadata(self, config, form_id):
+        config_data = dict(config) if isinstance(config, dict) else {}
+        calculations = config_data.get("calculations") if isinstance(config_data.get("calculations"), dict) else {}
+        calculation_relative_path = self._build_default_calculations_relative_path(form_id)
+        calculations["companion_relative_path"] = calculation_relative_path
+
+        sections = config_data.get("sections") if isinstance(config_data.get("sections"), list) else []
+        default_profiles = []
+        seen_section_ids = set()
+        for section in sections:
+            if not isinstance(section, dict):
+                continue
+            section_type = str(section.get("section_type") or "single").strip().lower()
+            if section_type != "repeating":
+                continue
+            section_id = str(section.get("id") or "").strip().lower()
+            if not section_id or section_id in seen_section_ids:
+                continue
+            behavior_profile = str(section.get("behavior_profile") or section_id).strip().lower()
+            default_profiles.append(
+                {
+                    "section_id": section_id,
+                    "requires_calculations": behavior_profile in {"production", "downtime"},
+                    "calculation_profile": behavior_profile,
+                }
+            )
+            seen_section_ids.add(section_id)
+
+        raw_profiles = calculations.get("section_profiles") if isinstance(calculations.get("section_profiles"), list) else []
+        normalized_profiles = []
+        seen_profile_sections = set()
+        for profile in raw_profiles:
+            if not isinstance(profile, dict):
+                continue
+            section_id = str(profile.get("section_id") or "").strip().lower()
+            if not section_id or section_id in seen_profile_sections:
+                continue
+            normalized_profiles.append(
+                {
+                    "section_id": section_id,
+                    "requires_calculations": bool(profile.get("requires_calculations", True)),
+                    "calculation_profile": str(profile.get("calculation_profile") or section_id).strip().lower(),
+                }
+            )
+            seen_profile_sections.add(section_id)
+
+        calculations["section_profiles"] = normalized_profiles or default_profiles
+        config_data["calculations"] = calculations
+        return config_data
 
     def _normalize_form_record(self, record, seen_ids):
         if not isinstance(record, dict):
@@ -268,12 +333,25 @@ class FormDefinitionRegistry:
         form_id = self._build_unique_form_id(form_name)
         relative_path = self._build_default_relative_path(form_id)
         save_path = external_path(relative_path)
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        normalized_config = self._ensure_calculation_metadata(config, form_id)
         write_json_with_backup(
             save_path,
-            config,
+            normalized_config,
             backup_dir=ensure_external_directory(os.path.join("data", "backups", "layouts", form_id)),
             keep_count=12,
         )
+
+        calculations_relative_path = self._build_default_calculations_relative_path(form_id)
+        calculations_path = external_path(calculations_relative_path)
+        os.makedirs(os.path.dirname(calculations_path), exist_ok=True)
+        if not os.path.exists(calculations_path):
+            write_json_with_backup(
+                calculations_path,
+                self._build_default_calculation_payload(),
+                backup_dir=self._build_calculation_backup_dir(form_id),
+                keep_count=12,
+            )
 
         registry = self.get_registry()
         registry.setdefault("forms", []).append(
@@ -317,6 +395,18 @@ class FormDefinitionRegistry:
         save_path = deleted_form.get("save_path")
         if save_path and os.path.exists(save_path):
             os.remove(save_path)
+
+        calculation_path = external_path(self._build_default_calculations_relative_path(deleted_form.get("id") or ""))
+        if calculation_path and os.path.exists(calculation_path):
+            os.remove(calculation_path)
+
+        layout_dir = os.path.dirname(str(save_path or ""))
+        if layout_dir and os.path.isdir(layout_dir):
+            try:
+                if not os.listdir(layout_dir):
+                    os.rmdir(layout_dir)
+            except Exception:
+                pass
 
         return {
             "deleted_form": deleted_form,

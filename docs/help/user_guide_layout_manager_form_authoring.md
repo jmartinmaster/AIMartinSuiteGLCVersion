@@ -52,6 +52,8 @@ The form saved here is the same layout contract that Form Loader loads through t
   - Show Delete Button
   - Delete Button Label and Tooltip
   - Require Delete Confirm
+- If a repeating section should participate in calculation workflows, ensure its calculations metadata profile marks `requires_calculations` as `true`.
+- Save-time behavior: when a save introduces new required-calculation sections, Layout Manager prompts to open Form Calculations so setup can be completed immediately.
 - Use Move Up / Move Down in `Structure > Section Editor` to finalize ordering before broad field edits.
 
 ## Row Field Tips

@@ -358,8 +358,8 @@ class ProductionLogQtController:
         self.balance_state = self.model.normalize_balance_state(payload.get("balance_state"))
         self.current_draft_path = draft_path
         normalized_header = self.model.normalize_header_data(payload.get("header") or {})
-        production_rows = list(payload.get("production") or []) or [{}]
-        downtime_rows = list(payload.get("downtime") or []) or [{}]
+        production_rows = list(payload.get("production") or payload.get(self.production_section_id) or []) or [{}]
+        downtime_rows = list(payload.get("downtime") or payload.get(self.downtime_section_id) or []) or [{}]
         self.view.set_form_name(self.model.get_active_form_name())
         self._refresh_form_selector()
         self.view.set_form_data(normalized_header, production_rows, downtime_rows)
@@ -742,6 +742,12 @@ class ProductionLogQtController:
             self._header_value_by_role(header_payload, "goal_rate", fallback_id="goal_mph", default="240")
         )
 
+        production_duration_role = self.model.get_display_target("production_minutes_role", "duration_minutes")
+        downtime_duration_role = self.model.get_display_target("downtime_minutes_role", "duration_minutes")
+        efficiency_header_role = self.model.get_display_target("efficiency_header_role", "efficiency_pct")
+        ghost_display_mode = self.model.get_display_target("ghost_display_mode", "metrics_only")
+        ghost_header_role = self.model.get_display_target("ghost_header_role", "target_time")
+
         total_molds = 0
         production_total_minutes = 0
         for row_index, row_payload in enumerate(production_rows):
@@ -773,7 +779,7 @@ class ProductionLogQtController:
             production_total_minutes += minutes
             duration_field_id = self.model.get_section_field_id_by_role(
                 "production",
-                "duration_minutes",
+                production_duration_role,
                 config=self.layout_config,
                 fallback_id="time_calc",
             )
@@ -790,7 +796,7 @@ class ProductionLogQtController:
                 downtime_total_minutes += duration_minutes
             duration_field_id = self.model.get_section_field_id_by_role(
                 "downtime",
-                "duration_minutes",
+                downtime_duration_role,
                 config=self.layout_config,
                 fallback_id="time_calc",
             )
@@ -813,6 +819,22 @@ class ProductionLogQtController:
         self.balance_state["displayed_ghost_minutes"] = int(ghost_minutes)
         efficiency = self.model.calculate_efficiency(total_molds, hours_value, goal_value)
         self.view.set_metrics(efficiency, ghost_minutes)
+
+        efficiency_field_id = self.model.get_header_field_id_by_role(
+            efficiency_header_role,
+            config=self.layout_config,
+            fallback_id="eff_pct",
+        )
+        self.view.set_header_field_value(efficiency_field_id, f"{float(efficiency):.2f}")
+
+        if ghost_display_mode in {"header_only", "metrics_and_header"}:
+            ghost_field_id = self.model.get_header_field_id_by_role(
+                ghost_header_role,
+                config=self.layout_config,
+                fallback_id="target_time",
+            )
+            self.view.set_header_field_value(ghost_field_id, f"{int(ghost_minutes)} min")
+
         if not silent:
             self.view.set_status("Calculated production metrics.")
 

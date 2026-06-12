@@ -101,7 +101,12 @@ class ProductionLogCalculationsQtView(QMainWindow):
             for field in section.get("fields", []):
                 widget = self._create_field_widget(field)
                 label_text = str(field.get("label") or field.get("key") or "Field")
-                form_layout.addRow(QLabel(label_text), widget)
+                label_widget = QLabel(label_text)
+                help_text = str(field.get("help") or "").strip()
+                if help_text:
+                    label_widget.setToolTip(help_text)
+                    widget.setToolTip(help_text)
+                form_layout.addRow(label_widget, widget)
             scroll_layout.addWidget(group_box)
 
         preview_group = QGroupBox("Active Formula Preview")
@@ -173,6 +178,12 @@ class ProductionLogCalculationsQtView(QMainWindow):
     def _create_field_widget(self, field):
         key = str(field.get("key") or "")
         kind = str(field.get("kind") or "entry")
+
+        if kind == "info":
+            widget = QLabel(str(field.get("value") or ""))
+            widget.setWordWrap(True)
+            widget.setObjectName("mutedLabel")
+            return widget
 
         if kind == "bool":
             widget = QCheckBox()

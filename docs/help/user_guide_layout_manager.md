@@ -24,6 +24,9 @@ Large multi-pane workflows are flattened into inner tabs so editing surfaces do 
 - Format JSON rewrites the current layout with consistent indentation.
 - Validate JSON checks the current layout before you save it.
 - Save writes the working layout to the active form file. For the built-in default form that is `layout_config.json`. For custom stored forms that is `data/forms/<form_id>.json`.
+- After a successful Save, Layout Manager checks calculations metadata transitions. If one or more sections now require calculations setup, a confirmation dialog offers to open Form Calculations immediately.
+- If you choose `Yes`, Layout Manager asks the host shell to open `Form Calculations` so you can configure formulas and display targets for the newly-required sections.
+- If you choose `No`, Save still completes normally and you can open Form Calculations later from navigation.
 - Save now accepts only valid full-layout JSON. If the JSON is malformed, Save fails with a syntax error instead of extracting partial sections.
 - When Save succeeds from the JSON Editor and no visible Block View / Import / Export / Section Editor changes alter the layout, the file is written from the current editor text instead of being rebuilt from hidden defaults.
 - When Save detects visible Block View, Import / Export, or Section Editor edits that have not been manually applied yet, those edits are now auto-applied before the file is written.

@@ -18,6 +18,13 @@ from copy import deepcopy
 from app.app_identity import DEFAULT_UPDATE_REPOSITORY_URL
 from app.downtime_codes import DEFAULT_DT_CODE_MAP
 from app.external_data_registry import ExternalDataRegistry
+from app.settings_diagnostics import (
+    build_default_settings_payload,
+    diagnose_and_repair_settings,
+    log_settings_diagnostics_summary,
+    persist_repaired_settings,
+    write_settings_diagnostics_report,
+)
 from app.theme_manager import DEFAULT_THEME, normalize_theme
 
 
@@ -30,6 +37,7 @@ class SettingsManagerModel:
         self.valid_persistent_modules = []
         self.saved_theme = DEFAULT_THEME
         self.preview_theme = DEFAULT_THEME
+        self.last_settings_diagnostics = None
         self.load_settings()
 
     def normalize_module_names(self, raw_value, valid_modules=None):
@@ -60,34 +68,51 @@ class SettingsManagerModel:
         return self.settings
 
     def build_default_settings(self):
-        return {
-            "export_directory": "exports",
-            "organize_exports_by_date": True,
-            "default_export_prefix": "Disamatic Production Sheet",
-            "update_repository_url": DEFAULT_UPDATE_REPOSITORY_URL,
-            "enable_advanced_dev_updates": False,
-            "theme": DEFAULT_THEME,
-            "ui_shell_backend": "pyqt6",
-            "enable_screen_transitions": True,
-            "enable_module_update_notifications": True,
-            "screen_transition_duration_ms": 360,
-            "toast_duration_sec": 5,
-            "auto_save_interval_min": 5,
-            "default_shift_hours": 8.0,
-            "default_goal_mph": 240,
-            "downtime_codes": deepcopy(DEFAULT_DT_CODE_MAP),
-            "module_whitelist": [],
-            "persistent_modules": [],
-        }
+        defaults = build_default_settings_payload()
+        defaults["update_repository_url"] = DEFAULT_UPDATE_REPOSITORY_URL
+        return defaults
 
     def load_settings(self):
         loaded = self.data_registry.load_json("settings", default_factory=self.build_default_settings)
         if not isinstance(loaded, dict):
             loaded = self.build_default_settings()
-        self.settings = self.normalize_settings(loaded)
+        diagnostics = diagnose_and_repair_settings(
+            loaded,
+            self.build_default_settings(),
+            context="settings_manager_model.load_settings",
+            valid_navigation_modules=self.valid_navigation_modules or None,
+            valid_persistent_modules=self.valid_persistent_modules or None,
+            drop_unknown_from_effective=True,
+            keep_unknown_for_persist=False,
+        )
+        self.last_settings_diagnostics = diagnostics
+        self.settings = self.normalize_settings(diagnostics.repaired_effective_payload)
+        if diagnostics.repaired:
+            diagnostics.repaired_effective_payload = dict(self.settings)
+            diagnostics.repaired_persisted_payload.update(self.settings)
+            persist_repaired_settings(diagnostics, self.settings_path, keep_count=12)
+            write_settings_diagnostics_report(diagnostics, keep_count=30)
+            log_settings_diagnostics_summary(diagnostics)
         self.saved_theme = self.settings["theme"]
         self.preview_theme = self.saved_theme
         return self.settings
+
+    def get_last_diagnostics_warning(self, max_items=5):
+        diagnostics = self.last_settings_diagnostics
+        if diagnostics is None or not diagnostics.issues:
+            return ""
+        issue_lines = []
+        for issue in diagnostics.issues[:max(1, int(max_items))]:
+            issue_lines.append(f"- {issue.key}: {issue.message}")
+        remainder = len(diagnostics.issues) - len(issue_lines)
+        if remainder > 0:
+            issue_lines.append(f"- ...and {remainder} more")
+        report_note = f"\n\nDiagnostics report: {diagnostics.report_path}" if diagnostics.report_path else ""
+        return (
+            "Settings auto-repair detected invalid entries and corrected them.\n"
+            + "\n".join(issue_lines)
+            + report_note
+        )
 
     def normalize_settings(self, payload):
         settings = self.build_default_settings()

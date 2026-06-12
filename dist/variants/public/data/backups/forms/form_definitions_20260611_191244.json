@@ -1,0 +1,14 @@
+{
+    "schema_version": 1,
+    "active_form_id": "temp_form_title",
+    "forms": [
+        {
+            "id": "temp_form_title",
+            "name": "Temp Form Title",
+            "description": "Default form definition backed by layout_config.json",
+            "layout_relative_path": "layout_config.json",
+            "layout_path_mode": "local_or_resource",
+            "built_in": true
+        }
+    ]
+}

@@ -40,6 +40,7 @@ class SettingsManagerQtController:
         self.persistable_modules = list(self.payload.get("persistable_modules") or [])
         self.external_modules_status = str(self.payload.get("external_modules_status") or "")
         self.model = SettingsManagerModel()
+        self._last_diagnostics_warning_signature = None
         self.model.set_valid_modules(
             [item.get("module_name") for item in self.navigation_modules],
             [item.get("module_name") for item in self.persistable_modules],
@@ -180,6 +181,19 @@ class SettingsManagerQtController:
         self.view.configure_security_admin_panel(self.get_security_admin_state())
         self.view.configure_developer_admin_tools(self.get_developer_admin_settings_state())
         self.view.set_theme_status(f"Current theme: {get_theme_label(self.model.preview_theme)}")
+        diagnostics = self.model.last_settings_diagnostics
+        diagnostics_warning = self.model.get_last_diagnostics_warning(max_items=5)
+        warning_signature = None
+        if diagnostics is not None and diagnostics.issues:
+            warning_signature = (
+                diagnostics.context,
+                tuple((issue.key, issue.issue_type, issue.message) for issue in diagnostics.issues),
+                diagnostics.report_path,
+            )
+        if diagnostics_warning and warning_signature != self._last_diagnostics_warning_signature:
+            self.show_toast("Settings Auto-Repair", diagnostics_warning, "warning")
+            self.view.set_status("Settings auto-repair applied. See diagnostics report for details.")
+            self._last_diagnostics_warning_signature = warning_signature
         if initial:
             self.view.set_status(f"{self.module_title} viewport ready.")
 

@@ -1,13 +1,25 @@
 # production_log_calculations.json Reference
 
-`production_log_calculations.json` controls runtime behavior for Form Loader calculations.
+`production_log_calculations.json` is the legacy compatibility name for Form Loader calculations payloads.
 
 The file keeps the permanent internal `production_log_calculations` family name for compatibility, while `Form Calculations` is the preferred user-facing alias.
 
-This file is separate from the active form layout contract on purpose:
+The calculations companion file is separate from the active form layout contract on purpose:
 
 - The active layout file, either `layout_config.json` or a stored form under `data/forms`, controls what the UI renders and how workbook columns are mapped.
-- `production_log_calculations.json` controls how values are interpreted, rounded, normalized, and calculated.
+- The active form's calculations companion file controls how values are interpreted, rounded, normalized, and calculated.
+- Companion file location comes from layout metadata at `calculations.companion_relative_path`.
+
+For scoped stored forms, the default companion path is:
+
+- `data/forms/<form_id>/calculations.json`
+
+## Layout Manager Save Prompt
+
+When Layout Manager saves a form and detects newly required calculations sections (`calculations.section_profiles[].requires_calculations` transitions to `true`), it prompts to open Form Calculations immediately.
+
+- Choose `Yes` to launch Form Calculations and configure formulas/display targets now.
+- Choose `No` to keep working and open Form Calculations later.
 
 See also:
 

@@ -214,6 +214,11 @@ class LayoutManagerQtView(QMainWindow):
         delete_button.clicked.connect(self.controller.delete_form)
         delete_button.setMinimumHeight(26)
         form_manage_row.addWidget(delete_button)
+
+        migrate_button = QPushButton("Migrate Forms")
+        migrate_button.clicked.connect(self.controller.migrate_forms_storage)
+        migrate_button.setMinimumHeight(26)
+        form_manage_row.addWidget(migrate_button)
         ribbon_row.addWidget(form_manage_group, 2)
 
         editor_group = QGroupBox("Editor")
@@ -257,6 +262,98 @@ class LayoutManagerQtView(QMainWindow):
         editor_group_layout.addWidget(self.editor)
         json_editor_layout.addWidget(editor_group)
         self.tabs.addTab(self.json_editor_tab, "JSON Editor")
+
+        self.compare_tab = QWidget()
+        compare_layout = QVBoxLayout(self.compare_tab)
+        compare_layout.setContentsMargins(8, 8, 8, 8)
+        compare_layout.setSpacing(8)
+
+        compare_controls_row = QHBoxLayout()
+        compare_controls_row.addWidget(QLabel("Reference Form"))
+        self.compare_form_combo = QComboBox()
+        self.compare_form_combo.setMinimumWidth(260)
+        compare_controls_row.addWidget(self.compare_form_combo)
+
+        load_reference_button = QPushButton("Load Reference")
+        load_reference_button.clicked.connect(self.controller.load_compare_reference_selected_form)
+        compare_controls_row.addWidget(load_reference_button)
+
+        load_into_editor_button = QPushButton("Load Into Editor")
+        load_into_editor_button.clicked.connect(self.controller.load_compare_selected_form_into_editor)
+        compare_controls_row.addWidget(load_into_editor_button)
+
+        load_default_reference_button = QPushButton("Load Default")
+        load_default_reference_button.clicked.connect(self.controller.load_compare_reference_default)
+        compare_controls_row.addWidget(load_default_reference_button)
+
+        copy_reference_button = QPushButton("Reference -> Working")
+        copy_reference_button.clicked.connect(self.controller.copy_compare_reference_to_working)
+        compare_controls_row.addWidget(copy_reference_button)
+
+        copy_editor_button = QPushButton("Main Editor -> Working")
+        copy_editor_button.clicked.connect(self.controller.copy_editor_to_compare_working)
+        compare_controls_row.addWidget(copy_editor_button)
+
+        apply_working_button = QPushButton("Apply Working -> Editor")
+        apply_working_button.clicked.connect(self.controller.apply_compare_working_to_editor)
+        compare_controls_row.addWidget(apply_working_button)
+
+        compare_diff_button = QPushButton("Refresh Diff")
+        compare_diff_button.clicked.connect(self.controller.refresh_compare_diff)
+        compare_controls_row.addWidget(compare_diff_button)
+        compare_controls_row.addStretch(1)
+        compare_layout.addLayout(compare_controls_row)
+
+        compare_section_row = QHBoxLayout()
+        compare_section_row.addWidget(QLabel("Section"))
+        self.compare_section_combo = QComboBox()
+        for section_key in (
+            "template_path",
+            "header_fields",
+            "production_row_fields",
+            "downtime_row_fields",
+            "production_mapping",
+            "downtime_mapping",
+            "sections",
+            "editor_presets",
+        ):
+            self.compare_section_combo.addItem(section_key, section_key)
+        self.compare_section_combo.setMinimumWidth(220)
+        compare_section_row.addWidget(self.compare_section_combo)
+
+        copy_section_button = QPushButton("Copy Section Reference -> Working")
+        copy_section_button.clicked.connect(self.controller.copy_compare_section_from_reference_to_working)
+        compare_section_row.addWidget(copy_section_button)
+        compare_section_row.addStretch(1)
+        compare_layout.addLayout(compare_section_row)
+
+        compare_editors_row = QHBoxLayout()
+        compare_editors_row.setSpacing(8)
+
+        reference_group = QGroupBox("Reference JSON")
+        reference_layout = QVBoxLayout(reference_group)
+        self.compare_reference_editor = QPlainTextEdit()
+        self.compare_reference_editor.setReadOnly(True)
+        reference_layout.addWidget(self.compare_reference_editor)
+        compare_editors_row.addWidget(reference_group, 1)
+
+        working_group = QGroupBox("Working JSON")
+        working_layout = QVBoxLayout(working_group)
+        self.compare_working_editor = QPlainTextEdit()
+        self.compare_working_editor.textChanged.connect(self.controller.refresh_compare_diff)
+        working_layout.addWidget(self.compare_working_editor)
+        compare_editors_row.addWidget(working_group, 1)
+
+        compare_layout.addLayout(compare_editors_row, 1)
+
+        diff_group = QGroupBox("Unified Diff")
+        diff_layout = QVBoxLayout(diff_group)
+        self.compare_diff_editor = QPlainTextEdit()
+        self.compare_diff_editor.setReadOnly(True)
+        diff_layout.addWidget(self.compare_diff_editor)
+        compare_layout.addWidget(diff_group, 1)
+
+        self.tabs.addTab(self.compare_tab, "JSON Compare")
 
         block_tab = QWidget()
         block_layout = QVBoxLayout(block_tab)
@@ -1281,6 +1378,41 @@ class LayoutManagerQtView(QMainWindow):
             if match_index >= 0:
                 self.form_combo.setCurrentIndex(match_index)
         del blocker
+
+    def set_compare_forms(self, forms, selected_form_id):
+        blocker = QSignalBlocker(self.compare_form_combo)
+        self.compare_form_combo.clear()
+        for form_info in forms:
+            form_name = str(form_info.get("name") or form_info.get("id") or "Unnamed Form")
+            self.compare_form_combo.addItem(form_name, form_info.get("id"))
+        if selected_form_id:
+            match_index = self.compare_form_combo.findData(selected_form_id)
+            if match_index >= 0:
+                self.compare_form_combo.setCurrentIndex(match_index)
+        del blocker
+
+    def current_compare_form_id(self):
+        return self.compare_form_combo.currentData()
+
+    def set_compare_reference_text(self, text):
+        self.compare_reference_editor.setPlainText(str(text or ""))
+
+    def compare_reference_text(self):
+        return self.compare_reference_editor.toPlainText()
+
+    def set_compare_working_text(self, text):
+        blocker = QSignalBlocker(self.compare_working_editor)
+        self.compare_working_editor.setPlainText(str(text or ""))
+        del blocker
+
+    def compare_working_text(self):
+        return self.compare_working_editor.toPlainText()
+
+    def set_compare_diff_text(self, text):
+        self.compare_diff_editor.setPlainText(str(text or ""))
+
+    def current_compare_section_key(self):
+        return str(self.compare_section_combo.currentData() or "").strip()
 
     def current_form_id(self):
         return self.form_combo.currentData()

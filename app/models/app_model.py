@@ -19,6 +19,13 @@ import threading
 from dataclasses import dataclass, field
 
 from app.app_platform import get_obsolete_local_executables
+from app.settings_diagnostics import (
+    build_default_settings_payload,
+    diagnose_and_repair_settings,
+    log_settings_diagnostics_summary,
+    persist_repaired_settings,
+    write_settings_diagnostics_report,
+)
 from app.theme_manager import DEFAULT_THEME, normalize_theme
 
 __module_name__ = "Application Shell"
@@ -57,6 +64,7 @@ class AppModel:
     module_preload_thread: object = None
     module_preload_poll_seconds: float = 1.0
     preload_data_lock: object = field(default_factory=threading.RLock)
+    last_settings_diagnostics: object = None
 
     def ensure_external_modules_directory(self):
         os.makedirs(self.external_modules_path, exist_ok=True)
@@ -186,22 +194,28 @@ class AppModel:
         return normalized
 
     def load_runtime_settings(self, valid_navigation_modules=None, valid_persistent_modules=None):
-        settings = {
-            "theme": DEFAULT_THEME,
-            "ui_shell_backend": "pyqt6",
-            "enable_screen_transitions": True,
-            "screen_transition_duration_ms": 360,
-            "toast_duration_sec": 5,
-            "enable_module_update_notifications": True,
-            "persistent_modules": [],
-        }
+        settings = build_default_settings_payload()
         loaded = None
         if os.path.exists(self.settings_path):
             try:
                 with open(self.settings_path, "r", encoding="utf-8") as handle:
                     loaded = json.load(handle)
                 if isinstance(loaded, dict):
-                    settings.update(loaded)
+                    diagnostics = diagnose_and_repair_settings(
+                        loaded,
+                        settings,
+                        context="app_model.load_runtime_settings",
+                        valid_navigation_modules=valid_navigation_modules,
+                        valid_persistent_modules=valid_persistent_modules,
+                        drop_unknown_from_effective=True,
+                        keep_unknown_for_persist=False,
+                    )
+                    settings.update(diagnostics.repaired_effective_payload)
+                    if diagnostics.repaired:
+                        persist_repaired_settings(diagnostics, self.settings_path, keep_count=12)
+                        write_settings_diagnostics_report(diagnostics, keep_count=30)
+                        log_settings_diagnostics_summary(diagnostics)
+                    self.last_settings_diagnostics = diagnostics
             except Exception:
                 pass
 

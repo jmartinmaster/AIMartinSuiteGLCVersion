@@ -30,7 +30,7 @@ from PyQt6.QtWidgets import QGroupBox, QHBoxLayout, QLabel, QMessageBox, QPushBu
 from app.app_logging import log_exception
 
 __module_name__ = "Layout Manager Mini Dispatcher"
-__version__ = "1.1.2"
+__version__ = "1.2.0"
 LAYOUT_MANAGER_QT_SESSION_ENV = "AIMARTIN_LAYOUT_MANAGER_QT_SESSION"
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -197,6 +197,7 @@ class LayoutManagerQtBridge(QWidget):
         self.mini_dispatcher = mini_dispatcher
         self.runtime_manager = mini_dispatcher.runtime_manager
         self._last_toast_token = None
+        self._last_module_open_token = None
         self._poll_timer = QTimer(self)
         self._build_ui()
         self._poll_timer.setInterval(900)
@@ -269,6 +270,11 @@ class LayoutManagerQtBridge(QWidget):
         if toast_token is not None and toast_token != self._last_toast_token:
             self._last_toast_token = toast_token
             self.mini_dispatcher.forward_runtime_toast(toast_event)
+        module_open_event = state.get("module_open_event") if isinstance(state.get("module_open_event"), dict) else None
+        module_open_token = module_open_event.get("token") if isinstance(module_open_event, dict) else None
+        if module_open_token is not None and module_open_token != self._last_module_open_token:
+            self._last_module_open_token = module_open_token
+            self.mini_dispatcher.forward_runtime_module_open(module_open_event)
         if status.lower() == "closed":
             self.mini_dispatcher.schedule_preload(force=True)
 
@@ -374,6 +380,29 @@ class LayoutManagerMiniDispatcher:
         except Exception:
             duration_ms = None
         self.host_dispatcher.show_toast(title, message, bootstyle=bootstyle, duration_ms=duration_ms)
+
+    def forward_runtime_module_open(self, module_open_event):
+        if not isinstance(module_open_event, dict):
+            return
+        module_name = str(module_open_event.get("module") or "").strip()
+        if not module_name:
+            return
+        reason = str(module_open_event.get("reason") or "").strip()
+        try:
+            self.host_dispatcher.load_module(module_name, use_transition=True, ensure_authorized=True)
+            if reason:
+                self.host_dispatcher.show_toast(
+                    "Layout Manager",
+                    f"Opened {module_name}: {reason}",
+                    bootstyle="info",
+                )
+        except Exception as exc:
+            log_exception("layout_manager_dispatcher.forward_runtime_module_open", exc)
+            self.host_dispatcher.show_toast(
+                "Layout Manager",
+                f"Could not open requested module '{module_name}': {exc}",
+                bootstyle="danger",
+            )
 
     def stop_window(self):
         self.runtime_manager.stop_runtime(force=False)

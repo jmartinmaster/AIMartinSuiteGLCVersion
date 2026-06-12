@@ -761,46 +761,56 @@ class Gatekeeper:
         button_box.rejected.connect(dialog.reject)
         root_layout.addWidget(button_box)
 
+        def _handle_dialog_callback_error(callback_name, exc):
+            log_exception(f"security.login_dialog.{callback_name}", exc)
+            status_label.setText(f"Login action failed: {exc}")
+
         def refresh_vault_note(*_args):
-            selected_vault = vault_lookup.get(vault_combo.currentText())
-            if selected_vault is None:
-                vault_status_label.setText("")
-                password_entry.setText("")
-                password_entry.setEnabled(False)
-                return
-            _effective_rights, status_text = self._build_vault_status_text(selected_vault)
-            vault_status_label.setText(status_text)
-            if selected_vault.password_required:
-                password_entry.setEnabled(True)
-                password_entry.setFocus()
-                password_entry.selectAll()
-            else:
-                password_entry.setText("")
-                password_entry.setEnabled(False)
+            try:
+                selected_vault = vault_lookup.get(vault_combo.currentText())
+                if selected_vault is None:
+                    vault_status_label.setText("")
+                    password_entry.setText("")
+                    password_entry.setEnabled(False)
+                    return
+                _effective_rights, status_text = self._build_vault_status_text(selected_vault)
+                vault_status_label.setText(status_text)
+                if selected_vault.password_required:
+                    password_entry.setEnabled(True)
+                    password_entry.setFocus()
+                    password_entry.selectAll()
+                else:
+                    password_entry.setText("")
+                    password_entry.setEnabled(False)
+            except Exception as exc:
+                _handle_dialog_callback_error("refresh_vault_note", exc)
 
         def submit_login():
-            selected_vault = vault_lookup.get(vault_combo.currentText())
-            if selected_vault is None:
-                status_label.setText("Choose a vault.")
-                return
-            effective_rights = self._get_effective_vault_rights(selected_vault)
-            if required_right and required_right not in effective_rights:
-                status_label.setText("That vault does not have the required access right.")
-                return
-            if selected_vault.password_required:
-                entered_password = password_entry.text()
-                if not entered_password:
-                    status_label.setText("Enter the vault password.")
+            try:
+                selected_vault = vault_lookup.get(vault_combo.currentText())
+                if selected_vault is None:
+                    status_label.setText("Choose a vault.")
                     return
-                if not self._verify_password(selected_vault, entered_password):
-                    status_label.setText("Incorrect password.")
+                effective_rights = self._get_effective_vault_rights(selected_vault)
+                if required_right and required_right not in effective_rights:
+                    status_label.setText("That vault does not have the required access right.")
                     return
-            native_verified, native_message = self._verify_native_device_requirement(selected_vault)
-            if not native_verified:
-                status_label.setText(native_message or "Native security-device verification failed.")
-                return
-            self._set_session_from_vault(selected_vault)
-            dialog.accept()
+                if selected_vault.password_required:
+                    entered_password = password_entry.text()
+                    if not entered_password:
+                        status_label.setText("Enter the vault password.")
+                        return
+                    if not self._verify_password(selected_vault, entered_password):
+                        status_label.setText("Incorrect password.")
+                        return
+                native_verified, native_message = self._verify_native_device_requirement(selected_vault)
+                if not native_verified:
+                    status_label.setText(native_message or "Native security-device verification failed.")
+                    return
+                self._set_session_from_vault(selected_vault)
+                dialog.accept()
+            except Exception as exc:
+                _handle_dialog_callback_error("submit_login", exc)
 
         button_box.accepted.connect(submit_login)
         password_entry.returnPressed.connect(submit_login)

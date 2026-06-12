@@ -15,6 +15,8 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 import json
 import time
+import difflib
+from copy import deepcopy
 from pathlib import Path
 from PyQt6.QtCore import QTimer
 
@@ -22,7 +24,7 @@ from app.models.layout_manager_model import LayoutManagerModel
 from app.views.layout_manager_qt_view import LayoutManagerQtView
 
 __module_name__ = "Layout Manager Qt Controller"
-__version__ = "0.6.0"
+__version__ = "0.7.0"
 
 
 class LayoutManagerQtController:
@@ -34,6 +36,7 @@ class LayoutManagerQtController:
         self.command_path = Path(payload["command_path"])
         self.change_token = 0
         self.toast_token = 0
+        self.module_open_token = 0
         self.dirty = False
         self.current_form_info = dict(payload.get("form_info") or {})
         self.current_config = dict(payload.get("config") or {})
@@ -43,6 +46,7 @@ class LayoutManagerQtController:
         self.guardrails = payload.get("guardrails") or {}
         self.protected_row_field_lookup = payload.get("protected_row_field_lookup") or {}
         self.last_refresh_ms = 0.0
+        self.compare_reference_form_id = ""
         self.view = LayoutManagerQtView(controller=self, theme_tokens=payload.get("theme_tokens") or {})
         self._initial_view_rendered = False
         self._undo_stack = []
@@ -145,6 +149,11 @@ class LayoutManagerQtController:
             selected_form_id = next(iter(available_form_ids), "")
         self.selected_form_id = selected_form_id
         self.view.set_forms(self.forms, self.selected_form_id)
+        compare_form_id = str(self.compare_reference_form_id or "").strip()
+        if compare_form_id not in available_form_ids:
+            compare_form_id = self.selected_form_id or next(iter(available_form_ids), "")
+        self.compare_reference_form_id = compare_form_id
+        self.view.set_compare_forms(self.forms, self.compare_reference_form_id)
 
     def refresh_view(self, reason="", editor_text_override=None):
         started_at = time.perf_counter()
@@ -186,7 +195,7 @@ class LayoutManagerQtController:
         self.view.set_dirty(self.dirty)
         self.last_refresh_ms = round((time.perf_counter() - started_at) * 1000.0, 2)
 
-    def write_state(self, status="running", message="", toast_event=None):
+    def write_state(self, status="running", message="", toast_event=None, module_open_event=None):
         state = {
             "status": status,
             "dirty": self.dirty,
@@ -200,6 +209,8 @@ class LayoutManagerQtController:
         }
         if isinstance(toast_event, dict):
             state["toast_event"] = toast_event
+        if isinstance(module_open_event, dict):
+            state["module_open_event"] = module_open_event
         self.state_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
 
     def _emit_host_toast(self, message, bootstyle="info", title="Layout Manager", duration_ms=None):
@@ -212,6 +223,72 @@ class LayoutManagerQtController:
             "duration_ms": duration_ms,
         }
         self.write_state(message=str(message or ""), toast_event=toast_payload)
+
+    def _emit_host_module_open(self, module_name, reason="", payload=None):
+        target_module = str(module_name or "").strip()
+        if not target_module:
+            return
+        self.module_open_token += 1
+        module_open_payload = {
+            "token": self.module_open_token,
+            "module": target_module,
+            "reason": str(reason or "").strip(),
+            "payload": dict(payload or {}),
+        }
+        self.write_state(
+            message=f"Requested host to open module '{target_module}'.",
+            module_open_event=module_open_payload,
+        )
+
+    def _required_calculation_section_ids(self, config):
+        metadata = self.model._normalize_calculations_metadata(config if isinstance(config, dict) else {})
+        section_profiles = metadata.get("section_profiles") if isinstance(metadata, dict) else []
+        required_sections = set()
+        for profile in section_profiles if isinstance(section_profiles, list) else []:
+            if not isinstance(profile, dict):
+                continue
+            section_id = str(profile.get("section_id") or "").strip().lower()
+            if not section_id:
+                continue
+            if bool(profile.get("requires_calculations")):
+                required_sections.add(section_id)
+        return required_sections
+
+    def _handle_new_calculation_requirements(self, previous_config, updated_config):
+        previous_required = self._required_calculation_section_ids(previous_config)
+        updated_required = self._required_calculation_section_ids(updated_config)
+        newly_required = sorted(updated_required - previous_required)
+        if not newly_required:
+            return
+
+        section_names = [
+            self.model.get_section_name(section_id, config=updated_config, fallback_name=section_id)
+            for section_id in newly_required
+        ]
+        section_lines = "\n".join(f"- {name}" for name in section_names)
+        prompt_message = (
+            "This save introduced sections that now require calculations setup:\n\n"
+            f"{section_lines}\n\n"
+            "Open Form Calculations now to configure them?"
+        )
+
+        if not self.view.confirm("Open Form Calculations", prompt_message):
+            self._emit_host_toast(
+                "Skipped opening Form Calculations. You can open it manually later.",
+                bootstyle="warning",
+            )
+            return
+
+        self._emit_host_module_open(
+            "production_log_calculations",
+            reason="Layout save introduced required calculations metadata.",
+            payload={
+                "section_ids": newly_required,
+                "section_names": section_names,
+                "source_form_id": str(self.current_form_info.get("id") or "").strip(),
+                "source_form_name": str(self.current_form_info.get("name") or "").strip(),
+            },
+        )
 
     def mark_dirty(self):
         if self.dirty:
@@ -471,6 +548,184 @@ class LayoutManagerQtController:
             return
         self.view.set_status("JSON is valid.")
         self._emit_host_toast("Layout JSON is valid.", bootstyle="success")
+
+    def load_compare_reference_selected_form(self):
+        form_id = str(self.view.current_compare_form_id() or "").strip()
+        if not form_id:
+            self.view.set_status("Select a reference form first.", error=True)
+            return
+        try:
+            reference_text, missing_keys = self._load_form_text_for_compare(form_id)
+            self.compare_reference_form_id = form_id
+            self.view.set_compare_reference_text(reference_text)
+            self._refresh_compare_diff()
+            if missing_keys:
+                self.view.set_status(
+                    f"Loaded compare reference from '{form_id}' with auto-added keys: {', '.join(missing_keys)}. "
+                    "Recommendation: save a refreshed copy to persist full structure."
+                )
+            else:
+                self.view.set_status(f"Loaded compare reference from form '{form_id}'.")
+        except Exception as exc:
+            self.view.set_status(f"Compare reference load failed: {exc}", error=True)
+
+    def load_compare_selected_form_into_editor(self):
+        form_id = str(self.view.current_compare_form_id() or "").strip()
+        if not form_id:
+            self.view.set_status("Select a form to load into the editor.", error=True)
+            return
+        if self.dirty and not self.view.confirm(
+            "Replace Unsaved Changes",
+            "Load selected form JSON into editor and replace current unsaved changes?",
+        ):
+            self.view.set_status("Load into editor cancelled.")
+            return
+        try:
+            source_text, missing_keys = self._load_form_text_for_compare(form_id)
+            self.view.set_editor_text(source_text)
+            self.apply_editor_changes(message=f"Loaded form '{form_id}' into editor")
+            self.view.set_compare_working_text(source_text)
+            self._refresh_compare_diff()
+            if missing_keys:
+                self.view.set_status(
+                    f"Loaded form '{form_id}' into editor with auto-added keys: {', '.join(missing_keys)}. "
+                    "Recommendation: save to persist full layout structure."
+                )
+            else:
+                self.view.set_status(f"Loaded form '{form_id}' into editor (not activated).")
+        except Exception as exc:
+            self.view.set_status(f"Load into editor failed: {exc}", error=True)
+
+    def load_compare_reference_default(self):
+        try:
+            reference_text = self.model.load_default_text()
+            self.view.set_compare_reference_text(reference_text)
+            self._refresh_compare_diff()
+            self.view.set_status("Loaded compare reference from default layout template.")
+        except Exception as exc:
+            self.view.set_status(f"Default reference load failed: {exc}", error=True)
+
+    def copy_compare_reference_to_working(self):
+        self.view.set_compare_working_text(self.view.compare_reference_text())
+        self._refresh_compare_diff()
+        self.view.set_status("Copied reference JSON into compare working editor.")
+
+    def copy_compare_section_from_reference_to_working(self):
+        section_key = str(self.view.current_compare_section_key() or "").strip()
+        if not section_key:
+            self.view.set_status("Select a section key first.", error=True)
+            return
+        try:
+            reference_payload = self._parse_compare_text_with_fallback(
+                self.view.compare_reference_text(),
+                label="reference",
+            )
+        except Exception as exc:
+            self.view.set_status(f"Reference JSON is invalid: {exc}", error=True)
+            return
+
+        if section_key not in reference_payload:
+            self.view.set_status(f"Reference JSON does not include '{section_key}'.", error=True)
+            return
+
+        working_text = self.view.compare_working_text().strip()
+        if not working_text:
+            try:
+                working_payload = self._load_editor_config()
+            except Exception:
+                working_payload = deepcopy(self.current_config)
+        else:
+            try:
+                working_payload = self._parse_compare_text_with_fallback(working_text, label="working")
+            except Exception as exc:
+                self.view.set_status(f"Working JSON is invalid: {exc}", error=True)
+                return
+
+        working_payload[section_key] = deepcopy(reference_payload[section_key])
+        self.view.set_compare_working_text(self.model.serialize_config(working_payload))
+        self._refresh_compare_diff()
+        self.view.set_status(f"Copied '{section_key}' from reference into working JSON.")
+
+    def copy_editor_to_compare_working(self):
+        self.view.set_compare_working_text(self.view.editor_text())
+        self._refresh_compare_diff()
+        self.view.set_status("Copied current JSON editor text into compare working editor.")
+
+    def apply_compare_working_to_editor(self):
+        working_text = self.view.compare_working_text()
+        if not str(working_text or "").strip():
+            self.view.set_status("Compare working editor is empty.", error=True)
+            return
+        try:
+            self.view.set_editor_text(working_text)
+            self.apply_editor_changes(message="Applied compare working JSON")
+            self._refresh_compare_diff()
+            self.view.set_status("Applied compare working JSON to the main editor.")
+        except Exception as exc:
+            self.view.set_status(f"Apply compare JSON failed: {exc}", error=True)
+
+    def refresh_compare_diff(self):
+        self._refresh_compare_diff()
+
+    def _refresh_compare_diff(self):
+        reference_lines = self.view.compare_reference_text().splitlines()
+        working_lines = self.view.compare_working_text().splitlines()
+        diff_lines = list(
+            difflib.unified_diff(
+                reference_lines,
+                working_lines,
+                fromfile="reference",
+                tofile="working",
+                lineterm="",
+            )
+        )
+        self.view.set_compare_diff_text("\n".join(diff_lines) if diff_lines else "No differences.")
+
+    def _load_form_text_for_compare(self, form_id):
+        raw_text = self.model.load_form_text(form_id)
+        missing_keys = []
+        try:
+            self.model.resolve_editor_text(raw_text, base_config=self.current_config)
+            return raw_text, missing_keys
+        except Exception as exc:
+            message = str(exc or "")
+            if "JSON editor expects the full layout object" not in message:
+                raise
+            missing_keys = self._extract_missing_keys_from_error(message)
+            config, _source_path, _form_info = self.model.load_form_config(form_id)
+            return self.model.serialize_config(config), missing_keys
+
+    def _parse_compare_text_with_fallback(self, text, label="json"):
+        try:
+            return self.model.parse_editor_text(text, base_config=self.current_config)
+        except Exception as exc:
+            message = str(exc or "")
+            if "JSON editor expects the full layout object" not in message:
+                raise
+            payload = json.loads(str(text or "{}"))
+            if not isinstance(payload, dict):
+                raise
+            missing_keys = self._extract_missing_keys_from_error(message)
+            repaired_payload = self.model.build_blank_form_config()
+            repaired_payload.update(payload)
+            repaired_payload = self.model.normalize_config(repaired_payload)
+            self.model.validate_config(repaired_payload)
+            if missing_keys:
+                self.view.set_status(
+                    f"{label.title()} JSON was legacy/incomplete; auto-added: {', '.join(missing_keys)}. "
+                    "Recommendation: save an updated copy."
+                )
+            return repaired_payload
+
+    def _extract_missing_keys_from_error(self, message):
+        text = str(message or "")
+        marker = "Missing:"
+        if marker not in text:
+            return []
+        missing_text = text.split(marker, 1)[1].strip()
+        if not missing_text:
+            return []
+        return [part.strip() for part in missing_text.split(",") if part.strip()]
 
     def format_editor(self):
         try:
@@ -880,6 +1135,7 @@ class LayoutManagerQtController:
     def save_current(self):
         def _execute():
             try:
+                previous_config = deepcopy(self.current_config)
                 self.view.finalize_block_table_edits()
                 editor_text = self.view.editor_text()
                 parsed_config, composed_config = self._compose_save_config(editor_text)
@@ -906,6 +1162,7 @@ class LayoutManagerQtController:
                 self.refresh_forms()
                 self.refresh_view(reason="Saved current layout configuration", editor_text_override=save_text)
                 self._emit_host_toast(message, bootstyle="success")
+                self._handle_new_calculation_requirements(previous_config, composed_config)
             except Exception as exc:
                 self.set_status_message(f"Save failed: {exc}", error=True)
 
@@ -1101,6 +1358,41 @@ class LayoutManagerQtController:
             self._emit_host_toast(action_message, bootstyle="success")
 
         self._run_busy_action(f"Deleting form '{form_name}'...", _execute)
+
+    def migrate_forms_storage(self):
+        if not self.view.confirm(
+            "Migrate Forms",
+            "Migrate stored forms to per-form folders and ensure companion calculation JSON metadata is present?\n\n"
+            "This rewrites form layout paths in the form registry.",
+        ):
+            return
+
+        def _execute():
+            try:
+                result = self.model.migrate_forms_to_scoped_storage()
+                migrated = list(result.get("migrated") or [])
+                skipped = list(result.get("skipped") or [])
+                config, source_path, loaded_form_info = self.model.load_current_config()
+                editor_text = self.model.load_current_text()
+                self.set_loaded_form_state(config, source_path, loaded_form_info)
+                self.refresh_forms()
+                self.refresh_view(reason="Migrated stored forms to scoped storage", editor_text_override=editor_text)
+                message = f"Migrated {len(migrated)} forms to scoped folders."
+                if skipped:
+                    message = f"{message} Skipped {len(skipped)} forms."
+                self.set_status_message(message)
+                self._emit_host_toast(message, bootstyle="success")
+                details = [
+                    message,
+                    "",
+                    f"Migrated: {', '.join(migrated) if migrated else 'None'}",
+                    f"Skipped: {', '.join(skipped) if skipped else 'None'}",
+                ]
+                self.view.show_info("Migration Complete", "\n".join(details))
+            except Exception as exc:
+                self.set_status_message(f"Migration failed: {exc}", error=True)
+
+        self._run_busy_action("Migrating forms and companion calculations...", _execute)
 
     def poll_commands(self):
         if not self.command_path.exists():

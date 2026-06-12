@@ -215,6 +215,20 @@ Examples:
 
 ## Form Loader Calculation Vocabulary
 
+Layout JSON calculations metadata includes:
+
+- `calculations.companion_relative_path`
+- `calculations.section_profiles[]`
+	- `section_id`
+	- `requires_calculations`
+	- `calculation_profile`
+
+Save-time transition behavior:
+
+- If a save introduces one or more `section_profiles` that transition from not-required to `requires_calculations=true`, Layout Manager prompts to open Form Calculations.
+- Declining that prompt does not block save; it only skips automatic navigation.
+- Accepting the prompt opens Form Calculations so formulas and display targets can be configured immediately for the affected sections.
+
 Recognized calculation formula names:
 
 - `production_minutes`

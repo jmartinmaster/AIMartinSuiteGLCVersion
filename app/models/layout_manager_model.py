@@ -81,15 +81,12 @@ class LayoutManagerModel:
     REQUIRED_TOP_LEVEL_KEYS = (
         "template_path",
         "header_fields",
-        "production_row_fields",
-        "downtime_row_fields",
-        "production_mapping",
-        "downtime_mapping",
+        "sections",
     )
-    EDITOR_REQUIRED_TOP_LEVEL_KEYS = REQUIRED_TOP_LEVEL_KEYS + ("sections",)
-    EDITOR_OPTIONAL_TOP_LEVEL_KEYS = ("editor_presets",)
+    EDITOR_REQUIRED_TOP_LEVEL_KEYS = REQUIRED_TOP_LEVEL_KEYS
+    EDITOR_OPTIONAL_TOP_LEVEL_KEYS = ("editor_presets", "calculations")
     EDITOR_TOP_LEVEL_KEYS = EDITOR_REQUIRED_TOP_LEVEL_KEYS + EDITOR_OPTIONAL_TOP_LEVEL_KEYS
-    EDITOR_PRESET_SECTION_KEYS = ("header_fields", "production_row_fields", "downtime_row_fields")
+    EDITOR_PRESET_SECTION_KEYS = ("header_fields",)
 
     def __init__(self):
         self.service = LayoutConfigService()
@@ -156,29 +153,23 @@ class LayoutManagerModel:
                 normalized_default["header_fields"] = self._normalize_header_fields(
                     deepcopy(normalized_default.get("header_fields"))
                 )
-            if "production_row_fields" in normalized_default:
-                normalized_default["production_row_fields"] = self._normalize_row_fields(
-                    normalized_default.get("production_row_fields"),
-                    "production_row_fields",
-                )
-            if "downtime_row_fields" in normalized_default:
-                normalized_default["downtime_row_fields"] = self._normalize_row_fields(
-                    normalized_default.get("downtime_row_fields"),
-                    "downtime_row_fields",
-                )
-            if "production_mapping" in normalized_default:
-                normalized_default["production_mapping"] = self._normalize_mapping(
-                    "production_mapping",
-                    normalized_default.get("production_mapping"),
-                    row_fields=normalized_default.get("production_row_fields"),
-                )
-            if "downtime_mapping" in normalized_default:
-                normalized_default["downtime_mapping"] = self._normalize_mapping(
-                    "downtime_mapping",
-                    normalized_default.get("downtime_mapping"),
-                    row_fields=normalized_default.get("downtime_row_fields"),
-                )
+            for binding in self._iter_repeating_section_bindings(normalized_default):
+                section_name = binding["fields_key"]
+                mapping_name = binding["mapping_key"]
+                if section_name in normalized_default:
+                    normalized_default[section_name] = self._normalize_row_fields(
+                        normalized_default.get(section_name),
+                        section_name,
+                    )
+                if mapping_name in normalized_default:
+                    normalized_default[mapping_name] = self._normalize_mapping(
+                        mapping_name,
+                        normalized_default.get(mapping_name),
+                        row_fields=normalized_default.get(section_name),
+                    )
             normalized_default["template_path"] = str(normalized_default.get("template_path") or "")
+            if "calculations" in normalized_default and isinstance(normalized_default.get("calculations"), dict):
+                normalized_default["calculations"] = deepcopy(normalized_default.get("calculations"))
             self._default_config_template = normalized_default
         return deepcopy(self._default_config_template)
 
@@ -439,10 +430,6 @@ class LayoutManagerModel:
 
         if section_id == "header":
             fields_key = "header_fields"
-        elif section_id == "production":
-            fields_key = "production_row_fields"
-        elif section_id == "downtime":
-            fields_key = "downtime_row_fields"
         elif section_type == "repeating":
             fields_key = f"{section_id}_row_fields"
         else:
@@ -467,13 +454,7 @@ class LayoutManagerModel:
                 section_payload["default_max_rows"] = max(1, int(max_rows_text or DEFAULT_MAPPING_MAX_ROWS))
             except (TypeError, ValueError):
                 raise ValueError("Default max rows must be a positive integer.")
-            mapping_key = ""
-            if section_id == "production":
-                mapping_key = "production_mapping"
-            elif section_id == "downtime":
-                mapping_key = "downtime_mapping"
-            else:
-                mapping_key = f"{section_id}_mapping"
+            mapping_key = f"{section_id}_mapping"
             section_payload["mapping_key"] = mapping_key
             if mapping_key not in config or not isinstance(config.get(mapping_key), dict):
                 config[mapping_key] = {
@@ -504,17 +485,21 @@ class LayoutManagerModel:
         fields_key = str(target_section.get("fields_key") or "").strip()
         mapping_key = str(target_section.get("mapping_key") or "").strip()
         config["sections"] = [section for section in sections if section.get("id") != normalized_section_id]
-        if fields_key and fields_key in config and fields_key not in {"header_fields", "production_row_fields", "downtime_row_fields"}:
+        if fields_key and fields_key in config and fields_key != "header_fields":
             config.pop(fields_key, None)
-        if mapping_key and mapping_key in config and mapping_key not in {"production_mapping", "downtime_mapping"}:
+        if mapping_key and mapping_key in config:
             config.pop(mapping_key, None)
         return config, f"Removed section '{normalized_section_id}'"
 
-    def _get_mapping_section_name(self, mapping_name):
-        if mapping_name == "production_mapping":
-            return "production"
-        if mapping_name == "downtime_mapping":
-            return "downtime"
+    def _get_mapping_section_name(self, mapping_name, config=None):
+        normalized_mapping_name = str(mapping_name or "").strip()
+        config_data = config if isinstance(config, dict) else {}
+        if config_data:
+            for binding in self._iter_repeating_section_bindings(config_data):
+                if binding.get("mapping_key") == normalized_mapping_name:
+                    return normalize_row_section_name(binding.get("section_id") or binding.get("fields_key") or "")
+        if normalized_mapping_name.endswith("_mapping"):
+            return normalize_row_section_name(normalized_mapping_name[:-8])
         return ""
 
     def _get_default_mapping_transform(self, mapping_name, field_id, direction, row_fields=None):
@@ -657,12 +642,17 @@ class LayoutManagerModel:
         if not isinstance(editor_presets, dict):
             return {}
 
+        config_data = self._get_default_config_template()
+        row_section_names = [binding["fields_key"] for binding in self._iter_repeating_section_bindings(config_data)]
+        if not row_section_names:
+            row_section_names = list(self.row_field_sections)
+
         normalized_presets = {}
         raw_header_presets = editor_presets.get("header_fields")
         if isinstance(raw_header_presets, list):
             normalized_presets["header_fields"] = self._normalize_header_fields(deepcopy(raw_header_presets))
 
-        for section_name in self.row_field_sections:
+        for section_name in row_section_names:
             raw_row_presets = editor_presets.get(section_name)
             if not isinstance(raw_row_presets, list):
                 continue
@@ -702,6 +692,69 @@ class LayoutManagerModel:
                 normalized_mapping[key_name] = deepcopy(value)
         return normalized_mapping
 
+    def _normalize_calculation_section_profiles(self, raw_profiles):
+        if not isinstance(raw_profiles, list):
+            return []
+        normalized_profiles = []
+        seen_sections = set()
+        for raw_profile in raw_profiles:
+            if not isinstance(raw_profile, dict):
+                continue
+            section_id = normalize_role_name(raw_profile.get("section_id"))
+            if not section_id or section_id in seen_sections:
+                continue
+            requires_calculations = self._normalize_bool_value(raw_profile.get("requires_calculations"), default=True)
+            calculation_profile = normalize_role_name(raw_profile.get("calculation_profile")) or section_id
+            normalized_profiles.append(
+                {
+                    "section_id": section_id,
+                    "requires_calculations": requires_calculations,
+                    "calculation_profile": calculation_profile,
+                }
+            )
+            seen_sections.add(section_id)
+        return normalized_profiles
+
+    def _build_default_calculation_section_profiles(self, config):
+        profiles = []
+        config_data = config if isinstance(config, dict) else {}
+        sections = config_data.get("sections") if isinstance(config_data.get("sections"), list) else []
+        for section in sections:
+            if not isinstance(section, dict):
+                continue
+            section_type = str(section.get("section_type") or "single").strip().lower()
+            if section_type != "repeating":
+                continue
+            section_id = normalize_role_name(section.get("id"))
+            if not section_id:
+                continue
+            behavior_profile = normalize_role_name(section.get("behavior_profile")) or section_id
+            requires_calculations = behavior_profile in {"production", "downtime"}
+            profiles.append(
+                {
+                    "section_id": section_id,
+                    "requires_calculations": requires_calculations,
+                    "calculation_profile": behavior_profile,
+                }
+            )
+        return profiles
+
+    def _normalize_calculations_metadata(self, config, form_id=None):
+        config_data = config if isinstance(config, dict) else {}
+        raw_calculations = config_data.get("calculations") if isinstance(config_data.get("calculations"), dict) else {}
+        resolved_form_id = str(form_id or "").strip().lower()
+        if not resolved_form_id:
+            resolved_form_id = "form"
+        default_companion_path = os.path.join("data", "forms", resolved_form_id, "calculations.json").replace("\\", "/")
+        companion_relative_path = str(raw_calculations.get("companion_relative_path") or default_companion_path).strip().replace("\\", "/")
+        section_profiles = self._normalize_calculation_section_profiles(raw_calculations.get("section_profiles"))
+        if not section_profiles:
+            section_profiles = self._build_default_calculation_section_profiles(config_data)
+        return {
+            "companion_relative_path": companion_relative_path,
+            "section_profiles": section_profiles,
+        }
+
     def _iter_repeating_section_bindings(self, config):
         sections = config.get("sections") if isinstance(config, dict) and isinstance(config.get("sections"), list) else []
         bindings = []
@@ -729,19 +782,39 @@ class LayoutManagerModel:
         if bindings:
             return bindings
 
+        config_data = config if isinstance(config, dict) else {}
+        inferred_bindings = []
+        for key_name, value in config_data.items():
+            normalized_key = str(key_name or "").strip()
+            if not normalized_key.endswith("_row_fields") or not isinstance(value, list):
+                continue
+            mapping_key = f"{normalized_key[:-11]}_mapping"
+            if not isinstance(config_data.get(mapping_key), dict):
+                continue
+            inferred_bindings.append(
+                {
+                    "section_id": normalize_row_section_name(normalized_key),
+                    "behavior_profile": normalize_row_section_name(normalized_key),
+                    "fields_key": normalized_key,
+                    "mapping_key": mapping_key,
+                }
+            )
+
+        if inferred_bindings:
+            return inferred_bindings
+
         return [
             {
-                "section_id": "production",
-                "behavior_profile": "production",
-                "fields_key": "production_row_fields",
-                "mapping_key": "production_mapping",
-            },
-            {
-                "section_id": "downtime",
-                "behavior_profile": "downtime",
-                "fields_key": "downtime_row_fields",
-                "mapping_key": "downtime_mapping",
-            },
+                "section_id": normalize_row_section_name(section.get("id") or section.get("fields_key") or ""),
+                "behavior_profile": normalize_role_name(section.get("behavior_profile") or section.get("id") or ""),
+                "fields_key": section["fields_key"],
+                "mapping_key": section["mapping_key"],
+            }
+            for section in DEFAULT_SECTIONS
+            if isinstance(section, dict)
+            and str(section.get("section_type") or "").strip().lower() == "repeating"
+            and str(section.get("fields_key") or "").strip()
+            and str(section.get("mapping_key") or "").strip()
         ]
 
     def normalize_config(self, config):
@@ -771,9 +844,95 @@ class LayoutManagerModel:
                 )
         if "editor_presets" in normalized:
             normalized["editor_presets"] = self._normalize_editor_presets(normalized.get("editor_presets"))
+        normalized["calculations"] = self._normalize_calculations_metadata(normalized)
         if "template_path" in normalized:
             normalized["template_path"] = str(normalized.get("template_path") or "")
         return normalized
+
+    def migrate_forms_to_scoped_storage(self):
+        registry = self.service.registry
+        registry_payload = registry.get_registry()
+        forms = registry_payload.get("forms") if isinstance(registry_payload.get("forms"), list) else []
+        migrated = []
+        skipped = []
+
+        legacy_calculations_path = self.service.data_registry.resolve_read_path("production_log_calculations")
+        legacy_calculation_payload = {}
+        if os.path.exists(legacy_calculations_path):
+            try:
+                with open(legacy_calculations_path, "r", encoding="utf-8") as handle:
+                    loaded_payload = json.load(handle)
+                if isinstance(loaded_payload, dict):
+                    legacy_calculation_payload = loaded_payload
+            except Exception:
+                legacy_calculation_payload = {}
+
+        for index, form_record in enumerate(forms):
+            if not isinstance(form_record, dict):
+                continue
+            form_id = str(form_record.get("id") or "").strip().lower()
+            if not form_id or form_record.get("built_in"):
+                skipped.append(form_id or f"index:{index}")
+                continue
+
+            form_info = registry.enrich_form_record(form_record, active_form_id=registry_payload.get("active_form_id"))
+            target_layout_relative_path = os.path.join("data", "forms", form_id, "layout.json").replace("\\", "/")
+            target_calculation_relative_path = os.path.join("data", "forms", form_id, "calculations.json").replace("\\", "/")
+            target_layout_path = external_path(target_layout_relative_path)
+            target_calculation_path = external_path(target_calculation_relative_path)
+            os.makedirs(os.path.dirname(target_layout_path), exist_ok=True)
+            os.makedirs(os.path.dirname(target_calculation_path), exist_ok=True)
+
+            try:
+                with open(form_info.get("load_path"), "r", encoding="utf-8") as handle:
+                    config_payload = json.load(handle)
+            except Exception:
+                skipped.append(form_id)
+                continue
+
+            normalized_config = self.normalize_config(config_payload)
+            normalized_config["calculations"] = self._normalize_calculations_metadata(normalized_config, form_id=form_id)
+            normalized_config["calculations"]["companion_relative_path"] = target_calculation_relative_path
+
+            old_calculations_relative_path = str((config_payload.get("calculations") or {}).get("companion_relative_path") or "").strip().replace("\\", "/")
+            old_calculation_payload = {}
+            if old_calculations_relative_path:
+                old_calculation_path = external_path(old_calculations_relative_path)
+                if os.path.exists(old_calculation_path):
+                    try:
+                        with open(old_calculation_path, "r", encoding="utf-8") as handle:
+                            loaded_payload = json.load(handle)
+                        if isinstance(loaded_payload, dict):
+                            old_calculation_payload = loaded_payload
+                    except Exception:
+                        old_calculation_payload = {}
+
+            calculation_payload = old_calculation_payload or legacy_calculation_payload or {}
+
+            write_json_with_backup(
+                target_layout_path,
+                normalized_config,
+                backup_dir=registry.resolve_backup_dir({"id": form_id}),
+                keep_count=12,
+            )
+            write_json_with_backup(
+                target_calculation_path,
+                calculation_payload,
+                backup_dir=external_path(os.path.join("data", "backups", "form_calculations", form_id).replace("\\", "/")),
+                keep_count=12,
+            )
+
+            form_record["layout_relative_path"] = target_layout_relative_path
+            form_record["layout_path_mode"] = "external"
+            migrated.append(form_id)
+
+        normalized_registry_payload = registry._normalize_registry_payload(registry_payload)
+        registry._write_registry_payload(normalized_registry_payload)
+        return {
+            "migrated": migrated,
+            "skipped": skipped,
+            "count": len(migrated),
+        }
 
     def _get_observed_header_roles(self, header_fields):
         observed_roles = set()
@@ -951,24 +1110,25 @@ class LayoutManagerModel:
 
     def build_blank_form_config(self):
         default_config = self._get_default_config_template()
-        return {
+        blank_config = {
             "template_path": str(default_config.get("template_path", "")),
             "header_fields": [],
-            "production_row_fields": [],
-            "downtime_row_fields": [],
-            "production_mapping": {
-                "start_row": 1,
-                "max_rows": DEFAULT_MAPPING_MAX_ROWS,
-                "columns": {},
-            },
-            "downtime_mapping": {
-                "start_row": 1,
-                "max_rows": DEFAULT_MAPPING_MAX_ROWS,
-                "columns": {},
-            },
             "sections": [],
             "editor_presets": {},
+            "calculations": {},
         }
+
+        for binding in self._iter_repeating_section_bindings(default_config):
+            section_name = binding["fields_key"]
+            mapping_name = binding["mapping_key"]
+            blank_config[section_name] = []
+            blank_config[mapping_name] = {
+                "start_row": 1,
+                "max_rows": DEFAULT_MAPPING_MAX_ROWS,
+                "columns": {},
+            }
+
+        return blank_config
 
     def create_blank_form(self, name, description="", activate=False):
         config = self.build_blank_form_config()
@@ -1121,6 +1281,9 @@ class LayoutManagerModel:
         if "editor_presets" in config:
             self.validate_editor_presets(config.get("editor_presets"))
 
+        if "calculations" in config:
+            self.validate_calculations_metadata(config.get("calculations"))
+
         for binding in repeating_bindings:
             section_name = binding["fields_key"]
             mapping_name = binding["mapping_key"]
@@ -1135,6 +1298,29 @@ class LayoutManagerModel:
                 required_columns,
                 allowed_columns,
             )
+
+    def validate_calculations_metadata(self, calculations):
+        if not isinstance(calculations, dict):
+            raise ValueError("calculations must be an object.")
+        companion_relative_path = str(calculations.get("companion_relative_path") or "").strip()
+        if not companion_relative_path:
+            raise ValueError("calculations.companion_relative_path is required.")
+        section_profiles = calculations.get("section_profiles")
+        if not isinstance(section_profiles, list):
+            raise ValueError("calculations.section_profiles must be a list.")
+        seen_sections = set()
+        for index, profile in enumerate(section_profiles, start=1):
+            if not isinstance(profile, dict):
+                raise ValueError(f"calculations.section_profiles item {index} must be an object.")
+            section_id = normalize_role_name(profile.get("section_id"))
+            if not section_id:
+                raise ValueError(f"calculations.section_profiles item {index} has an empty section_id.")
+            if section_id in seen_sections:
+                raise ValueError(f"calculations.section_profiles has duplicate section_id '{section_id}'.")
+            seen_sections.add(section_id)
+            calculation_profile = normalize_role_name(profile.get("calculation_profile"))
+            if not calculation_profile:
+                raise ValueError(f"calculations.section_profiles item {index} has an empty calculation_profile.")
 
     def get_mapping_field_ids(self, row_fields):
         field_ids = []
@@ -1197,7 +1383,13 @@ class LayoutManagerModel:
         if not isinstance(editor_presets, dict):
             raise ValueError("editor_presets must be an object.")
 
-        unknown_keys = [key for key in editor_presets.keys() if key not in self.EDITOR_PRESET_SECTION_KEYS]
+        config_data = self._get_default_config_template()
+        supported_keys = {"header_fields"}
+        supported_keys.update(binding["fields_key"] for binding in self._iter_repeating_section_bindings(config_data))
+        if not supported_keys:
+            supported_keys.update(self.EDITOR_PRESET_SECTION_KEYS)
+
+        unknown_keys = [key for key in editor_presets.keys() if key not in supported_keys]
         if unknown_keys:
             raise ValueError(
                 "editor_presets contains unsupported sections: "
@@ -1207,7 +1399,10 @@ class LayoutManagerModel:
         if "header_fields" in editor_presets:
             self.validate_header_fields(editor_presets.get("header_fields"), field_group_name="editor_presets.header_fields")
 
-        for section_name in self.row_field_sections:
+        row_section_names = [binding["fields_key"] for binding in self._iter_repeating_section_bindings(config_data)]
+        if not row_section_names:
+            row_section_names = list(self.row_field_sections)
+        for section_name in row_section_names:
             if section_name in editor_presets:
                 self.validate_row_fields(editor_presets.get(section_name), f"editor_presets.{section_name}")
 
@@ -1306,12 +1501,11 @@ class LayoutManagerModel:
 
     def create_unique_field_id(self, config, section_name="header_fields"):
         existing_ids = {field.get("id") for field in config.get(section_name, [])}
-        prefix_map = {
-            "header_fields": "new_field",
-            "production_row_fields": "new_production_field",
-            "downtime_row_fields": "new_downtime_field",
-        }
-        prefix = prefix_map.get(section_name, "new_field")
+        normalized_section_name = str(section_name or "header_fields").strip().lower()
+        if normalized_section_name == "header_fields":
+            prefix = "new_field"
+        else:
+            prefix = f"new_{normalize_row_section_name(normalized_section_name) or 'field'}_field"
         index = 1
         while True:
             field_id = f"{prefix}_{index}"
@@ -1321,11 +1515,6 @@ class LayoutManagerModel:
 
     def _mapping_name_for_section(self, section_name, config=None):
         normalized_section_name = str(section_name or "").strip()
-        if normalized_section_name == "downtime_row_fields":
-            return "downtime_mapping"
-        if normalized_section_name == "production_row_fields":
-            return "production_mapping"
-
         config_data = config if isinstance(config, dict) else {}
         sections = config_data.get("sections") if isinstance(config_data.get("sections"), list) else []
         for section in sections:
@@ -1342,7 +1531,7 @@ class LayoutManagerModel:
             return f"{normalized_section_name[:-11]}_mapping"
         if normalized_section_name.endswith("_fields"):
             return f"{normalized_section_name[:-7]}_mapping"
-        return "production_mapping"
+        return f"{normalize_role_name(normalized_section_name) or 'section'}_mapping"
 
     def _editor_preset_fields(self, config, section_name):
         editor_presets = config.get("editor_presets") if isinstance(config.get("editor_presets"), dict) else {}
@@ -1702,10 +1891,11 @@ class LayoutManagerModel:
         else:
             target_field.pop("options_source", None)
             target_field.pop("values", None)
+        readonly_enabled = self._normalize_bool_value(readonly_value, default=False)
         if target_field.get("id") == "cast_date":
             target_field["readonly"] = True
             target_field.pop("default", None)
-        elif readonly_value:
+        elif readonly_enabled:
             target_field["width"] = width
             target_field["readonly"] = True
         else:
@@ -2269,12 +2459,35 @@ class LayoutManagerModel:
                 "transform_overrides": transform_overrides,
             }
 
+        section_stats = {}
+        for binding in self._iter_repeating_section_bindings(config_data):
+            section_id = str(binding.get("section_id") or binding.get("fields_key") or "").strip() or binding["fields_key"]
+            section_stats[section_id] = _mapping_stats(binding["mapping_key"], binding["fields_key"])
+
         metadata = {
             "template_path": str(config_data.get("template_path") or ""),
-            "production": _mapping_stats("production_mapping", "production_row_fields"),
-            "downtime": _mapping_stats("downtime_mapping", "downtime_row_fields"),
+            "sections": section_stats,
             "workbook": self._build_template_workbook_stats(config_data.get("template_path")),
         }
+
+        production_binding = next(
+            (binding for binding in self._iter_repeating_section_bindings(config_data) if str(binding.get("behavior_profile") or "").strip().lower() == "production"),
+            None,
+        )
+        downtime_binding = next(
+            (binding for binding in self._iter_repeating_section_bindings(config_data) if str(binding.get("behavior_profile") or "").strip().lower() == "downtime"),
+            None,
+        )
+        metadata["production"] = (
+            _mapping_stats(production_binding["mapping_key"], production_binding["fields_key"])
+            if production_binding
+            else _mapping_stats("production_mapping", "production_row_fields")
+        )
+        metadata["downtime"] = (
+            _mapping_stats(downtime_binding["mapping_key"], downtime_binding["fields_key"])
+            if downtime_binding
+            else _mapping_stats("downtime_mapping", "downtime_row_fields")
+        )
 
         self._import_export_metadata_cache[cache_key] = deepcopy(metadata)
         if len(self._import_export_metadata_cache) > 12:
@@ -2309,11 +2522,20 @@ class LayoutManagerModel:
                 f"Unknown top-level keys in layout JSON: {', '.join(sorted(str(key) for key in unknown_keys))}"
             )
 
-        missing_keys = [key for key in self.EDITOR_REQUIRED_TOP_LEVEL_KEYS if key not in payload]
+        dynamic_required_keys = {
+            binding["fields_key"]
+            for binding in repeating_bindings
+        }
+        dynamic_required_keys.update(
+            binding["mapping_key"]
+            for binding in repeating_bindings
+        )
+        required_keys = tuple(dict.fromkeys((*self.EDITOR_REQUIRED_TOP_LEVEL_KEYS, *sorted(dynamic_required_keys))))
+        missing_keys = [key for key in required_keys if key not in payload]
         if missing_keys:
             raise ValueError(
                 "JSON editor expects the full layout object with top-level keys: "
-                f"{', '.join(self.EDITOR_REQUIRED_TOP_LEVEL_KEYS)}"
+                f"{', '.join(required_keys)}"
                 f". Optional: {', '.join(self.EDITOR_OPTIONAL_TOP_LEVEL_KEYS)}"
                 f". Missing: {', '.join(missing_keys)}"
             )
@@ -2335,12 +2557,29 @@ class LayoutManagerModel:
         return None
 
     def _infer_row_field_section(self, payload):
+        config_data = self._get_default_config_template()
+        bindings = self._iter_repeating_section_bindings(config_data)
+        if not bindings:
+            bindings = [
+                {"fields_key": "production_row_fields", "behavior_profile": "production"},
+                {"fields_key": "downtime_row_fields", "behavior_profile": "downtime"},
+            ]
+
         section_scores = {}
-        for section_name in self.row_field_sections:
+        for binding in bindings:
+            section_name = binding["fields_key"]
             score = 0
-            protected_ids = self.protected_row_field_ids.get(section_name, set())
-            protected_roles = self.protected_row_roles.get(section_name, set())
-            required_roles = set(REQUIRED_MAPPING_ROLES.get(section_name, ()))
+            normalized_section = normalize_row_section_name(section_name)
+            section_fields = config_data.get(section_name) if isinstance(config_data.get(section_name), list) else []
+            protected_ids = {
+                str(field.get("id") or "").strip()
+                for field in section_fields
+                if isinstance(field, dict) and str(field.get("id") or "").strip()
+            }
+            if not protected_ids:
+                protected_ids = self.protected_row_field_ids.get(section_name, set())
+            protected_roles = set(PROTECTED_ROW_ROLES.get(normalized_section, set()))
+            required_roles = set(REQUIRED_MAPPING_ROLES.get(normalized_section, ()))
             for field in payload:
                 field_id = str(field.get("id", "")).strip()
                 role_name = resolve_row_field_role(section_name, field_id, field.get("role"))
@@ -2367,10 +2606,26 @@ class LayoutManagerModel:
             return None
 
         column_names = {str(column_name).strip() for column_name in payload.get("columns", {}).keys()}
-        mapping_scores = {
-            "production_mapping": len(column_names & self.protected_row_field_ids.get("production_row_fields", set())),
-            "downtime_mapping": len(column_names & self.protected_row_field_ids.get("downtime_row_fields", set())),
-        }
+        config_data = self._get_default_config_template()
+        mapping_scores = {}
+        for binding in self._iter_repeating_section_bindings(config_data):
+            section_name = binding["fields_key"]
+            mapping_name = binding["mapping_key"]
+            section_fields = config_data.get(section_name) if isinstance(config_data.get(section_name), list) else []
+            section_field_ids = {
+                str(field.get("id") or "").strip()
+                for field in section_fields
+                if isinstance(field, dict) and str(field.get("id") or "").strip()
+            }
+            if not section_field_ids:
+                section_field_ids = set(self.protected_row_field_ids.get(section_name, set()))
+            mapping_scores[mapping_name] = len(column_names & section_field_ids)
+
+        if not mapping_scores:
+            mapping_scores = {
+                "production_mapping": len(column_names & self.protected_row_field_ids.get("production_row_fields", set())),
+                "downtime_mapping": len(column_names & self.protected_row_field_ids.get("downtime_row_fields", set())),
+            }
         highest_score = max(mapping_scores.values(), default=0)
         if highest_score <= 0:
             return None
@@ -2412,8 +2667,9 @@ class LayoutManagerModel:
             errors.append(str(exc))
 
         header_fields = config_data.get("header_fields") if isinstance(config_data.get("header_fields"), list) else []
-        production_fields = config_data.get("production_row_fields") if isinstance(config_data.get("production_row_fields"), list) else []
-        downtime_fields = config_data.get("downtime_row_fields") if isinstance(config_data.get("downtime_row_fields"), list) else []
+        repeating_bindings = self._iter_repeating_section_bindings(config_data)
+        section_field_counts = {"header_fields": len(header_fields)}
+        total_fields = len(header_fields)
 
         def _duplicate_ids(field_list):
             seen_ids = set()
@@ -2429,28 +2685,32 @@ class LayoutManagerModel:
                 seen_ids.add(field_id)
             return duplicate_ids
 
-        for section_name, field_list in (
-            ("header_fields", header_fields),
-            ("production_row_fields", production_fields),
-            ("downtime_row_fields", downtime_fields),
-        ):
+        field_sections = [("header_fields", header_fields)]
+        for binding in repeating_bindings:
+            section_name = binding["fields_key"]
+            field_list = config_data.get(section_name) if isinstance(config_data.get(section_name), list) else []
+            field_sections.append((section_name, field_list))
+            section_field_counts[section_name] = len(field_list)
+            total_fields += len(field_list)
+
+        for section_name, field_list in field_sections:
             duplicates = _duplicate_ids(field_list)
             if duplicates:
                 errors.append(f"{section_name} duplicate ids: {', '.join(duplicates)}")
 
-        try:
-            self.get_required_mapping_field_ids(production_fields, "production_row_fields")
-        except Exception as exc:
-            errors.append(str(exc))
+        for binding in repeating_bindings:
+            section_name = binding["fields_key"]
+            field_list = config_data.get(section_name) if isinstance(config_data.get(section_name), list) else []
+            try:
+                self.get_required_mapping_field_ids(field_list, section_name)
+            except Exception as exc:
+                errors.append(str(exc))
 
-        try:
-            self.get_required_mapping_field_ids(downtime_fields, "downtime_row_fields")
-        except Exception as exc:
-            errors.append(str(exc))
-
-        total_fields = len(header_fields) + len(production_fields) + len(downtime_fields)
         if total_fields == 0:
             warnings.append("Layout has no editable fields.")
+
+        production_count = section_field_counts.get("production_row_fields", 0)
+        downtime_count = section_field_counts.get("downtime_row_fields", 0)
 
         return {
             "ok": len(errors) == 0,
@@ -2458,8 +2718,9 @@ class LayoutManagerModel:
             "warnings": warnings,
             "stats": {
                 "header_fields": len(header_fields),
-                "production_row_fields": len(production_fields),
-                "downtime_row_fields": len(downtime_fields),
+                "production_row_fields": production_count,
+                "downtime_row_fields": downtime_count,
+                "sections": section_field_counts,
                 "total_fields": total_fields,
             },
         }

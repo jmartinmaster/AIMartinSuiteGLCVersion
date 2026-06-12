@@ -124,13 +124,23 @@ class ProductionLogCalculationsQtController:
 
         overnight_label = "Allow overnight rollover when downtime stop time is earlier than start time" if settings.get("allow_overnight_downtime", True) else "Treat earlier downtime stop times as invalid instead of rolling overnight"
         ghost_label = "Keep negative ghost time to surface shift overruns" if settings.get("negative_ghost_mode") == "allow_negative" else "Clamp ghost time to 0 when production and downtime exceed shift minutes"
+        display_targets = settings.get("display_targets", {}) if isinstance(settings, dict) else {}
         formulas = settings.get("formulas", {}) if isinstance(settings, dict) else {}
+        companion_info = self.model.production_log_model._resolve_calculation_companion_paths(
+            config=self.model.production_log_model.layout_config,
+        )
 
         return [
+            f"Companion calculation file: {companion_info.get('relative_path', '')}",
             f"Production minutes: round ((molds / rate) * 60) using {settings.get('production_minutes_rounding', 'floor')}",
             f"Shift total minutes: round (hours * 60) using {settings.get('shift_total_rounding', 'nearest')}",
             f"Missing rate fallback: {fallback_label}",
             f"Ghost time rule: {ghost_label}",
+            f"Display target production_minutes_role = {display_targets.get('production_minutes_role', 'duration_minutes')}",
+            f"Display target downtime_minutes_role = {display_targets.get('downtime_minutes_role', 'duration_minutes')}",
+            f"Display target efficiency_header_role = {display_targets.get('efficiency_header_role', 'efficiency_pct')}",
+            f"Display target ghost_display_mode = {display_targets.get('ghost_display_mode', 'metrics_only')}",
+            f"Display target ghost_header_role = {display_targets.get('ghost_header_role', 'target_time')}",
             f"Downtime rule: {overnight_label}",
             f"Default balance mix: {self._format_number(settings.get('default_balance_mix_pct', 100.0))}% weighted downtime distribution",
             f"Shift 1 timing: {settings.get('shift_1_anchor_mode', 'start')} anchor at {settings.get('shift_1_reference_time', '0600')}",

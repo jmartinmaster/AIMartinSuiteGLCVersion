@@ -16,8 +16,6 @@
 from copy import deepcopy
 
 from app.models.production_log_model import DEFAULT_CALCULATION_SETTINGS, DEFAULT_CALCULATION_FORMULAS, ProductionLogModel
-from app.persistence import write_json_with_backup
-from app.utils import external_path
 
 __module_name__ = "Form Calculations"
 __version__ = "1.0.0"
@@ -132,8 +130,91 @@ EDITOR_SECTIONS = [
         ],
     },
     {
+        "title": "Display Targets",
+        "fields": [
+            {
+                "key": "display_target_production_minutes_role",
+                "path": ("display_targets", "production_minutes_role"),
+                "label": "Production Minutes Display Role",
+                "kind": "choice",
+                "options": (
+                    ("Duration Minutes (recommended)", "duration_minutes"),
+                    ("Mold Count", "mold_count"),
+                    ("Part Number", "part_number"),
+                    ("Job Order", "job_order"),
+                ),
+                "help": "Chooses which production row role receives the calculated production minutes label.",
+            },
+            {
+                "key": "display_target_downtime_minutes_role",
+                "path": ("display_targets", "downtime_minutes_role"),
+                "label": "Downtime Minutes Display Role",
+                "kind": "choice",
+                "options": (
+                    ("Duration Minutes (recommended)", "duration_minutes"),
+                    ("Cause Text", "cause_text"),
+                    ("Downtime Code", "downtime_code"),
+                    ("Start Clock", "start_clock"),
+                    ("Stop Clock", "stop_clock"),
+                ),
+                "help": "Chooses which downtime row role receives the calculated downtime minutes label.",
+            },
+            {
+                "key": "display_target_efficiency_header_role",
+                "path": ("display_targets", "efficiency_header_role"),
+                "label": "Efficiency Header Display Role",
+                "kind": "choice",
+                "options": (
+                    ("Efficiency % (recommended)", "efficiency_pct"),
+                    ("MTD %", "mtd_percentage"),
+                    ("Total Molds", "total_molds"),
+                    ("Goal Rate", "goal_rate"),
+                ),
+                "help": "Chooses which header role gets updated with calculated efficiency.",
+            },
+            {
+                "key": "display_target_ghost_display_mode",
+                "path": ("display_targets", "ghost_display_mode"),
+                "label": "Ghost Time Display Mode",
+                "kind": "choice",
+                "options": (
+                    ("Metrics Bar Only", "metrics_only"),
+                    ("Header Field Only", "header_only"),
+                    ("Metrics Bar and Header", "metrics_and_header"),
+                ),
+                "help": "Controls whether ghost minutes are shown only in metrics or also pushed into a header field.",
+            },
+            {
+                "key": "display_target_ghost_header_role",
+                "path": ("display_targets", "ghost_header_role"),
+                "label": "Ghost Header Display Role",
+                "kind": "choice",
+                "options": (
+                    ("Target Time", "target_time"),
+                    ("Cast Date", "cast_date"),
+                    ("MTD %", "mtd_percentage"),
+                    ("Efficiency %", "efficiency_pct"),
+                ),
+                "help": "Header role used when Ghost Time Display Mode includes header output.",
+            },
+        ],
+    },
+    {
         "title": "Named Formulas",
         "fields": [
+            {
+                "key": "formula_context_reference",
+                "kind": "info",
+                "label": "Formula Value Reference",
+                "value": (
+                    "Variables: molds, rate, hours, goal_rate, total_molds, shift_total_minutes, "
+                    "production_total_minutes, downtime_total_minutes, start_minutes, stop_minutes, "
+                    "duration_minutes, day_minutes, invalid_value, allow_overnight_downtime.\n"
+                    "Helpers: round_minutes(value, mode), format_clock(minutes), if_value(cond, a, b), "
+                    "max_value(a, b), min_value(a, b), abs_value(value), float_value(value), int_value(value)."
+                ),
+                "help": "Use these runtime values and helper functions in Named Formula expressions.",
+            },
             {
                 "key": "formula_production_minutes",
                 "path": ("formulas", "production_minutes"),
@@ -199,7 +280,10 @@ class ProductionLogCalculationsModel:
     def __init__(self):
         self.production_log_model = ProductionLogModel()
         self.data_registry = self.production_log_model.data_registry
-        self.settings_path = self.data_registry.resolve_write_path("production_log_calculations")
+        companion_info = self.production_log_model._resolve_calculation_companion_paths(
+            config=self.production_log_model.layout_config,
+        )
+        self.settings_path = companion_info.get("path")
         self.settings = self.production_log_model.get_calculation_settings_copy()
 
     def get_settings_copy(self):
@@ -223,6 +307,8 @@ class ProductionLogCalculationsModel:
         source = settings if isinstance(settings, dict) else self.get_settings_copy()
         flattened = {}
         for field in self.iter_editor_fields():
+            if str(field.get("kind") or "").strip().lower() == "info":
+                continue
             flattened[field["key"]] = self._resolve_path_value(source, field.get("path", (field["key"],)))
         return flattened
 
@@ -230,6 +316,8 @@ class ProductionLogCalculationsModel:
         normalized_payload = {}
         raw_values = payload if isinstance(payload, dict) else {}
         for field in self.iter_editor_fields():
+            if str(field.get("kind") or "").strip().lower() == "info":
+                continue
             self._assign_path_value(
                 normalized_payload,
                 field.get("path", (field["key"],)),
@@ -250,10 +338,18 @@ class ProductionLogCalculationsModel:
 
     def load_settings_file(self):
         self.settings = self.production_log_model.refresh_calculation_settings()
+        companion_info = self.production_log_model._resolve_calculation_companion_paths(
+            config=self.production_log_model.layout_config,
+        )
+        self.settings_path = companion_info.get("path")
         return self.get_settings_copy()
 
     def save_settings_with_backup(self):
-        backup_info = self.data_registry.save_json("production_log_calculations", self.settings, keep_count=12)
+        backup_info = self.production_log_model.save_calculation_settings(self.settings)
+        companion_info = self.production_log_model._resolve_calculation_companion_paths(
+            config=self.production_log_model.layout_config,
+        )
+        self.settings_path = companion_info.get("path")
         return backup_info
 
     def _resolve_path_value(self, payload, path):

@@ -24,7 +24,7 @@ from app.external_data_registry import ExternalDataRegistry
 from app.form_definition_registry import DEFAULT_FORM_ID, DEFAULT_FORM_NAME, FormDefinitionRegistry
 from app.persistence import write_json_with_backup
 from app.production_log_roles import HEADER_BLANK_IGNORE_ROLES, HEADER_DERIVED_ROLES, resolve_header_field_role, resolve_row_field_role, normalize_role_name
-from app.utils import external_path
+from app.utils import ensure_external_directory, external_path
 from app.data_handler_service import DEFAULT_SHIFT_TIME_SETTINGS, DataHandlerService
 
 __module_name__ = "Form Loader"
@@ -50,6 +50,13 @@ DEFAULT_CALCULATION_SETTINGS = {
     "allow_overnight_downtime": True,
     "negative_ghost_mode": "allow_negative",
     "default_balance_mix_pct": 100.0,
+    "display_targets": {
+        "production_minutes_role": "duration_minutes",
+        "downtime_minutes_role": "duration_minutes",
+        "efficiency_header_role": "efficiency_pct",
+        "ghost_display_mode": "metrics_only",
+        "ghost_header_role": "target_time",
+    },
     "formulas": deepcopy(DEFAULT_CALCULATION_FORMULAS),
 }
 DEFAULT_PRODUCTION_ROW_FIELDS = [
@@ -227,11 +234,11 @@ class ProductionLogModel:
         self.dt_codes = get_code_options()
         self.data_handler = DataHandlerService(form_id=self.form_id, data_registry=self.data_registry)
         self.settings = self.load_settings()
-        self.calculation_settings = self.load_calculation_settings()
+        self.layout_config = self.load_layout_config()
+        self.calculation_settings = self.load_calculation_settings(config=self.layout_config)
         self.default_hours = self._format_number(self.settings.get("default_shift_hours", 8.0))
         self.default_goal = self._format_number(self.settings.get("default_goal_mph", 240.0))
         self.auto_save_interval = self._coerce_positive_int(self.settings.get("auto_save_interval_min", 5), 5) * 60000
-        self.layout_config = self.load_layout_config()
 
     def get_active_form_info(self):
         return dict(self.active_form_info)
@@ -409,6 +416,9 @@ class ProductionLogModel:
         for section in self.get_sections(config=config):
             if section.get("id") == normalized_section_id:
                 return section
+        routed_section = self.get_routed_section_by_profile(normalized_section_id, config=config)
+        if isinstance(routed_section, dict) and routed_section:
+            return routed_section
         return {}
 
     def get_section_name(self, section_id, config=None, fallback_name=None):
@@ -430,23 +440,94 @@ class ProductionLogModel:
         policy = section_info.get("delete_row_policy") if isinstance(section_info.get("delete_row_policy"), dict) else {}
         return self._normalize_delete_row_policy(policy)
 
+    def _resolve_section_profile_from_structure(self, section, config=None):
+        if not isinstance(section, dict):
+            return ""
+        section_type = str(section.get("section_type") or "single").strip().lower()
+        section_id = normalize_role_name(section.get("id"))
+        behavior_profile = normalize_role_name(section.get("behavior_profile"))
+        if behavior_profile in SUPPORTED_BEHAVIOR_PROFILES:
+            return behavior_profile
+        if section_id in SUPPORTED_BEHAVIOR_PROFILES:
+            return section_id
+
+        config_data = config if isinstance(config, dict) else self.layout_config
+        fields_key = str(section.get("fields_key") or "").strip()
+        if not fields_key:
+            return ""
+        field_configs = config_data.get(fields_key, []) if isinstance(config_data.get(fields_key), list) else []
+        if not field_configs:
+            return ""
+
+        if section_type == "single":
+            header_roles = {
+                resolve_header_field_role(str(field.get("id") or "").strip(), field.get("role"))
+                for field in field_configs
+                if isinstance(field, dict)
+            }
+            if any(role_name in header_roles for role_name in ("log_date", "shift_number", "shift_hours", "goal_rate")):
+                return "header"
+            return ""
+
+        if section_type != "repeating":
+            return ""
+
+        resolved_roles = {
+            resolve_row_field_role(section_id or behavior_profile, str(field.get("id") or "").strip(), field.get("role"))
+            for field in field_configs
+            if isinstance(field, dict)
+        }
+        production_roles = set(REQUIRED_MAPPING_ROLES.get("production") or ())
+        downtime_roles = set(REQUIRED_MAPPING_ROLES.get("downtime") or ())
+        if production_roles and production_roles.issubset(resolved_roles):
+            return "production"
+        if downtime_roles and downtime_roles.issubset(resolved_roles):
+            return "downtime"
+        return ""
+
     def get_routed_section_by_profile(self, behavior_profile, config=None, expected_type=None):
         normalized_profile = normalize_role_name(behavior_profile)
-        if normalized_profile not in SUPPORTED_BEHAVIOR_PROFILES:
+        if not normalized_profile:
             return {}
 
-        matching_sections = []
-        for section in self.get_sections(config=config):
-            section_profile = normalize_role_name(section.get("behavior_profile"))
-            if section_profile != normalized_profile:
-                continue
-            if expected_type and str(section.get("section_type", "")).strip().lower() != expected_type:
-                continue
-            matching_sections.append(section)
+        declared_sections = self.get_sections(config=config)
+        if expected_type:
+            declared_sections = [
+                section
+                for section in declared_sections
+                if str(section.get("section_type") or "").strip().lower() == expected_type
+            ]
 
-        if len(matching_sections) != 1:
+        id_matches = [
+            section
+            for section in declared_sections
+            if normalize_role_name(section.get("id")) == normalized_profile
+        ]
+        if len(id_matches) == 1:
+            return id_matches[0]
+        if len(id_matches) > 1:
             return {}
-        return matching_sections[0]
+
+        explicit_profile_matches = [
+            section
+            for section in declared_sections
+            if normalize_role_name(section.get("behavior_profile")) == normalized_profile
+        ]
+        if len(explicit_profile_matches) == 1:
+            return explicit_profile_matches[0]
+        if len(explicit_profile_matches) > 1:
+            return {}
+
+        inferred_profile_matches = []
+        for section in declared_sections:
+            inferred_profile = self._resolve_section_profile_from_structure(section, config=config)
+            if inferred_profile != normalized_profile:
+                continue
+            inferred_profile_matches.append(section)
+
+        if len(inferred_profile_matches) != 1:
+            return {}
+        return inferred_profile_matches[0]
 
     def get_active_repeating_profiles(self, config=None):
         active_profiles = []
@@ -642,19 +723,75 @@ class ProductionLogModel:
     def get_default_calculation_formulas(self):
         return deepcopy(DEFAULT_CALCULATION_FORMULAS)
 
-    def load_calculation_settings(self):
-        payload = self.data_registry.load_json(
-            "production_log_calculations",
-            default_factory=self.get_default_calculation_settings,
-        )
-        return self.normalize_calculation_settings(payload)
+    def _get_calculations_metadata(self, config=None):
+        config_data = config if isinstance(config, dict) else self.layout_config
+        calculations = config_data.get("calculations") if isinstance(config_data.get("calculations"), dict) else {}
+        companion_relative_path = str(calculations.get("companion_relative_path") or "").strip().replace("\\", "/")
+        if not companion_relative_path:
+            companion_relative_path = os.path.join("data", "forms", self.form_id, "calculations.json").replace("\\", "/")
+        section_profiles = calculations.get("section_profiles") if isinstance(calculations.get("section_profiles"), list) else []
+        return {
+            "companion_relative_path": companion_relative_path,
+            "section_profiles": [dict(profile) for profile in section_profiles if isinstance(profile, dict)],
+        }
+
+    def _resolve_calculation_companion_paths(self, config=None):
+        metadata = self._get_calculations_metadata(config=config)
+        companion_relative_path = str(metadata.get("companion_relative_path") or "").strip().replace("\\", "/")
+        companion_path = external_path(companion_relative_path)
+        backup_dir = ensure_external_directory(os.path.join("data", "backups", "form_calculations", self.form_id))
+        return {
+            "relative_path": companion_relative_path,
+            "path": companion_path,
+            "backup_dir": backup_dir,
+            "section_profiles": metadata.get("section_profiles") or [],
+        }
+
+    def load_calculation_settings(self, config=None):
+        companion_info = self._resolve_calculation_companion_paths(config=config)
+        companion_path = companion_info["path"]
+        payload = None
+        if os.path.exists(companion_path):
+            try:
+                with open(companion_path, "r", encoding="utf-8") as handle:
+                    payload = json.load(handle)
+            except Exception:
+                payload = None
+
+        if not isinstance(payload, dict):
+            payload = self.data_registry.load_json(
+                "production_log_calculations",
+                default_factory=self.get_default_calculation_settings,
+            )
+
+        normalized_settings = self.normalize_calculation_settings(payload)
+        if not os.path.exists(companion_path):
+            write_json_with_backup(
+                companion_path,
+                normalized_settings,
+                backup_dir=companion_info["backup_dir"],
+                keep_count=12,
+            )
+        return normalized_settings
 
     def get_calculation_settings_copy(self):
         return deepcopy(self.calculation_settings)
 
     def refresh_calculation_settings(self):
-        self.calculation_settings = self.load_calculation_settings()
+        self.calculation_settings = self.load_calculation_settings(config=self.layout_config)
         return self.get_calculation_settings_copy()
+
+    def save_calculation_settings(self, payload=None):
+        normalized_settings = self.normalize_calculation_settings(payload if isinstance(payload, dict) else self.calculation_settings)
+        companion_info = self._resolve_calculation_companion_paths(config=self.layout_config)
+        backup_info = write_json_with_backup(
+            companion_info["path"],
+            normalized_settings,
+            backup_dir=companion_info["backup_dir"],
+            keep_count=12,
+        )
+        self.calculation_settings = normalized_settings
+        return backup_info
 
     def normalize_calculation_settings(self, payload=None):
         raw_settings = payload if isinstance(payload, dict) else {}
@@ -711,6 +848,35 @@ class ProductionLogModel:
                 ),
             ),
         )
+        raw_display_targets = raw_settings.get("display_targets") if isinstance(raw_settings.get("display_targets"), dict) else {}
+        default_display_targets = defaults.get("display_targets") if isinstance(defaults.get("display_targets"), dict) else {}
+        normalized_settings["display_targets"] = {
+            "production_minutes_role": self._normalize_choice(
+                raw_display_targets.get("production_minutes_role"),
+                {"duration_minutes", "mold_count", "part_number", "job_order"},
+                default_display_targets.get("production_minutes_role", "duration_minutes"),
+            ),
+            "downtime_minutes_role": self._normalize_choice(
+                raw_display_targets.get("downtime_minutes_role"),
+                {"duration_minutes", "cause_text", "downtime_code", "start_clock", "stop_clock"},
+                default_display_targets.get("downtime_minutes_role", "duration_minutes"),
+            ),
+            "efficiency_header_role": self._normalize_choice(
+                raw_display_targets.get("efficiency_header_role"),
+                {"efficiency_pct", "mtd_percentage", "total_molds", "goal_rate"},
+                default_display_targets.get("efficiency_header_role", "efficiency_pct"),
+            ),
+            "ghost_display_mode": self._normalize_choice(
+                raw_display_targets.get("ghost_display_mode"),
+                {"metrics_only", "header_only", "metrics_and_header"},
+                default_display_targets.get("ghost_display_mode", "metrics_only"),
+            ),
+            "ghost_header_role": self._normalize_choice(
+                raw_display_targets.get("ghost_header_role"),
+                {"target_time", "cast_date", "mtd_percentage", "efficiency_pct"},
+                default_display_targets.get("ghost_header_role", "target_time"),
+            ),
+        }
         raw_formulas = raw_settings.get("formulas") if isinstance(raw_settings.get("formulas"), dict) else {}
         normalized_formulas = self.get_default_calculation_formulas()
         for formula_name, default_formula in normalized_formulas.items():
@@ -718,6 +884,13 @@ class ProductionLogModel:
             normalized_formulas[formula_name] = formula_text or default_formula
         normalized_settings["formulas"] = normalized_formulas
         return normalized_settings
+
+    def get_display_target(self, key_name, default_value=""):
+        display_targets = self.calculation_settings.get("display_targets") if isinstance(self.calculation_settings, dict) else {}
+        if not isinstance(display_targets, dict):
+            return default_value
+        value = str(display_targets.get(key_name) or "").strip()
+        return value or str(default_value or "")
 
     def get_calculation_formula(self, formula_name):
         formulas = self.calculation_settings.get("formulas", {}) if isinstance(self.calculation_settings, dict) else {}
