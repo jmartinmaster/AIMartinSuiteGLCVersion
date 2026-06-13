@@ -19,10 +19,16 @@ import shutil
 import tempfile
 from datetime import datetime
 
+from app.utils import external_path
+
 __module_name__ = "Persistence Helpers"
-__version__ = "1.0.9"
+__version__ = "1.1.0"
 
 _WARNED_BACKUP_FAILURES = set()
+_BACKUP_POLICY_CACHE = {
+    "settings_mtime": None,
+    "policy": None,
+}
 
 
 def ensure_directory(path):
@@ -94,15 +100,227 @@ def _copy_backup_with_fallback(source_path, destination_path, context):
             return False
 
 
+def _normalize_backup_policy(raw_policy):
+    policy = {
+        "enabled": True,
+        "interval_min": 30,
+        "keep_count": 12,
+        "draft_auto_save_interval_min": 5,
+        "draft_history_keep_count": 20,
+        "target_overrides": {},
+    }
+    if not isinstance(raw_policy, dict):
+        return policy
+
+    policy.update(raw_policy)
+    try:
+        policy["enabled"] = bool(policy.get("enabled", True))
+    except Exception:
+        policy["enabled"] = True
+    try:
+        policy["interval_min"] = max(1, int(policy.get("interval_min", 30)))
+    except Exception:
+        policy["interval_min"] = 30
+    try:
+        policy["keep_count"] = max(1, int(policy.get("keep_count", 12)))
+    except Exception:
+        policy["keep_count"] = 12
+    try:
+        policy["draft_auto_save_interval_min"] = max(1, int(policy.get("draft_auto_save_interval_min", 5)))
+    except Exception:
+        policy["draft_auto_save_interval_min"] = 5
+    try:
+        policy["draft_history_keep_count"] = max(1, int(policy.get("draft_history_keep_count", 20)))
+    except Exception:
+        policy["draft_history_keep_count"] = 20
+
+    normalized_targets = {}
+    raw_targets = policy.get("target_overrides")
+    if isinstance(raw_targets, dict):
+        for target_key, raw_target_policy in raw_targets.items():
+            normalized_key = str(target_key or "").strip()
+            if not normalized_key:
+                continue
+            target_policy = {
+                "enabled": True,
+                "interval_min": policy["interval_min"],
+                "keep_count": policy["keep_count"],
+            }
+            if isinstance(raw_target_policy, dict):
+                target_policy.update(raw_target_policy)
+            try:
+                target_policy["enabled"] = bool(target_policy.get("enabled", True))
+            except Exception:
+                target_policy["enabled"] = True
+            try:
+                target_policy["interval_min"] = max(1, int(target_policy.get("interval_min", policy["interval_min"])))
+            except Exception:
+                target_policy["interval_min"] = policy["interval_min"]
+            try:
+                target_policy["keep_count"] = max(1, int(target_policy.get("keep_count", policy["keep_count"])))
+            except Exception:
+                target_policy["keep_count"] = policy["keep_count"]
+            normalized_targets[normalized_key] = target_policy
+    policy["target_overrides"] = normalized_targets
+    return policy
+
+
+def _load_backup_policy():
+    settings_path = external_path(os.path.join("data", "config", "settings.json"))
+    try:
+        settings_mtime = os.path.getmtime(settings_path)
+    except OSError:
+        return _normalize_backup_policy(None)
+
+    cached_mtime = _BACKUP_POLICY_CACHE.get("settings_mtime")
+    cached_policy = _BACKUP_POLICY_CACHE.get("policy")
+    if cached_mtime == settings_mtime and isinstance(cached_policy, dict):
+        return cached_policy
+
+    try:
+        with open(settings_path, "r", encoding="utf-8") as handle:
+            settings = json.load(handle)
+    except Exception:
+        policy = _normalize_backup_policy(None)
+        _BACKUP_POLICY_CACHE["settings_mtime"] = settings_mtime
+        _BACKUP_POLICY_CACHE["policy"] = policy
+        return policy
+
+    policy = _normalize_backup_policy(settings.get("backup_policy") if isinstance(settings, dict) else None)
+    _BACKUP_POLICY_CACHE["settings_mtime"] = settings_mtime
+    _BACKUP_POLICY_CACHE["policy"] = policy
+    return policy
+
+
+def _normalize_path(path_value):
+    return os.path.normcase(os.path.normpath(os.path.abspath(str(path_value or ""))))
+
+
+def _resolve_backup_target(target_path, backup_dir):
+    normalized_target = _normalize_path(target_path)
+    normalized_backup_dir = _normalize_path(backup_dir)
+
+    target_map = {
+        _normalize_path(external_path(os.path.join("data", "config", "settings.json"))): "settings",
+        _normalize_path(external_path(os.path.join("data", "config", "layout_config.json"))): "layout_config",
+        _normalize_path(external_path(os.path.join("data", "config", "form_definitions.json"))): "form_definitions",
+        _normalize_path(external_path(os.path.join("data", "config", "rates.json"))): "rates",
+        _normalize_path(external_path(os.path.join("data", "config", "production_log_calculations.json"))): "production_log_calculations",
+    }
+    if normalized_target in target_map:
+        return target_map[normalized_target]
+
+    if normalized_backup_dir.endswith(_normalize_path(os.path.join("data", "backups", "layouts"))):
+        return "form_layouts"
+    if normalized_backup_dir.endswith(_normalize_path(os.path.join("data", "backups", "form_calculations"))):
+        return "form_calculations"
+    if normalized_backup_dir.endswith(_normalize_path(os.path.join("data", "pending", "history"))):
+        return "draft_history"
+    if _normalize_path(os.path.join("data", "pending")) in normalized_target:
+        return "draft_history"
+    return None
+
+
+def _get_target_policy(target_key, policy):
+    if not target_key:
+        return None
+    normalized_policy = policy if isinstance(policy, dict) else _normalize_backup_policy(None)
+    if target_key == "draft_history":
+        return {
+            "enabled": bool(normalized_policy.get("enabled", True)),
+            "interval_min": int(normalized_policy.get("draft_auto_save_interval_min", 5)),
+            "keep_count": int(normalized_policy.get("draft_history_keep_count", 20)),
+        }
+    target_overrides = normalized_policy.get("target_overrides") if isinstance(normalized_policy.get("target_overrides"), dict) else {}
+    target_policy = target_overrides.get(target_key)
+    if isinstance(target_policy, dict):
+        return target_policy
+    return {
+        "enabled": bool(normalized_policy.get("enabled", True)),
+        "interval_min": int(normalized_policy.get("interval_min", 30)),
+        "keep_count": int(normalized_policy.get("keep_count", 12)),
+    }
+
+
+def _should_create_versioned_backup(target_path, backup_dir, policy):
+    target_key = _resolve_backup_target(target_path, backup_dir)
+    target_policy = _get_target_policy(target_key, policy)
+    if not target_policy or not bool(target_policy.get("enabled", True)):
+        return False, target_key, target_policy
+
+    interval_min = max(1, int(target_policy.get("interval_min", 1)))
+    if interval_min <= 1:
+        return True, target_key, target_policy
+
+    try:
+        latest_mtime = None
+        if backup_dir and os.path.isdir(backup_dir):
+            newest_mtime = None
+            for filename in os.listdir(backup_dir):
+                candidate_path = os.path.join(backup_dir, filename)
+                if not os.path.isfile(candidate_path):
+                    continue
+                try:
+                    modified_at = os.path.getmtime(candidate_path)
+                except OSError:
+                    continue
+                if newest_mtime is None or modified_at > newest_mtime:
+                    newest_mtime = modified_at
+            if newest_mtime is not None:
+                latest_mtime = newest_mtime
+
+        if latest_mtime is None:
+            adjacent_backup_path = f"{os.path.abspath(target_path)}.bak"
+            if os.path.exists(adjacent_backup_path):
+                latest_mtime = os.path.getmtime(adjacent_backup_path)
+
+        if latest_mtime is None:
+            return True, target_key, target_policy
+
+        elapsed_minutes = (datetime.now().timestamp() - latest_mtime) / 60.0
+        return elapsed_minutes >= interval_min, target_key, target_policy
+    except OSError:
+        return True, target_key, target_policy
+
+
+def _latest_versioned_backup_age_seconds(target_path, backup_dir):
+    if not backup_dir or not os.path.exists(backup_dir):
+        return None
+
+    base_name = os.path.basename(target_path)
+    stem, extension = os.path.splitext(base_name)
+    latest_mtime = None
+    for filename in os.listdir(backup_dir):
+        if not filename.startswith(f"{stem}_") or not filename.endswith(extension):
+            continue
+        candidate_path = os.path.join(backup_dir, filename)
+        try:
+            modified_at = os.path.getmtime(candidate_path)
+        except OSError:
+            continue
+        if latest_mtime is None or modified_at > latest_mtime:
+            latest_mtime = modified_at
+
+    if latest_mtime is None:
+        return None
+    return max(0.0, datetime.now().timestamp() - latest_mtime)
+
+
 def write_json_with_backup(target_path, payload, backup_dir=None, keep_count=10, indent=4):
     target_path = os.path.abspath(target_path)
     target_dir = os.path.dirname(target_path) or os.path.abspath(".")
     ensure_directory(target_dir)
 
+    policy = _load_backup_policy()
+    allow_backup_copy, target_key, target_policy = _should_create_versioned_backup(target_path, backup_dir, policy)
+    effective_keep_count = keep_count
+    if isinstance(target_policy, dict):
+        effective_keep_count = int(target_policy.get("keep_count", keep_count) or keep_count)
+
     adjacent_backup_path = None
     versioned_backup_path = None
 
-    if os.path.exists(target_path):
+    if os.path.exists(target_path) and allow_backup_copy:
         adjacent_backup_path = f"{target_path}.bak"
         _copy_backup_with_fallback(target_path, adjacent_backup_path, "write_json_with_backup")
 
@@ -110,7 +328,7 @@ def write_json_with_backup(target_path, payload, backup_dir=None, keep_count=10,
             backup_dir = ensure_directory(os.path.abspath(backup_dir))
             versioned_backup_path = _build_versioned_backup_path(target_path, backup_dir)
             _copy_backup_with_fallback(target_path, versioned_backup_path, "write_json_with_backup")
-            _prune_versioned_backups(target_path, backup_dir, keep_count)
+            _prune_versioned_backups(target_path, backup_dir, effective_keep_count)
 
     fd, temp_path = tempfile.mkstemp(prefix="martin_", suffix=".json.tmp", dir=target_dir)
     try:
@@ -128,6 +346,7 @@ def write_json_with_backup(target_path, payload, backup_dir=None, keep_count=10,
         "target_path": target_path,
         "adjacent_backup_path": adjacent_backup_path,
         "versioned_backup_path": versioned_backup_path,
+        "backup_target": target_key,
     }
 
 
@@ -136,10 +355,16 @@ def write_text_with_backup(target_path, text, backup_dir=None, keep_count=10, en
     target_dir = os.path.dirname(target_path) or os.path.abspath(".")
     ensure_directory(target_dir)
 
+    policy = _load_backup_policy()
+    allow_backup_copy, target_key, target_policy = _should_create_versioned_backup(target_path, backup_dir, policy)
+    effective_keep_count = keep_count
+    if isinstance(target_policy, dict):
+        effective_keep_count = int(target_policy.get("keep_count", keep_count) or keep_count)
+
     adjacent_backup_path = None
     versioned_backup_path = None
 
-    if os.path.exists(target_path):
+    if os.path.exists(target_path) and allow_backup_copy:
         adjacent_backup_path = f"{target_path}.bak"
         _copy_backup_with_fallback(target_path, adjacent_backup_path, "write_text_with_backup")
 
@@ -147,7 +372,7 @@ def write_text_with_backup(target_path, text, backup_dir=None, keep_count=10, en
             backup_dir = ensure_directory(os.path.abspath(backup_dir))
             versioned_backup_path = _build_versioned_backup_path(target_path, backup_dir)
             _copy_backup_with_fallback(target_path, versioned_backup_path, "write_text_with_backup")
-            _prune_versioned_backups(target_path, backup_dir, keep_count)
+            _prune_versioned_backups(target_path, backup_dir, effective_keep_count)
 
     suffix = os.path.splitext(target_path)[1] or ".tmp"
     fd, temp_path = tempfile.mkstemp(prefix="martin_", suffix=suffix, dir=target_dir)
@@ -165,4 +390,5 @@ def write_text_with_backup(target_path, text, backup_dir=None, keep_count=10, en
         "target_path": target_path,
         "adjacent_backup_path": adjacent_backup_path,
         "versioned_backup_path": versioned_backup_path,
+        "backup_target": target_key,
     }

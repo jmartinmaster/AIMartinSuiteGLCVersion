@@ -14,14 +14,14 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 from app.downtime_codes import DEFAULT_DT_CODE_MAP, clear_downtime_code_cache
-from app.models.security_model import ACCESS_RIGHTS, ROLE_DEFAULT_RIGHTS, ROLE_LIMITS, normalize_role, role_requires_password
+from app.models.security_model import ACCESS_RIGHTS, MODULE_ACCESS_RIGHTS, ROLE_LIMITS, normalize_role, role_requires_password
 from app.security import gatekeeper
 from app.theme_manager import get_theme_label, get_theme_names, normalize_theme
-from app.models.settings_manager_model import SettingsManagerModel
+from app.models.settings_manager_model import PATH_OVERRIDE_DEFINITIONS, SettingsManagerModel
 from app.views.settings_manager_qt_view import SettingsManagerQtView
 
 __module_name__ = "Settings Manager Qt Controller"
-__version__ = "1.8.3"
+__version__ = "1.9.1"
 
 
 class SettingsManagerQtController:
@@ -99,13 +99,13 @@ class SettingsManagerQtController:
         if dispatcher is None:
             return self.external_modules_status or ""
         if not dispatcher.has_external_modules_directory():
-            return "External module overrides are unavailable until override files exist next to the app."
+            return "External module overrides are unavailable until files exist under data/modules."
         module_names = dispatcher.get_external_module_override_names()
         if module_names:
             if dispatcher.is_external_module_override_trust_enabled():
                 return f"External overrides are trusted and active. Available overrides: {', '.join(module_names)}"
             return f"External overrides exist but are inactive until an admin enables override trust. Available files: {', '.join(module_names)}"
-        return "Override-capable application folder detected. No module override files were found, so bundled modules stay in use."
+        return "No module override files were found under data/modules, so bundled modules stay in use."
 
     def show(self):
         self.view.show()
@@ -126,7 +126,18 @@ class SettingsManagerQtController:
         return gatekeeper.get_session() is not None and gatekeeper.has_right("security:manage_vaults") and self._get_session_role() in {"admin", "developer"}
 
     def _has_developer_access(self):
-        return gatekeeper.get_session() is not None and gatekeeper.has_right("developer:update_configuration") and self._get_session_role() == "developer"
+        return (
+            gatekeeper.get_session() is not None
+            and gatekeeper.has_right("developer:update_configuration")
+            and self._get_session_role() in {"admin", "developer"}
+        )
+
+    def _has_role_default_edit_access(self):
+        return (
+            gatekeeper.get_session() is not None
+            and gatekeeper.has_right("developer:update_configuration")
+            and self._get_session_role() == "developer"
+        )
 
     def refresh_snapshot(self, initial=False):
         self.model.settings = self.model.load_settings()
@@ -340,8 +351,8 @@ class SettingsManagerQtController:
                 granted = gatekeeper.authenticate(
                     required_right="developer:update_configuration",
                     parent=self.view,
-                    reason="Developer tools require a developer vault.",
-                    allowed_roles={"developer"},
+                    reason="Developer tools require an admin or developer vault with update rights.",
+                    allowed_roles={"admin", "developer"},
                 )
             except Exception as exc:
                 if show_error:
@@ -353,7 +364,7 @@ class SettingsManagerQtController:
         if show_error:
             self.view.show_error(
                 "Developer Tools",
-                "Developer tools require an active developer session with update-configuration rights.",
+                "Developer tools require an active admin or developer session with update-configuration rights.",
             )
         return False
 
@@ -365,13 +376,26 @@ class SettingsManagerQtController:
 
     def get_security_admin_state(self):
         session = gatekeeper.get_session()
+        bypass_options = []
+        for module_name, right_key in MODULE_ACCESS_RIGHTS.items():
+            if not str(right_key).startswith("module:"):
+                continue
+            if self.dispatcher is not None:
+                display_name = self.dispatcher.get_module_display_name(module_name)
+            else:
+                display_name = module_name.replace("_", " ").title()
+            bypass_options.append({"module_name": module_name, "display_name": display_name})
+        bypass_options.sort(key=lambda item: str(item.get("display_name") or "").lower())
         return {
             "can_manage_security": self._has_security_access(),
+            "can_manage_role_defaults": self._has_role_default_edit_access(),
             "session_summary": gatekeeper.get_session_summary(),
             "non_secure_mode": gatekeeper.is_non_secure_mode_enabled(),
+            "non_secure_bypass_modules": gatekeeper.get_non_secure_bypass_modules(),
+            "non_secure_bypass_options": bypass_options,
             "session_vault_name": session.vault_name if session else None,
             "vaults": [self._serialize_vault(vault) for vault in gatekeeper.list_vaults()],
-            "role_defaults": {key: list(value) for key, value in ROLE_DEFAULT_RIGHTS.items()},
+            "role_defaults": {key: list(value) for key, value in gatekeeper.get_role_default_rights_map().items()},
             "role_limits": dict(ROLE_LIMITS),
             "access_rights": [
                 {
@@ -423,11 +447,14 @@ class SettingsManagerQtController:
         vault_name = str(payload.get("vault_name") or "").strip()
         role = normalize_role(payload.get("role"))
         enabled = bool(payload.get("enabled", True))
+        password_required = bool(payload.get("password_required", True))
+        if role_requires_password(role):
+            password_required = True
         rights = payload.get("rights", [])
         reset_password = bool(payload.get("reset_password", False))
 
         password = None
-        if role_requires_password(role) and (existing_name is None or reset_password):
+        if password_required and (existing_name is None or reset_password):
             password = self.view.ask_for_password_pair(
                 "Vault Password",
                 f"Set the password for {vault_name or 'this vault'}.",
@@ -442,6 +469,7 @@ class SettingsManagerQtController:
             password=password,
             enabled=enabled,
             existing_name=existing_name,
+            password_required=password_required,
         )
         self.show_toast("Security", f"Saved vault {vault_name}.")
         return self.get_security_admin_state()
@@ -503,8 +531,10 @@ class SettingsManagerQtController:
         if not self._ensure_security_access():
             return
         desired_state = self.view.get_security_non_secure_mode()
+        bypassed_modules = self.view.get_security_non_secure_bypass_modules()
         current_state = gatekeeper.is_non_secure_mode_enabled()
-        if desired_state == current_state:
+        current_bypass = gatekeeper.get_non_secure_bypass_modules()
+        if desired_state == current_state and sorted(bypassed_modules) == sorted(current_bypass):
             return
         action_text = "enable" if desired_state else "disable"
         if not self.view.ask_yes_no(
@@ -517,21 +547,36 @@ class SettingsManagerQtController:
             )
             return
         try:
-            new_state = self.set_security_non_secure_mode(desired_state)
+            new_state = self.set_security_non_secure_mode(desired_state, bypassed_modules)
         except Exception as exc:
             self.view.show_error("Security", str(exc))
             return
         self.view.configure_security_admin_panel(new_state, preferred_name=self.view.get_selected_security_vault_name())
 
-    def set_security_non_secure_mode(self, enabled):
+    def set_security_non_secure_mode(self, enabled, bypass_modules):
         gatekeeper.set_non_secure_mode(bool(enabled))
+        gatekeeper.set_non_secure_bypass_modules(bypass_modules)
         message = (
-            "Non-secure mode is enabled. Protected-module authentication is bypassed."
+            "Non-secure mode is enabled. Authentication is bypassed only for the selected modules."
             if enabled
-            else "Non-secure mode is disabled. Protected modules are locked again."
+            else "Non-secure mode is disabled. Module authentication is active again."
         )
         self.show_toast("Security", message)
         return self.get_security_admin_state()
+
+    def save_selected_security_role_defaults(self):
+        if not self._has_role_default_edit_access():
+            self.view.show_error("Security", "Only a developer session can change role default rights.")
+            return
+        role_name = self.view.get_selected_security_role_name()
+        selected_rights = self.view.get_selected_security_rights()
+        try:
+            gatekeeper.set_role_default_rights(role_name, selected_rights)
+        except Exception as exc:
+            self.view.show_error("Security", str(exc))
+            return
+        self.show_toast("Security", f"Saved default rights for role: {role_name}.")
+        self.view.configure_security_admin_panel(self.get_security_admin_state(), preferred_name=self.view.get_selected_security_vault_name())
 
     def reset_security_storage(self):
         if not self._ensure_security_access():
@@ -553,14 +598,28 @@ class SettingsManagerQtController:
         self.view.configure_security_admin_panel(new_state)
 
     def get_developer_admin_settings_state(self):
+        runtime_path_state = self.model.get_runtime_path_state()
+        can_manage_developer = self._has_developer_access()
+        path_overrides = []
+        for entry in runtime_path_state.get("entries", []):
+            required_right = str(entry.get("required_right") or "").strip()
+            can_edit_entry = bool(can_manage_developer and required_right and gatekeeper.has_right(required_right))
+            path_overrides.append(
+                {
+                    **entry,
+                    "can_edit": can_edit_entry,
+                }
+            )
         return {
-            "can_manage_developer": self._has_developer_access(),
+            "can_manage_developer": can_manage_developer,
             "session_summary": gatekeeper.get_session_summary(),
             "section_mode": self.section_mode,
             "update_repository_url": self.model.settings.get("update_repository_url", ""),
             "enable_advanced_dev_updates": bool(self.model.settings.get("enable_advanced_dev_updates", False)),
             "enable_external_override_trust": gatekeeper.is_external_module_override_trust_enabled(),
             "external_modules_status": self.external_modules_status or "External override status is provided by the host dispatcher.",
+            "runtime_path_overrides": path_overrides,
+            "runtime_settings_path": runtime_path_state.get("settings_path"),
         }
 
     def save_current_developer_admin_settings(self):
@@ -571,12 +630,43 @@ class SettingsManagerQtController:
             values["update_repository_url"],
             values["enable_advanced_dev_updates"],
             values["enable_external_override_trust"],
+            values.get("runtime_path_overrides", {}),
         )
 
-    def save_developer_admin_settings(self, update_repository_url, enable_advanced_dev_updates, enable_external_override_trust):
+    def save_developer_admin_settings(self, update_repository_url, enable_advanced_dev_updates, enable_external_override_trust, runtime_path_overrides=None):
         trust_changed = gatekeeper.is_external_module_override_trust_enabled() != bool(enable_external_override_trust)
         self.model.settings["update_repository_url"] = str(update_repository_url or "").strip()
         self.model.settings["enable_advanced_dev_updates"] = bool(enable_advanced_dev_updates)
+        try:
+            current_overrides = dict(self.model.settings.get("path_overrides", {}))
+            if isinstance(runtime_path_overrides, dict):
+                requested_overrides = dict(runtime_path_overrides)
+            else:
+                requested_overrides = dict(current_overrides)
+
+            requested_lookup = {
+                definition["key"]: str(requested_overrides.get(definition["key"], "")).strip()
+                for definition in PATH_OVERRIDE_DEFINITIONS
+            }
+
+            for definition in PATH_OVERRIDE_DEFINITIONS:
+                required_right = str(definition.get("required_right") or "").strip()
+                override_key = str(definition.get("key") or "").strip()
+                if not required_right or not override_key:
+                    continue
+                if gatekeeper.has_right(required_right):
+                    continue
+                requested_value = requested_lookup.get(override_key, "")
+                current_value = str(current_overrides.get(override_key, "")).strip()
+                if requested_value != current_value:
+                    raise ValueError(
+                        f"Insufficient rights to change {definition.get('label', override_key)}. Required right: {required_right}."
+                    )
+
+            self.model.apply_path_overrides(requested_lookup)
+        except ValueError as exc:
+            self.view.show_error("Developer Settings", str(exc))
+            return
         self.model.settings = self.model.normalize_settings(self.model.settings)
         gatekeeper.set_external_module_override_trust(bool(enable_external_override_trust))
         backup_info = self.model.save_settings_with_backup()

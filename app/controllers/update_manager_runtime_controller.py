@@ -21,7 +21,6 @@ import threading
 from app.app_identity import format_versioned_deb_name, format_versioned_exe_name
 from app.app_platform import get_platform_update_artifact_kind, get_platform_update_artifact_label, is_windows_runtime
 from app.models.update_manager_model import UpdateManagerModel
-from app.tk_runtime_removed import raise_tk_runtime_removed
 from app.update_bindings import ObservableValue
 
 __module_name__ = "Update Manager Runtime Controller"
@@ -31,6 +30,14 @@ INFO = "info"
 SUCCESS = "success"
 WARNING = "warning"
 DANGER = "danger"
+
+
+def _raise_runtime_removed(live_path):
+    live_path = str(live_path or "app")
+    shadow_path = f"shadow/{live_path}"
+    raise RuntimeError(
+        f"{live_path} was removed from the live Phase 9 runtime. Use the PyQt6 implementation or inspect {shadow_path}."
+    )
 
 
 class UpdateManagerRuntimeController:
@@ -95,7 +102,7 @@ class UpdateManagerRuntimeController:
         self.coordinator.remote_info = self.remote_info
         self.branch_var.set(self.branch_name or "Unknown")
         self.repo_var.set(self.remote_info.get("display", "Unknown repository"))
-        raise_tk_runtime_removed("app/views/update_manager_view_factory.py")
+        _raise_runtime_removed("app/views/update_manager_view_factory.py")
         self.dispatcher.register_runtime_settings_listener(self._handle_runtime_settings_change)
         self._runtime_listener_registered = True
         self.refresh_local_manifest()
@@ -135,7 +142,7 @@ class UpdateManagerRuntimeController:
 
     def mount(self, parent):
         self.parent = parent
-        raise_tk_runtime_removed("app/views/update_manager_view_factory.py")
+        _raise_runtime_removed("app/views/update_manager_view_factory.py")
 
     def on_hide(self):
         return None

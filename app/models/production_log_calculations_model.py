@@ -18,7 +18,7 @@ from copy import deepcopy
 from app.models.production_log_model import DEFAULT_CALCULATION_SETTINGS, DEFAULT_CALCULATION_FORMULAS, ProductionLogModel
 
 __module_name__ = "Form Calculations"
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 
 EDITOR_SECTIONS = [
     {

@@ -16,7 +16,7 @@
 import re
 
 __module_name__ = "Form Loader Roles"
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 
 HEADER_FIELD_ROLE_DEFAULTS = {
     "date": "log_date",

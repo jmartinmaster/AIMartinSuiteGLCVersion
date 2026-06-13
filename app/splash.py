@@ -20,7 +20,7 @@ from app.theme_manager import get_theme_tokens, normalize_theme
 from app.utils import resource_path
 
 try:
-    from PyQt6.QtCore import QRect, Qt, QTimer
+    from PyQt6.QtCore import QPoint, QRect, Qt, QTimer
     from PyQt6.QtGui import QColor, QFont, QPainter, QPixmap
     from PyQt6.QtWidgets import QApplication, QSplashScreen
 
@@ -38,7 +38,7 @@ except ImportError:
     PYQT6_AVAILABLE = False
 
 __module_name__ = "Splash Screen"
-__version__ = "2.0.1"
+__version__ = "2.0.4"
 
 DEFAULT_SPLASH_DURATION_MS = 5000
 DEFAULT_SPLASH_WIDTH = 820
@@ -65,12 +65,23 @@ class MartinSplashScreen(QSplashScreen):
         self.host_shell_ready = False
         self._shown_at = None
         self._finish_timer = None
+        self._hard_timeout_timer = None
+        self._drag_offset = None
 
         if Qt is not None:
-            self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
+            self.setWindowFlags(
+                Qt.WindowType.FramelessWindowHint
+                | Qt.WindowType.Tool
+                | Qt.WindowType.WindowStaysOnTopHint
+            )
 
     def show_for_startup(self):
         self._shown_at = time.perf_counter()
+        if self._hard_timeout_timer is None:
+            self._hard_timeout_timer = QTimer(self)
+            self._hard_timeout_timer.setSingleShot(True)
+            self._hard_timeout_timer.timeout.connect(self._force_close_after_timeout)
+        self._hard_timeout_timer.start(self.minimum_duration_ms)
         self.show()
         application = QApplication.instance()
         if application is not None:
@@ -118,6 +129,8 @@ class MartinSplashScreen(QSplashScreen):
         self.detach_host_shell()
         if self._finish_timer is not None:
             self._finish_timer.stop()
+        if self._hard_timeout_timer is not None:
+            self._hard_timeout_timer.stop()
 
         if target_shell is not None:
             self.finish(target_shell)
@@ -125,6 +138,31 @@ class MartinSplashScreen(QSplashScreen):
             target_shell.activateWindow()
             return
         self.close()
+
+    def _force_close_after_timeout(self):
+        # If startup is blocked behind the splash (for example by auth prompts),
+        # force the splash to close so the operator can interact with the app.
+        self.host_shell_ready = True
+        self.finish_if_ready()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_offset = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self._drag_offset is not None and event.buttons() & Qt.MouseButton.LeftButton:
+            self.move(event.globalPosition().toPoint() - self._drag_offset)
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_offset = None
+        super().mouseReleaseEvent(event)
 
     def _font_from_token(self, token_name, fallback_size, bold=False):
         font_value = self.theme_tokens.get(token_name)

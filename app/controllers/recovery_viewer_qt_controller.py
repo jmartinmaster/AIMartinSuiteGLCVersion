@@ -20,7 +20,7 @@ from app.models.recovery_viewer_model import RecoveryViewerModel
 from app.views.recovery_viewer_qt_view import RecoveryViewerQtView
 
 __module_name__ = "Recovery Viewer Qt Controller"
-__version__ = "1.0.1"
+__version__ = "1.0.2"
 
 
 class RecoveryViewerQtController:
@@ -28,11 +28,12 @@ class RecoveryViewerQtController:
         self.parent = parent
         self.dispatcher = dispatcher
         self.selected_record_key = None
-        self.payload = self._build_view_payload()
         data_registry = getattr(dispatcher, "external_data_registry", None)
         self.model = RecoveryViewerModel(data_registry=data_registry)
+        self.payload = self._build_view_payload()
         self.records = []
         self.view = RecoveryViewerQtView(self, self.payload, parent_widget=parent)
+        self.refresh_backup_policy(initial=True)
         self.refresh_records(initial=True)
         self.view.show()
 
@@ -52,6 +53,8 @@ class RecoveryViewerQtController:
                 "Browse pending drafts, recovery snapshots, and backup artifacts directly in the PyQt6 workspace."
             ),
             "theme_tokens": theme_tokens,
+            "backup_policy": self.model.load_backup_policy(),
+            "backup_targets": self.model.get_backup_target_definitions(),
         }
 
     def _record_key(self, record):
@@ -130,6 +133,82 @@ class RecoveryViewerQtController:
         self.view.refresh_table(self.records)
         self._restore_selected_record(selected_record_key)
         _ = initial
+
+    def refresh_backup_policy(self, initial=False):
+        policy = self.model.load_backup_policy()
+        targets = self.model.get_backup_target_definitions()
+        if hasattr(self.view, "set_backup_policy"):
+            self.view.set_backup_policy(policy, targets)
+        if not initial:
+            self.view.set_status("Backup policy refreshed.")
+
+    def save_backup_policy(self):
+        form_values = getattr(self.view, "get_backup_policy_values", lambda: {})()
+        try:
+            saved_policy = self.model.save_backup_policy(form_values)
+        except Exception as exc:
+            self.view.show_error("Backup Policy", f"Could not save backup policy:\n{exc}")
+            return False
+
+        if hasattr(self.view, "set_backup_policy"):
+            self.view.set_backup_policy(saved_policy, self.model.get_backup_target_definitions())
+        self.view.set_status("Backup policy saved.")
+        self.show_toast("Backup Policy", "Saved backup policy.", "success")
+        return True
+
+    def reset_backup_policy_defaults(self):
+        policy = self.model.normalize_backup_policy(None)
+        if hasattr(self.view, "set_backup_policy"):
+            self.view.set_backup_policy(policy, self.model.get_backup_target_definitions())
+        self.view.set_status("Backup policy reset to defaults.")
+
+    def clean_backups(self):
+        if not self.view.ask_yes_no(
+            "Clean Backups",
+            "Delete all config backup files except the newest backup for each target?",
+        ):
+            return False
+
+        result = self.model.prune_config_backups()
+        self.refresh_records(selected_record_key=None)
+        self.show_toast(
+            "Clean Backups",
+            f"Deleted {result['deleted']} backup file(s). Kept {result['kept']} newest backup target(s).",
+            "success",
+        )
+        return True
+
+    def clean_drafts(self):
+        if not self.view.ask_yes_no(
+            "Clean Drafts",
+            "Delete all pending drafts except the newest draft?",
+        ):
+            return False
+
+        result = self.model.prune_pending_drafts()
+        self.refresh_records(selected_record_key=None)
+        self.show_toast(
+            "Clean Drafts",
+            f"Deleted {result['deleted']} draft file(s). Kept {result['kept']} newest draft.",
+            "success",
+        )
+        return True
+
+    def clean_snapshots(self):
+        if not self.view.ask_yes_no(
+            "Clean Recovery Snapshots",
+            "Delete all recovery snapshots except the newest snapshot?",
+        ):
+            return False
+
+        result = self.model.prune_recovery_snapshots()
+        self.refresh_records(selected_record_key=None)
+        self.show_toast(
+            "Clean Recovery Snapshots",
+            f"Deleted {result['deleted']} snapshot file(s). Kept {result['kept']} newest snapshot.",
+            "success",
+        )
+        return True
 
     def focus_record_path(self, record_path):
         record_key = self._find_record_key_by_path(record_path)

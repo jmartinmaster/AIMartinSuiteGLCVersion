@@ -28,7 +28,7 @@ from app.utils import ensure_external_directory, external_path
 from app.data_handler_service import DEFAULT_SHIFT_TIME_SETTINGS, DataHandlerService
 
 __module_name__ = "Form Loader"
-__version__ = "1.2.8"
+__version__ = "1.2.9"
 
 BALANCE_DOWNTIME_CAUSE = "Time Balance Adjustment"
 DEFAULT_GHOST_LABEL = "Ghost Time: 0 min"
@@ -238,7 +238,12 @@ class ProductionLogModel:
         self.calculation_settings = self.load_calculation_settings(config=self.layout_config)
         self.default_hours = self._format_number(self.settings.get("default_shift_hours", 8.0))
         self.default_goal = self._format_number(self.settings.get("default_goal_mph", 240.0))
-        self.auto_save_interval = self._coerce_positive_int(self.settings.get("auto_save_interval_min", 5), 5) * 60000
+        backup_policy = self.settings.get("backup_policy", {}) if isinstance(self.settings, dict) else {}
+        auto_save_minutes = self._coerce_positive_int(
+            backup_policy.get("draft_auto_save_interval_min", self.settings.get("auto_save_interval_min", 5)),
+            5,
+        )
+        self.auto_save_interval = auto_save_minutes * 60000
 
     def get_active_form_info(self):
         return dict(self.active_form_info)
@@ -1048,11 +1053,12 @@ class ProductionLogModel:
     def save_draft_data(self, data, version, is_auto=False):
         draft_path = self.build_draft_path(data.get("header", {}))
         payload = self.build_draft_payload(data, version, draft_path, is_auto=is_auto)
+        backup_policy = self.settings.get("backup_policy", {}) if isinstance(self.settings, dict) else {}
         backup_info = write_json_with_backup(
             draft_path,
             payload,
             backup_dir=self.get_pending_history_dir(),
-            keep_count=20,
+            keep_count=self._coerce_positive_int(backup_policy.get("draft_history_keep_count", 20), 20),
         )
         return draft_path, payload, backup_info
 

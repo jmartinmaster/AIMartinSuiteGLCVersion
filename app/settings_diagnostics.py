@@ -24,13 +24,14 @@ from app.app_logging import log_error
 from app.downtime_codes import DEFAULT_DT_CODE_MAP
 from app.persistence import write_json_with_backup
 from app.theme_manager import DEFAULT_THEME, normalize_theme
-from app.utils import ensure_external_directory, external_path
+from app.utils import ensure_external_data_directory, external_data_path
 
 __module_name__ = "Settings Diagnostics"
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 
 DEFAULT_SETTINGS_PAYLOAD = {
-    "export_directory": "exports",
+    "export_directory": "data/exports",
+    "path_overrides": {},
     "organize_exports_by_date": True,
     "default_export_prefix": "Disamatic Production Sheet",
     "update_repository_url": "https://github.com/jmartinmaster/AIMartinSuiteGLCVersion",
@@ -47,6 +48,14 @@ DEFAULT_SETTINGS_PAYLOAD = {
     "downtime_codes": deepcopy(DEFAULT_DT_CODE_MAP),
     "module_whitelist": [],
     "persistent_modules": [],
+    "backup_policy": {
+        "enabled": True,
+        "interval_min": 30,
+        "keep_count": 12,
+        "draft_auto_save_interval_min": 5,
+        "draft_history_keep_count": 20,
+        "target_overrides": {},
+    },
 }
 
 
@@ -286,7 +295,7 @@ def diagnose_and_repair_settings(
 
     for key, fallback_value in {
         "update_repository_url": defaults.get("update_repository_url", ""),
-        "export_directory": defaults.get("export_directory", "exports"),
+        "export_directory": defaults.get("export_directory", "data/exports"),
         "default_export_prefix": defaults.get("default_export_prefix", "Disamatic Production Sheet"),
     }.items():
         original_value = effective.get(key, fallback_value)
@@ -301,6 +310,43 @@ def diagnose_and_repair_settings(
                 normalized_value,
             )
         effective[key] = normalized_value
+
+    raw_path_overrides = effective.get("path_overrides", {})
+    normalized_path_overrides = {}
+    if isinstance(raw_path_overrides, dict):
+        for raw_key, raw_value in raw_path_overrides.items():
+            key_text = str(raw_key or "").strip()
+            value_text = str(raw_value or "").strip()
+            if key_text and value_text:
+                normalized_path_overrides[key_text] = value_text
+            else:
+                _record_repair(
+                    "runtime_paths",
+                    "path_overrides",
+                    "invalid_entry",
+                    "Runtime path override entry with blank key/value was ignored.",
+                    {"key": raw_key, "value": raw_value},
+                    None,
+                )
+    else:
+        _record_repair(
+            "runtime_paths",
+            "path_overrides",
+            "type_error",
+            "Runtime path overrides value was not an object and was reset.",
+            raw_path_overrides,
+            {},
+        )
+    if normalized_path_overrides != raw_path_overrides:
+        _record_repair(
+            "runtime_paths",
+            "path_overrides",
+            "normalized_map",
+            "Runtime path overrides were normalized to valid key/value pairs.",
+            raw_path_overrides,
+            normalized_path_overrides,
+        )
+    effective["path_overrides"] = normalized_path_overrides
 
     if "module_whitelist" in defaults or "module_whitelist" in source_payload:
         raw_modules = effective.get("module_whitelist", [])
@@ -396,7 +442,7 @@ def persist_repaired_settings(result: SettingsDiagnosticsResult, settings_path: 
     backup_info = write_json_with_backup(
         settings_path,
         result.repaired_persisted_payload,
-        backup_dir=external_path("data/backups/settings"),
+        backup_dir=external_data_path("backups/settings"),
         keep_count=keep_count,
     )
     result.persisted_repairs = True
@@ -408,8 +454,8 @@ def persist_repaired_settings(result: SettingsDiagnosticsResult, settings_path: 
 def write_settings_diagnostics_report(result: SettingsDiagnosticsResult, keep_count: int = 30):
     if not isinstance(result, SettingsDiagnosticsResult):
         return None
-    diagnostics_dir = ensure_external_directory("data/backups/settings/diagnostics")
-    report_target = external_path("data/backups/settings/diagnostics/settings_diagnostics_report.json")
+    diagnostics_dir = ensure_external_data_directory("backups/settings/diagnostics")
+    report_target = external_data_path("backups/settings/diagnostics/settings_diagnostics_report.json")
     result.report_path = report_target
     report_payload = result.to_dict()
     report_payload["effective_payload_preview_keys"] = sorted(list(result.repaired_effective_payload.keys()))

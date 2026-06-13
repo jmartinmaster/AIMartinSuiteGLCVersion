@@ -16,7 +16,7 @@
 from dataclasses import dataclass, field
 
 __module_name__ = "Security Model"
-__version__ = "2.0.2"
+__version__ = "2.1.1"
 
 
 GENERAL_USER_LIMIT = 9
@@ -135,12 +135,13 @@ class VaultRecord:
     def from_payload(cls, payload, path=None):
         role = normalize_role(payload.get("role"))
         display_name = str(payload.get("display_name") or payload.get("vault_name") or "").strip() or str(payload.get("vault_name") or "")
+        enforced_password_required = role_requires_password(role)
         return cls(
             vault_name=str(payload.get("vault_name") or "").strip(),
             display_name=display_name,
             role=role,
             enabled=bool(payload.get("enabled", True)),
-            password_required=bool(payload.get("password_required", role_requires_password(role))),
+            password_required=bool(payload.get("password_required", enforced_password_required)) or enforced_password_required,
             requires_yubikey=bool(payload.get("requires_yubikey", role == "developer")),
             rights=normalize_rights(payload.get("rights", ROLE_DEFAULT_RIGHTS.get(role, [])), role=role),
             hash_scheme=str(payload.get("hash_scheme", "pbkdf2_sha256") or "pbkdf2_sha256"),

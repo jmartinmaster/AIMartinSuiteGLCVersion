@@ -23,7 +23,7 @@ from app.persistence import write_json_with_backup
 from app.utils import ensure_external_directory, external_path, local_or_resource_path
 
 __module_name__ = "Form Definition Registry"
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 
 DEFAULT_FORM_ID = "temp_form_title"
 DEFAULT_FORM_NAME = "Temp Form Title"

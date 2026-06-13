@@ -36,6 +36,8 @@ Use this checklist before packaging or publishing Dispatcher Core `2.2.1` (curre
 - Confirm Update Manager uses the configured repository URL.
 - Confirm stable EXE checks still run and surface status correctly.
 - Confirm JSON payload restores still preserve backups before overwrite.
+- Confirm settings persist at `data/config/settings.json` and recover from legacy `settings.json` if present.
+- Confirm export-directory defaults resolve to `data/exports` and dated export folders still use the `YYYY/MM MonthName` pattern.
 
 ## Packaged Windows Gate
 

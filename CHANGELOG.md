@@ -4,6 +4,42 @@ This changelog tracks the main branch release line for Production Logging Center
 
 Version headings below are aligned to the current `2.x` release line used by Dispatcher Core. Earlier work has been grouped into practical release milestones so the shipped feature history is easier to follow without rewriting older module version markers.
 
+## [2.2.4] - 2026-06-12
+
+### Changed
+
+- Promoted Dispatcher Core to `2.2.4` for field-testing readiness after the security policy follow-up.
+- Added support for password-optional `general` vaults while keeping `admin` and `developer` vaults password-required.
+- Updated Security Admin save flows so password prompts are required only when the selected vault policy requires a password.
+- Added a Security Admin UI toggle to explicitly require or remove a password for `general` vaults.
+- Kept non-secure-mode auto-provisioning of a fallback `general_default` vault and surfaced its generated credentials when created.
+
+### Notes
+
+- `2.2.4` is an even patch field-testing checkpoint intended for broader runtime validation.
+- Validation passed through targeted `py_compile` and problems-panel checks for touched security and settings modules.
+
+## [2.2.3] - 2026-06-12
+
+### Changed
+
+- Promoted Dispatcher Core to `2.2.3` as the current source-side development checkpoint for the multi-form save payload, Layout Manager and Form Loader workflow refinements, and version-marker hygiene pass.
+- Adjusted Form Loader multi-file form save behavior so the stored-form payload correctly captures all sections and fields for the full form contract.
+- Continued Layout Manager and Form Loader workflow improvements across stored-form selection, layout normalization, section editing, and form management actions.
+- Updated Security Service authorization flow so privileged module rights (`security:*`, `developer:*`) now trigger rights-based authentication checks instead of relying only on the protected-module list.
+- Updated Security Service authorization flow so all mapped user-facing modules enforce access rights, with non-secure mode bypass limited to an admin-selected module list.
+- Removed native security-device verification from vault login flows and moved to password-only vault authentication.
+- Enforced password complexity for all vault roles: minimum 8 characters, at least 2 uppercase letters, and at least 1 special character from `!@#$%^&*().`.
+- Added developer-only runtime support for updating role default rights while keeping admin sessions read-only for role-default policy changes.
+- Added missing `__module_name__` and `__version__` markers to `layout_manager_model.py`, `recovery_viewer_model.py`, `settings_manager_model.py`, and `layout_config_service.py`.
+- Bumped version markers across all touched controllers, models, views, and service modules to reflect the current source state.
+- Refreshed multi-user migration documentation to reflect implemented vault/session/rights architecture and capture remaining policy decisions needed for full rollout.
+
+### Notes
+
+- `2.2.3` is an odd patch development checkpoint and is not intended to be treated as a packaged stable-update target.
+- Validation passed through `Validate Changed UI Modules` and targeted `py_compile` checks on the touched Python files.
+
 ## [2.2.1] - 2026-04-23
 
 ### Changed

@@ -27,10 +27,10 @@ from app.external_data_registry import ExternalDataRegistry
 from app.form_definition_registry import FormDefinitionRegistry
 from app.production_log_roles import HEADER_DERIVED_ROLES, PRODUCTION_IMPORT_LABEL_ROLES, get_default_row_field_id, normalize_role_name, resolve_header_field_role, resolve_row_field_role
 from app.safe_expression import SafeExpressionEvaluator
-from app.utils import ensure_external_directory, external_path, resource_path
+from app.utils import ensure_external_data_directory, external_path, local_or_resource_path, resource_path
 
 __module_name__ = "Data Handler"
-__version__ = "1.1.6"
+__version__ = "1.1.7"
 
 DEFAULT_SHIFT_TIME_SETTINGS = {
     "shift_total_rounding": "nearest",
@@ -85,7 +85,7 @@ class DataHandlerService:
         with open(self.config_path, "r", encoding="utf-8") as handle:
             self.config = self._normalize_layout_config(json.load(handle))
         self.settings = self.load_settings()
-        self.pending_dir = ensure_external_directory("data/pending")
+        self.pending_dir = ensure_external_data_directory("pending")
         self._operation_warnings = []
 
     def _normalize_layout_config(self, config):
@@ -247,7 +247,7 @@ class DataHandlerService:
 
     def load_settings(self):
         default_settings = {
-            "export_directory": "exports",
+            "export_directory": os.path.join("data", "exports"),
             "organize_exports_by_date": True,
             "default_export_prefix": "Disamatic Production Sheet",
         }
@@ -886,7 +886,8 @@ class DataHandlerService:
         return self._format_compact_time(stop_minutes)
 
     def get_export_directory(self, raw_date):
-        base_dir = str(self.settings.get("export_directory", "exports") or "exports").strip() or "exports"
+        default_export_directory = os.path.join("data", "exports")
+        base_dir = str(self.settings.get("export_directory", default_export_directory) or default_export_directory).strip() or default_export_directory
         target_dir = base_dir if os.path.isabs(base_dir) else external_path(base_dir)
         if self.settings.get("organize_exports_by_date", True):
             export_date = self.parse_export_date(raw_date)
@@ -1093,6 +1094,16 @@ class DataHandlerService:
         template_path = str(self.config.get("template_path", "") or "").strip()
         if not template_path:
             return None
+        if os.path.isabs(template_path) and os.path.exists(template_path):
+            return template_path
+        if os.path.exists(template_path):
+            return os.path.abspath(template_path)
+        external_candidate = external_path(template_path)
+        if os.path.exists(external_candidate):
+            return external_candidate
+        resolved_path = local_or_resource_path(template_path)
+        if os.path.exists(resolved_path):
+            return resolved_path
         resolved_path = resource_path(template_path)
         if os.path.exists(resolved_path):
             return resolved_path

@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 __module_name__ = "Settings Manager Qt View"
-__version__ = "1.7.3"
+__version__ = "1.8.1"
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
@@ -74,8 +74,11 @@ class SettingsManagerQtView(QMainWindow):
         self.security_vault_name_input = None
         self.security_role_combo = None
         self.security_enabled_checkbox = None
+        self.security_password_required_checkbox = None
         self.security_password_rule_label = None
         self.security_non_secure_checkbox = None
+        self.security_non_secure_modules_list = None
+        self.security_save_role_defaults_button = None
         self.security_unlock_button = None
         self.security_rights_checkboxes = {}
         self.security_role_defaults = {}
@@ -89,6 +92,9 @@ class SettingsManagerQtView(QMainWindow):
         self.developer_advanced_checkbox = None
         self.developer_trust_checkbox = None
         self.developer_status_label = None
+        self.developer_runtime_settings_path_label = None
+        self.developer_runtime_override_inputs = {}
+        self.developer_runtime_override_access_labels = {}
         self.developer_unlock_button = None
         self.developer_save_button = None
         self.note_text = None
@@ -296,6 +302,10 @@ class SettingsManagerQtView(QMainWindow):
         self.security_enabled_checkbox.stateChanged.connect(self._on_form_changed)
         security_form.addRow(QLabel("Vault Status"), self.security_enabled_checkbox)
 
+        self.security_password_required_checkbox = QCheckBox("Require Password")
+        self.security_password_required_checkbox.stateChanged.connect(self._on_form_changed)
+        security_form.addRow(QLabel("Password Requirement"), self.security_password_required_checkbox)
+
         self.security_password_rule_label = QLabel("Password rule: not set")
         self.security_password_rule_label.setWordWrap(True)
         security_form.addRow(QLabel("Password Rule"), self.security_password_rule_label)
@@ -308,9 +318,14 @@ class SettingsManagerQtView(QMainWindow):
         self.security_rights_container = rights_container
         self.security_rights_layout = rights_layout
 
-        self.security_non_secure_checkbox = QCheckBox("Persistently bypass protected-module authentication")
+        self.security_non_secure_checkbox = QCheckBox("Enable persisted non-secure mode (for selected modules)")
         self.security_non_secure_checkbox.stateChanged.connect(self._on_form_changed)
         security_form.addRow(QLabel("Security Mode"), self.security_non_secure_checkbox)
+
+        self.security_non_secure_modules_list = QListWidget()
+        self.security_non_secure_modules_list.setSelectionMode(QListWidget.SelectionMode.MultiSelection)
+        self.security_non_secure_modules_list.itemSelectionChanged.connect(self._on_form_changed)
+        security_form.addRow(QLabel("Non-Secure Bypass Modules"), self.security_non_secure_modules_list)
 
         security_actions_row_1 = QHBoxLayout()
         new_vault_button = QPushButton("New Vault")
@@ -319,6 +334,9 @@ class SettingsManagerQtView(QMainWindow):
         role_defaults_button = QPushButton("Role Defaults")
         role_defaults_button.clicked.connect(self.controller.apply_selected_security_role_defaults)
         security_actions_row_1.addWidget(role_defaults_button)
+        self.security_save_role_defaults_button = QPushButton("Save Role Defaults")
+        self.security_save_role_defaults_button.clicked.connect(self.controller.save_selected_security_role_defaults)
+        security_actions_row_1.addWidget(self.security_save_role_defaults_button)
         save_vault_button = QPushButton("Save Vault")
         save_vault_button.clicked.connect(self.controller.save_current_security_vault)
         security_actions_row_1.addWidget(save_vault_button)
@@ -382,6 +400,49 @@ class SettingsManagerQtView(QMainWindow):
         self.developer_status_label = QLabel("-")
         self.developer_status_label.setWordWrap(True)
         developer_layout.addRow(QLabel("External Modules"), self.developer_status_label)
+
+        self.developer_runtime_settings_path_label = QLabel("-")
+        self.developer_runtime_settings_path_label.setWordWrap(True)
+        developer_layout.addRow(QLabel("Settings File"), self.developer_runtime_settings_path_label)
+
+        runtime_paths_group = QGroupBox("Deferred Runtime Path Overrides")
+        runtime_paths_layout = QFormLayout(runtime_paths_group)
+        runtime_paths_hint = QLabel(
+            "Set optional root overrides for runtime folders. Leave a field blank to use the default data/... location."
+        )
+        runtime_paths_hint.setWordWrap(True)
+        runtime_paths_layout.addRow(runtime_paths_hint)
+
+        self.developer_runtime_override_inputs = {}
+        self.developer_runtime_override_access_labels = {}
+        for override_key, override_label in [
+            ("exports_root", "Exports Root"),
+            ("forms_root", "Forms Root"),
+            ("pending_root", "Pending Drafts Root"),
+            ("backups_root", "Backups Root"),
+            ("modules_root", "External Modules Root"),
+            ("security_root", "Security Root"),
+        ]:
+            row_widget = QWidget()
+            row_layout = QVBoxLayout(row_widget)
+            row_layout.setContentsMargins(0, 0, 0, 0)
+            row_layout.setSpacing(2)
+
+            path_input = QLineEdit()
+            path_input.setPlaceholderText("Default (blank)")
+            path_input.textChanged.connect(self._on_form_changed)
+            row_layout.addWidget(path_input)
+
+            access_label = QLabel("-")
+            access_label.setWordWrap(True)
+            access_label.setObjectName("mutedLabel")
+            row_layout.addWidget(access_label)
+
+            runtime_paths_layout.addRow(QLabel(override_label), row_widget)
+            self.developer_runtime_override_inputs[override_key] = path_input
+            self.developer_runtime_override_access_labels[override_key] = access_label
+
+        developer_layout.addRow(runtime_paths_group)
 
         self.developer_unlock_button = QPushButton("Unlock Developer Tools")
         self.developer_unlock_button.clicked.connect(self.controller.request_developer_admin_access)
@@ -626,6 +687,7 @@ class SettingsManagerQtView(QMainWindow):
                 role_index = 0
             self.security_role_combo.setCurrentIndex(role_index)
             self.security_enabled_checkbox.setChecked(bool(vault_record.get("enabled", True)))
+            self.security_password_required_checkbox.setChecked(bool(vault_record.get("password_required", True)))
             self.update_security_role_note()
 
             selected_rights = set(vault_record.get("rights") or self.security_role_defaults.get(role, []))
@@ -653,13 +715,22 @@ class SettingsManagerQtView(QMainWindow):
     def update_security_role_note(self):
         role = str(self.security_role_combo.currentText() or "general").strip().lower()
         limit = self._security_state.get("role_limits", {}).get(role)
-        if role == "general":
-            self.security_password_rule_label.setText(f"General vaults do not require passwords. Limit: {limit}.")
-        elif role == "admin":
-            self.security_password_rule_label.setText(f"Admin vaults require a password. Limit: {limit}.")
+        if role in {"admin", "developer"}:
+            self.security_password_required_checkbox.setChecked(True)
+            self.security_password_required_checkbox.setEnabled(False)
+            self.security_password_rule_label.setText(
+                f"{role.title()} vaults require passwords. Rule: minimum 8 characters, at least 2 uppercase letters, and at least 1 special character from !@#$%^&*(). Limit: {limit}."
+            )
+            return
+
+        self.security_password_required_checkbox.setEnabled(True)
+        if self.security_password_required_checkbox.isChecked():
+            self.security_password_rule_label.setText(
+                f"General vault password is enabled. Rule: minimum 8 characters, at least 2 uppercase letters, and at least 1 special character from !@#$%^&*(). Limit: {limit}."
+            )
         else:
             self.security_password_rule_label.setText(
-                f"Developer vaults require a password and native security-device verification. Limit: {limit}."
+                f"General vault password is disabled by policy. Limit: {limit}."
             )
 
     def apply_security_role_defaults(self):
@@ -692,6 +763,7 @@ class SettingsManagerQtView(QMainWindow):
         state = state if isinstance(state, dict) else {}
         self._security_state = state
         can_manage_security = bool(state.get("can_manage_security", False))
+        can_manage_role_defaults = bool(state.get("can_manage_role_defaults", False))
         session_vault_name = str(state.get("session_vault_name") or "").strip()
         self.security_role_defaults = dict(state.get("role_defaults") or {})
         self._configure_security_rights(state.get("access_rights") or [])
@@ -705,8 +777,24 @@ class SettingsManagerQtView(QMainWindow):
             self.security_form_container.setEnabled(can_manage_security)
         if self.security_vault_list is not None:
             self.security_vault_list.setEnabled(can_manage_security)
+        if self.security_non_secure_modules_list is not None:
+            self.security_non_secure_modules_list.setEnabled(can_manage_security)
+        if self.security_save_role_defaults_button is not None:
+            self.security_save_role_defaults_button.setEnabled(can_manage_role_defaults)
         if self.security_unlock_button is not None:
             self.security_unlock_button.setText("Re-authenticate Security Admin" if can_manage_security else "Unlock Security Admin")
+
+        self.security_non_secure_modules_list.clear()
+        bypass_lookup = set(state.get("non_secure_bypass_modules") or [])
+        for module_item in state.get("non_secure_bypass_options") or []:
+            module_name = str(module_item.get("module_name") or "").strip()
+            display_name = str(module_item.get("display_name") or module_name.replace("_", " ").title()).strip()
+            if not module_name:
+                continue
+            list_item = QListWidgetItem(f"{display_name} ({module_name})")
+            list_item.setData(0x0100, module_name)
+            self.security_non_secure_modules_list.addItem(list_item)
+            list_item.setSelected(module_name in bypass_lookup)
 
         self.security_vault_list.clear()
         preferred = str(preferred_name or "").strip() or session_vault_name
@@ -715,9 +803,8 @@ class SettingsManagerQtView(QMainWindow):
             vault_name = str(vault.get("vault_name") or "")
             role = str(vault.get("role") or "general")
             enabled_text = "enabled" if bool(vault.get("enabled", True)) else "disabled"
-            native_text = ", native verification" if bool(vault.get("requires_yubikey", False)) else ""
             active_text = ", active" if session_vault_name and vault_name == session_vault_name else ""
-            list_item = QListWidgetItem(f"{vault_name} ({role}, {enabled_text}{native_text}{active_text})")
+            list_item = QListWidgetItem(f"{vault_name} ({role}, {enabled_text}{active_text})")
             list_item.setData(0x0100, vault)
             self.security_vault_list.addItem(list_item)
             if preferred and vault_name == preferred:
@@ -740,6 +827,26 @@ class SettingsManagerQtView(QMainWindow):
     def get_security_non_secure_mode(self):
         return bool(self.security_non_secure_checkbox.isChecked())
 
+    def get_security_non_secure_bypass_modules(self):
+        selected_names = []
+        if self.security_non_secure_modules_list is None:
+            return selected_names
+        for item in self.security_non_secure_modules_list.selectedItems():
+            module_name = str(item.data(0x0100) or "").strip()
+            if module_name and module_name not in selected_names:
+                selected_names.append(module_name)
+        return selected_names
+
+    def get_selected_security_role_name(self):
+        return str(self.security_role_combo.currentText() or "general").strip().lower()
+
+    def get_selected_security_rights(self):
+        return [
+            right_key
+            for right_key, checkbox in self.security_rights_checkboxes.items()
+            if checkbox.isChecked()
+        ]
+
     def get_security_vault_payload(self, reset_password=False):
         selected = self._get_selected_vault_record() or {}
         rights = [
@@ -752,6 +859,7 @@ class SettingsManagerQtView(QMainWindow):
             "vault_name": self.security_vault_name_input.text().strip(),
             "role": str(self.security_role_combo.currentText() or "general").strip().lower(),
             "enabled": bool(self.security_enabled_checkbox.isChecked()),
+            "password_required": bool(self.security_password_required_checkbox.isChecked()),
             "rights": rights,
             "reset_password": bool(reset_password),
         }
@@ -768,6 +876,8 @@ class SettingsManagerQtView(QMainWindow):
             self.developer_advanced_checkbox.setChecked(bool(state.get("enable_advanced_dev_updates", False)))
             self.developer_trust_checkbox.setChecked(bool(state.get("enable_external_override_trust", False)))
             self.developer_status_label.setText(str(state.get("external_modules_status") or "-"))
+            self.developer_runtime_settings_path_label.setText(str(state.get("runtime_settings_path") or "-"))
+            self._set_runtime_path_override_state(state.get("runtime_path_overrides") or [], can_manage_developer)
             if section_mode == "developer_admin":
                 note_text = "Privileged update and override settings now live on this dedicated page. Internal Code Editor remains a separate sidebar module."
             elif can_manage_developer:
@@ -786,11 +896,44 @@ class SettingsManagerQtView(QMainWindow):
             self.developer_unlock_button.setText("Re-authenticate Developer Tools" if can_manage_developer else "Unlock Developer Tools")
 
     def get_developer_admin_settings_values(self):
+        runtime_overrides = {
+            key: widget.text().strip()
+            for key, widget in self.developer_runtime_override_inputs.items()
+            if widget is not None
+        }
         return {
             "update_repository_url": self.developer_repository_input.text().strip(),
             "enable_advanced_dev_updates": bool(self.developer_advanced_checkbox.isChecked()),
             "enable_external_override_trust": bool(self.developer_trust_checkbox.isChecked()),
+            "runtime_path_overrides": runtime_overrides,
         }
+
+    def _set_runtime_path_override_state(self, runtime_path_overrides, can_manage_developer):
+        entries = runtime_path_overrides if isinstance(runtime_path_overrides, list) else []
+        entries_by_key = {
+            str(entry.get("key") or "").strip(): entry
+            for entry in entries
+            if isinstance(entry, dict)
+        }
+        for override_key, path_input in self.developer_runtime_override_inputs.items():
+            entry = entries_by_key.get(override_key, {})
+            override_value = str(entry.get("override_value") or "")
+            required_right = str(entry.get("required_right") or "")
+            can_edit = bool(entry.get("can_edit", False) and can_manage_developer)
+            default_path = str(entry.get("default_path") or "")
+            effective_path = str(entry.get("effective_path") or "")
+
+            path_input.setText(override_value)
+            path_input.setEnabled(can_edit)
+
+            access_label = self.developer_runtime_override_access_labels.get(override_key)
+            if access_label is not None:
+                if can_edit:
+                    access_label.setText(f"Default: {default_path} | Effective: {effective_path}")
+                else:
+                    access_label.setText(
+                        f"Read-only. Required right: {required_right or '-'} | Default: {default_path} | Effective: {effective_path}"
+                    )
 
     def ask_for_password_pair(self, title, message):
         first_value, first_ok = QInputDialog.getText(self, title, message, QLineEdit.EchoMode.Password)
@@ -804,6 +947,17 @@ class SettingsManagerQtView(QMainWindow):
             return None
         if not str(first_value or "").strip():
             self.show_error(title, "Password cannot be blank.")
+            return None
+        password_text = str(first_value)
+        special_characters = "!@#$%^&*()."
+        if len(password_text) < 8:
+            self.show_error(title, "Password must be at least 8 characters long.")
+            return None
+        if sum(1 for character in password_text if character.isupper()) < 2:
+            self.show_error(title, "Password must include at least two uppercase letters.")
+            return None
+        if not any(character in special_characters for character in password_text):
+            self.show_error(title, "Password must include at least one special character from !@#$%^&*().")
             return None
         return str(first_value)
 

@@ -16,6 +16,7 @@
 import json
 import os
 import re
+import shutil
 from copy import deepcopy
 from datetime import datetime
 
@@ -27,7 +28,10 @@ except Exception:
 from app.layout_config_service import LayoutConfigService
 from app.persistence import write_json_with_backup
 from app.production_log_roles import PROTECTED_ROW_ROLES, REQUIRED_MAPPING_ROLES, get_default_row_field_id, normalize_role_name, normalize_row_section_name, resolve_header_field_role, resolve_row_field_role
-from app.utils import external_path
+from app.utils import external_path, local_or_resource_path
+
+__module_name__ = "Layout Manager"
+__version__ = "1.0.0"
 
 VALID_IMPORT_TRANSFORMS = ("value", "code_lookup", "stop_from_duration")
 VALID_EXPORT_TRANSFORMS = ("value", "code_number", "duration_minutes", "bool_int", "minutes_label")
@@ -986,7 +990,7 @@ class LayoutManagerModel:
         except json.JSONDecodeError as exc:
             raise ValueError(f"Syntax error at line {exc.lineno}, column {exc.colno}: {exc.msg}") from exc
 
-        normalized_payload, payload_details = self._normalize_editor_payload(payload)
+        normalized_payload, payload_details = self._normalize_editor_payload(payload, base_config=base_config)
         self.validate_editor_payload_preserves_required_structure(normalized_payload, payload_details)
         normalized_config = self.normalize_config(normalized_payload)
         self.validate_config(normalized_config)
@@ -2082,6 +2086,69 @@ class LayoutManagerModel:
         config["template_path"] = str(template_path_value or "").strip()
         return config, "Updated export template path"
 
+    def resolve_template_path(self, template_path_value):
+        normalized_path = str(template_path_value or "").strip()
+        if not normalized_path:
+            return ""
+
+        if os.path.isabs(normalized_path) and os.path.exists(normalized_path):
+            return normalized_path
+
+        external_candidate = external_path(normalized_path)
+        if os.path.exists(external_candidate):
+            return external_candidate
+
+        local_or_resource_candidate = local_or_resource_path(normalized_path)
+        if os.path.exists(local_or_resource_candidate):
+            return local_or_resource_candidate
+
+        if os.path.exists(normalized_path):
+            return os.path.abspath(normalized_path)
+
+        return ""
+
+    def build_form_template_relative_path(self, form_info=None, target_filename=""):
+        resolved_form_info = dict(form_info) if isinstance(form_info, dict) else self.service.get_active_form_info()
+        form_id = self.service.registry.canonical_form_id(str(resolved_form_info.get("id") or ""))
+        if not form_id:
+            form_id = "form"
+
+        source_name = str(target_filename or "").strip() or "export_template.xlsx"
+        sanitized_name = re.sub(r"[^A-Za-z0-9._-]+", "_", os.path.basename(source_name)).strip("._")
+        if not sanitized_name:
+            sanitized_name = "export_template.xlsx"
+        if "." not in sanitized_name:
+            sanitized_name = f"{sanitized_name}.xlsx"
+
+        return os.path.join("data", "forms", form_id, sanitized_name).replace("\\", "/")
+
+    def copy_template_to_active_form(self, template_path_value, form_info=None, target_filename=""):
+        source_path = self.resolve_template_path(template_path_value)
+        if not source_path:
+            raise ValueError("Template path is missing or does not exist.")
+
+        target_relative_path = self.build_form_template_relative_path(
+            form_info=form_info,
+            target_filename=target_filename or os.path.basename(source_path),
+        )
+        target_absolute_path = external_path(target_relative_path)
+        os.makedirs(os.path.dirname(target_absolute_path), exist_ok=True)
+
+        copied = True
+        try:
+            copied = not os.path.samefile(source_path, target_absolute_path)
+        except OSError:
+            copied = True
+
+        if copied:
+            shutil.copy2(source_path, target_absolute_path)
+
+        return {
+            "relative_path": target_relative_path,
+            "absolute_path": target_absolute_path,
+            "copied": copied,
+        }
+
     def _versions_file_path(self):
         return external_path(LAYOUT_VERSION_FILE)
 
@@ -2315,11 +2382,14 @@ class LayoutManagerModel:
         normalized_path = str(template_path or "").strip()
         if not normalized_path:
             return ""
+        resolved_path = self.resolve_template_path(normalized_path)
+        if not resolved_path:
+            return f"{normalized_path}|missing"
         try:
-            stat_info = os.stat(normalized_path)
+            stat_info = os.stat(resolved_path)
         except OSError:
             return f"{normalized_path}|missing"
-        return f"{normalized_path}|{int(stat_info.st_mtime)}|{int(stat_info.st_size)}"
+        return f"{normalized_path}|{resolved_path}|{int(stat_info.st_mtime)}|{int(stat_info.st_size)}"
 
     def _build_template_workbook_stats(self, template_path):
         normalized_path = str(template_path or "").strip()
@@ -2334,6 +2404,7 @@ class LayoutManagerModel:
             }
 
         cache_key = self._build_template_file_signature(normalized_path)
+        resolved_path = self.resolve_template_path(normalized_path)
         cached_stats = self._template_workbook_stats_cache.get(cache_key)
         if isinstance(cached_stats, dict):
             return deepcopy(cached_stats)
@@ -2367,7 +2438,7 @@ class LayoutManagerModel:
         non_empty_rows = 0
         workbook = None
         try:
-            workbook = load_workbook(normalized_path, read_only=True, data_only=True)
+            workbook = load_workbook(resolved_path, read_only=True, data_only=True)
             worksheets = list(workbook.worksheets)
             for worksheet in worksheets:
                 sheet_names.append(str(worksheet.title))
@@ -2498,7 +2569,7 @@ class LayoutManagerModel:
 
         return metadata
 
-    def _normalize_editor_payload(self, payload):
+    def _normalize_editor_payload(self, payload, base_config=None):
         if not isinstance(payload, dict):
             raise ValueError("JSON editor content must be a full layout JSON object.")
 
@@ -2533,12 +2604,37 @@ class LayoutManagerModel:
         required_keys = tuple(dict.fromkeys((*self.EDITOR_REQUIRED_TOP_LEVEL_KEYS, *sorted(dynamic_required_keys))))
         missing_keys = [key for key in required_keys if key not in payload]
         if missing_keys:
-            raise ValueError(
-                "JSON editor expects the full layout object with top-level keys: "
-                f"{', '.join(required_keys)}"
-                f". Optional: {', '.join(self.EDITOR_OPTIONAL_TOP_LEVEL_KEYS)}"
-                f". Missing: {', '.join(missing_keys)}"
+            fallback_config = base_config if isinstance(base_config, dict) else self._get_default_config_template()
+            fallback_payload = self.normalize_config(deepcopy(fallback_config))
+            merged_payload = deepcopy(fallback_payload)
+            merged_payload.update(payload)
+
+            merged_bindings = self._iter_repeating_section_bindings(merged_payload)
+            merged_dynamic_required_keys = {binding["fields_key"] for binding in merged_bindings}
+            merged_dynamic_required_keys.update(binding["mapping_key"] for binding in merged_bindings)
+            merged_required_keys = tuple(
+                dict.fromkeys((*self.EDITOR_REQUIRED_TOP_LEVEL_KEYS, *sorted(merged_dynamic_required_keys)))
             )
+            still_missing = [key for key in merged_required_keys if key not in merged_payload]
+            if still_missing:
+                raise ValueError(
+                    "JSON editor expects the full layout object with top-level keys: "
+                    f"{', '.join(merged_required_keys)}"
+                    f". Optional: {', '.join(self.EDITOR_OPTIONAL_TOP_LEVEL_KEYS)}"
+                    f". Missing: {', '.join(still_missing)}"
+                )
+
+            warning_message = (
+                "Saved using auto-repaired JSON. Missing top-level keys were restored from the active form/default: "
+                f"{', '.join(missing_keys)}"
+            )
+            applied_sections = [key for key in self.EDITOR_TOP_LEVEL_KEYS if key in payload]
+            return merged_payload, {
+                "mode": "full",
+                "applied_sections": applied_sections,
+                "auto_filled_missing_keys": list(missing_keys),
+                "warning_message": warning_message,
+            }
 
         applied_sections = [key for key in self.EDITOR_TOP_LEVEL_KEYS if key in payload]
         return payload, {"mode": "full", "applied_sections": applied_sections}

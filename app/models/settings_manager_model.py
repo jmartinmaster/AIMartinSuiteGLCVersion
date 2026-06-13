@@ -14,6 +14,8 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 from copy import deepcopy
+import os
+import time
 
 from app.app_identity import DEFAULT_UPDATE_REPOSITORY_URL
 from app.downtime_codes import DEFAULT_DT_CODE_MAP
@@ -26,6 +28,62 @@ from app.settings_diagnostics import (
     write_settings_diagnostics_report,
 )
 from app.theme_manager import DEFAULT_THEME, normalize_theme
+from app.utils import external_data_path
+
+
+__module_name__ = "Settings Manager"
+__version__ = "1.0.0"
+
+PATH_OVERRIDE_DEFINITIONS = (
+    {
+        "key": "exports_root",
+        "label": "Exports Root",
+        "default_relative": "data/exports",
+        "required_right": "developer:update_configuration",
+        "description": "Base folder used for exported Excel workbooks.",
+        "high_impact": False,
+    },
+    {
+        "key": "forms_root",
+        "label": "Forms Root",
+        "default_relative": "data/forms",
+        "required_right": "developer:update_configuration",
+        "description": "Root for runtime form assets.",
+        "high_impact": False,
+    },
+    {
+        "key": "pending_root",
+        "label": "Pending Drafts Root",
+        "default_relative": "data/pending",
+        "required_right": "developer:update_configuration",
+        "description": "Storage root for pending drafts and history.",
+        "high_impact": False,
+    },
+    {
+        "key": "backups_root",
+        "label": "Backups Root",
+        "default_relative": "data/backups",
+        "required_right": "developer:update_configuration",
+        "description": "Root for runtime backup artifacts.",
+        "high_impact": False,
+    },
+    {
+        "key": "modules_root",
+        "label": "External Modules Root",
+        "default_relative": "data/modules",
+        "required_right": "developer:external_module_overrides",
+        "description": "External override location for managed Python modules.",
+        "high_impact": True,
+    },
+    {
+        "key": "security_root",
+        "label": "Security Root",
+        "default_relative": "data/security",
+        "required_right": "developer:external_module_overrides",
+        "description": "Storage root for vault files and persisted security settings.",
+        "high_impact": True,
+    },
+)
 
 
 class SettingsManagerModel:
@@ -70,7 +128,97 @@ class SettingsManagerModel:
     def build_default_settings(self):
         defaults = build_default_settings_payload()
         defaults["update_repository_url"] = DEFAULT_UPDATE_REPOSITORY_URL
+        defaults.setdefault("path_overrides", {})
+        defaults.setdefault("backup_policy", {})
         return defaults
+
+    def normalize_backup_policy(self, raw_policy):
+        policy = {
+            "enabled": True,
+            "interval_min": 30,
+            "keep_count": 12,
+            "draft_auto_save_interval_min": 5,
+            "draft_history_keep_count": 20,
+            "target_overrides": {},
+        }
+        if isinstance(raw_policy, dict):
+            policy.update(raw_policy)
+
+        try:
+            policy["enabled"] = bool(policy.get("enabled", True))
+        except Exception:
+            policy["enabled"] = True
+
+        try:
+            policy["interval_min"] = max(1, int(policy.get("interval_min", 30)))
+        except Exception:
+            policy["interval_min"] = 30
+
+        try:
+            policy["keep_count"] = max(1, int(policy.get("keep_count", 12)))
+        except Exception:
+            policy["keep_count"] = 12
+
+        try:
+            policy["draft_auto_save_interval_min"] = max(1, int(policy.get("draft_auto_save_interval_min", 5)))
+        except Exception:
+            policy["draft_auto_save_interval_min"] = 5
+
+        try:
+            policy["draft_history_keep_count"] = max(1, int(policy.get("draft_history_keep_count", 20)))
+        except Exception:
+            policy["draft_history_keep_count"] = 20
+
+        normalized_targets = {}
+        raw_targets = policy.get("target_overrides")
+        if isinstance(raw_targets, dict):
+            for target_key, raw_target_policy in raw_targets.items():
+                normalized_key = str(target_key or "").strip()
+                if not normalized_key:
+                    continue
+                target_policy = {
+                    "enabled": True,
+                    "interval_min": policy["interval_min"],
+                    "keep_count": policy["keep_count"],
+                }
+                if isinstance(raw_target_policy, dict):
+                    target_policy.update(raw_target_policy)
+                try:
+                    target_policy["enabled"] = bool(target_policy.get("enabled", True))
+                except Exception:
+                    target_policy["enabled"] = True
+                try:
+                    target_policy["interval_min"] = max(1, int(target_policy.get("interval_min", policy["interval_min"])))
+                except Exception:
+                    target_policy["interval_min"] = policy["interval_min"]
+                try:
+                    target_policy["keep_count"] = max(1, int(target_policy.get("keep_count", policy["keep_count"])))
+                except Exception:
+                    target_policy["keep_count"] = policy["keep_count"]
+                normalized_targets[normalized_key] = target_policy
+        policy["target_overrides"] = normalized_targets
+        return policy
+
+    def _normalize_runtime_root_override(self, raw_value, default_relative):
+        normalized_default = str(default_relative or "").strip().replace("\\", "/").lstrip("/")
+        if raw_value is None:
+            return ""
+        normalized_value = str(raw_value or "").strip()
+        if not normalized_value:
+            return ""
+        normalized_comp = normalized_value.replace("\\", "/").rstrip("/")
+        if normalized_comp.lower() == normalized_default.lower():
+            return ""
+        return normalized_value
+
+    def _resolve_runtime_root_path(self, override_value, default_relative):
+        if str(override_value or "").strip():
+            normalized_override = str(override_value).strip()
+            return normalized_override if os.path.isabs(normalized_override) else os.path.abspath(normalized_override)
+        return external_data_path(default_relative)
+
+    def _default_export_directory_setting(self):
+        return "data/exports"
 
     def load_settings(self):
         loaded = self.data_registry.load_json("settings", default_factory=self.build_default_settings)
@@ -119,6 +267,11 @@ class SettingsManagerModel:
         if isinstance(payload, dict):
             settings.update(payload)
 
+        settings["path_overrides"] = self.normalize_path_overrides(
+            settings.get("path_overrides", {}),
+            export_directory=settings.get("export_directory", self._default_export_directory_setting()),
+        )
+
         raw_module_whitelist = settings.get("module_whitelist", [])
         settings["module_whitelist"] = self.normalize_module_names(
             raw_module_whitelist,
@@ -148,6 +301,7 @@ class SettingsManagerModel:
         if normalized_shell_backend not in {"tk", "pyqt6"}:
             normalized_shell_backend = "pyqt6"
         settings["ui_shell_backend"] = normalized_shell_backend
+        settings["backup_policy"] = self.normalize_backup_policy(settings.get("backup_policy"))
         settings["enable_advanced_dev_updates"] = bool(settings.get("enable_advanced_dev_updates", False))
         settings["enable_screen_transitions"] = bool(settings.get("enable_screen_transitions", True))
         settings["enable_module_update_notifications"] = bool(settings.get("enable_module_update_notifications", True))
@@ -179,9 +333,81 @@ class SettingsManagerModel:
             settings["default_goal_mph"] = 240.0
 
         settings["update_repository_url"] = str(settings.get("update_repository_url", DEFAULT_UPDATE_REPOSITORY_URL) or "").strip()
-        settings["export_directory"] = str(settings.get("export_directory", "exports") or "exports").strip() or "exports"
+        default_export_directory = self._default_export_directory_setting()
+        export_override = settings.get("path_overrides", {}).get("exports_root")
+        settings["export_directory"] = str(export_override or default_export_directory).strip() or default_export_directory
         settings["default_export_prefix"] = str(settings.get("default_export_prefix", "Disamatic Production Sheet") or "").strip() or "Disamatic Production Sheet"
         return settings
+
+    def get_path_override_definitions(self):
+        return [dict(definition) for definition in PATH_OVERRIDE_DEFINITIONS]
+
+    def normalize_path_overrides(self, raw_overrides=None, export_directory=None):
+        raw_lookup = raw_overrides if isinstance(raw_overrides, dict) else {}
+        normalized = {}
+        for definition in PATH_OVERRIDE_DEFINITIONS:
+            override_key = definition["key"]
+            raw_value = raw_lookup.get(override_key)
+            if raw_value in (None, "") and override_key == "exports_root":
+                raw_value = export_directory
+            normalized_value = self._normalize_runtime_root_override(raw_value, definition["default_relative"])
+            if normalized_value:
+                normalized[override_key] = normalized_value
+        return normalized
+
+    def _probe_directory_write_access(self, directory_path):
+        os.makedirs(directory_path, exist_ok=True)
+        probe_name = f".path-write-probe-{os.getpid()}-{time.time_ns()}.tmp"
+        probe_path = os.path.join(directory_path, probe_name)
+        with open(probe_path, "w", encoding="utf-8") as handle:
+            handle.write("ok")
+        os.remove(probe_path)
+
+    def validate_path_override_values(self, raw_overrides):
+        normalized = self.normalize_path_overrides(raw_overrides)
+        validated = {}
+        for definition in PATH_OVERRIDE_DEFINITIONS:
+            override_key = definition["key"]
+            if override_key not in normalized:
+                continue
+            effective_path = self._resolve_runtime_root_path(normalized[override_key], definition["default_relative"])
+            if os.path.exists(effective_path) and not os.path.isdir(effective_path):
+                raise ValueError(f"{definition['label']} must point to a directory, not a file.")
+            try:
+                self._probe_directory_write_access(effective_path)
+            except OSError as exc:
+                raise ValueError(f"{definition['label']} is not writable: {exc}") from exc
+            validated[override_key] = normalized[override_key]
+        return validated
+
+    def apply_path_overrides(self, raw_overrides):
+        self.settings["path_overrides"] = self.validate_path_override_values(raw_overrides)
+        self.settings["export_directory"] = str(
+            self.settings["path_overrides"].get("exports_root") or self._default_export_directory_setting()
+        )
+        return self.settings
+
+    def get_runtime_path_state(self):
+        overrides = dict(self.settings.get("path_overrides", {}))
+        path_entries = []
+        for definition in PATH_OVERRIDE_DEFINITIONS:
+            override_key = definition["key"]
+            override_value = overrides.get(override_key, "")
+            effective_path = self._resolve_runtime_root_path(override_value, definition["default_relative"])
+            default_path = self._resolve_runtime_root_path(None, definition["default_relative"])
+            path_entries.append(
+                {
+                    **definition,
+                    "override_value": override_value,
+                    "effective_path": effective_path,
+                    "default_path": default_path,
+                    "is_overridden": bool(override_value),
+                }
+            )
+        return {
+            "settings_path": self.settings_path,
+            "entries": path_entries,
+        }
 
     def get_settings_copy(self):
         return deepcopy(self.settings)

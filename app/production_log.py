@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 __module_name__ = "Form Loader"
-__version__ = "1.3.0"
+__version__ = "1.3.1"
 
 
 def get_ui(parent, dispatcher):

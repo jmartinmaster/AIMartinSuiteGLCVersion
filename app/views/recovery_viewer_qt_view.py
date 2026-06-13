@@ -14,13 +14,18 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 __module_name__ = "Recovery Viewer Qt View"
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
+    QAbstractItemView,
     QApplication,
+    QCheckBox,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
+    QGroupBox,
+    QFormLayout,
     QMainWindow,
     QMessageBox,
     QPushButton,
@@ -28,6 +33,7 @@ from PyQt6.QtWidgets import (
     QTabWidget,
     QTableWidget,
     QTableWidgetItem,
+    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
@@ -52,6 +58,12 @@ class RecoveryViewerQtView(QMainWindow):
         self._tab_base_labels = {record_type: label for record_type, label in self._tab_definitions}
         self._tables_by_record_type = {}
         self._tab_row_to_global_index = {}
+        self._backup_policy_table = None
+        self._backup_policy_enabled_checkbox = None
+        self._backup_policy_interval_spin = None
+        self._backup_policy_keep_spin = None
+        self._backup_policy_draft_auto_spin = None
+        self._backup_policy_history_keep_spin = None
         self._build_ui()
         self._attach_to_parent_container(parent_widget)
 
@@ -104,6 +116,18 @@ class RecoveryViewerQtView(QMainWindow):
         resume_button.clicked.connect(self.controller.resume_selected)
         controls_layout.addWidget(resume_button)
 
+        clean_drafts_button = QPushButton("Clean Drafts")
+        clean_drafts_button.clicked.connect(self.controller.clean_drafts)
+        controls_layout.addWidget(clean_drafts_button)
+
+        clean_snapshots_button = QPushButton("Clean Snapshots")
+        clean_snapshots_button.clicked.connect(self.controller.clean_snapshots)
+        controls_layout.addWidget(clean_snapshots_button)
+
+        clean_config_backups_button = QPushButton("Clean Config Backups")
+        clean_config_backups_button.clicked.connect(self.controller.clean_backups)
+        controls_layout.addWidget(clean_config_backups_button)
+
         open_file_button = QPushButton("Open Selected File")
         open_file_button.clicked.connect(self.controller.open_selected_file)
         controls_layout.addWidget(open_file_button)
@@ -121,6 +145,7 @@ class RecoveryViewerQtView(QMainWindow):
             self._tables_by_record_type[record_type] = table
             self._tab_row_to_global_index[record_type] = []
             self.tabs.addTab(table, tab_label)
+        self.tabs.addTab(self._build_backup_policy_tab(), "Backup Policy")
         root_layout.addWidget(self.tabs, 1)
 
         self.setCentralWidget(central_widget)
@@ -138,6 +163,173 @@ class RecoveryViewerQtView(QMainWindow):
         table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         return table
+
+    def _build_backup_policy_tab(self):
+        tab = QWidget(self)
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(12)
+
+        description = QLabel(
+            "Control how long the shared backup system waits between copies, how many versions it keeps, and which targets remain protected."
+        )
+        description.setWordWrap(True)
+        layout.addWidget(description)
+
+        controls_group = QGroupBox("Global Backup Policy")
+        controls_form = QFormLayout(controls_group)
+
+        self._backup_policy_enabled_checkbox = QCheckBox("Enable shared backups")
+        controls_form.addRow(QLabel("Enabled"), self._backup_policy_enabled_checkbox)
+
+        self._backup_policy_interval_spin = QSpinBox()
+        self._backup_policy_interval_spin.setRange(1, 240)
+        self._backup_policy_interval_spin.setSuffix(" min")
+        controls_form.addRow(QLabel("Config Backup Interval"), self._backup_policy_interval_spin)
+
+        self._backup_policy_keep_spin = QSpinBox()
+        self._backup_policy_keep_spin.setRange(1, 250)
+        controls_form.addRow(QLabel("Config Backup Retention"), self._backup_policy_keep_spin)
+
+        self._backup_policy_draft_auto_spin = QSpinBox()
+        self._backup_policy_draft_auto_spin.setRange(1, 240)
+        self._backup_policy_draft_auto_spin.setSuffix(" min")
+        controls_form.addRow(QLabel("Draft Auto-Save Interval"), self._backup_policy_draft_auto_spin)
+
+        self._backup_policy_history_keep_spin = QSpinBox()
+        self._backup_policy_history_keep_spin.setRange(1, 250)
+        controls_form.addRow(QLabel("Draft History Retention"), self._backup_policy_history_keep_spin)
+
+        layout.addWidget(controls_group)
+
+        targets_group = QGroupBox("Backup Targets")
+        targets_layout = QVBoxLayout(targets_group)
+        targets_hint = QLabel(
+            "Each row mirrors a backup target that currently writes to disk. Disable a row to stop that target from producing versioned backups."
+        )
+        targets_hint.setWordWrap(True)
+        targets_layout.addWidget(targets_hint)
+
+        self._backup_policy_table = QTableWidget(0, 6)
+        self._backup_policy_table.setHorizontalHeaderLabels(["Enabled", "Target", "Interval", "Keep", "Path", "Description"])
+        self._backup_policy_table.verticalHeader().setVisible(False)
+        self._backup_policy_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self._backup_policy_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self._backup_policy_table.setEditTriggers(QAbstractItemView.EditTrigger.AllEditTriggers)
+        self._backup_policy_table.horizontalHeader().setStretchLastSection(True)
+        self._backup_policy_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        self._backup_policy_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self._backup_policy_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        self._backup_policy_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        self._backup_policy_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
+        self._backup_policy_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)
+        targets_layout.addWidget(self._backup_policy_table)
+
+        target_actions = QHBoxLayout()
+        reload_policy_button = QPushButton("Reload Policy")
+        reload_policy_button.clicked.connect(self.controller.refresh_backup_policy)
+        target_actions.addWidget(reload_policy_button)
+
+        reset_policy_button = QPushButton("Reset Defaults")
+        reset_policy_button.clicked.connect(self.controller.reset_backup_policy_defaults)
+        target_actions.addWidget(reset_policy_button)
+
+        clean_backups_button = QPushButton("Clean Config Backups")
+        clean_backups_button.clicked.connect(self.controller.clean_backups)
+        target_actions.addWidget(clean_backups_button)
+
+        save_policy_button = QPushButton("Save Policy")
+        save_policy_button.clicked.connect(self.controller.save_backup_policy)
+        target_actions.addWidget(save_policy_button)
+
+        target_actions.addStretch(1)
+        targets_layout.addLayout(target_actions)
+        layout.addWidget(targets_group, 1)
+        return tab
+
+    def set_backup_policy(self, policy, target_definitions):
+        policy = dict(policy or {})
+        target_definitions = list(target_definitions or [])
+        if self._backup_policy_enabled_checkbox is not None:
+            self._backup_policy_enabled_checkbox.setChecked(bool(policy.get("enabled", True)))
+        if self._backup_policy_interval_spin is not None:
+            self._backup_policy_interval_spin.setValue(int(policy.get("interval_min", 30) or 30))
+        if self._backup_policy_keep_spin is not None:
+            self._backup_policy_keep_spin.setValue(int(policy.get("keep_count", 12) or 12))
+        if self._backup_policy_draft_auto_spin is not None:
+            self._backup_policy_draft_auto_spin.setValue(int(policy.get("draft_auto_save_interval_min", 5) or 5))
+        if self._backup_policy_history_keep_spin is not None:
+            self._backup_policy_history_keep_spin.setValue(int(policy.get("draft_history_keep_count", 20) or 20))
+
+        target_overrides = policy.get("target_overrides") if isinstance(policy.get("target_overrides"), dict) else {}
+        table = self._backup_policy_table
+        if table is None:
+            return
+
+        table.setRowCount(len(target_definitions))
+        for row_index, definition in enumerate(target_definitions):
+            override = target_overrides.get(definition.get("key"), {}) if isinstance(target_overrides, dict) else {}
+            effective_enabled = bool(override.get("enabled", True))
+            effective_interval = int(override.get("interval_min", policy.get("interval_min", 30)) or 30)
+            effective_keep = int(override.get("keep_count", policy.get("keep_count", 12)) or 12)
+
+            enabled_item = QTableWidgetItem()
+            enabled_item.setFlags(enabled_item.flags() | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled)
+            enabled_item.setCheckState(Qt.CheckState.Checked if effective_enabled else Qt.CheckState.Unchecked)
+            enabled_item.setData(Qt.ItemDataRole.UserRole, str(definition.get("key") or ""))
+            table.setItem(row_index, 0, enabled_item)
+
+            table.setItem(row_index, 1, QTableWidgetItem(str(definition.get("label") or definition.get("key") or "")))
+
+            interval_item = QTableWidgetItem(str(effective_interval))
+            table.setItem(row_index, 2, interval_item)
+
+            keep_item = QTableWidgetItem(str(effective_keep))
+            table.setItem(row_index, 3, keep_item)
+
+            table.setItem(row_index, 4, QTableWidgetItem(str(definition.get("target_path") or "")))
+            table.setItem(row_index, 5, QTableWidgetItem(str(definition.get("description") or "")))
+
+        self._backup_policy_table.resizeRowsToContents()
+
+    def get_backup_policy_values(self):
+        policy = {
+            "enabled": self._backup_policy_enabled_checkbox.isChecked() if self._backup_policy_enabled_checkbox is not None else True,
+            "interval_min": self._backup_policy_interval_spin.value() if self._backup_policy_interval_spin is not None else 30,
+            "keep_count": self._backup_policy_keep_spin.value() if self._backup_policy_keep_spin is not None else 12,
+            "draft_auto_save_interval_min": self._backup_policy_draft_auto_spin.value() if self._backup_policy_draft_auto_spin is not None else 5,
+            "draft_history_keep_count": self._backup_policy_history_keep_spin.value() if self._backup_policy_history_keep_spin is not None else 20,
+            "target_overrides": {},
+        }
+
+        table = self._backup_policy_table
+        if table is None:
+            return policy
+
+        for row_index in range(table.rowCount()):
+            target_item = table.item(row_index, 0)
+            if target_item is None:
+                continue
+            target_key = str(target_item.data(Qt.ItemDataRole.UserRole) or "").strip()
+            enabled_item = table.item(row_index, 0)
+            interval_item = table.item(row_index, 2)
+            keep_item = table.item(row_index, 3)
+            interval_value = policy["interval_min"]
+            keep_value = policy["keep_count"]
+            try:
+                interval_value = max(1, int(str(interval_item.text()).strip())) if interval_item is not None else policy["interval_min"]
+            except Exception:
+                interval_value = policy["interval_min"]
+            try:
+                keep_value = max(1, int(str(keep_item.text()).strip())) if keep_item is not None else policy["keep_count"]
+            except Exception:
+                keep_value = policy["keep_count"]
+            policy["target_overrides"][target_key] = {
+                "enabled": bool(enabled_item.checkState() == Qt.CheckState.Checked) if enabled_item is not None else True,
+                "interval_min": interval_value,
+                "keep_count": keep_value,
+            }
+        return policy
 
     def _available_screen_geometry(self):
         window_handle = self.windowHandle()

@@ -22,7 +22,7 @@ from app.persistence import write_json_with_backup
 from app.utils import external_path, resource_path
 
 __module_name__ = "External Data Registry"
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 
 DATA_CONFIG_ROOT = os.path.join("data", "config")
 

@@ -16,7 +16,7 @@
 from app.models.production_log_calculations_model import EDITOR_SECTIONS
 
 __module_name__ = "Form Calculations Qt View"
-__version__ = "1.1.2"
+__version__ = "1.1.3"
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (

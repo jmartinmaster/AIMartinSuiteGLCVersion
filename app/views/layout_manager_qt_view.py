@@ -23,10 +23,10 @@ from pathlib import Path
 from launcher import create_qt_application
 from app.production_log_roles import HEADER_FIELD_ROLE_DEFAULTS, ROW_FIELD_ROLE_DEFAULTS
 from app.theme_manager import get_qt_palette, get_qt_stylesheet
-from PyQt6.QtGui import QFont, QFontDatabase, QKeySequence, QShortcut
+from PyQt6.QtGui import QDesktopServices, QFont, QFontDatabase, QKeySequence, QShortcut
 
 __module_name__ = "Layout Manager Qt View"
-__version__ = "0.6.10"
+__version__ = "0.6.12"
 LAYOUT_MANAGER_QT_SESSION_ENV = "AIMARTIN_LAYOUT_MANAGER_QT_SESSION"
 REPO_ROOT = Path(__file__).resolve().parents[2]
 HEADER_ROLE_OPTIONS = [""] + sorted(set(HEADER_FIELD_ROLE_DEFAULTS.values()))
@@ -40,11 +40,12 @@ STATE_OPTIONS = ["", "normal", "disabled", "readonly"]
 OPTIONS_SOURCE_OPTIONS = ["", "downtime_codes"]
 BOOTSTYLE_OPTIONS = ["", "primary", "secondary", "success", "info", "warning", "danger", "light", "dark"]
 
-from PyQt6.QtCore import QEvent, QSignalBlocker, Qt, QTimer
+from PyQt6.QtCore import QEvent, QSignalBlocker, Qt, QTimer, QUrl
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QApplication,
     QComboBox,
+    QFileDialog,
     QFormLayout,
     QGridLayout,
     QGroupBox,
@@ -519,6 +520,15 @@ class LayoutManagerQtView(QMainWindow):
         template_apply_button = QPushButton("Apply")
         template_apply_button.clicked.connect(self.controller.apply_template_path_from_import_export)
         template_layout.addWidget(template_apply_button)
+        template_browse_button = QPushButton("Browse")
+        template_browse_button.clicked.connect(self.controller.browse_template_from_import_export)
+        template_layout.addWidget(template_browse_button)
+        template_open_button = QPushButton("Open")
+        template_open_button.clicked.connect(self.controller.open_template_from_import_export)
+        template_layout.addWidget(template_open_button)
+        template_store_button = QPushButton("Store With Form")
+        template_store_button.clicked.connect(self.controller.store_template_with_active_form_from_import_export)
+        template_layout.addWidget(template_store_button)
 
         template_tab = QWidget()
         template_tab_layout = QVBoxLayout(template_tab)
@@ -2154,6 +2164,38 @@ class LayoutManagerQtView(QMainWindow):
 
     def template_path_value(self):
         return str(self.template_path_input.text()).strip()
+
+    def set_template_path_value(self, template_path):
+        self.template_path_input.setText(str(template_path or "").strip())
+
+    def choose_template_file(self, initial_path=""):
+        initial_value = str(initial_path or "").strip()
+        initial_directory = ""
+        if initial_value:
+            if os.path.isfile(initial_value):
+                initial_directory = os.path.dirname(initial_value)
+            elif os.path.isdir(initial_value):
+                initial_directory = initial_value
+            else:
+                expanded_candidate = os.path.abspath(initial_value)
+                if os.path.isfile(expanded_candidate):
+                    initial_directory = os.path.dirname(expanded_candidate)
+                elif os.path.isdir(expanded_candidate):
+                    initial_directory = expanded_candidate
+
+        selected_file, _selected_filter = QFileDialog.getOpenFileName(
+            self,
+            "Select Export Template",
+            initial_directory,
+            "Excel templates (*.xlsx *.xlsm *.xltx *.xltm);;All files (*.*)",
+        )
+        return str(selected_file or "").strip()
+
+    def open_local_file(self, file_path):
+        normalized_path = os.path.abspath(str(file_path or "").strip())
+        if not normalized_path or not os.path.exists(normalized_path):
+            return False
+        return bool(QDesktopServices.openUrl(QUrl.fromLocalFile(normalized_path)))
 
     def version_label_value(self):
         return str(self.snapshot_label_input.text() or "").strip()

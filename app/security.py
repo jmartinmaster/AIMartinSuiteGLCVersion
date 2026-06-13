@@ -44,6 +44,7 @@ ttk = None
 from app.app_logging import log_exception
 from app.models.security_model import (
     ACCESS_RIGHTS_BY_KEY,
+    MODULE_ACCESS_RIGHTS,
     PBKDF2_ITERATIONS,
     ROLE_DEFAULT_RIGHTS,
     ROLE_LIMITS,
@@ -53,17 +54,22 @@ from app.models.security_model import (
     normalize_role,
     role_requires_password,
 )
-from app.native_security_verifier import native_security_verifier
-from app.utils import ensure_external_directory, external_path
+from app.utils import ensure_external_data_directory, external_data_path
 
 __module_name__ = "Security Blanket"
-__version__ = "2.1.0"
+__version__ = "2.2.3"
+
+PASSWORD_SPECIAL_CHARACTERS = "!@#$%^&*()."
+MIN_PASSWORD_LENGTH = 8
+MIN_PASSWORD_UPPERCASE = 2
+DEFAULT_NON_SECURE_GENERAL_VAULT_NAME = "general_default"
+DEFAULT_NON_SECURE_GENERAL_VAULT_PASSWORD = "GeneralAA!0001"
 
 
 class Gatekeeper:
     _instance = None
     _legacy_vault_path = os.path.join(os.getcwd(), ".vault")
-    _security_settings_path = external_path(os.path.join("data", "security", "security_settings.json"))
+    _security_settings_path = external_data_path(os.path.join("security", "security_settings.json"))
 
     def __new__(cls, *args, **kwargs):
         if not cls._instance:
@@ -75,10 +81,10 @@ class Gatekeeper:
         return cls._instance
 
     def _vault_directory(self):
-        return ensure_external_directory(os.path.join("data", "security", "vaults"))
+        return ensure_external_data_directory(os.path.join("security", "vaults"))
 
     def _vault_backup_directory(self):
-        return ensure_external_directory(os.path.join("data", "security", "backups", "vaults"))
+        return ensure_external_data_directory(os.path.join("security", "backups", "vaults"))
 
     def _create_temp_root(self):
         raise RuntimeError("Tk security dialogs were removed in Phase 9. Use the PyQt6 shell runtime.")
@@ -164,14 +170,11 @@ class Gatekeeper:
             if right_key in ACCESS_RIGHTS_BY_KEY
         ) or "No rights assigned"
         password_text = "Password required" if vault_record.password_required else "No password required"
-        device_text = " | Native device verification required" if getattr(vault_record, "requires_yubikey", False) else ""
-        return effective_rights, f"Role: {vault_record.role.title()} | {password_text}{device_text}\nRights: {rights_text}"
+        return effective_rights, f"Role: {vault_record.role.title()} | {password_text}\nRights: {rights_text}"
 
     def _verify_native_device_requirement(self, vault_record):
-        if not getattr(vault_record, "requires_yubikey", False):
-            return True, ""
-        prompt_text = f"Verify the {vault_record.role.title()} vault '{vault_record.display_name or vault_record.vault_name}' to continue."
-        return native_security_verifier.verify_access(prompt_text)
+        _ = vault_record
+        return True, ""
 
     def _sanitize_vault_name(self, raw_value):
         text = str(raw_value or "").strip()
@@ -196,10 +199,15 @@ class Gatekeeper:
         raise RuntimeError("PyQt6 dialogs are unavailable and the Tk security fallback was removed in Phase 9.")
 
     def _ensure_security_settings_directory(self):
-        ensure_external_directory(os.path.join("data", "security"))
+        ensure_external_data_directory("security")
 
     def _load_security_settings(self):
-        settings = {"non_secure_mode": False, "external_module_override_trust": False}
+        settings = {
+            "non_secure_mode": False,
+            "external_module_override_trust": False,
+            "non_secure_bypass_modules": [],
+            "role_default_rights": {},
+        }
         if not os.path.exists(self._security_settings_path):
             return settings
         try:
@@ -208,20 +216,94 @@ class Gatekeeper:
             if isinstance(payload, dict):
                 settings["non_secure_mode"] = bool(payload.get("non_secure_mode", False))
                 settings["external_module_override_trust"] = bool(payload.get("external_module_override_trust", False))
+                raw_bypass_modules = payload.get("non_secure_bypass_modules")
+                if isinstance(raw_bypass_modules, list):
+                    normalized_bypass = []
+                    for raw_module_name in raw_bypass_modules:
+                        module_name = str(raw_module_name or "").strip()
+                        if module_name in MODULE_ACCESS_RIGHTS and module_name not in normalized_bypass:
+                            normalized_bypass.append(module_name)
+                    settings["non_secure_bypass_modules"] = normalized_bypass
+                raw_role_defaults = payload.get("role_default_rights")
+                if isinstance(raw_role_defaults, dict):
+                    normalized_defaults = {}
+                    for raw_role, raw_rights in raw_role_defaults.items():
+                        role_name = normalize_role(raw_role)
+                        normalized_defaults[role_name] = normalize_rights(raw_rights, role=role_name)
+                    settings["role_default_rights"] = normalized_defaults
         except Exception as exc:
             log_exception("gatekeeper._load_security_settings", exc)
         return settings
 
     def _save_security_settings(self, settings):
         self._ensure_security_settings_directory()
+        raw_bypass_modules = settings.get("non_secure_bypass_modules", [])
+        normalized_bypass_modules = []
+        if isinstance(raw_bypass_modules, list):
+            for raw_module_name in raw_bypass_modules:
+                module_name = str(raw_module_name or "").strip()
+                if module_name in MODULE_ACCESS_RIGHTS and module_name not in normalized_bypass_modules:
+                    normalized_bypass_modules.append(module_name)
+
+        raw_role_defaults = settings.get("role_default_rights", {})
+        normalized_role_defaults = {}
+        if isinstance(raw_role_defaults, dict):
+            for raw_role, raw_rights in raw_role_defaults.items():
+                role_name = normalize_role(raw_role)
+                normalized_role_defaults[role_name] = normalize_rights(raw_rights, role=role_name)
+
         payload = {
             "non_secure_mode": bool(settings.get("non_secure_mode", False)),
             "external_module_override_trust": bool(settings.get("external_module_override_trust", False)),
+            "non_secure_bypass_modules": normalized_bypass_modules,
+            "role_default_rights": normalized_role_defaults,
         }
         temp_path = f"{self._security_settings_path}.tmp"
         with open(temp_path, "w", encoding="utf-8") as handle:
             json.dump(payload, handle, indent=4)
         os.replace(temp_path, self._security_settings_path)
+
+    def _validate_password_strength(self, password):
+        password_text = str(password or "")
+        if len(password_text) < MIN_PASSWORD_LENGTH:
+            raise ValueError(
+                f"Password must be at least {MIN_PASSWORD_LENGTH} characters long and include at least {MIN_PASSWORD_UPPERCASE} uppercase letters plus one special character ({PASSWORD_SPECIAL_CHARACTERS})."
+            )
+        uppercase_count = sum(1 for character in password_text if character.isupper())
+        if uppercase_count < MIN_PASSWORD_UPPERCASE:
+            raise ValueError(
+                f"Password must include at least {MIN_PASSWORD_UPPERCASE} uppercase letters and one special character ({PASSWORD_SPECIAL_CHARACTERS})."
+            )
+        if not any(character in PASSWORD_SPECIAL_CHARACTERS for character in password_text):
+            raise ValueError(f"Password must include at least one special character from {PASSWORD_SPECIAL_CHARACTERS}.")
+
+    def get_role_default_rights_map(self):
+        settings = self._load_security_settings()
+        persisted_defaults = settings.get("role_default_rights", {})
+        resolved_defaults = {}
+        for role_name in ROLE_LIMITS:
+            fallback_rights = ROLE_DEFAULT_RIGHTS.get(role_name, [])
+            persisted_rights = persisted_defaults.get(role_name, fallback_rights)
+            resolved_defaults[role_name] = normalize_rights(persisted_rights, role=role_name)
+        return resolved_defaults
+
+    def get_role_default_rights(self, role):
+        role_name = normalize_role(role)
+        return list(self.get_role_default_rights_map().get(role_name, []))
+
+    def set_role_default_rights(self, role, rights):
+        if self._session is None or normalize_role(getattr(self._session, "role", "")) != "developer":
+            raise ValueError("Only a developer session can change role default rights.")
+        if not self.has_right("developer:update_configuration"):
+            raise ValueError("Developer update-configuration rights are required to change role defaults.")
+        role_name = normalize_role(role)
+        settings = self._load_security_settings()
+        role_defaults = dict(settings.get("role_default_rights", {}))
+        role_defaults[role_name] = normalize_rights(rights, role=role_name)
+        settings["role_default_rights"] = role_defaults
+        self._save_security_settings(settings)
+        self._notify_session_listeners("session-changed")
+        return self.get_role_default_rights_map()
 
     def _hash_password(self, password, salt_hex=None, iterations=PBKDF2_ITERATIONS):
         salt = bytes.fromhex(salt_hex) if salt_hex else secrets.token_bytes(16)
@@ -309,7 +391,7 @@ class Gatekeeper:
         if limit and self._count_role(role_key, exclude_name=exclude_name) >= limit:
             raise ValueError(f"{role_key.title()} vaults are limited to {limit}.")
 
-    def create_or_update_vault(self, vault_name, role, rights, password=None, enabled=True, existing_name=None):
+    def create_or_update_vault(self, vault_name, role, rights, password=None, enabled=True, existing_name=None, password_required=None):
         normalized_name = self._sanitize_vault_name(vault_name)
         if not normalized_name:
             raise ValueError("Vault name is required.")
@@ -335,8 +417,13 @@ class Gatekeeper:
                 if not remaining_enabled_admins:
                     raise ValueError("At least one enabled admin vault must remain available.")
 
-        password_required = role_requires_password(role_key)
-        normalized_rights = normalize_rights(rights or ROLE_DEFAULT_RIGHTS.get(role_key, []), role=role_key)
+        if role_requires_password(role_key):
+            password_required = True
+        elif password_required is None:
+            password_required = bool(existing_record.password_required) if existing_record is not None else True
+        else:
+            password_required = bool(password_required)
+        normalized_rights = normalize_rights(rights or self.get_role_default_rights(role_key), role=role_key)
         if not normalized_rights:
             raise ValueError("At least one access right must be selected.")
 
@@ -346,7 +433,7 @@ class Gatekeeper:
             role=role_key,
             enabled=bool(enabled),
             password_required=password_required,
-            requires_yubikey=True if role_key == "developer" else bool(existing_record.requires_yubikey) if existing_record is not None else False,
+            requires_yubikey=False,
             rights=normalized_rights,
             created_at=existing_record.created_at if existing_record else self._utc_timestamp(),
             updated_at=self._utc_timestamp(),
@@ -364,6 +451,7 @@ class Gatekeeper:
             vault_record.password_salt = existing_record.password_salt
             vault_record.password_iterations = existing_record.password_iterations
         elif password:
+            self._validate_password_strength(password)
             hashed = self._hash_password(password)
             vault_record.hash_scheme = hashed["hash_scheme"]
             vault_record.password_hash = hashed["password_hash"]
@@ -383,6 +471,7 @@ class Gatekeeper:
             raise ValueError("Vault not found.")
         if not vault_record.password_required:
             raise ValueError("This vault does not use a password.")
+        self._validate_password_strength(new_password)
         hashed = self._hash_password(new_password)
         vault_record.hash_scheme = hashed["hash_scheme"]
         vault_record.password_hash = hashed["password_hash"]
@@ -449,8 +538,9 @@ class Gatekeeper:
                 log_exception("gatekeeper.session_listener", exc)
 
     def _merge_role_default_rights(self, role, rights):
+        role_defaults = self.get_role_default_rights(role)
         merged_rights = list(rights or [])
-        for right_key in ROLE_DEFAULT_RIGHTS.get(normalize_role(role), []):
+        for right_key in role_defaults:
             if right_key not in merged_rights:
                 merged_rights.append(right_key)
         return normalize_rights(merged_rights, role=role)
@@ -524,6 +614,11 @@ class Gatekeeper:
         if second != first:
             self._show_error("Security", "The passwords did not match.", parent=parent)
             return None
+        try:
+            self._validate_password_strength(first)
+        except ValueError as exc:
+            self._show_error("Security", str(exc), parent=parent)
+            return None
         return first
 
     def _migrate_legacy_vault_if_needed(self, parent=None):
@@ -553,7 +648,7 @@ class Gatekeeper:
             enabled=True,
             password_required=True,
             requires_yubikey=False,
-            rights=list(ROLE_DEFAULT_RIGHTS["admin"]),
+            rights=list(self.get_role_default_rights("admin")),
             hash_scheme="legacy_sha256",
             password_hash=legacy_hash,
             password_salt="",
@@ -589,7 +684,7 @@ class Gatekeeper:
         vault_record = self.create_or_update_vault(
             vault_name=vault_name,
             role="admin",
-            rights=ROLE_DEFAULT_RIGHTS["admin"],
+            rights=self.get_role_default_rights("admin"),
             password=password,
             enabled=True,
         )
@@ -651,14 +746,80 @@ class Gatekeeper:
         return self._authenticated and self._session_role in {"admin", "developer"}
 
     def is_non_secure_mode_enabled(self):
-        return bool(self._load_security_settings().get("non_secure_mode", False))
+        enabled = bool(self._load_security_settings().get("non_secure_mode", False))
+        if enabled:
+            self._ensure_non_secure_general_vault()
+        return enabled
+
+    def _ensure_non_secure_general_vault(self):
+        try:
+            existing_vaults = self.list_vaults()
+            if any(normalize_role(vault.role) == "general" and bool(vault.enabled) for vault in existing_vaults):
+                return
+
+            candidate_name = DEFAULT_NON_SECURE_GENERAL_VAULT_NAME
+            existing_names = {str(vault.vault_name) for vault in existing_vaults}
+            suffix = 1
+            while candidate_name in existing_names:
+                suffix += 1
+                candidate_name = f"{DEFAULT_NON_SECURE_GENERAL_VAULT_NAME}_{suffix}"
+
+            generated_password = DEFAULT_NON_SECURE_GENERAL_VAULT_PASSWORD
+            self.create_or_update_vault(
+                vault_name=candidate_name,
+                role="general",
+                rights=self.get_role_default_rights("general"),
+                password=generated_password,
+                enabled=True,
+            )
+            self._notify_non_secure_general_vault_created(candidate_name, generated_password)
+        except Exception as exc:
+            log_exception("gatekeeper.ensure_non_secure_general_vault", exc)
+
+    def _notify_non_secure_general_vault_created(self, vault_name, password):
+        message = (
+            "Non-secure mode created a default General vault.\n\n"
+            f"Vault: {vault_name}\n"
+            f"Password: {password}\n\n"
+            "Sign in with these credentials and rotate the password from Security Admin."
+        )
+        if self._use_qt_dialogs(None) and QMessageBox is not None:
+            QMessageBox.information(self._get_qt_parent(None), "Security Setup", message)
+            return
+        try:
+            print(message)
+        except Exception:
+            pass
 
     def set_non_secure_mode(self, enabled):
         settings = self._load_security_settings()
         settings["non_secure_mode"] = bool(enabled)
         self._save_security_settings(settings)
+        if settings["non_secure_mode"]:
+            self._ensure_non_secure_general_vault()
         self._notify_session_listeners("session-changed")
         return settings["non_secure_mode"]
+
+    def get_non_secure_bypass_modules(self):
+        settings = self._load_security_settings()
+        return list(settings.get("non_secure_bypass_modules", []))
+
+    def set_non_secure_bypass_modules(self, module_names):
+        settings = self._load_security_settings()
+        normalized_modules = []
+        for raw_module_name in list(module_names or []):
+            module_name = str(raw_module_name or "").strip()
+            if module_name in MODULE_ACCESS_RIGHTS and module_name not in normalized_modules:
+                normalized_modules.append(module_name)
+        settings["non_secure_bypass_modules"] = normalized_modules
+        self._save_security_settings(settings)
+        self._notify_session_listeners("session-changed")
+        return list(normalized_modules)
+
+    def is_non_secure_module_bypassed(self, module_name):
+        if not self.is_non_secure_mode_enabled():
+            return False
+        return str(module_name or "").strip() in set(self.get_non_secure_bypass_modules())
 
     def is_external_module_override_trust_enabled(self):
         return bool(self._load_security_settings().get("external_module_override_trust", False))
@@ -671,9 +832,6 @@ class Gatekeeper:
         return settings["external_module_override_trust"]
 
     def authenticate(self, required_right=None, parent=None, reason=None, force_reauth=False, allowed_roles=None):
-        if self.is_non_secure_mode_enabled() and required_right and str(required_right).startswith("module:"):
-            return True
-
         normalized_roles = {normalize_role(role) for role in (allowed_roles or set()) if str(role).strip()}
         if not force_reauth and self._session and self.has_right(required_right):
             if not normalized_roles or self._session_role in normalized_roles:
@@ -803,10 +961,6 @@ class Gatekeeper:
                     if not self._verify_password(selected_vault, entered_password):
                         status_label.setText("Incorrect password.")
                         return
-                native_verified, native_message = self._verify_native_device_requirement(selected_vault)
-                if not native_verified:
-                    status_label.setText(native_message or "Native security-device verification failed.")
-                    return
                 self._set_session_from_vault(selected_vault)
                 dialog.accept()
             except Exception as exc:

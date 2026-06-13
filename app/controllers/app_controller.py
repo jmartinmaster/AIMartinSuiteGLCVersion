@@ -33,7 +33,7 @@ from app.security_service import SecurityService
 from app.update_state import UpdateCoordinator
 
 __module_name__ = "Dispatcher Core"
-__version__ = "2.1.6"
+__version__ = "2.1.7"
 
 ISSUE_REPORT_URL = "https://github.com/jmartinmaster/AIMartinSuiteGLCVersion/issues/new/choose"
 MODULE_PRELOAD_POLL_SECONDS = 1.0
@@ -141,7 +141,7 @@ class Dispatcher:
         self.data_request_worker = None
 
         modules_path = resource_path("app")
-        external_modules_path = external_path("app")
+        external_modules_path = external_path(os.path.join("data", "modules"))
         layout_config = self.external_data_registry.resolve_read_path("layout_config")
         rate_config = self.external_data_registry.resolve_read_path("rates")
         settings_path = self.external_data_registry.resolve_read_path("settings")

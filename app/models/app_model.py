@@ -27,9 +27,10 @@ from app.settings_diagnostics import (
     write_settings_diagnostics_report,
 )
 from app.theme_manager import DEFAULT_THEME, normalize_theme
+from app.utils import external_path
 
 __module_name__ = "Application Shell"
-__version__ = "2.1.5"
+__version__ = "2.1.6"
 
 
 @dataclass
@@ -66,7 +67,44 @@ class AppModel:
     preload_data_lock: object = field(default_factory=threading.RLock)
     last_settings_diagnostics: object = None
 
+    def _get_legacy_external_modules_path(self):
+        return external_path("app")
+
+    def migrate_legacy_external_module_overrides(self):
+        legacy_root = self._get_legacy_external_modules_path()
+        normalized_legacy_root = os.path.abspath(legacy_root)
+        normalized_external_root = os.path.abspath(self.external_modules_path)
+        normalized_bundled_root = os.path.abspath(self.modules_path)
+
+        if normalized_legacy_root in {normalized_external_root, normalized_bundled_root}:
+            return []
+        if not os.path.isdir(legacy_root):
+            return []
+
+        moved_paths = []
+        for relative_root in ("", "controllers", "models", "views"):
+            source_dir = os.path.join(legacy_root, relative_root) if relative_root else legacy_root
+            if not os.path.isdir(source_dir):
+                continue
+
+            target_dir = os.path.join(self.external_modules_path, relative_root) if relative_root else self.external_modules_path
+            os.makedirs(target_dir, exist_ok=True)
+
+            for file_name in os.listdir(source_dir):
+                if not file_name.endswith(".py"):
+                    continue
+                source_path = os.path.join(source_dir, file_name)
+                if not os.path.isfile(source_path):
+                    continue
+                target_path = os.path.join(target_dir, file_name)
+                if os.path.exists(target_path):
+                    continue
+                os.replace(source_path, target_path)
+                moved_paths.append(target_path)
+        return moved_paths
+
     def ensure_external_modules_directory(self):
+        self.migrate_legacy_external_module_overrides()
         os.makedirs(self.external_modules_path, exist_ok=True)
 
     def _write_text_file(self, target_path, file_text):
@@ -86,12 +124,14 @@ class AppModel:
         ]
 
     def get_external_module_override_path(self, module_name, managed_module_names):
+        self.migrate_legacy_external_module_overrides()
         if module_name not in managed_module_names:
             return None
         candidate = os.path.join(self.external_modules_path, f"{module_name}.py")
         return candidate if os.path.exists(candidate) else None
 
     def has_external_modules_directory(self):
+        self.migrate_legacy_external_module_overrides()
         return os.path.isdir(self.external_modules_path) and os.path.abspath(self.external_modules_path) != os.path.abspath(self.modules_path)
 
     def get_external_module_override_names(self, managed_module_names):

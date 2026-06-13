@@ -18,7 +18,7 @@ Use Settings Manager to configure application defaults.
 - Manage Security opens the authenticated security-administration flow for vault and session tasks.
 - The Developer & Admin tools row appears only during an active admin session.
 - Saving settings also keeps recovery copies under `data/backups/settings`.
-- External override files can exist beside the app without loading immediately. Bundled modules stay in use until an admin enables override trust.
+- External override files can exist under `data/modules` without loading immediately. Bundled modules stay in use until an admin enables override trust.
 
 ## Security Notes
 
@@ -35,7 +35,7 @@ Use Settings Manager to configure application defaults.
 
 ## External Module Notes
 
-- External module editing writes only to the external override folder beside the app.
+- External module editing writes only to the external override folder under `data/modules`.
 - Saving an override does not modify the bundled internal module copy.
 - Saving an override does not make it active by itself; the app only loads external overrides when admin-controlled override trust is enabled.
 - Removing an override returns that module to the bundled version on the next reload.

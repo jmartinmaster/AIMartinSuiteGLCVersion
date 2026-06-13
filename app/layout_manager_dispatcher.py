@@ -30,7 +30,7 @@ from PyQt6.QtWidgets import QGroupBox, QHBoxLayout, QLabel, QMessageBox, QPushBu
 from app.app_logging import log_exception
 
 __module_name__ = "Layout Manager Mini Dispatcher"
-__version__ = "1.2.0"
+__version__ = "1.2.1"
 LAYOUT_MANAGER_QT_SESSION_ENV = "AIMARTIN_LAYOUT_MANAGER_QT_SESSION"
 
 REPO_ROOT = Path(__file__).resolve().parent.parent

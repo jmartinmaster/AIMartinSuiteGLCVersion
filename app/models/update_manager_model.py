@@ -34,7 +34,7 @@ from app.persistence import write_json_with_backup, write_text_with_backup
 from app.utils import ensure_external_directory, external_path, local_or_resource_path, resolve_local_venv_python
 
 __module_name__ = "Update Manager"
-__version__ = "2.1.5"
+__version__ = "2.1.6"
 
 
 GITHUB_REMOTE_PATTERN = re.compile(r"github\.com[:/](?P<owner>[^/]+)/(?P<repo>[^/.]+?)(?:\.git)?$")
@@ -44,7 +44,6 @@ MASTER_VERSION_PATH = "main.py"
 LEGACY_REMOTE_EXE_PATH = "dist/TheMartinSuite_GLC.exe"
 LEGACY_REMOTE_DEB_PATH = f"dist/ubuntu/{DEB_PACKAGE_NAME}.deb"
 MODULE_PAYLOAD_EXCLUDED_KEYS = {"__init__", "update_manager"}
-SETTINGS_RELATIVE_PATH = "settings.json"
 DOCUMENTATION_PAYLOAD_RELATIVE_ROOT = os.path.join("docs", "help")
 DOCUMENTATION_PAYLOAD_BACKUP_ROOT = os.path.join("data", "backups", "docs")
 DOCUMENTATION_STANDALONE_FILES = [

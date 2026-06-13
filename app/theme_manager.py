@@ -23,7 +23,7 @@ except ImportError:
     PYQT6_THEME_SUPPORT = False
 
 __module_name__ = "Theme Manager"
-__version__ = "1.4.3"
+__version__ = "1.4.4"
 
 DEFAULT_THEME = "martin_modern_light"
 

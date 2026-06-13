@@ -1,12 +1,12 @@
 # settings.json Reference
 
-`settings.json` stores user-configurable defaults for the application.
+`data/config/settings.json` stores user-configurable defaults for the application.
 
 ## Structure
 
 ```json
 {
-  "export_directory": "exports",
+  "export_directory": "data/exports",
   "organize_exports_by_date": true,
   "default_export_prefix": "Disamatic Production Sheet",
   "update_repository_url": "https://github.com/jmartinmaster/AIMartinSuiteGLCVersion.git",
@@ -31,7 +31,8 @@
     "7": "No Iron (Transfer)",
     "8": "AMC, SBC, Shakeout",
     "9": "Pattern Change",
-    "10": "No Sand"
+    "10": "No Sand",
+    "X": "Startup or other permissible"
   }
 }
 ```
@@ -41,6 +42,7 @@
 - `export_directory`
   - Type: string
   - Purpose: Base folder used for Excel exports.
+  - Default: `data/exports`
   - Notes: When `organize_exports_by_date` is enabled, exports are written under `YYYY/MM MonthName` inside this base folder.
 
 - `organize_exports_by_date`

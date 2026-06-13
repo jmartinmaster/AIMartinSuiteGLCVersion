@@ -18,7 +18,7 @@ import os
 from app.utils import local_or_resource_path
 
 __module_name__ = "Help Viewer Documents"
-__version__ = "1.0.1"
+__version__ = "1.0.2"
 
 DOC_GROUPS = {
     "user_guide": {

@@ -20,7 +20,7 @@ from app.models.update_manager_model import UpdateManagerModel
 from app.views.update_manager_qt_view import UpdateManagerQtView
 
 __module_name__ = "Update Manager Qt Controller"
-__version__ = "1.4.1"
+__version__ = "1.4.3"
 
 
 class SimpleVar:
@@ -37,10 +37,14 @@ class SimpleVar:
             self._on_change()
 
 
-class UpdateManagerQtController(UpdateManagerRuntimeController):
+class UpdateManagerQtController:
+    SUCCESS_BANNER_AUTOHIDE_MS = UpdateManagerRuntimeController.SUCCESS_BANNER_AUTOHIDE_MS
+    RUNTIME_SKIP_BIND_METHODS = {"__init__", "mount", "on_hide", "on_unload"}
+
     def __init__(self, parent=None, dispatcher=None):
         self.parent = parent
         self.dispatcher = dispatcher
+        self._bind_runtime_methods()
         self.requested_view_backend = "qt"
         self.resolved_view_backend = "qt"
         self.view_backend_fallback_reason = None
@@ -115,11 +119,24 @@ class UpdateManagerQtController(UpdateManagerRuntimeController):
         self._render_from_state()
         self.view.show()
 
+    def _bind_runtime_methods(self):
+        for method_name, descriptor in UpdateManagerRuntimeController.__dict__.items():
+            if method_name.startswith("__"):
+                continue
+            if method_name in self.RUNTIME_SKIP_BIND_METHODS:
+                continue
+            if method_name in type(self).__dict__:
+                continue
+            if hasattr(descriptor, "__get__"):
+                self.__dict__[method_name] = descriptor.__get__(self, type(self))
+            else:
+                self.__dict__[method_name] = descriptor
+
     def __getattr__(self, attribute_name):
         view = self.__dict__.get("view")
-        if view is None:
-            raise AttributeError(attribute_name)
-        return getattr(view, attribute_name)
+        if view is not None:
+            return getattr(view, attribute_name)
+        raise AttributeError(attribute_name)
 
     def _create_model(self):
         if hasattr(self, "model") and self.model is not None:

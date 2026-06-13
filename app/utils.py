@@ -21,6 +21,8 @@ from app.app_identity import DEB_PACKAGE_NAME
 __module_name__ = "Path Helpers"
 __version__ = "1.1.5"
 
+DATA_ROOT_RELATIVE_PATH = "data"
+
 
 def source_root_path():
     return os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
@@ -52,6 +54,13 @@ def external_path(relative_path):
     return os.path.join(external_base_path(), relative_path)
 
 
+def external_data_path(relative_path=""):
+    normalized_relative_path = str(relative_path or "").strip().replace("\\", "/").lstrip("/")
+    if not normalized_relative_path:
+        return external_path(DATA_ROOT_RELATIVE_PATH)
+    return external_path(os.path.join(DATA_ROOT_RELATIVE_PATH, normalized_relative_path))
+
+
 def local_or_resource_path(relative_path):
     local_path = external_path(relative_path)
     if os.path.exists(local_path):
@@ -61,6 +70,12 @@ def local_or_resource_path(relative_path):
 
 def ensure_external_directory(relative_path):
     directory_path = external_path(relative_path)
+    os.makedirs(directory_path, exist_ok=True)
+    return directory_path
+
+
+def ensure_external_data_directory(relative_path=""):
+    directory_path = external_data_path(relative_path)
     os.makedirs(directory_path, exist_ok=True)
     return directory_path
 

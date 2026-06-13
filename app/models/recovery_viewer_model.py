@@ -23,6 +23,69 @@ from app.persistence import write_json_with_backup
 from app.utils import external_path
 
 
+__module_name__ = "Recovery Viewer"
+__version__ = "1.0.0"
+
+BACKUP_TARGET_DEFINITIONS = (
+    {
+        "key": "settings",
+        "label": "Settings",
+        "description": "Backs up the editable settings.json file.",
+        "target_path": external_path("data/config/settings.json"),
+        "backup_dir": external_path("data/backups/settings"),
+    },
+    {
+        "key": "layout_config",
+        "label": "Default Layout",
+        "description": "Backs up the shared default layout configuration.",
+        "target_path": external_path("data/config/layout_config.json"),
+        "backup_dir": external_path("data/backups/layouts"),
+    },
+    {
+        "key": "form_definitions",
+        "label": "Form Definitions",
+        "description": "Backs up the form registry.",
+        "target_path": external_path("data/config/form_definitions.json"),
+        "backup_dir": external_path("data/backups/forms"),
+    },
+    {
+        "key": "rates",
+        "label": "Rates",
+        "description": "Backs up the rate configuration.",
+        "target_path": external_path("data/config/rates.json"),
+        "backup_dir": external_path("data/backups/rates"),
+    },
+    {
+        "key": "production_log_calculations",
+        "label": "Form Calculations",
+        "description": "Backs up the calculation formulas and runtime defaults.",
+        "target_path": external_path("data/config/production_log_calculations.json"),
+        "backup_dir": external_path("data/backups/production_log_calculations"),
+    },
+    {
+        "key": "form_layouts",
+        "label": "Form Layout Backups",
+        "description": "Backs up per-form layout files under data/backups/layouts.",
+        "target_path": external_path("data/forms"),
+        "backup_dir": external_path("data/backups/layouts"),
+    },
+    {
+        "key": "form_calculations",
+        "label": "Form Calculation Backups",
+        "description": "Backs up per-form calculation files under data/backups/form_calculations.",
+        "target_path": external_path("data/forms"),
+        "backup_dir": external_path("data/backups/form_calculations"),
+    },
+    {
+        "key": "draft_history",
+        "label": "Draft History",
+        "description": "Backs up pending drafts into data/pending/history.",
+        "target_path": external_path("data/pending"),
+        "backup_dir": external_path("data/pending/history"),
+    },
+)
+
+
 class RecoveryViewerModel:
     def __init__(self, data_registry=None):
         self.form_registry = FormDefinitionRegistry()
@@ -36,6 +99,150 @@ class RecoveryViewerModel:
         self.records.extend(self.collect_config_backup_records())
         self.records.sort(key=lambda item: item["sort_key"], reverse=True)
         return list(self.records)
+
+    def normalize_backup_policy(self, raw_policy):
+        policy = {
+            "enabled": True,
+            "interval_min": 30,
+            "keep_count": 12,
+            "draft_auto_save_interval_min": 5,
+            "draft_history_keep_count": 20,
+            "target_overrides": {},
+        }
+        if isinstance(raw_policy, dict):
+            policy.update(raw_policy)
+
+        try:
+            policy["enabled"] = bool(policy.get("enabled", True))
+        except Exception:
+            policy["enabled"] = True
+        try:
+            policy["interval_min"] = max(1, int(policy.get("interval_min", 30)))
+        except Exception:
+            policy["interval_min"] = 30
+        try:
+            policy["keep_count"] = max(1, int(policy.get("keep_count", 12)))
+        except Exception:
+            policy["keep_count"] = 12
+        try:
+            policy["draft_auto_save_interval_min"] = max(1, int(policy.get("draft_auto_save_interval_min", 5)))
+        except Exception:
+            policy["draft_auto_save_interval_min"] = 5
+        try:
+            policy["draft_history_keep_count"] = max(1, int(policy.get("draft_history_keep_count", 20)))
+        except Exception:
+            policy["draft_history_keep_count"] = 20
+
+        normalized_targets = {}
+        raw_targets = policy.get("target_overrides")
+        if isinstance(raw_targets, dict):
+            for target_key, raw_target_policy in raw_targets.items():
+                normalized_key = str(target_key or "").strip()
+                if not normalized_key:
+                    continue
+                target_policy = {
+                    "enabled": True,
+                    "interval_min": policy["interval_min"],
+                    "keep_count": policy["keep_count"],
+                }
+                if isinstance(raw_target_policy, dict):
+                    target_policy.update(raw_target_policy)
+                try:
+                    target_policy["enabled"] = bool(target_policy.get("enabled", True))
+                except Exception:
+                    target_policy["enabled"] = True
+                try:
+                    target_policy["interval_min"] = max(1, int(target_policy.get("interval_min", policy["interval_min"])))
+                except Exception:
+                    target_policy["interval_min"] = policy["interval_min"]
+                try:
+                    target_policy["keep_count"] = max(1, int(target_policy.get("keep_count", policy["keep_count"])))
+                except Exception:
+                    target_policy["keep_count"] = policy["keep_count"]
+                normalized_targets[normalized_key] = target_policy
+        policy["target_overrides"] = normalized_targets
+        return policy
+
+    def _read_settings_payload(self):
+        settings_path = self.data_registry.resolve_write_path("settings")
+        try:
+            with open(settings_path, "r", encoding="utf-8") as handle:
+                return json.load(handle)
+        except Exception:
+            return {}
+
+    def load_backup_policy(self):
+        payload = self._read_settings_payload()
+        return self.normalize_backup_policy(payload.get("backup_policy") if isinstance(payload, dict) else None)
+
+    def save_backup_policy(self, policy):
+        settings_payload = self._read_settings_payload()
+        if not isinstance(settings_payload, dict):
+            settings_payload = {}
+        settings_payload["backup_policy"] = self.normalize_backup_policy(policy)
+        write_json_with_backup(
+            self.data_registry.resolve_write_path("settings"),
+            settings_payload,
+            backup_dir=self.data_registry.resolve_backup_dir("settings"),
+            keep_count=int(settings_payload["backup_policy"].get("keep_count", 12) or 12),
+        )
+        return settings_payload["backup_policy"]
+
+    def get_backup_target_definitions(self):
+        return [dict(definition) for definition in BACKUP_TARGET_DEFINITIONS]
+
+    def _delete_paths(self, paths):
+        deleted_count = 0
+        for path in paths:
+            try:
+                if path and os.path.exists(path) and os.path.isfile(path):
+                    os.remove(path)
+                    deleted_count += 1
+            except OSError:
+                continue
+        return deleted_count
+
+    def prune_pending_drafts(self):
+        drafts = sorted(self.collect_draft_records(), key=lambda item: item["sort_key"], reverse=True)
+        deleted_count = self._delete_paths([record.get("path") for record in drafts[1:]])
+        return {
+            "kept": 1 if drafts else 0,
+            "deleted": deleted_count,
+            "total": len(drafts),
+        }
+
+    def prune_recovery_snapshots(self):
+        snapshots = sorted(self.collect_snapshot_records(), key=lambda item: item["sort_key"], reverse=True)
+        deleted_count = self._delete_paths([record.get("path") for record in snapshots[1:]])
+        return {
+            "kept": 1 if snapshots else 0,
+            "deleted": deleted_count,
+            "total": len(snapshots),
+        }
+
+    def prune_config_backups(self):
+        records_by_target = {}
+        for record in self.collect_config_backup_records():
+            target_path = str(record.get("target_path") or "").strip()
+            if not target_path:
+                continue
+            records_by_target.setdefault(target_path, []).append(record)
+
+        deleted_count = 0
+        kept_count = 0
+        total_count = 0
+        for grouped_records in records_by_target.values():
+            sorted_records = sorted(grouped_records, key=lambda item: item["sort_key"], reverse=True)
+            total_count += len(sorted_records)
+            if sorted_records:
+                kept_count += 1
+            deleted_count += self._delete_paths([record.get("path") for record in sorted_records[1:]])
+
+        return {
+            "kept": kept_count,
+            "deleted": deleted_count,
+            "total": total_count,
+        }
 
     def collect_draft_records(self):
         pending_dir = external_path("data/pending")

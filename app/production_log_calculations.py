@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 __module_name__ = "Form Calculations"
-__version__ = "1.1.0"
+__version__ = "1.1.1"
 
 
 def get_ui(parent, dispatcher):

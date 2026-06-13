@@ -46,27 +46,23 @@ class ObservableValue:
             self._traces.pop(callback_name, None)
 
 
-def _create_binding(master, value=""):
-    if hasattr(master, "tk"):
-        raise RuntimeError("Tk update bindings were removed from the live Phase 9 runtime.")
-    return ObservableValue(value=value)
-
-
 class UpdateStateBindings:
     def __init__(self, root):
-        self.banner_var = _create_binding(root, value="Updates idle.")
-        self.status_var = _create_binding(root, value="Ready to check for updates.")
-        self.branch_var = _create_binding(root, value="main")
-        self.repo_var = _create_binding(root, value="Unknown repository")
-        self.target_name_var = _create_binding(root, value="Dispatcher Core")
-        self.local_version_var = _create_binding(root, value="Unknown")
-        self.remote_version_var = _create_binding(root, value="Not checked")
-        self.result_var = _create_binding(root, value="Pending")
-        self.note_var = _create_binding(root, value="Run a repository check to compare the packaged release target.")
-        self.advanced_status_var = _create_binding(root, value="Advanced dev updates are Windows-only on packaged builds; Ubuntu uses the stable package update path.")
-        self.job_phase_var = _create_binding(root, value="Idle")
-        self.job_detail_var = _create_binding(root, value="No update job is running.")
-        self.build_runtime_var = _create_binding(root, value="Build runtime not resolved yet.")
+            if hasattr(root, "tk"):
+                raise RuntimeError("Tk update bindings were removed from the live Phase 9 runtime.")
+            self.banner_var = ObservableValue(value="Updates idle.")
+            self.status_var = ObservableValue(value="Ready to check for updates.")
+            self.branch_var = ObservableValue(value="main")
+            self.repo_var = ObservableValue(value="Unknown repository")
+            self.target_name_var = ObservableValue(value="Dispatcher Core")
+            self.local_version_var = ObservableValue(value="Unknown")
+            self.remote_version_var = ObservableValue(value="Not checked")
+            self.result_var = ObservableValue(value="Pending")
+            self.note_var = ObservableValue(value="Run a repository check to compare the packaged release target.")
+            self.advanced_status_var = ObservableValue(value="Advanced dev updates are Windows-only on packaged builds; Ubuntu uses the stable package update path.")
+            self.job_phase_var = ObservableValue(value="Idle")
+            self.job_detail_var = ObservableValue(value="No update job is running.")
+            self.build_runtime_var = ObservableValue(value="Build runtime not resolved yet.")
 
     def sync_from_model(self, model):
         self.banner_var.set(model.banner_text)

@@ -13,16 +13,11 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-from typing import Callable
-
 from app.views.layout_manager_qt_view import is_layout_manager_qt_runtime_available
 from app.views.layout_manager_view_contract import LayoutManagerViewContract
 
 __module_name__ = "Layout Manager View Factory"
 __version__ = "1.0.2"
-
-LayoutManagerViewFactory = Callable[[object, object, object], LayoutManagerViewContract]
-
 
 def get_requested_layout_manager_ui_backend(dispatcher):
     runtime_settings = getattr(dispatcher, "runtime_settings", {}) or {}

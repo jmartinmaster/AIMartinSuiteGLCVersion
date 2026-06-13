@@ -24,7 +24,7 @@ from app.models.layout_manager_model import LayoutManagerModel
 from app.views.layout_manager_qt_view import LayoutManagerQtView
 
 __module_name__ = "Layout Manager Qt Controller"
-__version__ = "0.7.0"
+__version__ = "0.7.2"
 
 
 class LayoutManagerQtController:
@@ -307,7 +307,7 @@ class LayoutManagerQtController:
         self.write_state(message=message)
 
     def apply_editor_changes(self, message=None):
-        config, _payload_details = self.model.resolve_editor_text(
+        config, payload_details = self.model.resolve_editor_text(
             self.view.editor_text(),
             base_config=self.current_config,
         )
@@ -316,11 +316,24 @@ class LayoutManagerQtController:
         self.refresh_view(reason=message or "Applied editor changes")
         self.mark_dirty()
         self._redo_stack.clear()
-        return config
+        return config, payload_details
+
+    def _payload_warning_message(self, payload_details):
+        details = payload_details if isinstance(payload_details, dict) else {}
+        warning_message = str(details.get("warning_message") or "").strip()
+        if warning_message:
+            return warning_message
+        missing_keys = details.get("auto_filled_missing_keys")
+        if isinstance(missing_keys, list) and missing_keys:
+            return (
+                "Saved using auto-repaired JSON. Missing top-level keys were restored from the active form/default: "
+                f"{', '.join(str(key) for key in missing_keys)}"
+            )
+        return ""
 
     def sync_block_view_to_editor(self):
         try:
-            parsed_config, composed_config = self._compose_save_config(self.view.editor_text())
+            parsed_config, composed_config, _payload_details = self._compose_save_config(self.view.editor_text())
         except Exception:
             return
         if composed_config == self.current_config:
@@ -346,7 +359,7 @@ class LayoutManagerQtController:
         return rename_map
 
     def _compose_save_config(self, editor_text):
-        parsed_config, _payload_details = self.model.resolve_editor_text(
+        parsed_config, payload_details = self.model.resolve_editor_text(
             editor_text,
             base_config=self.current_config,
         )
@@ -393,7 +406,7 @@ class LayoutManagerQtController:
             mapping_values["max_rows"],
             mapping_columns,
         )
-        return parsed_config, updated_config
+        return parsed_config, updated_config, payload_details
 
     def _apply_layout_update(self, updated_config, status_message):
         self._record_undo_state()
@@ -539,14 +552,18 @@ class LayoutManagerQtController:
 
     def validate_editor(self):
         try:
-            self.model.resolve_editor_text(
+            _config, payload_details = self.model.resolve_editor_text(
                 self.view.editor_text(),
                 base_config=self.current_config,
             )
         except Exception as exc:
             self.view.set_status(f"JSON validation failed: {exc}", error=True)
             return
-        self.view.set_status("JSON is valid.")
+        warning_message = self._payload_warning_message(payload_details)
+        if warning_message:
+            self.view.set_status(f"JSON is valid with warnings. {warning_message}")
+        else:
+            self.view.set_status("JSON is valid.")
         self._emit_host_toast("Layout JSON is valid.", bootstyle="success")
 
     def load_compare_reference_selected_form(self):
@@ -729,11 +746,15 @@ class LayoutManagerQtController:
 
     def format_editor(self):
         try:
-            self.apply_editor_changes(message="Formatted editor JSON")
+            _config, payload_details = self.apply_editor_changes(message="Formatted editor JSON")
         except Exception as exc:
             self.view.set_status(f"Format JSON failed: {exc}", error=True)
             return
-        self.view.set_status("Editor JSON was normalized and reformatted.")
+        warning_message = self._payload_warning_message(payload_details)
+        if warning_message:
+            self.view.set_status(f"Editor JSON was normalized and reformatted with warnings. {warning_message}")
+        else:
+            self.view.set_status("Editor JSON was normalized and reformatted.")
 
     def on_row_section_changed(self, *_args):
         self.view.render_row_fields_authoring(self.current_config)
@@ -1017,6 +1038,47 @@ class LayoutManagerQtController:
         finally:
             self.view.set_import_export_progress(False)
 
+    def browse_template_from_import_export(self):
+        selected_file = self.view.choose_template_file(self.view.template_path_value())
+        if not selected_file:
+            self.view.set_status("Template browse canceled.")
+            return
+        self.view.set_template_path_value(selected_file)
+        self.view.set_status("Template selected. Apply to persist or Store With Form to keep it with this form.")
+
+    def open_template_from_import_export(self):
+        template_path = self.view.template_path_value()
+        resolved_template_path = self.model.resolve_template_path(template_path)
+        if not resolved_template_path:
+            self.view.set_status("Template path is not set or does not exist.", error=True)
+            return
+        if not self.view.open_local_file(resolved_template_path):
+            self.view.set_status("Could not open the template with a local app.", error=True)
+            return
+        self.view.set_status(f"Opened template: {resolved_template_path}")
+
+    def store_template_with_active_form_from_import_export(self):
+        self.view.set_import_export_progress(True, "Storing template with active form...")
+        try:
+            stored_template = self.model.copy_template_to_active_form(
+                self.view.template_path_value(),
+                form_info=self.current_form_info,
+            )
+            config = self._load_editor_config()
+            updated_config, _status_message = self.model.update_template_path(
+                config,
+                stored_template["relative_path"],
+            )
+            self._apply_layout_update(
+                updated_config,
+                f"Stored template with active form: {stored_template['relative_path']}",
+            )
+            self._emit_host_toast("Stored export template with the active form.", bootstyle="success")
+        except Exception as exc:
+            self.view.set_status(f"Import/export error: {exc}", error=True)
+        finally:
+            self.view.set_import_export_progress(False)
+
     def apply_mapping_from_import_export(self):
         mapping_name = self.view.current_mapping_name()
         mapping_values = self.view.mapping_form_values()
@@ -1138,7 +1200,7 @@ class LayoutManagerQtController:
                 previous_config = deepcopy(self.current_config)
                 self.view.finalize_block_table_edits()
                 editor_text = self.view.editor_text()
-                parsed_config, composed_config = self._compose_save_config(editor_text)
+                parsed_config, composed_config, payload_details = self._compose_save_config(editor_text)
                 serialized_config = self.model.serialize_config(composed_config)
                 save_text = editor_text if composed_config == parsed_config else serialized_config
                 self.current_config = composed_config
@@ -1158,6 +1220,9 @@ class LayoutManagerQtController:
                         f"{message} '{self.selected_form_name()}' is selected in Stored Forms but is not active. "
                         "Click Activate before editing or saving that form."
                     )
+                warning_message = self._payload_warning_message(payload_details)
+                if warning_message:
+                    message = f"{message} Warning: {warning_message}"
                 self.mark_clean(message)
                 self.refresh_forms()
                 self.refresh_view(reason="Saved current layout configuration", editor_text_override=save_text)

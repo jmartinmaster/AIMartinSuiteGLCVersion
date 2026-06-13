@@ -20,7 +20,7 @@ INFO = "info"
 SUCCESS = "success"
 
 __module_name__ = "Form Calculations Qt Controller"
-__version__ = "1.1.2"
+__version__ = "1.1.3"
 
 
 class ProductionLogCalculationsQtController:

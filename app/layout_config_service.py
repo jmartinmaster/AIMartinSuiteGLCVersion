@@ -21,6 +21,10 @@ from app.form_definition_registry import FormDefinitionRegistry
 from app.persistence import write_json_with_backup, write_text_with_backup
 
 
+__module_name__ = "Layout Config Service"
+__version__ = "1.0.0"
+
+
 class LayoutConfigService:
     def __init__(self):
         self.data_registry = ExternalDataRegistry()
