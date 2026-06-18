@@ -447,10 +447,23 @@ class SettingsManagerQtView(QMainWindow):
             row_layout.setContentsMargins(0, 0, 0, 0)
             row_layout.setSpacing(2)
 
+            input_row = QWidget()
+            input_row_layout = QHBoxLayout(input_row)
+            input_row_layout.setContentsMargins(0, 0, 0, 0)
+            input_row_layout.setSpacing(4)
+
             path_input = QLineEdit()
             path_input.setPlaceholderText("Default (blank)")
             path_input.textChanged.connect(self._on_form_changed)
-            row_layout.addWidget(path_input)
+            input_row_layout.addWidget(path_input, 1)
+
+            browse_button = QPushButton("Browse…")
+            browse_button.setFixedWidth(72)
+            _key = override_key
+            browse_button.clicked.connect(lambda _checked=False, k=_key: self.controller.browse_runtime_path(k))
+            input_row_layout.addWidget(browse_button)
+
+            row_layout.addWidget(input_row)
 
             access_label = QLabel("-")
             access_label.setWordWrap(True)
@@ -651,6 +664,16 @@ class SettingsManagerQtView(QMainWindow):
 
     def ask_for_export_directory(self):
         return str(QFileDialog.getExistingDirectory(self, "Select Export Directory", self.export_directory_input.text().strip() or "") or "").strip()
+
+    def ask_for_runtime_path_directory(self, override_key):
+        path_input = self.developer_runtime_override_inputs.get(override_key)
+        start_dir = path_input.text().strip() if path_input is not None else ""
+        return str(QFileDialog.getExistingDirectory(self, "Select Folder", start_dir) or "").strip()
+
+    def set_runtime_path_override(self, override_key, directory_path):
+        path_input = self.developer_runtime_override_inputs.get(override_key)
+        if path_input is not None:
+            path_input.setText(str(directory_path or ""))
 
     def set_downtime_code_rows(self, code_map):
         code_map = code_map if isinstance(code_map, dict) else {}

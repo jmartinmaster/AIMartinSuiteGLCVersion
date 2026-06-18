@@ -243,6 +243,11 @@ class SettingsManagerQtController:
         if directory_path:
             self.view.set_export_directory(directory_path)
 
+    def browse_runtime_path(self, override_key):
+        directory_path = self.view.ask_for_runtime_path_directory(override_key)
+        if directory_path:
+            self.view.set_runtime_path_override(override_key, directory_path)
+
     def open_internal_code_editor(self):
         if self.dispatcher is None or not hasattr(self.dispatcher, "secure_load"):
             return

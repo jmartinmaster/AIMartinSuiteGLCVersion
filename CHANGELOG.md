@@ -4,6 +4,15 @@ This changelog tracks the main branch release line for Production Logging Center
 
 Version headings below are aligned to the current `2.x` release line used by Dispatcher Core. Earlier work has been grouped into practical release milestones so the shipped feature history is easier to follow without rewriting older module version markers.
 
+## [Unreleased] - 2026-06-18
+
+### Changed
+
+- Added Browse buttons to each Deferred Runtime Path Override field in Settings Manager Developer Tools, allowing users to select folders via the system directory picker instead of typing paths manually.
+- Added `browse_runtime_path(override_key)` to `SettingsManagerQtController` following the established `browse_export_dir` delegation pattern.
+- Added `ask_for_runtime_path_directory(override_key)` and `set_runtime_path_override(override_key, path)` view helpers to `SettingsManagerQtView` for controller-delegated directory browsing.
+- Validation: `py_compile` passed on both `settings_manager_qt_view.py` and `settings_manager_qt_controller.py`.
+
 ## [2.2.4] - 2026-06-12
 
 ### Changed
