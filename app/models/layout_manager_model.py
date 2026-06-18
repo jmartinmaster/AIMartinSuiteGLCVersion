@@ -237,6 +237,14 @@ class LayoutManagerModel:
                         normalized_section["default_max_rows"] = default_max_rows
                 else:
                     normalized_section.pop("default_max_rows", None)
+                default_field_width = raw_section.get("default_field_width", normalized_section.get("default_field_width"))
+                if default_field_width not in (None, ""):
+                    try:
+                        normalized_section["default_field_width"] = max(1, int(default_field_width))
+                    except (TypeError, ValueError):
+                        normalized_section.pop("default_field_width", None)
+                else:
+                    normalized_section.pop("default_field_width", None)
                 raw_policy = raw_section.get("delete_row_policy", normalized_section.get("delete_row_policy"))
                 if isinstance(raw_policy, dict):
                     normalized_section["delete_row_policy"] = self._normalize_delete_row_policy(raw_policy)
@@ -244,6 +252,7 @@ class LayoutManagerModel:
                     normalized_section.pop("delete_row_policy", None)
             else:
                 normalized_section.pop("default_max_rows", None)
+                normalized_section.pop("default_field_width", None)
                 normalized_section.pop("delete_row_policy", None)
 
             normalized_sections.append(normalized_section)
@@ -377,6 +386,17 @@ class LayoutManagerModel:
             except (TypeError, ValueError):
                 raise ValueError("Default max rows must be a positive integer.")
 
+            default_field_width_text = str(
+                section_values.get("default_field_width", target_section.get("default_field_width", ""))
+            ).strip()
+            if default_field_width_text:
+                try:
+                    target_section["default_field_width"] = max(1, int(default_field_width_text))
+                except (TypeError, ValueError):
+                    raise ValueError("Default field width must be a positive integer.")
+            else:
+                target_section.pop("default_field_width", None)
+
             target_section["delete_row_policy"] = self._normalize_delete_row_policy(
                 {
                     "show_delete_button": section_values.get(
@@ -400,6 +420,7 @@ class LayoutManagerModel:
             )
         else:
             target_section.pop("default_max_rows", None)
+            target_section.pop("default_field_width", None)
             target_section.pop("delete_row_policy", None)
 
         return config, f"Updated section '{normalized_section_id}' metadata"
@@ -458,6 +479,12 @@ class LayoutManagerModel:
                 section_payload["default_max_rows"] = max(1, int(max_rows_text or DEFAULT_MAPPING_MAX_ROWS))
             except (TypeError, ValueError):
                 raise ValueError("Default max rows must be a positive integer.")
+            field_width_text = str(section_values.get("default_field_width") or "").strip()
+            if field_width_text:
+                try:
+                    section_payload["default_field_width"] = max(1, int(field_width_text))
+                except (TypeError, ValueError):
+                    raise ValueError("Default field width must be a positive integer.")
             mapping_key = f"{section_id}_mapping"
             section_payload["mapping_key"] = mapping_key
             if mapping_key not in config or not isinstance(config.get(mapping_key), dict):
@@ -1488,7 +1515,8 @@ class LayoutManagerModel:
             if isinstance(column_config, dict):
                 column_name = str(column_config.get("column", "")).strip()
                 if not column_name:
-                    raise ValueError(f"{mapping_name}.columns.{field_id} must include a column value.")
+                    # Allow blank mapping columns so forms can be saved before column assignment is complete.
+                    continue
                 import_transform = str(column_config.get("import_transform", "value") or "value").strip()
                 export_transform = str(column_config.get("export_transform", "value") or "value").strip()
                 if import_transform not in VALID_IMPORT_TRANSFORMS:
@@ -1501,7 +1529,7 @@ class LayoutManagerModel:
                     )
                 continue
             if not str(column_config or "").strip():
-                raise ValueError(f"{mapping_name}.columns.{field_id} cannot be empty.")
+                continue
 
     def create_unique_field_id(self, config, section_name="header_fields"):
         existing_ids = {field.get("id") for field in config.get(section_name, [])}

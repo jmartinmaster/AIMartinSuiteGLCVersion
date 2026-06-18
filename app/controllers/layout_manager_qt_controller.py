@@ -787,6 +787,7 @@ class LayoutManagerQtController:
             "behavior_profile": behavior_profile,
             "description": "",
             "default_max_rows": "25",
+            "default_field_width": "12",
             "show_delete_button": True,
             "delete_button_label": "X",
             "delete_button_tooltip": "Delete this row",

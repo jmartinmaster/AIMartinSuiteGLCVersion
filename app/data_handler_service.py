@@ -1131,6 +1131,19 @@ class DataHandlerService:
         for field in self.get_header_fields():
             cell_coord = field.get("cell")
             val = ui_data["header"].get(field["id"])
+            if field.get("export_enabled", True) and not cell_coord:
+                self._operation_warnings.append(
+                    {
+                        "operation": "export",
+                        "kind": "missing_cell_coordinate",
+                        "field_id": str(field.get("id") or ""),
+                        "message": (
+                            f"Header field '{field.get('id', '?')}' is marked for export but has no cell coordinate "
+                            "assigned. Set the 'cell' value in the Layout Manager → Block View → Header Fields to "
+                            "enable export for this field."
+                        ),
+                    }
+                )
             if cell_coord and field.get("export_enabled", True):
                 cell = ws[cell_coord]
                 from openpyxl.cell.cell import MergedCell

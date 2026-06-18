@@ -52,6 +52,7 @@ def is_production_log_qt_runtime_available():
 
 class ProductionLogQtView(QMainWindow):
     ROW_ACTION_COLUMN = 0
+    REPEATING_DEFAULT_FIELD_WIDTH_CHARS = 12
     SECTION_NAME_DEFAULTS = {
         "header": "Header Fields",
         "production": "Production Rows",
@@ -281,6 +282,27 @@ class ProductionLogQtView(QMainWindow):
 
     def _get_section_field_configs(self, section_id):
         return list(self.section_field_configs.get(str(section_id or "").strip().lower()) or [])
+
+    def _parse_positive_int(self, raw_value, default=0):
+        try:
+            parsed = int(str(raw_value or "").strip())
+        except (TypeError, ValueError):
+            return int(default)
+        return parsed if parsed > 0 else int(default)
+
+    def _resolve_repeating_default_width_chars(self, section_info):
+        section_payload = section_info if isinstance(section_info, dict) else {}
+        for key in ("default_field_width", "default_column_width", "default_field_width_chars"):
+            width_value = self._parse_positive_int(section_payload.get(key), default=0)
+            if width_value > 0:
+                return width_value
+        return int(self.REPEATING_DEFAULT_FIELD_WIDTH_CHARS)
+
+    def _resolve_repeating_column_width(self, field, section_info):
+        field_payload = field if isinstance(field, dict) else {}
+        field_width_chars = self._parse_positive_int(field_payload.get("width"), default=0)
+        width_chars = field_width_chars if field_width_chars > 0 else self._resolve_repeating_default_width_chars(section_info)
+        return max(90, int(width_chars) * 10)
 
     def _register_repeating_section(self, section_id, table, field_configs, section_name):
         resolved_section_id = str(section_id or "").strip().lower()
@@ -533,11 +555,13 @@ class ProductionLogQtView(QMainWindow):
             return
         widget.setText(text_value)
 
-    def _create_repeating_table(self, field_configs):
+    def _create_repeating_table(self, field_configs, section_info=None):
         table = QTableWidget()
         table.setColumnCount(len(field_configs) + 1)
         table.setHorizontalHeaderLabels([""] + self._field_labels(field_configs))
         table.setColumnWidth(self.ROW_ACTION_COLUMN, 36)
+        for column_offset, field in enumerate(field_configs, start=1):
+            table.setColumnWidth(column_offset, self._resolve_repeating_column_width(field, section_info))
         table.horizontalHeader().setStretchLastSection(True)
         table.verticalHeader().setVisible(False)
         table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -550,7 +574,7 @@ class ProductionLogQtView(QMainWindow):
         description = str(section_info.get("description") or "")
         field_configs = self._get_section_field_configs(section_id)
         self._add_section_heading(content_layout, section_name, description)
-        table = self._create_repeating_table(field_configs)
+        table = self._create_repeating_table(field_configs, section_info=section_info)
         table.setMinimumHeight(self.REPEATING_SECTION_MIN_HEIGHTS.get(section_id, 240))
         self._register_repeating_section(section_id, table, field_configs, section_name)
         content_layout.addWidget(table)
@@ -777,6 +801,27 @@ class ProductionLogQtView(QMainWindow):
         self._refresh_row_action_buttons(table, field_configs)
         table.blockSignals(False)
 
+    def _row_field_options(self, field):
+        options = []
+        raw_values = field.get("values")
+        if isinstance(raw_values, list):
+            for raw_value in raw_values:
+                value_text = str(raw_value or "").strip()
+                if value_text and value_text not in options:
+                    options.append(value_text)
+        elif isinstance(raw_values, str):
+            for raw_value in raw_values.split(","):
+                value_text = str(raw_value or "").strip()
+                if value_text and value_text not in options:
+                    options.append(value_text)
+        options_source = str(field.get("options_source") or "").strip().lower()
+        if options_source == "downtime_codes":
+            for raw_value in get_code_options():
+                value_text = str(raw_value or "").strip()
+                if value_text and value_text not in options:
+                    options.append(value_text)
+        return options
+
     def _append_row(self, table, field_configs, row_data=None):
         if table is None:
             return
@@ -786,8 +831,25 @@ class ProductionLogQtView(QMainWindow):
         for column_index, field in enumerate(field_configs, start=self._field_column_offset()):
             field_id = str(field.get("id") or "").strip()
             item_value = str(row_data.get(field_id, field.get("default") or ""))
+            widget_name = str(field.get("widget") or "entry").strip().lower()
+            is_readonly = bool(field.get("readonly")) or bool(field.get("derived"))
+            if widget_name == "combobox" and not is_readonly:
+                combo = QComboBox(table)
+                combo.addItems(self._row_field_options(field))
+                combo.setEditable(True)
+                match_index = combo.findText(item_value, Qt.MatchFlag.MatchFixedString)
+                if match_index >= 0:
+                    combo.setCurrentIndex(match_index)
+                else:
+                    combo.setEditText(item_value)
+                combo.currentTextChanged.connect(lambda _text, t=table, fc=field_configs: self._handle_table_item_changed(t, fc))
+                table.setCellWidget(row_index, column_index, combo)
+                backing_item = QTableWidgetItem(item_value)
+                backing_item.setFlags(backing_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                table.setItem(row_index, column_index, backing_item)
+                continue
             table_item = QTableWidgetItem(item_value)
-            if bool(field.get("readonly")) or bool(field.get("derived")):
+            if is_readonly:
                 table_item.setFlags(table_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             table.setItem(row_index, column_index, table_item)
 
@@ -852,8 +914,12 @@ class ProductionLogQtView(QMainWindow):
                 field_id = str(field.get("id") or "").strip()
                 if not field_id:
                     continue
-                item = table.item(row_index, column_index)
-                value = str(item.text()) if item is not None else ""
+                cell_widget = table.cellWidget(row_index, column_index)
+                if isinstance(cell_widget, QComboBox):
+                    value = str(cell_widget.currentText())
+                else:
+                    item = table.item(row_index, column_index)
+                    value = str(item.text()) if item is not None else ""
                 row_payload[field_id] = value
             has_content = self._row_has_content(table, field_configs, row_index)
             if has_content:

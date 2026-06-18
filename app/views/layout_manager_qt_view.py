@@ -728,6 +728,9 @@ class LayoutManagerQtView(QMainWindow):
         self.section_default_max_rows_input = QLineEdit()
         self.section_default_max_rows_input.setMinimumHeight(30)
         section_form.addRow("Default Max Rows", self.section_default_max_rows_input)
+        self.section_default_field_width_input = QLineEdit()
+        self.section_default_field_width_input.setMinimumHeight(30)
+        section_form.addRow("Default Field Width", self.section_default_field_width_input)
         self.section_show_delete_combo = QComboBox()
         self.section_show_delete_combo.addItem("True", True)
         self.section_show_delete_combo.addItem("False", False)
@@ -994,6 +997,9 @@ class LayoutManagerQtView(QMainWindow):
             text_value = str(value if value is not None else "")
             if combo_widget.isEditable():
                 combo_widget.setEditText(text_value)
+                line_edit = combo_widget.lineEdit()
+                if line_edit is not None:
+                    line_edit.setCursorPosition(0)
             else:
                 normalized_value = text_value.strip().lower()
                 match_index = combo_widget.findText(normalized_value, Qt.MatchFlag.MatchFixedString)
@@ -2275,6 +2281,7 @@ class LayoutManagerQtView(QMainWindow):
             self.section_description_input.setText("")
             self.section_behavior_profile_input.setText("")
             self.section_default_max_rows_input.setText("")
+            self.section_default_field_width_input.setText("")
             self.section_delete_label_input.setText("")
             self.section_delete_tooltip_input.setText("")
             return
@@ -2286,6 +2293,7 @@ class LayoutManagerQtView(QMainWindow):
             self.section_type_combo.setCurrentIndex(section_type_index)
         self.section_behavior_profile_input.setText(str(current_section.get("behavior_profile") or ""))
         self.section_default_max_rows_input.setText(str(current_section.get("default_max_rows") or ""))
+        self.section_default_field_width_input.setText(str(current_section.get("default_field_width") or ""))
 
         delete_policy = current_section.get("delete_row_policy") if isinstance(current_section.get("delete_row_policy"), dict) else {}
         show_delete = bool(delete_policy.get("show_delete_button", True))
@@ -2314,6 +2322,7 @@ class LayoutManagerQtView(QMainWindow):
             "section_type": str(self.section_type_combo.currentData() or "single"),
             "behavior_profile": str(self.section_behavior_profile_input.text() or "").strip(),
             "default_max_rows": str(self.section_default_max_rows_input.text() or "").strip(),
+            "default_field_width": str(self.section_default_field_width_input.text() or "").strip(),
             "show_delete_button": self.section_show_delete_combo.currentData(),
             "delete_button_label": str(self.section_delete_label_input.text() or "").strip(),
             "delete_button_tooltip": str(self.section_delete_tooltip_input.text() or "").strip(),

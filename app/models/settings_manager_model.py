@@ -468,13 +468,11 @@ class SettingsManagerModel:
             if not code and not label:
                 continue
             if not code:
-                raise ValueError("Each downtime code row needs a code number.")
-            if not code.isdigit():
-                raise ValueError(f"Code '{code}' must be numeric.")
+                raise ValueError("Each downtime code row needs a code identifier.")
             if not label:
-                raise ValueError(f"Code {code} cannot be blank.")
+                raise ValueError(f"Code '{code}' cannot have a blank label.")
             if code in updated_codes:
-                raise ValueError(f"Code {code} is duplicated.")
+                raise ValueError(f"Code '{code}' is duplicated.")
             updated_codes[code] = label
 
         if not updated_codes:

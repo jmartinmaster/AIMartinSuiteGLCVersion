@@ -749,6 +749,7 @@ class Gatekeeper:
         enabled = bool(self._load_security_settings().get("non_secure_mode", False))
         if enabled:
             self._ensure_non_secure_general_vault()
+            self._ensure_non_secure_general_session()
         return enabled
 
     def _ensure_non_secure_general_vault(self):
@@ -791,12 +792,32 @@ class Gatekeeper:
         except Exception:
             pass
 
+    def _ensure_non_secure_general_session(self):
+        try:
+            if self._session is not None:
+                return
+            enabled_general_vaults = [
+                vault
+                for vault in self.list_vaults()
+                if bool(vault.enabled) and normalize_role(vault.role) == "general"
+            ]
+            if not enabled_general_vaults:
+                return
+            selected_vault = next(
+                (vault for vault in enabled_general_vaults if vault.vault_name == DEFAULT_NON_SECURE_GENERAL_VAULT_NAME),
+                enabled_general_vaults[0],
+            )
+            self._set_session_from_vault(selected_vault)
+        except Exception as exc:
+            log_exception("gatekeeper.ensure_non_secure_general_session", exc)
+
     def set_non_secure_mode(self, enabled):
         settings = self._load_security_settings()
         settings["non_secure_mode"] = bool(enabled)
         self._save_security_settings(settings)
         if settings["non_secure_mode"]:
             self._ensure_non_secure_general_vault()
+            self._ensure_non_secure_general_session()
         self._notify_session_listeners("session-changed")
         return settings["non_secure_mode"]
 

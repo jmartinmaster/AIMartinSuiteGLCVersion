@@ -248,6 +248,38 @@ class SettingsManagerQtController:
             return
         self.dispatcher.secure_load("internal_code_editor")
 
+    def _apply_runtime_path_overrides(self, settings, runtime_path_overrides):
+        current_overrides = dict(self.model.settings.get("path_overrides", {}))
+        if isinstance(runtime_path_overrides, dict):
+            requested_overrides = dict(runtime_path_overrides)
+        else:
+            requested_overrides = dict(current_overrides)
+
+        requested_lookup = {
+            definition["key"]: str(requested_overrides.get(definition["key"], "")).strip()
+            for definition in PATH_OVERRIDE_DEFINITIONS
+        }
+
+        for definition in PATH_OVERRIDE_DEFINITIONS:
+            required_right = str(definition.get("required_right") or "").strip()
+            override_key = str(definition.get("key") or "").strip()
+            if not required_right or not override_key:
+                continue
+            if gatekeeper.has_right(required_right):
+                continue
+            requested_value = requested_lookup.get(override_key, "")
+            current_value = str(current_overrides.get(override_key, "")).strip()
+            if requested_value != current_value:
+                raise ValueError(
+                    f"Insufficient rights to change {definition.get('label', override_key)}. Required right: {required_right}."
+                )
+
+        settings["path_overrides"] = self.model.validate_path_override_values(requested_lookup)
+        settings["export_directory"] = str(
+            settings["path_overrides"].get("exports_root") or self.model._default_export_directory_setting()
+        )
+        return settings
+
     def save_settings(self):
         form_values = self.view.get_form_values()
         try:
@@ -260,6 +292,8 @@ class SettingsManagerQtController:
                 form_values.get("persistent_modules", []),
                 self.model.valid_persistent_modules or None,
             )
+            runtime_path_overrides = self.view.get_runtime_path_overrides()
+            settings = self._apply_runtime_path_overrides(settings, runtime_path_overrides)
             self.model.update_settings(settings)
             backup_info = self.model.save_settings_with_backup()
         except Exception as exc:

@@ -33,6 +33,7 @@ from PyQt6.QtWidgets import (
     QListWidgetItem,
     QMainWindow,
     QMessageBox,
+    QFileDialog,
     QPushButton,
     QScrollArea,
     QSpinBox,
@@ -218,15 +219,33 @@ class SettingsManagerQtView(QMainWindow):
         self.transition_duration_spin.valueChanged.connect(self._on_form_changed)
         editable_layout.addRow(QLabel("Transition Duration (ms)"), self.transition_duration_spin)
 
-        module_lists_row = QHBoxLayout()
+        module_lists_row = QWidget()
+        module_lists_layout = QHBoxLayout(module_lists_row)
+        module_lists_layout.setContentsMargins(0, 0, 0, 0)
+        module_lists_layout.setSpacing(10)
+
+        whitelist_column = QWidget()
+        whitelist_layout = QVBoxLayout(whitelist_column)
+        whitelist_layout.setContentsMargins(0, 0, 0, 0)
+        whitelist_layout.setSpacing(4)
+        whitelist_layout.addWidget(QLabel("Navigation Modules"))
         self.module_whitelist_list = QListWidget()
         self.module_whitelist_list.setSelectionMode(QListWidget.SelectionMode.MultiSelection)
         self.module_whitelist_list.itemSelectionChanged.connect(self._on_form_changed)
+        whitelist_layout.addWidget(self.module_whitelist_list)
+
+        persistent_column = QWidget()
+        persistent_layout = QVBoxLayout(persistent_column)
+        persistent_layout.setContentsMargins(0, 0, 0, 0)
+        persistent_layout.setSpacing(4)
+        persistent_layout.addWidget(QLabel("Persistent Modules"))
         self.persistent_modules_list = QListWidget()
         self.persistent_modules_list.setSelectionMode(QListWidget.SelectionMode.MultiSelection)
         self.persistent_modules_list.itemSelectionChanged.connect(self._on_form_changed)
-        module_lists_row.addWidget(self.module_whitelist_list)
-        module_lists_row.addWidget(self.persistent_modules_list)
+        persistent_layout.addWidget(self.persistent_modules_list)
+
+        module_lists_layout.addWidget(whitelist_column)
+        module_lists_layout.addWidget(persistent_column)
         editable_layout.addRow(QLabel("Module Lists"), module_lists_row)
 
         content_layout.addWidget(self.editable_group)
@@ -234,7 +253,7 @@ class SettingsManagerQtView(QMainWindow):
         self.downtime_group = QGroupBox("Downtime Codes")
         downtime_layout = QVBoxLayout(self.downtime_group)
         downtime_hint = QLabel(
-            "Edit numeric downtime codes inline. Imports and exports use these code numbers."
+            "Edit downtime codes inline. Codes may be numeric or alphanumeric. Imports and exports use these code identifiers."
         )
         downtime_hint.setWordWrap(True)
         downtime_layout.addWidget(downtime_hint)
@@ -895,12 +914,15 @@ class SettingsManagerQtView(QMainWindow):
         if self.developer_unlock_button is not None:
             self.developer_unlock_button.setText("Re-authenticate Developer Tools" if can_manage_developer else "Unlock Developer Tools")
 
-    def get_developer_admin_settings_values(self):
-        runtime_overrides = {
+    def get_runtime_path_overrides(self):
+        return {
             key: widget.text().strip()
             for key, widget in self.developer_runtime_override_inputs.items()
             if widget is not None
         }
+
+    def get_developer_admin_settings_values(self):
+        runtime_overrides = self.get_runtime_path_overrides()
         return {
             "update_repository_url": self.developer_repository_input.text().strip(),
             "enable_advanced_dev_updates": bool(self.developer_advanced_checkbox.isChecked()),
