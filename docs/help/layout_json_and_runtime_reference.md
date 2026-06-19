@@ -129,10 +129,10 @@ Recognized optional row-field keys:
 
 Recognized widget values:
 
-- `entry`
-- `display`
-- `checkbutton`
-- `combobox`
+- `entry`: Editable text input cell.
+- `display`: Read-only text cell, strictly enforced to be non-editable by the user.
+- `checkbutton`: Native interactive checkbox.
+- `combobox`: Dropdown selection box.
 
 Recognized historical/core production row field ids:
 

@@ -28,6 +28,7 @@ Large multi-pane workflows are flattened into inner tabs so editing surfaces do 
 - If you choose `Yes`, Layout Manager asks the host shell to open `Form Calculations` so you can configure formulas and display targets for the newly-required sections.
 - If you choose `No`, Save still completes normally and you can open Form Calculations later from navigation.
 - Save now accepts only valid full-layout JSON. If the JSON is malformed, Save fails with a syntax error instead of extracting partial sections.
+- **Save Normalization and Robustness**: When saving, Layout Manager cleans up and normalizes the layout file, converting string-based booleans (like `"true"`/`"false"`) to native JSON booleans, resolving mutually-exclusive field settings (like `user_input` and `derived`), and preserving clean formatting. This ensures changes made externally or internally are fully persisted and not reverted when reloading.
 - When Save succeeds from the JSON Editor and no visible Block View / Import / Export / Section Editor changes alter the layout, the file is written from the current editor text instead of being rebuilt from hidden defaults.
 - When Save detects visible Block View, Import / Export, or Section Editor edits that have not been manually applied yet, those edits are now auto-applied before the file is written.
 - Reloading or activating a form now opens the JSON Editor with the saved file text for that form instead of a regenerated JSON dump.
@@ -130,6 +131,11 @@ Block View row field editing now supports the extended row-field properties used
 - options_source
 - bootstyle
 - values (for combobox fields)
+
+### Row Field Rules & Widget Rendering
+
+- **Preventing Conflicting Field Settings**: To prevent contradictory configurations (like a field that is both user-entered and calculated), `user_input` and `derived` are mutually exclusive. In both the Block View and the raw JSON Editor, if `user_input` is toggled or set to `true`, `derived` will automatically toggle to `false`. Conversely, if `derived` is set to `true`, `user_input` automatically switches to `false`.
+- **Checkbutton Rendering**: Field definitions using the `checkbutton` widget type render as native, clickable checkboxes in the Form Loader.
 
 Block View apply behavior:
 

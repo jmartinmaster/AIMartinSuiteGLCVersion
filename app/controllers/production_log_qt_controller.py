@@ -22,7 +22,7 @@ from app.models.production_log_model import BALANCE_DOWNTIME_CAUSE, ProductionLo
 from app.views.production_log_qt_view import ProductionLogQtView
 
 __module_name__ = "Form Loader Qt Controller"
-__version__ = "1.3.1"
+__version__ = "1.3.2"
 
 
 class ProductionLogQtController:
@@ -754,26 +754,41 @@ class ProductionLogQtController:
             part_number = self._row_value_by_role(row_payload, "production", "part_number", fallback_id="part_number")
             molds_value = self._row_value_by_role(row_payload, "production", "mold_count", fallback_id="molds")
 
+            # Determine if rate override checkbox is enabled/checked
+            override_val = self._row_value_by_role(row_payload, "production", "rate_override_toggle", fallback_id="rate_override_enabled")
+            override_enabled = str(override_val).strip().lower() in ("true", "1", "yes", "on")
+
             rate_value = self._row_value_by_role(row_payload, "production", "rate_value", fallback_id="rate_lookup")
             try:
                 rate = float(str(rate_value).strip()) if str(rate_value).strip() else None
             except Exception:
                 rate = None
 
-            if rate is None:
-                rate = self.model.resolve_lookup_rate(part_number, rates_data, goal_value)
+            # Look up rate if override is disabled OR if override is enabled but no custom rate has been entered
+            if not override_enabled or rate is None:
+                lookup_rate = self.model.resolve_lookup_rate(part_number, rates_data, goal_value)
+                if not override_enabled:
+                    # Force overwrite to the lookup rate
+                    rate = lookup_rate
+                else:
+                    # Override is enabled, but rate is None, so default to lookup_rate
+                    if rate is None:
+                        rate = lookup_rate
+
                 rate_field_id = self.model.get_section_field_id_by_role(
                     "production",
                     "rate_value",
                     config=self.layout_config,
                     fallback_id="rate_lookup",
                 )
-                self.view.set_table_field_value(
-                    "production",
-                    row_index,
-                    rate_field_id,
-                    self.model.format_rate_value(rate) if rate is not None else "",
-                )
+                formatted_lookup = self.model.format_rate_value(rate) if rate is not None else ""
+                if str(rate_value).strip() != formatted_lookup:
+                    self.view.set_table_field_value(
+                        "production",
+                        row_index,
+                        rate_field_id,
+                        formatted_lookup,
+                    )
 
             minutes = self.model.calculate_production_minutes(molds_value, rate)
             production_total_minutes += minutes

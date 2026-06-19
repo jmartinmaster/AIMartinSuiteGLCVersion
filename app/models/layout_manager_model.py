@@ -31,7 +31,7 @@ from app.production_log_roles import PROTECTED_ROW_ROLES, REQUIRED_MAPPING_ROLES
 from app.utils import external_path, local_or_resource_path
 
 __module_name__ = "Layout Manager"
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 
 VALID_IMPORT_TRANSFORMS = ("value", "code_lookup", "stop_from_duration")
 VALID_EXPORT_TRANSFORMS = ("value", "code_number", "duration_minutes", "bool_int", "minutes_label")
@@ -618,6 +618,15 @@ class LayoutManagerModel:
             normalized_field.pop("options_source", None)
             normalized_field.pop("values", None)
 
+        readonly_enabled = self._normalize_bool_value(normalized_field.get("readonly"), default=False)
+        if field_id == "cast_date":
+            normalized_field["readonly"] = True
+            normalized_field.pop("default", None)
+        elif readonly_enabled:
+            normalized_field["readonly"] = True
+        else:
+            normalized_field.pop("readonly", None)
+
         return normalized_field
 
     def _normalize_header_fields(self, header_fields):
@@ -649,6 +658,18 @@ class LayoutManagerModel:
         else:
             normalized_field.pop("values", None)
         normalized_field.pop("_original_id", None)
+
+        for key in ("readonly", "derived", "math_trigger", "open_row_trigger", "user_input", "expand", "bold"):
+            if key in normalized_field:
+                val = self._normalize_bool_value(normalized_field.get(key), default=False)
+                if val:
+                    normalized_field[key] = True
+                else:
+                    normalized_field.pop(key, None)
+
+        if normalized_field.get("user_input"):
+            normalized_field.pop("derived", None)
+
         return normalized_field
 
     def _normalize_row_fields(self, row_fields, section_name):
@@ -1994,11 +2015,16 @@ class LayoutManagerModel:
         else:
             target_field.pop("role", None)
 
+        user_input_val = self._normalize_bool_value(field_values.get("user_input"), default=False)
+        derived_val = self._normalize_bool_value(field_values.get("derived"), default=False)
+        if user_input_val:
+            derived_val = False
+
         self._set_bool_field(target_field, "readonly", field_values.get("readonly"), default=False)
-        self._set_bool_field(target_field, "derived", field_values.get("derived"), default=False)
+        self._set_bool_field(target_field, "derived", derived_val, default=False)
         self._set_bool_field(target_field, "math_trigger", field_values.get("math_trigger"), default=False)
         self._set_bool_field(target_field, "open_row_trigger", field_values.get("open_row_trigger"), default=False)
-        self._set_bool_field(target_field, "user_input", field_values.get("user_input"), default=False)
+        self._set_bool_field(target_field, "user_input", user_input_val, default=False)
         self._set_bool_field(target_field, "expand", field_values.get("expand"), default=False)
         self._set_bool_field(target_field, "bold", field_values.get("bold"), default=False)
 

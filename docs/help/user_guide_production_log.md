@@ -47,7 +47,10 @@ Those lists describe the current shipped form, not the full future design envelo
 - The header also includes Total Molds, which updates from the current production rows and is saved with the draft header data for workbook export.
 - Optional workbook-linked header fields can also display imported summary cells such as bond, percentages, and selected top-part values when they are configured in the layout.
 - Production rows capture shop order, part number, the active rate, a per-line override toggle for temporary corrections, and mold count.
-- Form Loader automatically keeps one blank production row and one blank downtime row open while you type so you do not need separate add-row buttons during normal entry.
+  - **Dynamic Rate Lookup**: When you type or correct a part number, the app automatically checks the rates database (`rates.json`) and updates the `Rate` column.
+  - **Rate Overrides**: The `Rate` column is normally read-only to prevent accidental edits. If you need to set a custom rate, check the native `Override` checkbox in that row. This unlocks the `Rate` cell. Unchecking `Override` will lock the cell again and restore the standard lookup rate.
+  - **Checkbutton Widgets**: Widgets defined as `checkbutton` (like `Override`) render as native checkboxes. You can toggle them by clicking or pressing the Spacebar when focused.
+- **Clean Table Growth (Open-Row Behavior)**: Form Loader keeps exactly one blank row at the bottom of repeating tables so you can enter data continuously. A new blank row is only appended when you enter actual content in a user-input field (such as `Shop Order`, `Part Number`, `Molds`, `Start`, or `Stop`). Pre-filled defaults, calculated/derived cells (such as minutes), and read-only cells will not trigger row growth.
 - The footer shows a derived Ghost Time value based on the difference between shift time and the combined production-plus-downtime total.
 - Ghost Time shows missing time in red and extra time in green.
 - Ghost Time is an internal balancing aid in the app and is not expected to exist in imported or exported production logs.

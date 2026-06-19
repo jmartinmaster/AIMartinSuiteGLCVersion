@@ -32,7 +32,7 @@ from app.utils import external_data_path
 
 
 __module_name__ = "Settings Manager"
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 
 PATH_OVERRIDE_DEFINITIONS = (
     {

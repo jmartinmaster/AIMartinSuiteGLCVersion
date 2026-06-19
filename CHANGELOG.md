@@ -4,14 +4,26 @@ This changelog tracks the main branch release line for Production Logging Center
 
 Version headings below are aligned to the current `2.x` release line used by Dispatcher Core. Earlier work has been grouped into practical release milestones so the shipped feature history is easier to follow without rewriting older module version markers.
 
-## [Unreleased] - 2026-06-18
+## [2.2.7] - 2026-06-19
 
 ### Changed
 
+- Audited and updated Help Center documentation files (`user_guide_production_log.md`, `user_guide_layout_manager.md`, `layout_config.md`, `layout_json_and_runtime_reference.md`, `rates_json.md`) to align with current features.
+- Fixed Layout Manager save-bypass bug where normalized in-memory configuration comparisons would bypass saving edits to disk.
+- Added support for `checkbutton` widget type in repeating rows of Form Loader, rendering it as a native checkbox widget.
+- Added readonly enforcement for `display` widget types in repeating rows.
+- Implemented dynamic rate-clearing on part number change to automatically trigger recalculation and fresh rate lookups.
+- Added override toggling behavior to make the rate cell editable only when the rate override checkbutton is checked.
+- Wrapped table item change events in signal blocking to prevent infinite recursion loop bugs.
+- Fixed open-row growth logic to check actual widget values and ignore readonly, derived, display, and checkbox/textbox default values, ensuring blank row insertion only occurs on new content.
 - Added Browse buttons to each Deferred Runtime Path Override field in Settings Manager Developer Tools, allowing users to select folders via the system directory picker instead of typing paths manually.
 - Added `browse_runtime_path(override_key)` to `SettingsManagerQtController` following the established `browse_export_dir` delegation pattern.
 - Added `ask_for_runtime_path_directory(override_key)` and `set_runtime_path_override(override_key, path)` view helpers to `SettingsManagerQtView` for controller-delegated directory browsing.
-- Validation: `py_compile` passed on both `settings_manager_qt_view.py` and `settings_manager_qt_controller.py`.
+- Incremented individual module version numbers for all files modified in the last 24 hours.
+
+### Fixed
+
+- Resolved infinite loop recursion when changing QTableWidget item flags and values.
 
 ## [2.2.4] - 2026-06-12
 

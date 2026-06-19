@@ -17,7 +17,7 @@ from app.downtime_codes import get_code_options
 from app.theme_manager import get_qt_palette, get_qt_stylesheet
 
 __module_name__ = "Form Loader Qt View"
-__version__ = "1.3.7"
+__version__ = "1.3.8"
 
 from PyQt6.QtCore import QTimer, Qt
 from PyQt6.QtWidgets import (
@@ -634,23 +634,80 @@ class ProductionLogQtView(QMainWindow):
                 continue
             try:
                 table.itemChanged.connect(
-                    lambda _item, current_table=table, current_fields=field_configs: self._handle_table_item_changed(
+                    lambda item, current_table=table, current_fields=field_configs: self._handle_table_item_changed(
                         current_table,
                         current_fields,
+                        item,
                     )
                 )
             except Exception:
                 continue
 
-    def _handle_production_item_changed(self, _item):
-        self._handle_table_item_changed(self.production_table, self.production_fields)
+    def _handle_production_item_changed(self, item):
+        self._handle_table_item_changed(self.production_table, self.production_fields, item)
 
-    def _handle_downtime_item_changed(self, _item):
-        self._handle_table_item_changed(self.downtime_table, self.downtime_fields)
+    def _handle_downtime_item_changed(self, item):
+        self._handle_table_item_changed(self.downtime_table, self.downtime_fields, item)
 
-    def _handle_table_item_changed(self, table, field_configs):
-        self._ensure_open_row(table, field_configs)
-        self._refresh_row_action_buttons(table, field_configs)
+    def _handle_table_item_changed(self, table, field_configs, item=None):
+        table.blockSignals(True)
+        try:
+            if item is not None:
+                column_index = item.column()
+                row_index = item.row()
+                field_offset = self._field_column_offset()
+                field_config_index = column_index - field_offset
+                if 0 <= field_config_index < len(field_configs):
+                    changed_field = field_configs[field_config_index]
+                    changed_field_role = changed_field.get("role")
+                    changed_field_id = changed_field.get("id")
+
+                    # Check if part_number changed
+                    if changed_field_role == "part_number" or changed_field_id == "part_number":
+                        rate_col = None
+                        for col_idx, f in enumerate(field_configs, start=field_offset):
+                            if f.get("role") == "rate_value" or f.get("id") == "rate_lookup":
+                                rate_col = col_idx
+                                break
+                        if rate_col is not None:
+                            rate_item = table.item(row_index, rate_col)
+                            if rate_item is None:
+                                rate_item = QTableWidgetItem("")
+                                table.setItem(row_index, rate_col, rate_item)
+                            rate_item.setText("")
+
+            # Dynamically manage editability of rate cells based on override checkbox state
+            rate_col = None
+            override_col = None
+            field_offset = self._field_column_offset()
+            for col_idx, f in enumerate(field_configs, start=field_offset):
+                if f.get("role") == "rate_value" or f.get("id") == "rate_lookup":
+                    rate_col = col_idx
+                elif f.get("role") == "rate_override_toggle" or f.get("id") == "rate_override_enabled":
+                    override_col = col_idx
+
+            if rate_col is not None and override_col is not None:
+                for r in range(table.rowCount()):
+                    override_item = table.item(r, override_col)
+                    rate_item = table.item(r, rate_col)
+                    if override_item is not None and rate_item is not None:
+                        is_override = override_item.checkState() == Qt.CheckState.Checked
+                        rate_field = field_configs[rate_col - field_offset]
+                        is_originally_readonly = bool(rate_field.get("readonly")) or bool(rate_field.get("derived")) or rate_field.get("widget") == "display"
+
+                        current_flags = rate_item.flags()
+                        if is_override:
+                            rate_item.setFlags(current_flags | Qt.ItemFlag.ItemIsEditable)
+                        else:
+                            if is_originally_readonly:
+                                rate_item.setFlags(current_flags & ~Qt.ItemFlag.ItemIsEditable)
+                            else:
+                                rate_item.setFlags(current_flags | Qt.ItemFlag.ItemIsEditable)
+
+            self._ensure_open_row(table, field_configs)
+            self._refresh_row_action_buttons(table, field_configs)
+        finally:
+            table.blockSignals(False)
         self._queue_live_recalculate()
 
     def _queue_live_recalculate(self, *_args):
@@ -680,10 +737,25 @@ class ProductionLogQtView(QMainWindow):
         return self._field_column_offset()
 
     def _field_counts_as_user_content(self, field):
-        if bool(field.get("derived")):
+        if bool(field.get("derived")) or bool(field.get("readonly")):
             return False
-        # Only fields explicitly marked for user entry/open-row behavior should drive row growth.
+        widget_name = str(field.get("widget") or "").strip().lower()
+        if widget_name == "display":
+            return False
         return bool(field.get("open_row_trigger")) or bool(field.get("user_input"))
+
+    def _get_cell_value(self, table, row_index, column_index, field):
+        cell_widget = table.cellWidget(row_index, column_index)
+        if isinstance(cell_widget, QComboBox):
+            return str(cell_widget.currentText()).strip()
+        widget_name = str(field.get("widget") or "").strip().lower()
+        if widget_name == "checkbutton":
+            item = table.item(row_index, column_index)
+            if item is not None:
+                return "True" if item.checkState() == Qt.CheckState.Checked else "False"
+            return "False"
+        item = table.item(row_index, column_index)
+        return str(item.text()).strip() if item is not None else ""
 
     def _row_has_content(self, table, field_configs, row_index):
         if table is None:
@@ -691,8 +763,11 @@ class ProductionLogQtView(QMainWindow):
         for column_index, field in enumerate(field_configs, start=self._field_column_offset()):
             if not self._field_counts_as_user_content(field):
                 continue
-            item = table.item(row_index, column_index)
-            if item is not None and str(item.text() or "").strip():
+            val = self._get_cell_value(table, row_index, column_index, field)
+            default_val = str(field.get("default") or "").strip()
+            if str(field.get("widget") or "").strip().lower() == "checkbutton" and val == "False":
+                continue
+            if val and val != default_val:
                 return True
         return False
 
@@ -822,6 +897,12 @@ class ProductionLogQtView(QMainWindow):
                     options.append(value_text)
         return options
 
+    def _parse_bool(self, value):
+        if isinstance(value, bool):
+            return value
+        s = str(value or "").strip().lower()
+        return s in ("1", "true", "yes", "on", "checked")
+
     def _append_row(self, table, field_configs, row_data=None):
         if table is None:
             return
@@ -832,7 +913,7 @@ class ProductionLogQtView(QMainWindow):
             field_id = str(field.get("id") or "").strip()
             item_value = str(row_data.get(field_id, field.get("default") or ""))
             widget_name = str(field.get("widget") or "entry").strip().lower()
-            is_readonly = bool(field.get("readonly")) or bool(field.get("derived"))
+            is_readonly = bool(field.get("readonly")) or bool(field.get("derived")) or widget_name == "display"
             if widget_name == "combobox" and not is_readonly:
                 combo = QComboBox(table)
                 combo.addItems(self._row_field_options(field))
@@ -847,6 +928,17 @@ class ProductionLogQtView(QMainWindow):
                 backing_item = QTableWidgetItem(item_value)
                 backing_item.setFlags(backing_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 table.setItem(row_index, column_index, backing_item)
+                continue
+            if widget_name == "checkbutton":
+                table_item = QTableWidgetItem()
+                if not is_readonly:
+                    table_item.setFlags(table_item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+                else:
+                    table_item.setFlags(table_item.flags() & ~Qt.ItemFlag.ItemIsUserCheckable)
+                table_item.setFlags(table_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                is_checked = self._parse_bool(item_value)
+                table_item.setCheckState(Qt.CheckState.Checked if is_checked else Qt.CheckState.Unchecked)
+                table.setItem(row_index, column_index, table_item)
                 continue
             table_item = QTableWidgetItem(item_value)
             if is_readonly:
@@ -864,7 +956,8 @@ class ProductionLogQtView(QMainWindow):
     def set_table_field_value(self, section_name, row_index, field_id, value):
         normalized_section_name = str(section_name or "").strip().lower()
         table = self._get_section_table(normalized_section_name)
-        field_map = self._field_index_map(self._get_section_field_configs(normalized_section_name))
+        field_configs = self._get_section_field_configs(normalized_section_name)
+        field_map = self._field_index_map(field_configs)
         if table is None:
             return
         column_index = field_map.get(str(field_id or "").strip())
@@ -876,8 +969,17 @@ class ProductionLogQtView(QMainWindow):
         if item is None:
             item = QTableWidgetItem("")
             table.setItem(row_index, column_index, item)
+
+        field = next((f for f in field_configs if str(f.get("id") or "").strip() == str(field_id).strip()), None)
+        is_checkbutton = field is not None and str(field.get("widget") or "").strip().lower() == "checkbutton"
+
         table.blockSignals(True)
-        item.setText(str(value or ""))
+        if is_checkbutton:
+            is_checked = self._parse_bool(value)
+            item.setCheckState(Qt.CheckState.Checked if is_checked else Qt.CheckState.Unchecked)
+            item.setText("")
+        else:
+            item.setText(str(value or ""))
         table.blockSignals(False)
 
     def set_header_field_value(self, field_id, value):
@@ -917,6 +1019,13 @@ class ProductionLogQtView(QMainWindow):
                 cell_widget = table.cellWidget(row_index, column_index)
                 if isinstance(cell_widget, QComboBox):
                     value = str(cell_widget.currentText())
+                elif str(field.get("widget") or "").strip().lower() == "checkbutton":
+                    item = table.item(row_index, column_index)
+                    if item is not None:
+                        is_checked = item.checkState() == Qt.CheckState.Checked
+                        value = "True" if is_checked else "False"
+                    else:
+                        value = "False"
                 else:
                     item = table.item(row_index, column_index)
                     value = str(item.text()) if item is not None else ""

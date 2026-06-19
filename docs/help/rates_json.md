@@ -24,7 +24,7 @@ Example:
 - Form Loader looks up the entered part number in this file.
 - If a part number is found, its target rate is used to estimate row time.
 - If a part number is not found, Form Loader falls back to the current goal MPH.
-- The active row rate is shown in Form Loader, and each line can temporarily override that value without changing `rates.json`.
+- The active row rate is shown in Form Loader. If you need to temporarily override a rate, check the `Override` checkbox in that row to unlock the rate cell and enter a custom value. This custom value is saved with your log/draft and does not change the standard targets stored in `rates.json`.
 
 ## Good Practices
 

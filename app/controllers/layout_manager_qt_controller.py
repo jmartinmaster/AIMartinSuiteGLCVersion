@@ -24,7 +24,7 @@ from app.models.layout_manager_model import LayoutManagerModel
 from app.views.layout_manager_qt_view import LayoutManagerQtView
 
 __module_name__ = "Layout Manager Qt Controller"
-__version__ = "0.7.2"
+__version__ = "0.7.3"
 
 
 class LayoutManagerQtController:
@@ -363,7 +363,7 @@ class LayoutManagerQtController:
             editor_text,
             base_config=self.current_config,
         )
-        updated_config = parsed_config
+        updated_config = deepcopy(parsed_config)
 
         updated_config, _status_message = self.model.update_template_path(
             updated_config,
@@ -1185,9 +1185,9 @@ class LayoutManagerQtController:
 
     def load_default(self):
         def _execute():
-            config, source_path = self.model.load_default_config()
+            config, source_path, active_form_info = self.model.load_default_config()
             editor_text = self.model.load_default_text()
-            self.set_loaded_form_state(config, source_path, self.model.get_active_form_info())
+            self.set_loaded_form_state(config, source_path, active_form_info)
             self.refresh_forms()
             self.mark_dirty()
             self.refresh_view(reason="Loaded default layout template", editor_text_override=editor_text)
@@ -1203,7 +1203,11 @@ class LayoutManagerQtController:
                 editor_text = self.view.editor_text()
                 parsed_config, composed_config, payload_details = self._compose_save_config(editor_text)
                 serialized_config = self.model.serialize_config(composed_config)
-                save_text = editor_text if composed_config == parsed_config else serialized_config
+                try:
+                    raw_parsed = json.loads(editor_text)
+                except Exception:
+                    raw_parsed = None
+                save_text = editor_text if (composed_config == parsed_config and raw_parsed is not None and composed_config == raw_parsed) else serialized_config
                 self.current_config = composed_config
                 self.refresh_view(reason="Prepared layout for save", editor_text_override=save_text)
                 backup_info = self.model.save_config_text(save_text, config=composed_config, form_info=self.current_form_info)

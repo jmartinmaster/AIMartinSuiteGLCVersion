@@ -28,7 +28,7 @@ from app.utils import ensure_external_directory, external_path
 from app.data_handler_service import DEFAULT_SHIFT_TIME_SETTINGS, DataHandlerService
 
 __module_name__ = "Form Loader"
-__version__ = "1.2.9"
+__version__ = "1.2.10"
 
 BALANCE_DOWNTIME_CAUSE = "Time Balance Adjustment"
 DEFAULT_GHOST_LABEL = "Ghost Time: 0 min"
@@ -559,6 +559,14 @@ class ProductionLogModel:
                 normalized_field["role"] = role_name
             else:
                 normalized_field.pop("role", None)
+
+            if "readonly" in normalized_field:
+                readonly_val = self._coerce_bool(normalized_field.get("readonly"), default=False)
+                if readonly_val:
+                    normalized_field["readonly"] = True
+                else:
+                    normalized_field.pop("readonly", None)
+
             normalized_fields.append(normalized_field)
             seen_ids.add(field_id)
         return normalized_fields
@@ -581,6 +589,18 @@ class ProductionLogModel:
                 merged_field["role"] = role_name
             else:
                 merged_field.pop("role", None)
+
+            for key in ("readonly", "derived", "math_trigger", "open_row_trigger", "user_input", "expand", "bold"):
+                if key in merged_field:
+                    val = self._coerce_bool(merged_field.get(key), default=False)
+                    if val:
+                        merged_field[key] = True
+                    else:
+                        merged_field.pop(key, None)
+
+            if merged_field.get("user_input"):
+                merged_field.pop("derived", None)
+
             merged_fields.append(merged_field)
             seen_ids.add(field_id)
 

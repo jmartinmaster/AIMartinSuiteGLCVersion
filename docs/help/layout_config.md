@@ -230,16 +230,16 @@ Required keys per row field:
 
 - `id`: internal field name used by the UI and persistence layer
 - `label`: visible label or column heading
-- `widget`: one of `entry`, `display`, `checkbutton`, or `combobox`
+- `widget`: one of `entry` (text input), `display` (read-only label), `checkbutton` (native checkbox), or `combobox` (dropdown selection).
 
 Optional keys:
 
 - `width`: display width for the widget
 - `readonly`: marks the field as non-editable in the form
 - `default`: default value applied when a row is created
-- `derived`: marks a field that is calculated or populated from other values
+- `derived`: marks a field that is calculated or populated from other values (mutually exclusive with `user_input` to avoid contradictions).
 - `open_row_trigger`: if `true`, entering a value here can trigger creation of the next blank row
-- `user_input`: marks fields expected to be entered by the operator
+- `user_input`: marks fields expected to be entered by the operator (mutually exclusive with `derived` to avoid contradictions).
 - `state`: widget state override, typically used with comboboxes
 - `options_source`: named option list source for widgets such as downtime code comboboxes
 - `expand`: allows the widget to stretch with the row layout

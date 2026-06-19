@@ -57,7 +57,7 @@ from app.models.security_model import (
 from app.utils import ensure_external_data_directory, external_data_path
 
 __module_name__ = "Security Blanket"
-__version__ = "2.2.3"
+__version__ = "2.2.4"
 
 PASSWORD_SPECIAL_CHARACTERS = "!@#$%^&*()."
 MIN_PASSWORD_LENGTH = 8

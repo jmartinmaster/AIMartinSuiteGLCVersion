@@ -4,7 +4,7 @@ Status: Active implementation status and remaining decisions.
 
 This note tracks current delivery status for the multi-user security migration. It remains separate from the completed PyQt6 host migration plan and should be used as security-feature planning and implementation guidance.
 
-## Current `2.2.3` Status
+## Current `2.2.7` Status
 
 ### Completed in code
 
