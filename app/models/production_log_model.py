@@ -28,7 +28,7 @@ from app.utils import ensure_external_directory, external_path
 from app.data_handler_service import DEFAULT_SHIFT_TIME_SETTINGS, DEFAULT_PRODUCTION_ROW_FIELDS, DEFAULT_DOWNTIME_ROW_FIELDS, DataHandlerService
 
 __module_name__ = "Form Loader"
-__version__ = "1.2.10"
+__version__ = "1.2.11"
 
 BALANCE_DOWNTIME_CAUSE = "Time Balance Adjustment"
 DEFAULT_GHOST_LABEL = "Ghost Time: 0 min"

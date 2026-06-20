@@ -17,6 +17,9 @@ from pathlib import Path
 
 from symbol_index import DEFAULT_OUTPUT_DIR as SYMBOL_INDEX_OUTPUT_DIR, JSON_OUTPUT_NAME as SYMBOL_INDEX_JSON_NAME, SymbolIndexError, generate_symbol_index
 
+__module_name__ = "Project Librarian"
+__version__ = "1.1.0"
+
 #
 #Librarian server launch command: python project_librarian.py mcp-server --transport streamable-http --host 127.0.0.1 --port 8765
 #
@@ -1930,6 +1933,15 @@ def _render_dashboard_html(auth_enabled=False, bootstrap_payload=None):
             border: none;
             font-weight: 700;
         }
+        button.danger {
+            background: #b91c1c;
+            color: #ffffff;
+            border: none;
+            font-weight: 700;
+        }
+        button.danger:hover {
+            background: #dc2626;
+        }
         button.ghost {
             background: transparent;
         }
@@ -2204,6 +2216,43 @@ def _render_dashboard_html(auth_enabled=False, bootstrap_payload=None):
         @media (max-width: 860px) {
             .split-wide { grid-template-columns: 1fr; }
         }
+        .inspect-symbol {
+            padding: 0;
+            border: none;
+            background: none;
+            color: var(--text-main);
+            text-align: left;
+            font-family: Consolas, Monaco, 'Andale Mono', 'Ubuntu Mono', monospace;
+            cursor: pointer;
+            transition: color 0.15s;
+        }
+        .inspect-symbol:hover {
+            color: var(--accent-strong);
+            text-decoration: underline;
+        }
+        .toggle-file-header:hover {
+            background: rgba(30, 58, 80, 0.3) !important;
+        }
+        .toggle-file-header {
+            padding: 4px;
+            border-radius: 8px;
+            transition: background 0.15s;
+        }
+        .toggle-class-header:hover {
+            background: rgba(30, 58, 80, 0.2);
+        }
+        .toggle-class-header {
+            padding: 2px 4px;
+            border-radius: 6px;
+            transition: background 0.15s;
+        }
+        .file-toggle-icon, .class-toggle-icon {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            user-select: none;
+            display: inline-block;
+            transition: transform 0.15s;
+        }
     </style>
 </head>
 <body>
@@ -2220,6 +2269,7 @@ def _render_dashboard_html(auth_enabled=False, bootstrap_payload=None):
                 <a href='/mcp'>MCP Endpoint</a>
                 <a href='/api/status'>Status JSON</a>
                 <button class='primary' id='refresh-button' type='button'>Refresh Cache</button>
+                <button class='danger' id='terminate-button' type='button'>Terminate Server</button>
                 __LOGOUT_BUTTON__
             </div>
         </section>
@@ -2233,6 +2283,8 @@ def _render_dashboard_html(auth_enabled=False, bootstrap_payload=None):
             <button class='tab-btn' data-tab='draft-center' role='tab' type='button'>Draft Center</button>
             <button class='tab-btn' data-tab='excel-library' role='tab' type='button'>Excel Library</button>
             <button class='tab-btn' data-tab='git-controls' role='tab' type='button'>Git Controls</button>
+            <button class='tab-btn' data-tab='index-browser' role='tab' type='button'>Index Browser</button>
+            <button class='tab-btn' data-tab='task-board' role='tab' type='button'>Task Board</button>
         </nav>
 
         <div class='tab-pane active' id='tab-librarian'>
@@ -2460,6 +2512,123 @@ def _render_dashboard_html(auth_enabled=False, bootstrap_payload=None):
         </section>
         </div>
 
+        <div class='tab-pane' id='tab-index-browser'>
+        <div class='layout'>
+            <div>
+                <section class='panel'>
+                    <div class='inline' style='justify-content: space-between;'>
+                        <h2 style='margin: 0;'>Python Symbol Index</h2>
+                        <button class='ghost' id='index-rescan' type='button'>Rescan Index</button>
+                    </div>
+                    <div class='message' id='index-message'></div>
+                    <div class='controls' style='grid-template-columns: 2fr 1fr 1fr; margin-top: 12px; gap: 10px; align-items: end;'>
+                        <div>
+                            <label class='label' for='index-search'>Search Files/Symbols</label>
+                            <input id='index-search' type='text' placeholder='Search by name, docstring, or path...'>
+                        </div>
+                        <div>
+                            <label class='label' for='index-filter-area'>Area</label>
+                            <select id='index-filter-area'></select>
+                        </div>
+                        <div>
+                            <label class='label' for='index-filter-kind'>Kind</label>
+                            <select id='index-filter-kind'>
+                                <option value='all'>All Kinds</option>
+                                <option value='class'>Classes</option>
+                                <option value='function'>Functions</option>
+                                <option value='method'>Methods</option>
+                                <option value='variable'>Variables &amp; Attributes</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class='inline' style='margin-top: 14px;'>
+                        <span class='label' style='margin-bottom: 0;'>Quick Stats:</span>
+                        <span id='index-stats-summary' class='muted' style='font-size: 0.9rem;'>Loading...</span>
+                    </div>
+                </section>
+
+                <section class='panel' style='max-height: 60vh; overflow-y: auto;'>
+                    <h2>Indexed Files &amp; Symbols</h2>
+                    <div id='index-tree' style='display: flex; flex-direction: column; gap: 10px;'>
+                        <p class='muted'>Loading symbol index...</p>
+                    </div>
+                </section>
+
+                <section class='panel'>
+                    <div class='inline' style='justify-content: space-between;'>
+                        <h2 style='margin: 0;'>Source Code Excerpt</h2>
+                        <span class='muted' id='index-excerpt-path'></span>
+                    </div>
+                    <pre class='preview' id='index-file-excerpt'>Select a symbol to inspect its source code excerpt here.</pre>
+                </section>
+            </div>
+            <div>
+                <section class='panel'>
+                    <h2>Symbol Details</h2>
+                    <div id='selected-symbol-details'>
+                        <p class='muted'>Select a class, function, method, or variable to inspect its metadata and load its excerpt below.</p>
+                    </div>
+                </section>
+            </div>
+        </div>
+        </div>
+
+        <div class='tab-pane' id='tab-task-board'>
+        <div class='layout'>
+            <div>
+                <section class='panel'>
+                    <div class='inline' style='justify-content: space-between;'>
+                        <h2 style='margin: 0;'>Interactive Task Board</h2>
+                        <button class='ghost' id='tasks-refresh' type='button'>Refresh</button>
+                    </div>
+                    
+                    <div class='controls' style='grid-template-columns: 2fr 1.2fr; margin-top: 14px; gap: 10px; align-items: end;'>
+                        <div>
+                            <label class='label' for='tasks-list-select'>Select Task List File</label>
+                            <select id='tasks-list-select'></select>
+                        </div>
+                        <div>
+                            <label class='label'>Create New List</label>
+                            <div style='display: flex; gap: 6px;'>
+                                <input id='tasks-new-list-name' placeholder='new-list.md' style='padding: 10px; border-radius: 12px; font-size: 0.9rem;'>
+                                <button class='primary' id='tasks-create-list-btn' type='button' style='padding: 10px 14px; font-size: 0.9rem;'>Create</button>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class='controls' style='grid-template-columns: 1fr; margin-top: 12px;'>
+                        <div>
+                            <label class='label'>Add Task to Selected List</label>
+                            <div style='display: flex; gap: 8px;'>
+                                <input id='tasks-new-item-text' placeholder='Add a new task item to this list (e.g. Write unit tests)...'>
+                                <button class='primary' id='tasks-add-item-btn' type='button' style='white-space: nowrap;'>Add Task</button>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class='message' id='tasks-message'></div>
+                </section>
+                
+                <div id='tasks-container' style='display: flex; flex-direction: column; gap: 16px;'>
+                    <p class='muted'>Loading checklists from workspace...</p>
+                </div>
+            </div>
+            <div>
+                <section class='panel'>
+                    <h2>Task Legend &amp; Help</h2>
+                    <p>Tasks are automatically extracted from markdown files in your project root and subdirectories. They are grouped by file path.</p>
+                    <p style="margin-top: 10px;"><strong>Status Levels:</strong></p>
+                    <ul class='list'>
+                        <li><span style="color: var(--accent-strong); font-weight: bold; font-size: 1.1rem; margin-right: 6px;">[ ]</span> <strong>Todo:</strong> Unstarted item. Toggles to In Progress.</li>
+                        <li><span style="color: var(--warn); font-weight: bold; font-size: 1.1rem; margin-right: 6px;">[/]</span> <strong>In Progress:</strong> Currently active task. Toggles to Completed.</li>
+                        <li><span style="color: var(--accent); font-weight: bold; font-size: 1.1rem; margin-right: 6px;">[x]</span> <strong>Completed:</strong> Successfully done. Toggles back to Todo.</li>
+                    </ul>
+                    <p style="margin-top: 10px; font-size: 0.85rem;" class="muted">Note: Checking off or adding tasks modifies the markdown file directly in your local repository. The changes are saved automatically.</p>
+                </section>
+            </div>
+        </div>
+        </div>
+
     </div>
 
     <script id='initial-state' type='application/json'>__INITIAL_STATE__</script>
@@ -2469,6 +2638,7 @@ def _render_dashboard_html(auth_enabled=False, bootstrap_payload=None):
             lastSearch: null,
             lastPath: '',
             lastQueryForExcerpt: '',
+            selectedTaskListPath: '',
         };
 
         const byId = (id) => document.getElementById(id);
@@ -2643,7 +2813,7 @@ def _render_dashboard_html(auth_enabled=False, bootstrap_payload=None):
             setMessage(searchMessageEl, `${payload.count || 0} result(s) loaded.`);
         }
 
-        async function loadExcerpt(pathValue, query = '') {
+        async function loadExcerpt(pathValue, query = '', line = '', isIndexTab = false, fullCode = false) {
             if (!pathValue) {
                 return;
             }
@@ -2651,11 +2821,31 @@ def _render_dashboard_html(auth_enabled=False, bootstrap_payload=None):
             if (query) {
                 params.set('query', query);
             }
+            if (line) {
+                params.set('line', line);
+                if (fullCode) {
+                    params.set('full_code', 'true');
+                } else {
+                    params.set('context', '15');
+                }
+            } else if (fullCode) {
+                params.set('full_code', 'true');
+            }
             const payload = await fetchJson(`/api/file?${params.toString()}`);
             state.lastPath = pathValue;
             state.lastQueryForExcerpt = query;
-            excerptPathEl.textContent = pathValue;
-            excerptEl.textContent = payload.excerpt || '';
+            state.lastLineForExcerpt = line;
+            state.lastFullCodeForExcerpt = fullCode;
+
+            const pathEl = isIndexTab ? byId('index-excerpt-path') : excerptPathEl;
+            const contentEl = isIndexTab ? byId('index-file-excerpt') : excerptEl;
+
+            if (pathEl) {
+                pathEl.textContent = line ? `${pathValue} : Line ${line}` : pathValue;
+            }
+            if (contentEl) {
+                contentEl.textContent = payload.excerpt || '';
+            }
         }
 
         async function refreshWorkspace() {
@@ -2665,7 +2855,9 @@ def _render_dashboard_html(auth_enabled=False, bootstrap_payload=None):
                 await runSearch();
             }
             if (state.lastPath) {
-                await loadExcerpt(state.lastPath, state.lastQueryForExcerpt);
+                const activeTab = document.querySelector('.tab-btn.active')?.dataset.tab;
+                const isIndex = activeTab === 'index-browser';
+                await loadExcerpt(state.lastPath, state.lastQueryForExcerpt, state.lastLineForExcerpt || '', isIndex, state.lastFullCodeForExcerpt || false);
             }
         }
 
@@ -2920,6 +3112,14 @@ def _render_dashboard_html(auth_enabled=False, bootstrap_payload=None):
                 return `<option value="${escapeHtml(area)}">${escapeHtml(label)}</option>`;
             }).join('');
 
+            const indexAreaSelect = byId('index-filter-area');
+            if (indexAreaSelect) {
+                indexAreaSelect.innerHTML = [''].concat(state.bootstrap.areas || []).map((area) => {
+                    const label = area || 'All Areas';
+                    return `<option value="${escapeHtml(area)}">${escapeHtml(label)}</option>`;
+                }).join('');
+            }
+
             byId('docs-target').value = state.bootstrap.docs_target || 'README.md';
             byId('changelog-target').value = state.bootstrap.changelog_target || 'CHANGELOG.md';
         }
@@ -2988,6 +3188,21 @@ def _render_dashboard_html(auth_enabled=False, bootstrap_payload=None):
                     setMessage(searchMessageEl, 'Shared cache refreshed.');
                 } catch (error) {
                     setMessage(searchMessageEl, error.message, true);
+                }
+            });
+
+            byId('terminate-button').addEventListener('click', async () => {
+                if (confirm('Are you sure you want to terminate the Project Librarian server? This will shut down the server process.')) {
+                    try {
+                        setMessage(searchMessageEl, 'Terminating server...');
+                        const res = await fetchJson('/api/server/terminate', { method: 'POST', body: JSON.stringify({}) });
+                        setMessage(searchMessageEl, res.message || 'Server is shutting down.');
+                        statusBannerEl.innerHTML = '<strong>Server Terminated</strong>';
+                        statusBannerEl.classList.add('error');
+                        document.querySelectorAll('button').forEach(btn => btn.disabled = true);
+                    } catch (error) {
+                        setMessage(searchMessageEl, error.message, true);
+                    }
                 }
             });
 
@@ -3083,6 +3298,12 @@ def _render_dashboard_html(auth_enabled=False, bootstrap_payload=None):
                     }
                     if (btn.dataset.tab === 'git-controls') {
                         loadGitStatus().catch((error) => setMessage(gitMessageEl, error.message, true));
+                    }
+                    if (btn.dataset.tab === 'index-browser') {
+                        loadIndex().catch((error) => setMessage(byId('index-message'), error.message, true));
+                    }
+                    if (btn.dataset.tab === 'task-board') {
+                        loadTasks().catch((error) => setMessage(byId('tasks-message'), error.message, true));
                     }
                 });
             });
@@ -3193,6 +3414,631 @@ def _render_dashboard_html(auth_enabled=False, bootstrap_payload=None):
                     setMessage(gitMessageEl, error.message, true);
                 }
             });
+
+            const indexSearchInput = byId('index-search');
+            if (indexSearchInput) {
+                indexSearchInput.addEventListener('input', () => {
+                    updateIndexUI();
+                });
+            }
+
+            const indexAreaSelect = byId('index-filter-area');
+            if (indexAreaSelect) {
+                indexAreaSelect.addEventListener('change', () => {
+                    updateIndexUI();
+                });
+            }
+
+            const indexKindSelect = byId('index-filter-kind');
+            if (indexKindSelect) {
+                indexKindSelect.addEventListener('change', () => {
+                    updateIndexUI();
+                });
+            }
+
+            const indexRescanBtn = byId('index-rescan');
+            if (indexRescanBtn) {
+                indexRescanBtn.addEventListener('click', async () => {
+                    try {
+                        await loadIndex();
+                    } catch (error) {
+                        setMessage(byId('index-message'), error.message, true);
+                    }
+                });
+            }
+
+            document.addEventListener('click', (event) => {
+                const header = event.target.closest('.toggle-file-header');
+                if (!header) return;
+                if (event.target.closest('.open-file')) return;
+                const targetId = header.dataset.target;
+                const pane = byId(targetId);
+                const icon = byId(`icon-${targetId}`);
+                if (pane) {
+                    const isHidden = pane.style.display === 'none';
+                    pane.style.display = isHidden ? 'block' : 'none';
+                    if (icon) icon.textContent = isHidden ? '▼' : '▶';
+                }
+            });
+
+            document.addEventListener('click', (event) => {
+                const header = event.target.closest('.toggle-class-header');
+                if (!header) return;
+                if (event.target.closest('.inspect-symbol')) return;
+                const targetId = header.dataset.target;
+                const pane = byId(targetId);
+                const icon = byId(`icon-${targetId}`);
+                if (pane) {
+                    const isHidden = pane.style.display === 'none';
+                    pane.style.display = isHidden ? 'block' : 'none';
+                    if (icon) icon.textContent = isHidden ? '▼' : '▶';
+                }
+            });
+
+            document.addEventListener('click', async (event) => {
+                const btn = event.target.closest('.inspect-symbol');
+                if (!btn) return;
+                event.preventDefault();
+                event.stopPropagation();
+
+                const type = btn.dataset.type;
+                const name = btn.dataset.name;
+                const path = btn.dataset.path;
+                const line = parseInt(btn.dataset.line || '1', 10);
+
+                let docSummary = '';
+                let decorators = [];
+                let signature = '';
+                let bases = [];
+                let detailHtml = '';
+
+                if (state.indexPayload && state.indexPayload.files) {
+                    const fileEntry = state.indexPayload.files.find(f => f.path === path);
+                    if (fileEntry) {
+                        if (type === 'variable') {
+                            const item = fileEntry.variables.find(v => v.name === name);
+                            if (item) {
+                                detailHtml = `
+                                    <p style="margin: 4px 0;"><strong>Kind:</strong> ${escapeHtml(item.kind)}</p>
+                                    ${item.annotation ? `<p style="margin: 4px 0;"><strong>Annotation:</strong> <code>${escapeHtml(item.annotation)}</code></p>` : ''}
+                                    ${item.value_preview ? `<p style="margin: 4px 0;"><strong>Value Preview:</strong> <code>${escapeHtml(item.value_preview)}</code></p>` : ''}
+                                `;
+                            }
+                        } else if (type === 'function') {
+                            const item = fileEntry.functions.find(f => f.name === name);
+                            if (item) {
+                                docSummary = item.doc_summary || '';
+                                decorators = item.decorators || [];
+                                signature = item.signature || '';
+                                detailHtml = `
+                                    <p style="margin: 4px 0;"><strong>Signature:</strong> <code>${escapeHtml(signature)}</code></p>
+                                    ${decorators.length ? `<p style="margin: 4px 0;"><strong>Decorators:</strong> <code>${escapeHtml(decorators.join(', '))}</code></p>` : ''}
+                                    ${docSummary ? `<p style="margin: 8px 0 4px; font-style: italic; color: var(--text-muted);">${escapeHtml(docSummary)}</p>` : ''}
+                                `;
+                            }
+                        } else if (type === 'class') {
+                            const item = fileEntry.classes.find(c => c.name === name);
+                            if (item) {
+                                docSummary = item.doc_summary || '';
+                                decorators = item.decorators || [];
+                                bases = item.bases || [];
+                                detailHtml = `
+                                    <p style="margin: 4px 0;"><strong>Class Definition:</strong> <code>class ${escapeHtml(name)}${bases.length ? `(${bases.join(', ')})` : ''}</code></p>
+                                    ${decorators.length ? `<p style="margin: 4px 0;"><strong>Decorators:</strong> <code>${escapeHtml(decorators.join(', '))}</code></p>` : ''}
+                                    ${docSummary ? `<p style="margin: 8px 0 4px; font-style: italic; color: var(--text-muted);">${escapeHtml(docSummary)}</p>` : ''}
+                                `;
+                            }
+                        } else if (type === 'attribute' || type === 'method') {
+                            const parts = name.split('.');
+                            const classShortName = parts[0];
+                            const memberName = parts[1];
+                            const clsItem = fileEntry.classes.find(c => c.name === classShortName);
+                            if (clsItem) {
+                                if (type === 'attribute') {
+                                    const item = clsItem.attributes.find(a => a.name === memberName);
+                                    if (item) {
+                                        detailHtml = `
+                                            <p style="margin: 4px 0;"><strong>Class:</strong> <code>${escapeHtml(classShortName)}</code></p>
+                                            <p style="margin: 4px 0;"><strong>Kind:</strong> ${escapeHtml(item.kind)}</p>
+                                            ${item.annotation ? `<p style="margin: 4px 0;"><strong>Annotation:</strong> <code>${escapeHtml(item.annotation)}</code></p>` : ''}
+                                            ${item.value_preview ? `<p style="margin: 4px 0;"><strong>Value Preview:</strong> <code>${escapeHtml(item.value_preview)}</code></p>` : ''}
+                                        `;
+                                    }
+                                } else if (type === 'method') {
+                                    const item = clsItem.methods.find(m => m.name === memberName);
+                                    if (item) {
+                                        docSummary = item.doc_summary || '';
+                                        decorators = item.decorators || [];
+                                        signature = item.signature || '';
+                                        detailHtml = `
+                                            <p style="margin: 4px 0;"><strong>Class:</strong> <code>${escapeHtml(classShortName)}</code></p>
+                                            <p style="margin: 4px 0;"><strong>Signature:</strong> <code>${escapeHtml(signature)}</code></p>
+                                            ${decorators.length ? `<p style="margin: 4px 0;"><strong>Decorators:</strong> <code>${escapeHtml(decorators.join(', '))}</code></p>` : ''}
+                                            ${docSummary ? `<p style="margin: 8px 0 4px; font-style: italic; color: var(--text-muted);">${escapeHtml(docSummary)}</p>` : ''}
+                                        `;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                selectSymbol(type, name, path, line, detailHtml);
+            });
+
+            document.addEventListener('click', async (event) => {
+                const btn = event.target.closest('.load-symbol-source');
+                if (!btn) return;
+                event.preventDefault();
+                event.stopPropagation();
+                const path = btn.dataset.path;
+                const line = parseInt(btn.dataset.line || '1', 10);
+                
+                const activeTab = document.querySelector('.tab-btn.active')?.dataset.tab;
+                const isIndex = activeTab === 'index-browser';
+                
+                try {
+                    await loadExcerpt(path, '', line, isIndex, true);
+                } catch (error) {
+                    const contentEl = isIndex ? byId('index-file-excerpt') : excerptEl;
+                    if (contentEl) contentEl.textContent = error.message;
+                }
+            });
+
+            byId('tasks-refresh').addEventListener('click', () => {
+                const path = byId('tasks-list-select').value || state.selectedTaskListPath;
+                loadTasks(path).catch((error) => setMessage(byId('tasks-message'), error.message, true));
+            });
+
+            byId('tasks-list-select').addEventListener('change', (event) => {
+                state.selectedTaskListPath = event.target.value;
+                loadTasks(event.target.value).catch((error) => setMessage(byId('tasks-message'), error.message, true));
+            });
+
+            byId('tasks-create-list-btn').addEventListener('click', async () => {
+                const nameInput = byId('tasks-new-list-name');
+                const filename = nameInput.value.trim();
+                const msgEl = byId('tasks-message');
+                if (!filename) {
+                    setMessage(msgEl, 'Please enter a task list name.', true);
+                    return;
+                }
+                try {
+                    setMessage(msgEl, 'Creating task list...');
+                    const res = await fetchJson('/api/tasks/create', {
+                        method: 'POST',
+                        body: JSON.stringify({ filename })
+                    });
+                    setMessage(msgEl, res.message);
+                    nameInput.value = '';
+                    await loadTasks(res.path);
+                } catch (error) {
+                    setMessage(msgEl, error.message, true);
+                }
+            });
+
+            byId('tasks-add-item-btn').addEventListener('click', async () => {
+                const textInput = byId('tasks-new-item-text');
+                const text = textInput.value.trim();
+                const path = byId('tasks-list-select').value;
+                const msgEl = byId('tasks-message');
+                if (!path) {
+                    setMessage(msgEl, 'No task list selected.', true);
+                    return;
+                }
+                if (!text) {
+                    setMessage(msgEl, 'Please enter task text.', true);
+                    return;
+                }
+                try {
+                    setMessage(msgEl, 'Adding task...');
+                    const res = await fetchJson('/api/tasks/add', {
+                        method: 'POST',
+                        body: JSON.stringify({ path, text })
+                    });
+                    setMessage(msgEl, res.message);
+                    textInput.value = '';
+                    await loadTasks(path);
+                } catch (error) {
+                    setMessage(msgEl, error.message, true);
+                }
+            });
+
+            byId('tasks-new-item-text').addEventListener('keydown', (event) => {
+                if (event.key === 'Enter') {
+                    event.preventDefault();
+                    byId('tasks-add-item-btn').click();
+                }
+            });
+
+            byId('tasks-new-list-name').addEventListener('keydown', (event) => {
+                if (event.key === 'Enter') {
+                    event.preventDefault();
+                    byId('tasks-create-list-btn').click();
+                }
+            });
+
+            document.addEventListener('click', async (event) => {
+                const btn = event.target.closest('.task-toggle');
+                if (!btn) return;
+                event.preventDefault();
+                event.stopPropagation();
+                
+                const path = btn.dataset.path;
+                const line = parseInt(btn.dataset.line, 10);
+                const status = btn.dataset.status;
+                const msgEl = byId('tasks-message');
+                
+                try {
+                    setMessage(msgEl, 'Updating task...');
+                    await fetchJson('/api/tasks/toggle', {
+                        method: 'POST',
+                        body: JSON.stringify({ path, line, status })
+                    });
+                    await loadTasks(path);
+                } catch (error) {
+                    setMessage(msgEl, error.message, true);
+                }
+            });
+        }
+
+        async function loadTasks(selectedPath = null) {
+            const container = byId('tasks-container');
+            const msgEl = byId('tasks-message');
+            const selectEl = byId('tasks-list-select');
+            setMessage(msgEl, 'Loading checklists...');
+            try {
+                const payload = await fetchJson('/api/tasks');
+                setMessage(msgEl, '');
+                
+                if (!payload || !payload.length) {
+                    selectEl.innerHTML = '<option value="">(No task lists)</option>';
+                    container.innerHTML = '<p class="muted">No markdown files found in the workspace. Enter a name above to create a new task list file.</p>';
+                    return;
+                }
+                
+                const previousValue = selectedPath || selectEl.value || state.selectedTaskListPath;
+                selectEl.innerHTML = payload.map(file => `
+                    <option value="${escapeHtml(file.path)}" ${file.path === previousValue ? 'selected' : ''}>
+                        ${escapeHtml(file.path)} (${file.tasks.length} tasks)
+                    </option>
+                `).join('');
+                
+                const activePath = selectEl.value;
+                state.selectedTaskListPath = activePath;
+                
+                const activeFile = payload.find(f => f.path === activePath);
+                if (!activeFile) {
+                    container.innerHTML = '<p class="muted">Selected task list not found.</p>';
+                    return;
+                }
+                
+                const total = activeFile.tasks.length;
+                const completed = activeFile.tasks.filter(t => t.status === 'done').length;
+                const percent = total > 0 ? Math.round((completed / total) * 100) : 0;
+                
+                let checklistHtml = '';
+                if (total === 0) {
+                    checklistHtml = '<p class="muted" style="margin: 10px 0;">This task list is empty. Add a new task below or edit the markdown file directly.</p>';
+                } else {
+                    checklistHtml = `
+                        <ul class='list' style='display: flex; flex-direction: column; gap: 8px;'>
+                            ${activeFile.tasks.map(t => {
+                                const indentStyle = `margin-left: ${t.indent * 12}px;`;
+                                
+                                let statusSymbol = '[ ]';
+                                let nextStatus = 'progress';
+                                let statusColor = 'var(--text-muted)';
+                                let textClass = '';
+                                
+                                if (t.status === 'done') {
+                                    statusSymbol = '[x]';
+                                    nextStatus = 'todo';
+                                    statusColor = 'var(--accent)';
+                                    textClass = 'text-decoration: line-through; color: var(--text-muted);';
+                                } else if (t.status === 'progress') {
+                                    statusSymbol = '[/]';
+                                    nextStatus = 'done';
+                                    statusColor = 'var(--warn)';
+                                }
+                                
+                                return `
+                                    <li style='padding: 6px 0; border: none; display: flex; align-items: flex-start; gap: 10px; ${indentStyle}'>
+                                        <button type='button' class='task-toggle' data-path='${escapeHtml(activeFile.path)}' data-line='${t.line}' data-status='${nextStatus}' style='padding: 2px 6px; font-family: monospace; font-size: 1.1rem; font-weight: bold; border-color: #315264; color: ${statusColor}; background: #0b161d; border-radius: 6px; line-height: 1;'>
+                                            ${statusSymbol}
+                                        </button>
+                                        <span style='flex-grow: 1; margin-top: 2px; line-height: 1.35; ${textClass}'>
+                                            ${escapeHtml(t.text)}
+                                        </span>
+                                        <span class='muted' style='font-size: 0.8rem; margin-top: 4px; font-family: monospace;'>L${t.line}</span>
+                                    </li>
+                                `;
+                            }).join('')}
+                        </ul>
+                    `;
+                }
+                
+                container.innerHTML = `
+                    <section class='panel'>
+                        <div class='inline' style='justify-content: space-between; margin-bottom: 12px;'>
+                            <h3 style='margin: 0; font-family: monospace;'>📁 ${escapeHtml(activeFile.path)}</h3>
+                            <span class='muted' style='font-size: 0.85rem;'>${completed}/${total} completed (${percent}%)</span>
+                        </div>
+                        ${checklistHtml}
+                    </section>
+                `;
+            } catch (error) {
+                setMessage(msgEl, error.message, true);
+                container.innerHTML = `<p class="error">Failed to load checklists: ${escapeHtml(error.message)}</p>`;
+            }
+        }
+
+        async function loadIndex() {
+            const messageEl = byId('index-message');
+            setMessage(messageEl, 'Loading symbol index...');
+            try {
+                const payload = await fetchJson('/api/index');
+                state.indexPayload = payload;
+                setMessage(messageEl, '');
+                updateIndexUI();
+                renderIndexStats(payload.summary);
+            } catch (error) {
+                setMessage(messageEl, error.message, true);
+            }
+        }
+
+        function renderIndexStats(summary) {
+            const statsSummaryEl = byId('index-stats-summary');
+            if (!summary) {
+                statsSummaryEl.textContent = 'No stats available';
+                return;
+            }
+            statsSummaryEl.textContent = `${summary.files || 0} files · ${summary.classes || 0} classes · ${summary.functions || 0} functions · ${summary.methods || 0} methods · ${summary.module_variables || 0} variables`;
+        }
+
+        function updateIndexUI() {
+            if (!state.indexPayload) return;
+            const query = byId('index-search').value.toLowerCase().trim();
+            const area = byId('index-filter-area').value;
+            const kind = byId('index-filter-kind').value;
+
+            const filteredFiles = [];
+            for (const file of state.indexPayload.files) {
+                if (area && file.area !== area) continue;
+
+                const filePathMatches = file.path.toLowerCase().includes(query);
+
+                const filteredVariables = [];
+                const filteredFunctions = [];
+                const filteredClasses = [];
+
+                if (kind === 'all' || kind === 'variable') {
+                    for (const variable of file.variables || []) {
+                        const nameMatches = variable.name.toLowerCase().includes(query) ||
+                                            (variable.value_preview && variable.value_preview.toLowerCase().includes(query)) ||
+                                            (variable.annotation && variable.annotation.toLowerCase().includes(query));
+                        if (nameMatches || filePathMatches) {
+                            filteredVariables.push(variable);
+                        }
+                    }
+                }
+
+                if (kind === 'all' || kind === 'function') {
+                    for (const func of file.functions || []) {
+                        const nameMatches = func.name.toLowerCase().includes(query) ||
+                                            (func.signature && func.signature.toLowerCase().includes(query)) ||
+                                            (func.doc_summary && func.doc_summary.toLowerCase().includes(query));
+                        if (nameMatches || filePathMatches) {
+                            filteredFunctions.push(func);
+                        }
+                    }
+                }
+
+                if (kind === 'all' || kind === 'class' || kind === 'method' || kind === 'variable') {
+                    for (const cls of file.classes || []) {
+                        const classPathMatches = cls.name.toLowerCase().includes(query) ||
+                                                 (cls.doc_summary && cls.doc_summary.toLowerCase().includes(query));
+
+                        const filteredAttributes = [];
+                        const filteredMethods = [];
+
+                        if (kind === 'all' || kind === 'variable') {
+                            for (const attr of cls.attributes || []) {
+                                if (attr.name.toLowerCase().includes(query) || classPathMatches || filePathMatches) {
+                                    filteredAttributes.push(attr);
+                                }
+                            }
+                        }
+
+                        if (kind === 'all' || kind === 'method') {
+                            for (const method of cls.methods || []) {
+                                if (method.name.toLowerCase().includes(query) ||
+                                    (method.signature && method.signature.toLowerCase().includes(query)) ||
+                                    (method.doc_summary && method.doc_summary.toLowerCase().includes(query)) ||
+                                    classPathMatches || filePathMatches) {
+                                    filteredMethods.push(method);
+                                }
+                            }
+                        }
+
+                        const showClass = (kind === 'class' && (classPathMatches || filePathMatches)) ||
+                                          (kind !== 'class' && (classPathMatches || filePathMatches || filteredAttributes.length > 0 || filteredMethods.length > 0));
+
+                        if (showClass) {
+                            filteredClasses.push({
+                                ...cls,
+                                attributes: filteredAttributes,
+                                methods: filteredMethods
+                            });
+                        }
+                    }
+                }
+
+                const hasMatchingContent = filteredVariables.length > 0 ||
+                                           filteredFunctions.length > 0 ||
+                                           filteredClasses.length > 0;
+
+                if (filePathMatches || hasMatchingContent) {
+                    filteredFiles.push({
+                        ...file,
+                        variables: filteredVariables,
+                        functions: filteredFunctions,
+                        classes: filteredClasses
+                    });
+                }
+            }
+
+            renderIndexTree(filteredFiles, query !== '');
+        }
+
+        function renderIndexTree(files, autoExpand = false) {
+            const treeEl = byId('index-tree');
+            if (!files || !files.length) {
+                treeEl.innerHTML = '<p class="muted" style="margin: 0;">No files or symbols match the filters.</p>';
+                return;
+            }
+
+            treeEl.innerHTML = files.map((file, fileIdx) => {
+                const totalSymbols = (file.variables?.length || 0) + (file.functions?.length || 0) + (file.classes?.length || 0);
+                const fileId = `file-${fileIdx}`;
+                const displayStyle = autoExpand ? 'block' : 'none';
+                const icon = autoExpand ? '▼' : '▶';
+
+                let contentHtml = '';
+
+                if (file.variables && file.variables.length > 0) {
+                    contentHtml += `
+                        <div style="margin-bottom: 10px;">
+                            <div class="label" style="font-size: 0.72rem; margin-bottom: 4px; letter-spacing: 0.05em;">Variables</div>
+                            <ul class="list" style="margin-left: 10px;">
+                                ${file.variables.map(v => `
+                                    <li style="padding: 3px 0; border: none; display: flex; justify-content: space-between; align-items: center;">
+                                        <button type="button" class="inspect-symbol" data-type="variable" data-name="${escapeHtml(v.name)}" data-path="${escapeHtml(file.path)}" data-line="${v.line}" style="font-size: 0.88rem;">
+                                            <span style="color: var(--warn); margin-right: 4px;">𝔳</span> ${escapeHtml(v.name)}${v.annotation ? `: <span style="color: var(--text-muted);">${escapeHtml(v.annotation)}</span>` : ''}
+                                        </button>
+                                        <span class="muted" style="font-size: 0.8rem;">L${v.line}</span>
+                                    </li>
+                                `).join('')}
+                            </ul>
+                        </div>
+                    `;
+                }
+
+                if (file.functions && file.functions.length > 0) {
+                    contentHtml += `
+                        <div style="margin-bottom: 10px;">
+                            <div class="label" style="font-size: 0.72rem; margin-bottom: 4px; letter-spacing: 0.05em;">Functions</div>
+                            <ul class="list" style="margin-left: 10px;">
+                                ${file.functions.map(f => `
+                                    <li style="padding: 3px 0; border: none; display: flex; justify-content: space-between; align-items: center;">
+                                        <button type="button" class="inspect-symbol" data-type="function" data-name="${escapeHtml(f.name)}" data-path="${escapeHtml(file.path)}" data-line="${f.line}" style="font-size: 0.88rem;">
+                                            <span style="color: var(--accent); margin-right: 4px;">ƒ</span> ${escapeHtml(f.name)}()
+                                        </button>
+                                        <span class="muted" style="font-size: 0.8rem;">L${f.line}</span>
+                                    </li>
+                                `).join('')}
+                            </ul>
+                        </div>
+                    `;
+                }
+
+                if (file.classes && file.classes.length > 0) {
+                    contentHtml += `
+                        <div>
+                            <div class="label" style="font-size: 0.72rem; margin-bottom: 4px; letter-spacing: 0.05em;">Classes</div>
+                            ${file.classes.map((cls, clsIdx) => {
+                                const classId = `class-${fileIdx}-${clsIdx}`;
+                                const classIcon = autoExpand ? '▼' : '▶';
+                                const classBases = cls.bases && cls.bases.length ? `(${cls.bases.join(', ')})` : '';
+
+                                return `
+                                    <div style="margin-left: 6px; margin-bottom: 8px; border-left: 2px solid #315264; padding-left: 10px;">
+                                        <div class="toggle-class-header" data-target="${classId}" style="display: flex; justify-content: space-between; align-items: center; cursor: pointer; padding: 4px 0;">
+                                            <button type="button" class="inspect-symbol" data-type="class" data-name="${escapeHtml(cls.name)}" data-path="${escapeHtml(file.path)}" data-line="${cls.line}" style="font-size: 0.88rem; font-weight: 600; color: var(--accent-strong);">
+                                                <span style="color: #38bdf8; margin-right: 4px;">📦</span> class ${escapeHtml(cls.name)}${escapeHtml(classBases)}
+                                            </button>
+                                            <span class="class-toggle-icon" id="icon-${classId}">${classIcon}</span>
+                                        </div>
+
+                                        <div id="${classId}" style="display: ${displayStyle}; margin-top: 6px; margin-left: 10px;">
+                                            ${cls.attributes && cls.attributes.length ? `
+                                                <div style="margin-bottom: 6px;">
+                                                    <div class="muted" style="font-size: 0.72rem; text-transform: uppercase; margin-bottom: 2px; letter-spacing: 0.05em;">Attributes</div>
+                                                    <ul class="list" style="margin-left: 8px;">
+                                                        ${cls.attributes.map(a => `
+                                                            <li style="padding: 2px 0; border: none; display: flex; justify-content: space-between; align-items: center;">
+                                                                <button type="button" class="inspect-symbol" data-type="attribute" data-name="${escapeHtml(cls.name)}.${escapeHtml(a.name)}" data-path="${escapeHtml(file.path)}" data-line="${a.line}" style="font-size: 0.85rem;">
+                                                                    <span style="color: var(--warn); margin-right: 4px;">▫️</span> ${escapeHtml(a.name)}
+                                                                </button>
+                                                                <span class="muted" style="font-size: 0.75rem;">L${a.line}</span>
+                                                            </li>
+                                                        `).join('')}
+                                                    </ul>
+                                                </div>
+                                            ` : ''}
+
+                                            ${cls.methods && cls.methods.length ? `
+                                                <div>
+                                                    <div class="muted" style="font-size: 0.72rem; text-transform: uppercase; margin-bottom: 2px; letter-spacing: 0.05em;">Methods</div>
+                                                    <ul class="list" style="margin-left: 8px;">
+                                                        ${cls.methods.map(m => `
+                                                            <li style="padding: 2px 0; border: none; display: flex; justify-content: space-between; align-items: center;">
+                                                                <button type="button" class="inspect-symbol" data-type="method" data-name="${escapeHtml(cls.name)}.${escapeHtml(m.name)}" data-path="${escapeHtml(file.path)}" data-line="${m.line}" style="font-size: 0.85rem;">
+                                                                    <span style="color: var(--accent); margin-right: 4px;">⚙️</span> ${escapeHtml(m.name)}()
+                                                                </button>
+                                                                <span class="muted" style="font-size: 0.75rem;">L${m.line}</span>
+                                                            </li>
+                                                        `).join('')}
+                                                    </ul>
+                                                </div>
+                                            ` : ''}
+                                        </div>
+                                    </div>
+                                `;
+                            }).join('')}
+                        </div>
+                    `;
+                }
+
+                return `
+                    <div style="border: 1px solid var(--panel-border); border-radius: 12px; padding: 10px 14px; background: rgba(16, 32, 42, 0.4);">
+                        <div class="toggle-file-header" data-target="${fileId}" style="display: flex; justify-content: space-between; align-items: center; cursor: pointer;">
+                            <span style="font-family: monospace; font-weight: 600; font-size: 0.95rem;">
+                                📁 ${escapeHtml(file.path)}
+                                <span class="muted" style="font-size: 0.8rem; font-weight: normal; margin-left: 4px;">(${totalSymbols} symbols)</span>
+                            </span>
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                <button class="ghost open-file" data-path="${escapeHtml(file.path)}" style="padding: 2px 8px; font-size: 0.8rem; border-color: transparent;">view file</button>
+                                <span class="file-toggle-icon" id="icon-${fileId}">${icon}</span>
+                            </div>
+                        </div>
+                        <div id="${fileId}" style="display: ${displayStyle}; margin-top: 10px; border-top: 1px dashed #223745; padding-top: 10px;">
+                            ${contentHtml || '<p class="muted" style="font-size: 0.85rem; margin: 0;">No indexed symbols in this file.</p>'}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function selectSymbol(type, name, path, line, detailHtml) {
+            const detailsEl = byId('selected-symbol-details');
+            detailsEl.innerHTML = `
+                <div style="border: 1px solid var(--panel-border); border-radius: 12px; padding: 12px; background: rgba(16, 32, 42, 0.3);">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                        <span class="chip" style="font-size: 0.75rem; padding: 3px 8px; text-transform: uppercase;">${escapeHtml(type)}</span>
+                        <span class="muted" style="font-size: 0.82rem; font-family: monospace;">Line ${line}</span>
+                    </div>
+                    <h3 style="margin: 0 0 6px; font-family: monospace; font-size: 1.08rem; color: var(--accent-strong); word-break: break-all;">${escapeHtml(name)}</h3>
+                    <p class="muted" style="font-family: monospace; font-size: 0.82rem; margin: 0 0 12px; word-break: break-all;">File: ${escapeHtml(path)}</p>
+                    <div style="border-top: 1px dashed var(--panel-border); padding-top: 10px; margin-top: 10px;">
+                        ${detailHtml}
+                    </div>
+                    <div style="margin-top: 14px; display: flex; gap: 8px;">
+                        <button class="primary load-symbol-source" data-path="${escapeHtml(path)}" data-line="${line}" style="padding: 6px 12px; font-size: 0.8rem; border-radius: 8px;">Load Source Code</button>
+                    </div>
+                </div>
+            `;
+            loadExcerpt(path, '', line, true);
         }
 
         async function start() {
@@ -3722,6 +4568,211 @@ def create_librarian_mcp_server(
             )
         )
 
+    @server.custom_route("/api/index", methods=["GET"], include_in_schema=False)
+    async def _dashboard_index_route(request):
+        try:
+            payload, _ = _load_symbol_payload(service.repo_root)
+            return JSONResponse(payload)
+        except Exception as exc:
+            return JSONResponse({"error": str(exc)}, status_code=500)
+
+    @server.custom_route("/api/server/terminate", methods=["POST"], include_in_schema=False)
+    async def _server_terminate_route(request):
+        def _exit_later():
+            time.sleep(0.5)
+            os._exit(0)
+        
+        threading.Thread(target=_exit_later, daemon=True).start()
+        return JSONResponse({"status": "terminating", "message": "Server shutting down..."})
+
+    @server.custom_route("/api/tasks", methods=["GET"], include_in_schema=False)
+    async def _dashboard_tasks_route(request):
+        try:
+            results = []
+            repo_root = service.repo_root
+            md_candidates = []
+            
+            for name in ["task.md", "TODO.md", "todo.md", "README.md"]:
+                p = repo_root / name
+                if p.is_file():
+                    md_candidates.append(p)
+            
+            def _collect(workspace):
+                for r in workspace.file_records:
+                    p_text = r.get("path", "")
+                    if p_text.endswith(".md"):
+                        p = repo_root / p_text
+                        if p.is_file() and p not in md_candidates:
+                            md_candidates.append(p)
+            service._with_workspace(_collect)
+            
+            for path in md_candidates:
+                try:
+                    content = path.read_text(encoding="utf-8")
+                except Exception:
+                    continue
+                
+                lines = content.splitlines()
+                tasks = []
+                for idx, line in enumerate(lines):
+                    match = re.match(r"^(\s*)-\s*\[([\s_xX/])\]\s*(.*)$", line)
+                    if match:
+                        indent = match.group(1)
+                        status_char = match.group(2)
+                        text = match.group(3)
+                        
+                        status = "todo"
+                        if status_char in ("x", "X"):
+                            status = "done"
+                        elif status_char == "/":
+                            status = "progress"
+                        
+                        tasks.append({
+                            "id": idx,
+                            "text": text,
+                            "status": status,
+                            "indent": len(indent),
+                            "line": idx + 1
+                        })
+                
+                try:
+                    relative_path = path.relative_to(repo_root).as_posix()
+                except ValueError:
+                    relative_path = path.name
+                results.append({
+                    "path": relative_path,
+                    "tasks": tasks
+                })
+                
+            def get_sort_key(file_item):
+                tasks_list = file_item.get("tasks", [])
+                active_count = sum(1 for t in tasks_list if t.get("status") in ("todo", "progress"))
+                total_count = len(tasks_list)
+                
+                if active_count > 0:
+                    group = 0
+                elif total_count > 0:
+                    group = 1
+                else:
+                    group = 2
+                    
+                return (group, -active_count, file_item.get("path", "").lower())
+                
+            results.sort(key=get_sort_key)
+            return JSONResponse(results)
+        except Exception as exc:
+            return JSONResponse({"error": str(exc)}, status_code=500)
+
+    @server.custom_route("/api/tasks/create", methods=["POST"], include_in_schema=False)
+    async def _dashboard_tasks_create_route(request):
+        try:
+            payload = await _request_json_payload(request)
+            filename = str(payload.get("filename", "")).strip()
+            
+            if not filename:
+                return JSONResponse({"error": "Filename is required."}, status_code=400)
+            
+            filename = os.path.basename(filename)
+            if not filename.endswith(".md"):
+                filename += ".md"
+                
+            repo_root = service.repo_root
+            path = (repo_root / filename).resolve()
+            
+            if not str(path).lower().startswith(str(repo_root.resolve()).lower()):
+                return JSONResponse({"error": "Invalid directory location."}, status_code=403)
+                
+            if path.exists():
+                return JSONResponse({"error": f"File '{filename}' already exists."}, status_code=400)
+                
+            title = filename[:-3].replace("_", " ").replace("-", " ").title()
+            path.write_text(f"# {title}\n\n- [ ] First task item\n", encoding="utf-8")
+            
+            service.refresh()
+            
+            try:
+                relative_path = path.relative_to(repo_root).as_posix()
+            except ValueError:
+                relative_path = path.name
+                
+            return JSONResponse({"ok": True, "path": relative_path, "message": f"Created task list '{filename}'."})
+        except Exception as exc:
+            return JSONResponse({"error": str(exc)}, status_code=500)
+
+    @server.custom_route("/api/tasks/add", methods=["POST"], include_in_schema=False)
+    async def _dashboard_tasks_add_route(request):
+        try:
+            payload = await _request_json_payload(request)
+            path_text = str(payload.get("path", "")).strip()
+            text = str(payload.get("text", "")).strip()
+            
+            if not path_text or not text:
+                return JSONResponse({"error": "Path and task text are required."}, status_code=400)
+                
+            repo_root = service.repo_root
+            path = (repo_root / path_text).resolve()
+            
+            resolved_root = repo_root.resolve()
+            if not path.is_file() or not str(path).lower().startswith(str(resolved_root).lower()):
+                return JSONResponse({"error": "Unauthorized or invalid file path."}, status_code=403)
+                
+            content = path.read_text(encoding="utf-8")
+            if content and not content.endswith("\n"):
+                content += "\n"
+            content += f"- [ ] {text}\n"
+            path.write_text(content, encoding="utf-8")
+            
+            service.refresh()
+            
+            return JSONResponse({"ok": True, "message": f"Added task to {path_text}."})
+        except Exception as exc:
+            return JSONResponse({"error": str(exc)}, status_code=500)
+
+    @server.custom_route("/api/tasks/toggle", methods=["POST"], include_in_schema=False)
+    async def _dashboard_tasks_toggle_route(request):
+        try:
+            payload = await _request_json_payload(request)
+            path_text = str(payload.get("path", "")).strip()
+            line_value = payload.get("line")
+            new_status = str(payload.get("status", "todo")).strip()
+            
+            if not path_text or line_value is None:
+                return JSONResponse({"error": "Path and line parameters are required."}, status_code=400)
+                
+            line_number = int(line_value)
+            repo_root = service.repo_root
+            path = (repo_root / path_text).resolve()
+            
+            resolved_root = repo_root.resolve()
+            if not path.is_file() or not str(path).lower().startswith(str(resolved_root).lower()):
+                return JSONResponse({"error": "Unauthorized or invalid file path."}, status_code=403)
+                
+            content = path.read_text(encoding="utf-8")
+            lines = content.splitlines()
+            if line_number < 1 or line_number > len(lines):
+                return JSONResponse({"error": "Invalid line number."}, status_code=400)
+                
+            target_line = lines[line_number - 1]
+            match = re.match(r"^(\s*-\s*\[)([\s_xX/])(\]\s*.*)$", target_line)
+            if not match:
+                return JSONResponse({"error": "Target line is not a checklist item."}, status_code=400)
+                
+            char_map = {
+                "todo": " ",
+                "progress": "/",
+                "done": "x"
+            }
+            status_char = char_map.get(new_status, " ")
+            new_line = f"{match.group(1)}{status_char}{match.group(3)}"
+            lines[line_number - 1] = new_line
+            path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            
+            service.refresh()
+            
+            return JSONResponse({"ok": True, "message": f"Updated {path_text} line {line_number} to {new_status}."})
+        except Exception as exc:
+            return JSONResponse({"error": str(exc)}, status_code=500)
+
     @server.custom_route("/api/file", methods=["GET"], include_in_schema=False)
     async def _dashboard_file_route(request):
         path_text = str(request.query_params.get("path", "")).strip()
@@ -3730,7 +4781,13 @@ def create_librarian_mcp_server(
         query = request.query_params.get("query") or None
         line_value = request.query_params.get("line") or None
         line_number = None if not line_value else _coerce_int(line_value, line_value, minimum=1, maximum=500000)
-        context = _coerce_int(request.query_params.get("context"), 5, minimum=1, maximum=40)
+        
+        full_code = _parse_bool(request.query_params.get("full_code"))
+        if full_code:
+            context = 1000000
+        else:
+            context = _coerce_int(request.query_params.get("context"), 5, minimum=1, maximum=40)
+            
         try:
             excerpt = service.show_excerpt(path_text, query=query, line=line_number, context=context)
         except Exception as exc:

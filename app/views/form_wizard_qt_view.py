@@ -37,7 +37,7 @@ from PyQt6.QtWidgets import (
 )
 
 __module_name__ = "Form Wizard View"
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 
 
 class FormWizardQtView(QDialog):

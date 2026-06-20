@@ -31,7 +31,7 @@ from app.safe_expression import SafeExpressionEvaluator
 from app.utils import ensure_external_data_directory, external_path, local_or_resource_path, resource_path
 
 __module_name__ = "Data Handler"
-__version__ = "1.1.8"
+__version__ = "1.1.9"
 
 DEFAULT_SHIFT_TIME_SETTINGS = {
     "shift_total_rounding": "nearest",

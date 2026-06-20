@@ -24,7 +24,7 @@ from app.models.layout_manager_model import LayoutManagerModel
 from app.views.layout_manager_qt_view import LayoutManagerQtView
 
 __module_name__ = "Layout Manager Qt Controller"
-__version__ = "0.7.3"
+__version__ = "0.7.4"
 
 
 class LayoutManagerQtController:

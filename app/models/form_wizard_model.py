@@ -20,7 +20,7 @@ from app.layout_config_service import LayoutConfigService
 from app.models.layout_manager_model import LayoutManagerModel, DEFAULT_MAPPING_MAX_ROWS
 
 __module_name__ = "Form Wizard Model"
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 
 
 class FormWizardModel:

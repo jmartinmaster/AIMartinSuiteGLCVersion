@@ -4,6 +4,28 @@ This changelog tracks the main branch release line for Production Logging Center
 
 Version headings below are aligned to the current `2.x` release line used by Dispatcher Core. Earlier work has been grouped into practical release milestones so the shipped feature history is easier to follow without rewriting older module version markers.
 
+## [2.3.2] - 2026-06-20
+
+### Added
+
+- **Interactive Task Board**:
+  - Implemented the Task Board UI pane in the Project Librarian dashboard, supporting dropdown selection of markdown checklist files.
+  - Implemented list creation, item addition, and dynamic checklist status toggling directly from the Web UI.
+  - Added checklist sorting to place lists with active/incomplete tasks at the top, and empty or fully-completed checklists at the bottom.
+  - Added new REST API endpoints (`/api/tasks`, `/api/tasks/create`, `/api/tasks/add`, and `/api/tasks/toggle`).
+- **Index Browser and Full-Code View**:
+  - Configured full-file source loading with line numbering, active tab routing, and line highlighting in the Web UI.
+- **Server Self-Termination**:
+  - Added a "Terminate Server" option in the Web UI.
+  - Added the `/api/server/terminate` endpoint to gracefully shutdown the background Project Librarian server.
+- **Developer Verification Checklist**:
+  - Added `docs/verification_checklist.md` to track verification tasks.
+
+### Changed
+
+- **Launcher Version Bump**:
+  - Promoted Dispatcher Core to `2.3.2`.
+
 ## [2.3.0] - 2026-06-20
 
 ### Added
