@@ -1,8 +1,11 @@
 # settings.json Reference
 
-`data/config/settings.json` stores user-configurable defaults for the application.
+The `data/config/settings.json` file contains default configuration settings
+and options for the application.
 
-## Structure
+---
+
+## File Example
 
 ```json
 {
@@ -37,83 +40,79 @@
 }
 ```
 
-## Keys
+---
 
-- `export_directory`
-  - Type: string
-  - Purpose: Base folder used for Excel exports.
-  - Default: `data/exports`
-  - Notes: When `organize_exports_by_date` is enabled, exports are written under `YYYY/MM MonthName` inside this base folder.
+## Settings Keys Reference
 
-- `organize_exports_by_date`
-  - Type: boolean
-  - Purpose: If true, exports are grouped by date.
-  - Notes: The app uses year folders with month folders such as `04 April`. If it finds an older month folder such as `04`, it renames it to the newer format when that month is exported.
+### **export_directory**
+- **Type**: String
+- **Description**: The folder where Excel exports are saved. (Default: `data/exports`).
 
-- `default_export_prefix`
-  - Type: string
-  - Purpose: Prefix used when naming exported files.
+### **organize_exports_by_date**
+- **Type**: Boolean (`true`/`false`)
+- **Description**: If true, exports are sorted into year/month folders (e.g. `2026/06 June`).
 
-- `update_repository_url`
-  - Type: string
-  - Purpose: Repository URL used by Update Manager when checking the configured release source.
+### **default_export_prefix**
+- **Type**: String
+- **Description**: Prefix prepended to the filenames of exported files.
 
-- `enable_advanced_dev_updates`
-  - Type: boolean
-  - Purpose: Enables the privileged packaged Windows advanced dev update path.
-  - Notes: This setting is managed from Developer & Admin tools in Settings Manager.
+### **update_repository_url**
+- **Type**: String
+- **Description**: Online repository URL used to check for system updates.
 
-- `theme`
-  - Type: string
-  - Purpose: One of the curated readable theme names supported by Logging Center.
+### **enable_advanced_dev_updates**
+- **Type**: Boolean (`true`/`false`)
+- **Description**: Enables/disables development updates (accessible via admin tools).
 
-- `enable_screen_transitions`
-  - Type: boolean
-  - Purpose: Enables or disables the short fade used when switching between major pages in the application.
+### **theme**
+- **Type**: String
+- **Description**: The visual theme key for styling the application layout.
 
-- `enable_module_update_notifications`
-  - Type: boolean
-  - Purpose: Controls whether the app checks for module-update notifications during startup.
+### **enable_screen_transitions**
+- **Type**: Boolean (`true`/`false`)
+- **Description**: Enable or disable page-change fade animations.
 
-- `screen_transition_duration_ms`
-  - Type: integer
-  - Purpose: Duration of the screen-change fade in milliseconds.
-  - Supported range: `0` to `500`.
-  - Notes: `0` makes page switches immediate.
+### **enable_module_update_notifications**
+- **Type**: Boolean (`true`/`false`)
+- **Description**: Toggles check for updates on application startup.
 
-- `toast_duration_sec`
-  - Type: integer
-  - Purpose: Seconds that routine toast notifications remain visible.
+### **screen_transition_duration_ms**
+- **Type**: Integer
+- **Description**: Length of page transition animation (0 to 500 milliseconds).
 
-- `auto_save_interval_min`
-  - Type: integer
-  - Purpose: Minutes between automatic draft saves.
+### **toast_duration_sec**
+- **Type**: Integer
+- **Description**: Duration in seconds that popup alerts stay on screen.
 
-- `default_shift_hours`
-  - Type: number
-  - Purpose: Default shift hours loaded into Form Loader.
+### **auto_save_interval_min**
+- **Type**: Integer
+- **Description**: Minutes between automatic draft saves.
 
-- `default_goal_mph`
-  - Type: number
-  - Purpose: Default goal molds per hour loaded into Form Loader.
+### **default_shift_hours**
+- **Type**: Number
+- **Description**: Default shift duration loaded into the production form.
 
-- `module_whitelist`
-  - Type: array of strings
-  - Purpose: Optional list of visible sidebar modules to show.
-  - Notes: An empty list means all visible modules remain available.
+### **default_goal_mph**
+- **Type**: Number
+- **Description**: Default molds-per-hour target loaded into the production form.
 
-- `persistent_modules`
-  - Type: array of strings
-  - Purpose: Modules that stay live while the app remains open so their in-progress state is preserved when you navigate away and back.
+### **module_whitelist**
+- **Type**: Array of Strings
+- **Description**: Optional list of modules to show in sidebar. If empty, all are shown.
 
-- `downtime_codes`
-  - Type: object
-  - Purpose: Optional label overrides for downtime code numbers used by Form Loader and Excel import/export. Extra numeric codes can be added here in addition to the defaults.
+### **persistent_modules**
+- **Type**: Array of Strings
+- **Description**: Modules that keep their in-progress state when you navigate away.
 
-## Recommended Editing Path
+### **downtime_codes**
+- **Type**: Object (Key-Value map)
+- **Description**: Custom labels and categories for numeric downtime codes.
 
-Use Settings Manager for normal changes so values stay inside the supported range of the app.
+---
 
-## Related Security Setting
+## Guidelines
 
-External override trust is not stored in `settings.json`. It is persisted separately by the security system and is managed from the privileged Developer & Admin tools.
+- **Best Practice**: Always use the **Settings Manager** visual tool inside the
+  app rather than editing this file manually to prevent errors.
+- Admin security options and module trust keys are stored separately and cannot
+  be edited inside `settings.json`.

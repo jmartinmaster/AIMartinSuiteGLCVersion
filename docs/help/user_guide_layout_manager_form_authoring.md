@@ -1,116 +1,75 @@
-# Layout Manager: Form Creation and Editing
+# Form Creation & Editing
 
-Use this guide for a practical start-to-finish authoring workflow when creating or editing stored forms.
+Follow this guide when creating a new form layout or editing an existing one
+from scratch.
 
-The form saved here is the same layout contract that Form Loader loads through the active form registry.
+---
 
-## Quick Start Flow
+## Quick Start Steps
 
-1. Open Layout Manager.
-2. Choose one path:
-   - Create: start from your current editor state.
-   - Create Blank: start from the minimal scaffold.
-3. Enter form name and optional description.
-4. Use `Block View` and `Structure > Section Editor` to shape fields and section behavior.
-5. Use `Preview > Header Preview` and `Preview > Metadata` to verify placement and mapped metadata.
-6. Use `Structure > Validation` to clear issues and warnings.
-7. Save, then Activate the form when ready.
+1. Open **Layout Manager**.
+2. Choose one:
+   - Click **Create** to branch off the current form layout.
+   - Click **Create Blank** to start with a minimal blank template.
+3. Enter a name and description for your form.
+4. Use **Block View** and `Structure > Section Editor` to design sections and columns.
+5. Use **Preview** to check field alignment and placements.
+6. Check `Structure > Validation` to fix any layout issues or warnings.
+7. Click **Save** to write the layout.
+8. Click **Activate** to make the form active in the **Form Loader**.
 
-## Create vs Create Blank
+---
 
-- Create:
-  - Best when you want to branch from an existing draft.
-  - Copies current editor content into a new stored form.
-- Create Blank:
-  - Best when you want a net-new layout.
-  - Creates a minimal valid scaffold with required repeating-row seed fields and mapping keys.
+## Recommended Setup Order
 
-## Recommended Editing Order
+1. **Sections first**: Go to `Structure > Section Editor` to add your tables
+   and single field blocks, and set their ordering.
+2. **Fields second**: Go to **Block View** to define header and row columns,
+   set names, data types, read-only permissions, and options lists.
+3. **Excel mappings third**: Go to **Import / Export** to select your template and
+   map form fields to the correct Excel sheet columns/cells.
+4. **Verify fourth**: Use the **Preview** and **Validation** tabs to verify your
+   work and resolve any errors before saving.
 
-1. `Structure > Section Editor`:
-   - Define sections, section type, behavior profile, and repeating-row delete policy.
-2. `Block View`:
-   - `Header Fields`: edit header schema rows.
-   - `Row Fields`: edit production or downtime row schemas.
-   - Add/reorder header fields and row fields.
-   - Apply field-level attributes (readonly, role, defaults, triggers, options source).
-3. `Import / Export`:
-   - `Template Path`: set the workbook path.
-   - `Row Mapping`: confirm field-to-column mappings and transform settings.
-   - `Status`: review template and mapping summary details.
-4. `Preview`:
-   - `Header Preview`: confirm visual placement.
-   - `Row Sections`: inspect section and field structure.
-   - `Metadata`: verify mapped field details and coverage.
-5. `Structure > Validation`:
-   - Resolve validation issues before save.
+---
 
-## Section Editor Tips
+## Practical Editing Tips
 
-- Keep section ids stable once forms are in use.
-- For repeating sections, set delete-row behavior intentionally:
-  - Show Delete Button
-  - Delete Button Label and Tooltip
-  - Require Delete Confirm
-- If a repeating section should participate in calculation workflows, ensure its calculations metadata profile marks `requires_calculations` as `true`.
-- Save-time behavior: when a save introduces new required-calculation sections, Layout Manager prompts to open Form Calculations so setup can be completed immediately.
-- Use Move Up / Move Down in `Structure > Section Editor` to finalize ordering before broad field edits.
+### Section Editor
+- Keep **Section IDs** short and stable. Changing them later can break maps.
+- For repeating tables, configure the row deletion settings (labels, confirmations)
+  intentionally to protect operator data entry.
 
-## Row Field Tips
+### Row Fields
+- Assign **Role** values carefully (like `part_number` or `mold_count`) so the app
+  knows how to calculate values and lookup rates.
+- Use **Bulk Actions** (Bulk Rename, Bulk Delete, Bulk Convert) if you need to
+  make major changes to many columns at once.
 
-- Use role values for semantic behavior and future-proofing.
-- Keep section keys, field ids, roles, widgets, and mapping transforms aligned with the syntax Layout Manager and Form Loader recognize.
-- Use bulk actions to accelerate repetitive edits:
-  - Bulk Rename
-  - Bulk Delete Match
-  - Bulk Convert Widget
+### Mappings
+- Click preview cells in `Preview > Header Preview` to quickly see which fields
+  they map to.
+- Use the **Validation** summary tab frequently to identify duplicate names, missing
+  mappings, or invalid widget configurations.
 
-## Preview Metadata Tips
+---
 
-- Click a cell in `Preview > Header Preview` to inspect mapped field details (id, label, cell, role).
-- Use `Preview > Metadata` to verify overlap hotspots and missing placement.
-- Treat preview as placement validation, not live worksheet data.
+## Workflow Safety
 
-## Validation Summary Tips
+- **Save Snapshots**: Go to the **Summary** tab, enter a label, and click
+  **Save Version** before making major structural edits or running bulk actions.
+  Use **Restore Latest** to roll back if needed.
+- **Save Warnings**: If you save a layout that requires new calculations, the
+  app will offer to open the **Form Calculations** setup tool. We recommend
+  completing calculations setup immediately.
 
-- Use `Structure > Validation` after each structural change.
-- Resolve errors first, then warnings.
-- Common cleanup targets:
-  - Duplicate ids or ambiguous labels
-  - Invalid widget/type combinations
-  - Missing mapping coverage for required fields
-- Re-check validation after every structural change (section add/remove/reorder).
+---
 
-## Keyboard Workflow
+## Checklist for Launching a Form
 
-- Ctrl+S: Save quickly from anywhere.
-- Escape: Clear active inline focus.
-- Ctrl+L: Jump focus to stored form selector.
-- Ctrl+Tab / Ctrl+Shift+Tab: Cycle tabs.
-- Enter / Shift+Enter: Move down/up one row in active table.
-- Alt+Arrow: Move three cells in selected direction.
-- Ctrl+Arrow: Move five cells in selected direction.
-
-## Version Safety
-
-- Use Summary tab snapshots before major restructuring:
-  - Save Version with a clear label.
-  - Restore Latest to recover quickly from bad edits.
-- Snapshot before bulk operations and before section reorder passes.
-
-## Common Pitfalls
-
-- Editing mapping first before field ids/roles are stabilized.
-- Renaming fields repeatedly without checking dependent mappings.
-- Activating a form before preview and validation are clean.
-- Skipping snapshot creation before large bulk edits.
-
-## Completion Checklist
-
-- Form created and named correctly.
-- Section behavior and delete policy configured.
-- Header and row fields reviewed for role and readonly correctness.
-- Import/export mapping checked.
-- Preview metadata checked for expected cell coverage.
-- Validation Summary clear (or warnings accepted intentionally).
-- Form saved, then activated.
+- [ ] Form has a clear, descriptive name.
+- [ ] Table sections have deletion and repeat rules set.
+- [ ] Header and table fields are marked correct (read-only, roles, triggers).
+- [ ] Excel mapping references the correct columns/cells.
+- [ ] The **Validation** tab shows no errors (and warnings are verified).
+- [ ] Layout is **Saved** and then **Activated**.

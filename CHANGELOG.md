@@ -4,6 +4,26 @@ This changelog tracks the main branch release line for Production Logging Center
 
 Version headings below are aligned to the current `2.x` release line used by Dispatcher Core. Earlier work has been grouped into practical release milestones so the shipped feature history is easier to follow without rewriting older module version markers.
 
+## [2.3.0] - 2026-06-20
+
+### Added
+
+- **Form Wizard**:
+  - Implemented `FormWizardModel`, `FormWizardQtController`, and `FormWizardQtView` providing a step-by-step wizard for configuring new custom forms.
+  - Integrated "Create Blank Form Wizard" dialog (`BlankFormWizardDialog`) in Layout Manager to bootstrap header, production, and downtime sections with default schemas.
+- **Enhanced JSON Editor in Layout Manager**:
+  - Replaced standard text editors with custom `LineNumberPlainTextEdit` to add line numbers and active-line highlighting.
+  - Implemented auto-saving and JSON validation on tab switches to prevent switching if code contains invalid syntax.
+
+### Changed
+
+- **Generic Form Loader Layout Handling**:
+  - Refactored `ProductionLogQtController` to dynamically load form sections and layouts from generic schema configurations (`set_form_data(payload)`) rather than hardcoding fields.
+  - Updated `DataHandlerService` to supply default schemas for production and downtime rows if not specified in the custom JSON.
+- **Documentation and UI Assets**:
+  - Fully audited and updated Help Center documentation (`docs/help/`) to reflect new Form Wizard and Layout Manager additions.
+  - Updated application icons (`assets/icons/`).
+
 ## [2.2.7] - 2026-06-19
 
 ### Changed

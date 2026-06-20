@@ -18,6 +18,7 @@ import math
 import os
 import re
 import shutil
+from copy import deepcopy
 from datetime import date, datetime
 
 import openpyxl
@@ -72,6 +73,125 @@ DEFAULT_SECTIONS = (
     },
 )
 DEFAULT_REPEATING_SECTION_MAX_ROWS = 25
+DEFAULT_PRODUCTION_ROW_FIELDS = [
+    {
+        "id": "shop_order",
+        "role": "job_order",
+        "label": "Shop Order",
+        "widget": "entry",
+        "width": 15,
+        "open_row_trigger": True,
+        "user_input": True,
+    },
+    {
+        "id": "part_number",
+        "role": "part_number",
+        "label": "Part Number",
+        "widget": "entry",
+        "width": 15,
+        "math_trigger": True,
+        "open_row_trigger": True,
+        "user_input": True,
+    },
+    {
+        "id": "rate_lookup",
+        "role": "rate_value",
+        "label": "Rate",
+        "widget": "entry",
+        "width": 12,
+        "lookup_source": "part_number_rate",
+        "lookup_key_role": "part_number",
+        "override_toggle_role": "rate_override_toggle",
+        "math_trigger": True,
+        "readonly": True,
+        "derived": True,
+    },
+    {
+        "id": "rate_override_enabled",
+        "role": "rate_override_toggle",
+        "label": "Override",
+        "widget": "checkbutton",
+        "toggle_target_role": "rate_value",
+        "default": False,
+    },
+    {
+        "id": "molds",
+        "role": "mold_count",
+        "label": "Molds",
+        "widget": "entry",
+        "width": 10,
+        "math_trigger": True,
+        "open_row_trigger": True,
+        "user_input": True,
+    },
+    {
+        "id": "time_calc",
+        "role": "duration_minutes",
+        "label": "Time",
+        "widget": "display",
+        "width": 10,
+        "default": "0 min",
+        "sticky": "e",
+        "bold": True,
+        "derived": True,
+    },
+]
+DEFAULT_DOWNTIME_ROW_FIELDS = [
+    {
+        "id": "start",
+        "role": "start_clock",
+        "label": "Start",
+        "widget": "entry",
+        "width": 8,
+        "math_trigger": True,
+        "open_row_trigger": True,
+        "user_input": True,
+    },
+    {
+        "id": "stop",
+        "role": "stop_clock",
+        "label": "Stop",
+        "widget": "entry",
+        "width": 8,
+        "math_trigger": True,
+        "open_row_trigger": True,
+        "user_input": True,
+    },
+    {
+        "id": "code",
+        "role": "downtime_code",
+        "label": "Code",
+        "widget": "combobox",
+        "width": 18,
+        "state": "readonly",
+        "options_source": "downtime_codes",
+        "open_row_trigger": True,
+        "user_input": True,
+    },
+    {
+        "id": "cause",
+        "role": "cause_text",
+        "label": "Cause",
+        "widget": "entry",
+        "width": 24,
+        "expand": True,
+        "sticky": "ew",
+        "open_row_trigger": True,
+        "user_input": True,
+    },
+    {
+        "id": "time_calc",
+        "role": "duration_minutes",
+        "label": "Time",
+        "widget": "display",
+        "width": 10,
+        "default": "0 min",
+        "sticky": "e",
+        "bold": True,
+        "bootstyle": "danger",
+        "derived": True,
+    },
+]
 IMPLEMENTED_BEHAVIOR_PROFILES = ("header", "production", "downtime")
 SAFE_EXPRESSION_EVALUATOR = SafeExpressionEvaluator()
 
@@ -92,6 +212,12 @@ class DataHandlerService:
         normalized = dict(config) if isinstance(config, dict) else {}
         normalized["sections"] = self._normalize_sections(normalized)
         normalized["header_fields"] = self._normalize_header_field_configs(normalized.get("header_fields"))
+
+        if "production_row_fields" not in normalized or not normalized["production_row_fields"]:
+            normalized["production_row_fields"] = deepcopy(DEFAULT_PRODUCTION_ROW_FIELDS)
+        if "downtime_row_fields" not in normalized or not normalized["downtime_row_fields"]:
+            normalized["downtime_row_fields"] = deepcopy(DEFAULT_DOWNTIME_ROW_FIELDS)
+
         for section in normalized["sections"]:
             fields_key = str(section.get("fields_key") or "").strip()
             if not fields_key:

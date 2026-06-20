@@ -106,6 +106,7 @@ class ProductionLogQtView(QMainWindow):
         self.section_info_by_id = self._build_section_info_by_id()
         self.row_delete_policies = dict(row_delete_policies or {})
         self.header_widgets = {}
+        self.single_section_widgets = {}
         self.repeating_sections = {}
         self.action_buttons = []
         self.production_table = None
@@ -480,6 +481,9 @@ class ProductionLogQtView(QMainWindow):
 
             label_widget = QLabel(label_text + ":", header_group)
             self.header_widgets[field_id] = field_widget
+            if section_id not in self.single_section_widgets:
+                self.single_section_widgets[section_id] = {}
+            self.single_section_widgets[section_id][field_id] = field_widget
             header_layout.addWidget(label_widget, grid_row, grid_col)
             header_layout.addWidget(field_widget, grid_row, grid_col + 1)
 
@@ -1036,45 +1040,42 @@ class ProductionLogQtView(QMainWindow):
         return rows
 
     def collect_form_data(self):
-        header_payload = {}
-        for field_id, widget in self.header_widgets.items():
-            if isinstance(widget, QComboBox):
-                header_payload[field_id] = str(widget.currentText())
-            else:
-                header_payload[field_id] = str(widget.text())
-        repeating_payload = {}
+        payload = {}
+        for section_id, section_widgets in self.single_section_widgets.items():
+            section_payload = {}
+            for field_id, widget in section_widgets.items():
+                if isinstance(widget, QComboBox):
+                    section_payload[field_id] = str(widget.currentText())
+                else:
+                    section_payload[field_id] = str(widget.text())
+            payload[section_id] = section_payload
+
         for section_id, runtime_info in self.repeating_sections.items():
             table = runtime_info.get("table") if isinstance(runtime_info, dict) else None
             field_configs = list(runtime_info.get("field_configs") or []) if isinstance(runtime_info, dict) else []
-            repeating_payload[section_id] = self._collect_rows(table, field_configs)
+            payload[section_id] = self._collect_rows(table, field_configs)
 
-        production_rows = list(repeating_payload.get(self.production_section_id) or [])
-        downtime_rows = list(repeating_payload.get(self.downtime_section_id) or [])
-        payload = {
-            "header": header_payload,
-            "production": production_rows,
-            "downtime": downtime_rows,
-        }
-        payload.update(repeating_payload)
         return payload
 
-    def set_form_data(self, header_payload, production_rows, downtime_rows):
-        header_payload = dict(header_payload or {})
+    def set_form_data(self, payload):
+        payload = dict(payload or {})
         self._suspend_dirty_tracking = True
-        for field_id, widget in self.header_widgets.items():
-            widget.blockSignals(True)
-            self._set_header_widget_value(widget, header_payload.get(field_id, ""))
-            widget.blockSignals(False)
-        self._set_table_rows(
-            self._get_section_table(self.production_section_id),
-            self._get_section_field_configs(self.production_section_id),
-            list(production_rows or []),
-        )
-        self._set_table_rows(
-            self._get_section_table(self.downtime_section_id),
-            self._get_section_field_configs(self.downtime_section_id),
-            list(downtime_rows or []),
-        )
+        
+        for section_id, section_widgets in self.single_section_widgets.items():
+            section_payload = dict(payload.get(section_id) or {})
+            for field_id, widget in section_widgets.items():
+                widget.blockSignals(True)
+                self._set_header_widget_value(widget, section_payload.get(field_id, ""))
+                widget.blockSignals(False)
+                
+        for section_id, runtime_info in self.repeating_sections.items():
+            section_rows = list(payload.get(section_id) or [])
+            self._set_table_rows(
+                runtime_info.get("table"),
+                list(runtime_info.get("field_configs") or []),
+                section_rows
+            )
+            
         self._suspend_dirty_tracking = False
 
     def set_form_name(self, form_name):

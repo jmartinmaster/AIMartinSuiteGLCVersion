@@ -1,16 +1,30 @@
 # Backup / Recovery
 
-Use Backup / Recovery to inspect saved drafts, recovery snapshots, form-aware layout backups, and JSON backup files.
+Use the **Backup / Recovery** module to restore saved drafts, form configurations,
+and system backups.
 
-- Pending Drafts can be resumed directly into Form Loader.
-- Recovery Snapshots can be restored back into `data/pending` and opened immediately.
-- Settings, form definitions, default-layout, custom-form layout, and rate backups can be restored back into their live JSON files.
-- Open Selected File and Open Containing Folder help when you want to inspect recovery files directly with the system default app or file browser.
-- Selection reminders and restore-complete messages use toast notifications instead of blocking dialogs.
-- The internal persistence helper powers these saves, but it is intentionally hidden from the sidebar because it is not a user-facing tool.
+---
 
-## Recovery Scope
+## Recovery Options
 
-- Pending drafts are active work files.
-- Recovery snapshots are older versions of draft files.
-- JSON backups under `data/backups` protect the main editable settings, the form registry, form-backed layout files, and rates files.
+- **Pending Drafts**: Resume active shift entries directly in the **Form Loader**.
+- **Recovery Snapshots**: Restore previous versions of your drafts back to the
+  `data/pending/` folder.
+- **System Settings & Rates**: Restore older configurations for settings, form definitions,
+  rates, or custom layouts back to their live locations.
+- **Open Selected File**: Open the backup file using your system's default text editor.
+- **Open Containing Folder**: Open the file's folder in the system file browser.
+
+> **Note**: Alerts, notifications, and confirmations appear as non-blocking
+> status alerts (toast notifications) to keep your workflow smooth.
+
+---
+
+## Scope of Backups
+
+The system automatically categorizes files to keep backups organized:
+
+1. **Pending Drafts**: Active, in-progress shift logs.
+2. **Recovery Snapshots**: Older timestamped checkpoints of your active drafts.
+3. **Configuration Backups**: Saved under `data/backups/`, protecting your settings,
+   rates, form list registry, and layout files.

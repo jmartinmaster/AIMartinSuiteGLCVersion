@@ -1,19 +1,35 @@
 # Rate Manager
 
-Use Rate Manager to maintain molds-per-hour targets for part numbers.
+Use the **Rate Manager** to manage standard molds-per-hour targets for different
+part numbers. These rates are used by the **Form Loader** to calculate production
+time and shift efficiency.
 
-- Search filters the visible part-number list as you type, ignoring letter case.
-- Select an existing part and choose Edit to load that row into the editor.
-- While editing, the part number stays locked, Add changes to Save, and Edit changes to Cancel.
-- Add requires both a part number and a rate.
-- Saving an edit requires a non-empty rate.
-- Delete removes the selected rate entry.
-- The table is the working list of stored part-number rates.
+---
 
-These rates are used by Form Loader when calculating per-row time and overall shift efficiency.
+## How to Manage Rates
 
-## JSON Relationship
+### Finding a Part
+- Type in the **Search** box to filter the list of parts. The search is case-insensitive.
 
-- Rate Manager edits the live rate file used by Logging Center.
-- Use Rate Manager when possible instead of editing `rates.json` manually.
-- Saving rates writes the external live `rates.json` file and keeps recovery copies under `data/backups/rates`.
+### Adding a New Part Rate
+1. Enter the part number in the **Part Number** field.
+2. Enter the molds-per-hour target in the **Rate** field.
+3. Click **Add** to save it to the list.
+
+### Editing an Existing Rate
+1. Select a part from the table.
+2. Click **Edit**. The part details will load into the input fields above.
+3. Modify the **Rate** (the part number itself cannot be edited).
+4. Click **Save** to apply the changes, or click **Cancel** to discard them.
+
+### Deleting a Rate
+1. Select a part from the table.
+2. Click **Delete** to remove it from the database.
+
+---
+
+## File Backups
+- The app saves these rates in the `rates.json` file.
+- We recommend using the **Rate Manager** instead of editing files manually.
+- Every time you save changes, a backup copy is automatically created in
+  `data/backups/rates` to protect your data.

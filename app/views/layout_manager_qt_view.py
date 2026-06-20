@@ -23,7 +23,7 @@ from pathlib import Path
 from launcher import create_qt_application
 from app.production_log_roles import HEADER_FIELD_ROLE_DEFAULTS, ROW_FIELD_ROLE_DEFAULTS
 from app.theme_manager import get_qt_palette, get_qt_stylesheet
-from PyQt6.QtGui import QDesktopServices, QFont, QFontDatabase, QKeySequence, QShortcut
+from PyQt6.QtGui import QDesktopServices, QFont, QFontDatabase, QKeySequence, QShortcut, QColor, QPainter, QTextFormat
 
 __module_name__ = "Layout Manager Qt View"
 __version__ = "0.6.13"
@@ -40,8 +40,9 @@ STATE_OPTIONS = ["", "normal", "disabled", "readonly"]
 OPTIONS_SOURCE_OPTIONS = ["", "downtime_codes"]
 BOOTSTYLE_OPTIONS = ["", "primary", "secondary", "success", "info", "warning", "danger", "light", "dark"]
 
-from PyQt6.QtCore import QEvent, QSignalBlocker, Qt, QTimer, QUrl
+from PyQt6.QtCore import QEvent, QSignalBlocker, Qt, QTimer, QUrl, QRect, QSize
 from PyQt6.QtWidgets import (
+    QTextEdit,
     QAbstractItemView,
     QApplication,
     QComboBox,
@@ -67,6 +68,8 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QWidget,
     QInputDialog,
+    QDialog,
+    QCheckBox,
 )
 
 PYQT6_AVAILABLE = True
@@ -74,6 +77,193 @@ PYQT6_AVAILABLE = True
 
 def is_layout_manager_qt_runtime_available():
     return PYQT6_AVAILABLE
+
+
+class LineNumberArea(QWidget):
+    def __init__(self, editor):
+        super().__init__(editor)
+        self.codeEditor = editor
+
+    def sizeHint(self):
+        return QSize(self.codeEditor.lineNumberAreaWidth(), 0)
+
+    def paintEvent(self, event):
+        self.codeEditor.lineNumberAreaPaintEvent(event)
+
+
+class LineNumberPlainTextEdit(QPlainTextEdit):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.lineNumberArea = LineNumberArea(self)
+
+        self.blockCountChanged.connect(self.updateLineNumberAreaWidth)
+        self.updateRequest.connect(self.updateLineNumberArea)
+        self.cursorPositionChanged.connect(self.highlightCurrentLine)
+
+        mono_font = QFont("Courier New", 10)
+        mono_font.setStyleHint(QFont.StyleHint.Monospace)
+        self.setFont(mono_font)
+
+        self.updateLineNumberAreaWidth(0)
+        self.highlightCurrentLine()
+
+    def lineNumberAreaWidth(self):
+        digits = 1
+        max_num = max(1, self.blockCount())
+        while max_num >= 10:
+            max_num /= 10
+            digits += 1
+
+        space = 3 + self.fontMetrics().horizontalAdvance('9') * digits + 8
+        return space
+
+    def updateLineNumberAreaWidth(self, _):
+        self.setViewportMargins(self.lineNumberAreaWidth(), 0, 0, 0)
+
+    def updateLineNumberArea(self, rect, dy):
+        if dy:
+            self.lineNumberArea.scroll(0, dy)
+        else:
+            self.lineNumberArea.update(0, rect.y(), self.lineNumberArea.width(), rect.height())
+
+        if rect.contains(self.viewport().rect()):
+            self.updateLineNumberAreaWidth(0)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        cr = self.contentsRect()
+        self.lineNumberArea.setGeometry(
+            QRect(cr.left(), cr.top(), self.lineNumberAreaWidth(), cr.height())
+        )
+
+    def lineNumberAreaPaintEvent(self, event):
+        painter = QPainter(self.lineNumberArea)
+        bg_color = self.palette().color(self.backgroundRole())
+        if bg_color.lightness() > 128:
+            bg_color = bg_color.darker(105)
+        else:
+            bg_color = bg_color.lighter(115)
+        painter.fillRect(event.rect(), bg_color)
+
+        block = self.firstVisibleBlock()
+        blockNumber = block.blockNumber()
+        top = int(self.blockBoundingGeometry(block).translated(self.contentOffset()).y())
+        bottom = top + int(self.blockBoundingRect(block).height())
+
+        fg_color = self.palette().color(self.foregroundRole())
+        fg_color.setAlpha(128)
+
+        while block.isValid() and top <= event.rect().bottom():
+            if block.isVisible() and bottom >= event.rect().top():
+                number = str(blockNumber + 1)
+                painter.setPen(fg_color)
+                painter.drawText(
+                    0,
+                    top,
+                    self.lineNumberArea.width() - 5,
+                    int(self.blockBoundingRect(block).height()),
+                    Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+                    number,
+                )
+
+            block = block.next()
+            top = bottom
+            bottom = top + int(self.blockBoundingRect(block).height())
+            blockNumber += 1
+
+    def highlightCurrentLine(self):
+        extraSelections = []
+
+        if not self.isReadOnly():
+            selection = QTextEdit.ExtraSelection()
+            bg_color = self.palette().color(self.backgroundRole())
+            if bg_color.lightness() > 128:
+                lineColor = bg_color.darker(104)
+            else:
+                lineColor = bg_color.lighter(108)
+            selection.format.setBackground(lineColor)
+            selection.format.setProperty(QTextFormat.Property.FullWidthSelection, True)
+            selection.cursor = self.textCursor()
+            selection.cursor.clearSelection()
+            extraSelections.append(selection)
+
+        self.setExtraSelections(extraSelections)
+
+
+class BlankFormWizardDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Create Blank Form Wizard")
+        self.setMinimumWidth(450)
+        
+        layout = QVBoxLayout(self)
+        layout.setSpacing(12)
+        layout.setContentsMargins(16, 16, 16, 16)
+        
+        # Title/Description
+        title_label = QLabel("Configure New Blank Form", self)
+        title_font = title_label.font()
+        title_font.setBold(True)
+        title_font.setPointSize(12)
+        title_label.setFont(title_font)
+        layout.addWidget(title_label)
+        
+        form_layout = QFormLayout()
+        form_layout.setSpacing(8)
+        
+        self.name_edit = QLineEdit(self)
+        self.name_edit.setPlaceholderText("e.g. Custom Log Sheet")
+        form_layout.addRow("Form Name *", self.name_edit)
+        
+        self.desc_edit = QLineEdit(self)
+        self.desc_edit.setPlaceholderText("e.g. Logs daily production metrics")
+        form_layout.addRow("Description", self.desc_edit)
+        
+        layout.addLayout(form_layout)
+        
+        # Standard Components Options
+        group_box = QGroupBox("Pre-populate Standard Sections", self)
+        group_layout = QVBoxLayout(group_box)
+        group_layout.setSpacing(6)
+        
+        self.header_check = QCheckBox("Header Section (Date, Shift, Operator, etc.)", self)
+        self.header_check.setChecked(True)
+        group_layout.addWidget(self.header_check)
+        
+        self.production_check = QCheckBox("Production Section (Repeating table: order, parts, molds, time)", self)
+        self.production_check.setChecked(True)
+        group_layout.addWidget(self.production_check)
+        
+        self.downtime_check = QCheckBox("Downtime Section (Repeating table: start, stop, downtime code)", self)
+        self.downtime_check.setChecked(True)
+        group_layout.addWidget(self.downtime_check)
+        
+        layout.addWidget(group_box)
+        
+        help_label = QLabel("Unchecking a section will result in a completely custom empty section.", self)
+        help_label.setStyleSheet("color: gray; font-size: 11px;")
+        layout.addWidget(help_label)
+        
+        # Buttons
+        button_layout = QHBoxLayout()
+        self.ok_button = QPushButton("Create", self)
+        self.ok_button.clicked.connect(self.accept)
+        self.cancel_button = QPushButton("Cancel", self)
+        self.cancel_button.clicked.connect(self.reject)
+        
+        button_layout.addStretch(1)
+        button_layout.addWidget(self.ok_button)
+        button_layout.addWidget(self.cancel_button)
+        layout.addLayout(button_layout)
+
+    def get_values(self):
+        return {
+            "name": self.name_edit.text().strip(),
+            "description": self.desc_edit.text().strip(),
+            "include_header": self.header_check.isChecked(),
+            "include_production": self.production_check.isChecked(),
+            "include_downtime": self.downtime_check.isChecked(),
+        }
 
 
 class LayoutManagerQtView(QMainWindow):
@@ -258,7 +448,7 @@ class LayoutManagerQtView(QMainWindow):
         json_editor_layout.setSpacing(8)
         editor_group = QGroupBox("JSON Editor")
         editor_group_layout = QVBoxLayout(editor_group)
-        self.editor = QPlainTextEdit()
+        self.editor = LineNumberPlainTextEdit()
         self.editor.textChanged.connect(self._handle_editor_changed)
         editor_group_layout.addWidget(self.editor)
         json_editor_layout.addWidget(editor_group)
@@ -333,14 +523,14 @@ class LayoutManagerQtView(QMainWindow):
 
         reference_group = QGroupBox("Reference JSON")
         reference_layout = QVBoxLayout(reference_group)
-        self.compare_reference_editor = QPlainTextEdit()
+        self.compare_reference_editor = LineNumberPlainTextEdit()
         self.compare_reference_editor.setReadOnly(True)
         reference_layout.addWidget(self.compare_reference_editor)
         compare_editors_row.addWidget(reference_group, 1)
 
         working_group = QGroupBox("Working JSON")
         working_layout = QVBoxLayout(working_group)
-        self.compare_working_editor = QPlainTextEdit()
+        self.compare_working_editor = LineNumberPlainTextEdit()
         self.compare_working_editor.textChanged.connect(self.controller.refresh_compare_diff)
         working_layout.addWidget(self.compare_working_editor)
         compare_editors_row.addWidget(working_group, 1)
@@ -840,6 +1030,7 @@ class LayoutManagerQtView(QMainWindow):
 
         self.tabs.addTab(summary_tab, "Summary")
         self.tabs.currentChanged.connect(self._handle_main_tab_changed)
+        self._last_tab_index = 0
         content_layout.addWidget(self.tabs, 1)
 
         content_layout.addStretch(1)
@@ -1314,11 +1505,23 @@ class LayoutManagerQtView(QMainWindow):
         self.controller.mark_dirty()
 
     def _handle_main_tab_changed(self, *_args):
+        index = self.tabs.currentIndex()
+        if hasattr(self, "_last_tab_index") and self._last_tab_index == 0 and index != 0:
+            try:
+                self.controller.apply_editor_changes(message="Applied JSON editor changes on tab switch")
+            except Exception as exc:
+                self.set_status(f"Invalid JSON: {exc}", error=True)
+                QMessageBox.warning(self, "Invalid JSON", f"Cannot switch tabs: The JSON in the editor is invalid.\n\nError: {exc}")
+                QTimer.singleShot(0, lambda: self.tabs.setCurrentIndex(0))
+                QTimer.singleShot(0, lambda: self.editor.setFocus())
+                return
+
         current_widget = self.tabs.currentWidget()
-        if current_widget is not self.json_editor_tab:
-            return
-        self.finalize_block_table_edits()
-        self.controller.sync_block_view_to_editor()
+        if current_widget is self.json_editor_tab:
+            self.finalize_block_table_edits()
+            self.controller.sync_block_view_to_editor()
+
+        self._last_tab_index = index
 
     def finalize_block_table_edits(self):
         for table_widget in (self.header_fields_table, self.row_fields_table, self.mapping_table):
@@ -2328,6 +2531,15 @@ class LayoutManagerQtView(QMainWindow):
             "delete_button_tooltip": str(self.section_delete_tooltip_input.text() or "").strip(),
             "require_delete_confirmation": self.section_require_confirm_combo.currentData(),
         }
+
+    def is_json_editor_active(self):
+        return self.tabs.currentWidget() is self.json_editor_tab
+
+    def show_blank_form_wizard(self):
+        dialog = BlankFormWizardDialog(self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            return dialog.get_values()
+        return None
 
     def prompt_text(self, title, label, default_text=""):
         text, accepted = QInputDialog.getText(self, title, label, QLineEdit.EchoMode.Normal, default_text)

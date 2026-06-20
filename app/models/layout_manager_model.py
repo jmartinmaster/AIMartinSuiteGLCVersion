@@ -1118,6 +1118,8 @@ class LayoutManagerModel:
 
     def create_form_from_config(self, name, config, description="", activate=False):
         config = self.normalize_config(config)
+        form_id = self.service.registry.canonical_form_id(name) or self.service.registry.normalize_form_id(name)
+        config = self.service.registry._ensure_calculation_metadata(config, form_id)
         self.validate_config(config)
         form_info = self.service.create_form(name, config, description=description, activate=activate)
         self.current_source_path = self.service.config_path
@@ -1182,8 +1184,57 @@ class LayoutManagerModel:
 
         return blank_config
 
-    def create_blank_form(self, name, description="", activate=False):
-        config = self.build_blank_form_config()
+    def create_blank_form(self, name, description="", include_header=True, include_production=True, include_downtime=True, activate=False):
+        # 1. Start with the minimal config template structure
+        config = {
+            "template_path": "",
+            "header_fields": [],
+            "sections": [],
+            "editor_presets": {},
+            "calculations": {},
+        }
+        
+        default_config = self._get_default_config_template()
+        
+        # 2. Add sections according to selections
+        if include_header:
+            config["header_fields"] = deepcopy(default_config.get("header_fields", []))
+            for s in default_config.get("sections", []):
+                if s.get("behavior_profile") == "header":
+                    config["sections"].append(deepcopy(s))
+                    break
+        
+        if include_production:
+            config["production_row_fields"] = deepcopy(default_config.get("production_row_fields", []))
+            config["production_mapping"] = deepcopy(default_config.get("production_mapping", {
+                "start_row": 1,
+                "max_rows": DEFAULT_MAPPING_MAX_ROWS,
+                "columns": {}
+            }))
+            for s in default_config.get("sections", []):
+                if s.get("behavior_profile") == "production":
+                    config["sections"].append(deepcopy(s))
+                    break
+                    
+        if include_downtime:
+            config["downtime_row_fields"] = deepcopy(default_config.get("downtime_row_fields", []))
+            config["downtime_mapping"] = deepcopy(default_config.get("downtime_mapping", {
+                "start_row": 1,
+                "max_rows": DEFAULT_MAPPING_MAX_ROWS,
+                "columns": {}
+            }))
+            for s in default_config.get("sections", []):
+                if s.get("behavior_profile") == "downtime":
+                    config["sections"].append(deepcopy(s))
+                    break
+        
+        config["template_path"] = str(default_config.get("template_path", ""))
+        
+        # 3. Ensure calculation metadata based on name/form_id
+        form_id = self.service.registry.canonical_form_id(name) or self.service.registry.normalize_form_id(name)
+        config = self.service.registry._ensure_calculation_metadata(config, form_id)
+        
+        # 4. Validate and save
         self.validate_config(config)
         form_info = self.service.create_form(name, config, description=description, activate=activate)
         self.current_source_path = self.service.config_path

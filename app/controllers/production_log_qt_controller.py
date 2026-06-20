@@ -269,11 +269,33 @@ class ProductionLogQtController:
         self._refresh_form_selector()
         self.balance_state = self.model.normalize_balance_state()
         self.current_draft_path = None
-        self.view.set_form_data(self._default_header_payload(), [{}], [{}])
+        
+        payload = {}
+        for section in self.sections:
+            section_id = str(section.get("id") or "").strip().lower()
+            if not section_id: continue
+            section_type = str(section.get("section_type") or "single").strip().lower()
+            
+            if section_type == "single":
+                sec_payload = {}
+                fields = self.section_field_configs.get(section_id) or []
+                for field in fields:
+                    field_id = str(field.get("id") or "").strip()
+                    if field_id:
+                        sec_payload[field_id] = str(field.get("default") or "")
+                
+                if section_id == self.header_section_id:
+                    sec_payload = self.model.normalize_header_data(sec_payload)
+                payload[section_id] = sec_payload
+            else:
+                payload[section_id] = [{}]
+                
+        self.view.set_form_data(payload)
         self.view.mark_clean(self.collect_ui_data())
         self.view.set_status("Form Loader ready.")
 
     def _default_header_payload(self):
+        # Kept for backward compatibility if any other method calls it
         payload = {}
         for field in self.header_fields:
             field_id = str(field.get("id") or "").strip()
@@ -357,12 +379,9 @@ class ProductionLogQtController:
         payload = dict(payload or {})
         self.balance_state = self.model.normalize_balance_state(payload.get("balance_state"))
         self.current_draft_path = draft_path
-        normalized_header = self.model.normalize_header_data(payload.get("header") or {})
-        production_rows = list(payload.get("production") or payload.get(self.production_section_id) or []) or [{}]
-        downtime_rows = list(payload.get("downtime") or payload.get(self.downtime_section_id) or []) or [{}]
         self.view.set_form_name(self.model.get_active_form_name())
         self._refresh_form_selector()
-        self.view.set_form_data(normalized_header, production_rows, downtime_rows)
+        self.view.set_form_data(payload)
         if mark_dirty_after_load:
             self.view.mark_dirty()
         else:
