@@ -17,6 +17,7 @@ import os
 import sys
 import time
 import webbrowser
+import html as html_escape_mod
 
 from app.models.production_log_model import BALANCE_DOWNTIME_CAUSE, ProductionLogModel
 from app.views.production_log_qt_view import ProductionLogQtView
@@ -980,7 +981,7 @@ class ProductionLogQtController:
         return "\n".join(lines)
 
     def _generate_word_dump(self, ui_data):
-        form_name = self.model.get_active_form_name()
+        form_name = html_escape_mod.escape(self.model.get_active_form_name())
         html = []
         html.append("<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>")
         html.append("<head><title>Form Dump</title>")
@@ -1015,8 +1016,8 @@ class ProductionLogQtController:
             val = header.get(field_id, "")
             r = int(field.get("row") or 0)
             c = int(field.get("col") or 0)
-            grid[(r, c)] = f"<strong>{label}:</strong>"
-            grid[(r, c + 1)] = str(val)
+            grid[(r, c)] = f"<strong>{html_escape_mod.escape(str(label))}:</strong>"
+            grid[(r, c + 1)] = html_escape_mod.escape(str(val))
             
         html.append("<table class='meta-table' style='border-collapse: collapse; width: 100%; border: none; margin-top: 4px; margin-bottom: 8px;'>")
         for r in range(max_row + 1):
@@ -1045,13 +1046,13 @@ class ProductionLogQtController:
             html.append("<table style='border-collapse: collapse; width: 100%; margin-top: 4px; margin-bottom: 10px;'>")
             html.append("<tr style='margin: 0; padding: 0;'>")
             for f in self.production_fields:
-                label = f.get("label") or f.get("id")
+                label = html_escape_mod.escape(str(f.get("label") or f.get("id")))
                 html.append(f"<th style='border: 1px solid #b7c8d0; padding: 4px 6px; text-align: left; background-color: #eef5f7; color: #36505b; font-weight: bold; font-size: 9.5pt; mso-padding-top-alt: 2pt; mso-padding-bottom-alt: 2pt;'>{label}</th>")
             html.append("</tr>")
             for row in production:
                 html.append("<tr style='margin: 0; padding: 0;'>")
                 for f in self.production_fields:
-                    val = str(row.get(f.get("id"), ""))
+                    val = html_escape_mod.escape(str(row.get(f.get("id"), "")))
                     html.append(f"<td style='border: 1px solid #b7c8d0; padding: 4px 6px; text-align: left; font-size: 9.5pt; mso-padding-top-alt: 2pt; mso-padding-bottom-alt: 2pt;'>{val}</td>")
                 html.append("</tr>")
             html.append("</table>")
@@ -1065,13 +1066,13 @@ class ProductionLogQtController:
             html.append("<table style='border-collapse: collapse; width: 100%; margin-top: 4px; margin-bottom: 10px;'>")
             html.append("<tr style='margin: 0; padding: 0;'>")
             for f in self.downtime_fields:
-                label = f.get("label") or f.get("id")
+                label = html_escape_mod.escape(str(f.get("label") or f.get("id")))
                 html.append(f"<th style='border: 1px solid #b7c8d0; padding: 4px 6px; text-align: left; background-color: #eef5f7; color: #36505b; font-weight: bold; font-size: 9.5pt; mso-padding-top-alt: 2pt; mso-padding-bottom-alt: 2pt;'>{label}</th>")
             html.append("</tr>")
             for row in downtime:
                 html.append("<tr style='margin: 0; padding: 0;'>")
                 for f in self.downtime_fields:
-                    val = str(row.get(f.get("id"), ""))
+                    val = html_escape_mod.escape(str(row.get(f.get("id"), "")))
                     html.append(f"<td style='border: 1px solid #b7c8d0; padding: 4px 6px; text-align: left; font-size: 9.5pt; mso-padding-top-alt: 2pt; mso-padding-bottom-alt: 2pt;'>{val}</td>")
                 html.append("</tr>")
             html.append("</table>")

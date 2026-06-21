@@ -76,7 +76,7 @@ class FormWizardQtView(QDialog):
         # Build pages
         self._build_page_basic_info()
         self._build_page_sections()
-        self._build_page_header_fields()
+        self._build_page_single_fields()
         self._build_page_repeating_fields()
         
         # Event hooks (to be connected by controller)
@@ -144,6 +144,11 @@ class FormWizardQtView(QDialog):
         self.desc_edit = QLineEdit()
         self.desc_edit.setPlaceholderText("e.g. Logs parts, molds, and downtime codes")
         form_layout.addRow("Description", self.desc_edit)
+        
+        self.export_prefix_edit = QLineEdit()
+        self.export_prefix_edit.setPlaceholderText("e.g. Injection Molding Log")
+        form_layout.addRow("Export Filename Prefix", self.export_prefix_edit)
+        
         layout.addWidget(form_group)
         
         template_group = QGroupBox("Excel Export Template Association (Optional)")

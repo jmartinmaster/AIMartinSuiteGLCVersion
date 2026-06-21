@@ -1480,8 +1480,15 @@ class DataHandlerService:
         return rows
 
     def import_from_word(self, file_path):
-        with open(file_path, "r", encoding="utf-8") as f:
-            html_content = f.read()
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                html_content = f.read()
+        except UnicodeDecodeError as err:
+            raise ValueError(
+                "The selected file appears to be a binary Word document. "
+                "Only the app-exported HTML-format Word documents (.doc) are supported. "
+                "Importing binary Word files is not supported."
+            ) from err
             
         parser = WordDumpParser()
         parser.feed(html_content)

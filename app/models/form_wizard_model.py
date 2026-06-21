@@ -32,6 +32,7 @@ class FormWizardModel:
         self.form_name = ""
         self.description = ""
         self.template_path = ""
+        self.export_prefix = ""
         
         self.sections = []
         self.single_sections = {}     # maps fields_key to list of fields
@@ -44,6 +45,7 @@ class FormWizardModel:
         default_config = self.layout_manager._get_default_config_template()
         self.template_path = str(default_config.get("template_path", ""))
         self.sections = deepcopy(default_config.get("sections", []))
+        self.export_prefix = str(default_config.get("export_prefix", ""))
         
         for section in self.sections:
             section_type = section.get("section_type") or "single"
@@ -81,6 +83,7 @@ class FormWizardModel:
         config = {
             "template_path": self.template_path,
             "sections": self.sections,
+            "export_prefix": self.export_prefix or self.form_name or "Production Log",
             "editor_presets": {},
             "calculations": {},
         }
@@ -107,6 +110,8 @@ class FormWizardModel:
     def create_form(self, name, description="", activate=False):
         self.form_name = name
         self.description = description
+        if not self.export_prefix:
+            self.export_prefix = name
         config = self.build_config()
         
         # Prepopulate calculations metadata

@@ -79,6 +79,7 @@ class FormWizardQtController:
         self.view.name_edit.setText(self.model.form_name)
         self.view.desc_edit.setText(self.model.description)
         self.view.template_edit.setText(self.model.template_path)
+        self.view.export_prefix_edit.setText(self.model.export_prefix)
         
         # Page 2 values
         self.populate_sections_table()
@@ -149,6 +150,7 @@ class FormWizardQtController:
             self.model.form_name = self.view.name_edit.text().strip()
             self.model.description = self.view.desc_edit.text().strip()
             self.model.template_path = self.view.template_edit.text().strip()
+            self.model.export_prefix = self.view.export_prefix_edit.text().strip()
         elif self.current_page == 1:
             self.model.set_sections(self.get_sections_from_table())
         elif self.current_page == 2:

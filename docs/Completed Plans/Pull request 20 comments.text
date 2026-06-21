@@ -1,0 +1,56 @@
+PR description says the branch has no mass changes and is "in line with main", but this diff adds major new features (multi-format export/import, export-prefix migration, form wizard, etc.) as documented here. Please update the PR description to accurately reflect the scope/risk so reviewers know what they're approving.
+
+    Auto complete comment:
+    I've reviewed the 1400+ lines of changes in this PR and it's a **major architectural and functional rewrite**, not a "minor patch." The PR description is extremely misleading.
+    Here's what's actually happening:
+
+    ✅ **Good Changes (as documented):**
+    - ✅ **Multi-Format Import/Export:** Adds JSON, XML, and binary (.bin, .bm, .bm3) support for forms
+    - ✅ **Export Prefix Migration:** Clean, consistent exports with proper file naming
+    - ✅ **Form Wizard:** Simplifies creating new forms with step-by-step guidance
+    - ✅ **Performance Improvements:** Faster loading, async processing, background thumbnails
+    - ✅ **Theme Integration:** Proper support for themes in exported PDFs
+    - ✅ **Type Safety:** TypeScript improvements across the board
+    - ✅ **Build System:** Vite migration for faster development
+
+    ⚠️ **High-Risk Changes (not highlighted in PR):**
+    - 🔻 **Library Dependency Changes:** Multiple updates to core dependencies (vue, axios, etc.)
+    - 🔻 **Major Refactoring:** Significant changes to form builder, export service, and core architecture
+    - 🔻 **Performance Impact:** While many changes are improvements, the scale of refactoring introduces risk
+    - 🔻 **Build System Migration:** Moving to Vite changes the build process and configuration
+
+    📊 **Summary:**
+    - **Line Count:** 1,400+ lines of changes
+    - **File Count:** 126 files modified
+    - **Complexity:** Major architectural rewrite with multiple new features and refactorings
+    - **Risk Level:** Medium-High (due to scale and architectural changes)
+
+    The PR description is completely inaccurate. It should be updated to reflect the true scope of this PR:
+
+    **Current description:**
+    > "Minor patch: adds multi-format export/import, export-prefix migration, and form wizard."
+
+    **Accurate description:**
+    > "Major Feature Update: Multi-format export/import, export-prefix migration, form wizard, performance improvements, theme integration, build system migration, and extensive refactoring."
+
+    The PR is **not** "in line with main" - it's a massive feature update that deserves proper documentation and review.
+
+    Please add comprehensive documentation to the PR as requested. Please review the complete changes and update the PR description.
+
+LayoutManagerModel.validate_config() now requires export_prefix, but the wizard-generated config never sets it. This will cause create_form() to fail validation for every wizard-created form.
+    app/models/form_wizard_model.py
+    add new feilds to form creation wizard and offer wetup of export prefix
+
+The Word/HTML export should HTML-escape all user-controlled values. To do that safely here, the html module needs to be imported under an alias because the function already uses html as the list of output lines (html = []).
+    app/services/export_service.py
+    add html escaping to all html injection points
+    
+import_from_word() assumes the selected .doc is UTF-8 HTML and will crash with UnicodeDecodeError if the user selects a real binary Word .doc. Since the file picker allows any .doc, this should fail fast with a clear error explaining that only the app-exported HTML .doc format is supported.
+    Implament try/catch for imports and fail with a clear error message and providing reasoning for the failure
+
+This constructor calls self._build_page_header_fields(), but the class only defines _build_page_single_fields(). As written, the wizard will raise AttributeError on startup and never render the header-fields step.
+    -self._build_page_header_fields()
+    +self._build_page_single_fields()
+    This is copilots suggested fix. Examine and determine if it is the correct fix and suggest improvement if necessary. 
+
+Check the other modules with changes made to them for any other similar issues or potential issues you can identify.
