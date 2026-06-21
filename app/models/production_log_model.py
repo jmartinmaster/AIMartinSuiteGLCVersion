@@ -25,10 +25,10 @@ from app.form_definition_registry import DEFAULT_FORM_ID, DEFAULT_FORM_NAME, For
 from app.persistence import write_json_with_backup
 from app.production_log_roles import HEADER_BLANK_IGNORE_ROLES, HEADER_DERIVED_ROLES, resolve_header_field_role, resolve_row_field_role, normalize_role_name
 from app.utils import ensure_external_directory, external_path
-from app.data_handler_service import DEFAULT_SHIFT_TIME_SETTINGS, DataHandlerService
+from app.data_handler_service import DEFAULT_SHIFT_TIME_SETTINGS, DEFAULT_PRODUCTION_ROW_FIELDS, DEFAULT_DOWNTIME_ROW_FIELDS, DataHandlerService
 
 __module_name__ = "Form Loader"
-__version__ = "1.2.10"
+__version__ = "1.2.11"
 
 BALANCE_DOWNTIME_CAUSE = "Time Balance Adjustment"
 DEFAULT_GHOST_LABEL = "Ghost Time: 0 min"
@@ -59,125 +59,7 @@ DEFAULT_CALCULATION_SETTINGS = {
     },
     "formulas": deepcopy(DEFAULT_CALCULATION_FORMULAS),
 }
-DEFAULT_PRODUCTION_ROW_FIELDS = [
-    {
-        "id": "shop_order",
-        "role": "job_order",
-        "label": "Shop Order",
-        "widget": "entry",
-        "width": 15,
-        "open_row_trigger": True,
-        "user_input": True,
-    },
-    {
-        "id": "part_number",
-        "role": "part_number",
-        "label": "Part Number",
-        "widget": "entry",
-        "width": 15,
-        "math_trigger": True,
-        "open_row_trigger": True,
-        "user_input": True,
-    },
-    {
-        "id": "rate_lookup",
-        "role": "rate_value",
-        "label": "Rate",
-        "widget": "entry",
-        "width": 12,
-        "lookup_source": "part_number_rate",
-        "lookup_key_role": "part_number",
-        "override_toggle_role": "rate_override_toggle",
-        "math_trigger": True,
-        "readonly": True,
-        "derived": True,
-    },
-    {
-        "id": "rate_override_enabled",
-        "role": "rate_override_toggle",
-        "label": "Override",
-        "widget": "checkbutton",
-        "toggle_target_role": "rate_value",
-        "default": False,
-    },
-    {
-        "id": "molds",
-        "role": "mold_count",
-        "label": "Molds",
-        "widget": "entry",
-        "width": 10,
-        "math_trigger": True,
-        "open_row_trigger": True,
-        "user_input": True,
-    },
-    {
-        "id": "time_calc",
-        "role": "duration_minutes",
-        "label": "Time",
-        "widget": "display",
-        "width": 10,
-        "default": "0 min",
-        "sticky": "e",
-        "bold": True,
-        "derived": True,
-    },
-]
-DEFAULT_DOWNTIME_ROW_FIELDS = [
-    {
-        "id": "start",
-        "role": "start_clock",
-        "label": "Start",
-        "widget": "entry",
-        "width": 8,
-        "math_trigger": True,
-        "open_row_trigger": True,
-        "user_input": True,
-    },
-    {
-        "id": "stop",
-        "role": "stop_clock",
-        "label": "Stop",
-        "widget": "entry",
-        "width": 8,
-        "math_trigger": True,
-        "open_row_trigger": True,
-        "user_input": True,
-    },
-    {
-        "id": "code",
-        "role": "downtime_code",
-        "label": "Code",
-        "widget": "combobox",
-        "width": 18,
-        "state": "readonly",
-        "options_source": "downtime_codes",
-        "open_row_trigger": True,
-        "user_input": True,
-    },
-    {
-        "id": "cause",
-        "role": "cause_text",
-        "label": "Cause",
-        "widget": "entry",
-        "width": 24,
-        "expand": True,
-        "sticky": "ew",
-        "open_row_trigger": True,
-        "user_input": True,
-    },
-    {
-        "id": "time_calc",
-        "role": "duration_minutes",
-        "label": "Time",
-        "widget": "display",
-        "width": 10,
-        "default": "0 min",
-        "sticky": "e",
-        "bold": True,
-        "bootstyle": "danger",
-        "derived": True,
-    },
-]
+# Constants moved to data_handler_service.py to prevent circular imports.
 DEFAULT_SECTIONS = (
     {
         "id": "header",
@@ -299,13 +181,18 @@ class ProductionLogModel:
         normalized["sections"] = self._normalize_sections(normalized)
         if "header_fields" in normalized:
             normalized["header_fields"] = self._normalize_header_field_configs(normalized.get("header_fields"))
-        if "production_row_fields" in normalized:
+        
+        if "production_row_fields" not in normalized or not normalized["production_row_fields"]:
+            normalized["production_row_fields"] = deepcopy(DEFAULT_PRODUCTION_ROW_FIELDS)
+        else:
             normalized["production_row_fields"] = self._merge_row_field_configs(
                 normalized.get("production_row_fields"),
                 DEFAULT_PRODUCTION_ROW_FIELDS,
                 "production",
             )
-        if "downtime_row_fields" in normalized:
+        if "downtime_row_fields" not in normalized or not normalized["downtime_row_fields"]:
+            normalized["downtime_row_fields"] = deepcopy(DEFAULT_DOWNTIME_ROW_FIELDS)
+        else:
             normalized["downtime_row_fields"] = self._merge_row_field_configs(
                 normalized.get("downtime_row_fields"),
                 DEFAULT_DOWNTIME_ROW_FIELDS,
@@ -784,13 +671,17 @@ class ProductionLogModel:
                 payload = None
 
         if not isinstance(payload, dict):
-            payload = self.data_registry.load_json(
-                "production_log_calculations",
-                default_factory=self.get_default_calculation_settings,
-            )
+            if self.form_id == DEFAULT_FORM_ID:
+                payload = self.data_registry.load_json(
+                    "production_log_calculations",
+                    default_factory=self.get_default_calculation_settings,
+                )
+            else:
+                payload = self.get_default_calculation_settings()
 
         normalized_settings = self.normalize_calculation_settings(payload)
         if not os.path.exists(companion_path):
+            os.makedirs(os.path.dirname(companion_path), exist_ok=True)
             write_json_with_backup(
                 companion_path,
                 normalized_settings,
@@ -904,9 +795,12 @@ class ProductionLogModel:
         }
         raw_formulas = raw_settings.get("formulas") if isinstance(raw_settings.get("formulas"), dict) else {}
         normalized_formulas = self.get_default_calculation_formulas()
-        for formula_name, default_formula in normalized_formulas.items():
+        for formula_name, default_formula in list(normalized_formulas.items()):
             formula_text = str(raw_formulas.get(formula_name, default_formula) or "").strip()
             normalized_formulas[formula_name] = formula_text or default_formula
+        for formula_name, custom_formula in raw_formulas.items():
+            if formula_name not in normalized_formulas:
+                normalized_formulas[formula_name] = str(custom_formula or "").strip()
         normalized_settings["formulas"] = normalized_formulas
         return normalized_settings
 
@@ -1244,6 +1138,8 @@ class ProductionLogModel:
             {
                 "molds": molds,
                 "rate": float(rate),
+                "mold_count": molds,
+                "rate_value": float(rate),
             },
             default=0,
         )
@@ -1254,6 +1150,7 @@ class ProductionLogModel:
             "shift_total_minutes",
             {
                 "hours": self._coerce_float(hours_value, 0.0),
+                "shift_hours": self._coerce_float(hours_value, 0.0),
             },
             default=0,
         )
@@ -1276,6 +1173,7 @@ class ProductionLogModel:
             {
                 "total_molds": float(total_molds or 0),
                 "hours": hours,
+                "shift_hours": hours,
                 "goal_rate": goal,
             },
             default=0.0,

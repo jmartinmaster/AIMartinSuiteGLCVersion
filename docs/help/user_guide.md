@@ -1,98 +1,101 @@
-# Production Logging Center User Guide
+# Production Logging Center - User Guide
 
-Production Logging Center is a floor-focused desktop application for recording Disamatic production, tracking downtime, managing standard production rates, and exporting the finished shift record into the plant Excel template.
+Welcome to the Production Logging Center. This desktop application is designed
+to help you record Disamatic production, track downtime, manage standard part
+rates, and export shift records into the plant's Excel template.
 
+---
 
-Logging Center is built around four day-to-day jobs:
+## What Does This App Do?
 
-1. Fill out the current shift form in Form Loader.
-2. Save and recover draft work during the shift.
-3. Maintain part-number rate values used for time and efficiency calculations.
-4. Adjust the layout and settings without editing code.
+The application is built around four daily tasks:
 
-It also includes a packaged-release Update Manager and direct access to the GPL license from the Help Center and About screen.
+1. **Fill out the shift form** in the **Form Loader**.
+2. **Save and restore drafts** so you never lose your work.
+3. **Manage standard rates** (molds per hour) for time and efficiency calculations.
+4. **Customize forms and settings** without having to write or edit code.
 
-## Accessibility And ADA Progress
+You can also check for application updates using the **Update Manager** and view
+license information on the **About** screen.
 
-- ADA-aligned accessibility improvements are a work in progress across the application.
-- Accessibility work is currently being integrated gradually while higher-priority functional updates continue.
-- User suggestions, operator feedback, and contribution help for accessibility improvements are welcome.
+---
 
-## Main Areas Of The Program
+## Accessibility (ADA Compliance)
 
-The module details now live under the smaller User Guide section chips in the Help Center so you can jump directly to the page you want instead of reading one long combined document.
+We are actively working on making the program easier to use for everyone:
+- Accessibility improvements are currently being developed and added.
+- We welcome your suggestions, feedback, and contributions to help improve
+  the app for all operators.
 
-- Overview: this page, for the broad workflow and shared notes.
-- Form Loader: shift entry, downtime balancing, drafts, and Excel import/export behavior.
-- Rate Manager: part-number rate maintenance used by Form Loader calculations.
-- Layout Manager: active-form sections, field schemas, and workbook mapping editing.
-- Settings Manager: defaults, theme behavior, persistence options, security access, and admin-only developer tools.
-- Backup / Recovery: draft recovery, backup restore, and recovery file handling.
-- Update Manager: Dispatcher Core version checks, payload downloads, and build-runtime notes.
+---
 
-Use the top User Guide chip first, then use the half-sized section chips directly below it to switch between module guides.
+## How to Find Your Way Around
 
-## Typical Workflow
+To keep things simple, details for each part of the app are broken into separate
+guides. You can click on the sections below them in the Help Center:
 
-1. Open Form Loader at the start of the shift.
-2. Enter the date and shift information.
-3. Add production rows as jobs are run.
-4. Add downtime rows when stoppages occur.
-5. Use Save Draft during the shift if you want a manual checkpoint.
-6. Resume the latest draft later if the session is interrupted.
-7. Use Calculate All to review efficiency.
-8. Export Excel when the record is ready.
+- **Overview** (This page): General workflow and general guidelines.
+- **Form Loader**: How to enter shift data, balance downtime, and import/export Excel.
+- **Rate Manager**: Where you update standard production rates for part numbers.
+- **Layout Manager**: Customize form sections, field types, and Excel mappings.
+- **Settings Manager**: Change defaults, themes, saving options, and access security controls.
+- **Backup / Recovery**: Recover lost drafts or restore layout/settings backups.
+- **Update Manager**: Check for app updates and view release details.
 
-## Draft Recovery
+---
 
-The draft status area at the top of Form Loader helps prevent lost work without duplicating the full recovery page.
+## Typical Daily Workflow
 
-- Resume Latest loads the newest draft in `data/pending`.
-- Pending Drafts opens a focused list of active draft files.
-- Backup / Recovery provides the full restore workspace for recovery snapshots, form-aware layout backups, and JSON backups.
-- Delete Current Draft removes the active saved draft file.
-- The status line shows the latest draft name, current draft name, dirty/saved state, pending count, and recovery count.
-- Draft saves, imports, and exports use toast notifications for routine success messages.
+Follow these steps for a standard shift:
 
-If you load a draft or import Excel while unsaved changes exist, Logging Center asks for confirmation before replacing the current session.
+1. **Open Form Loader** at the start of your shift.
+2. **Enter Shift Info** (date, shift, team, etc.) at the top.
+3. **Add Production Rows** as you run different parts.
+4. **Add Downtime Rows** whenever a stoppage or delay occurs.
+5. **Save Drafts** periodically during your shift to keep your progress safe.
+6. **Calculate All** to review shift efficiency.
+7. **Export Excel** once the record is finished and ready to submit.
 
-## Excel Import And Export Notes
+---
 
-- Export uses the template path stored in the active form layout file, which may be the default `layout_config.json` or a selected stored form under `data/forms`.
-- Export writes into the configured base export folder and, when date organization is enabled, uses `YYYY/MM MonthName` subfolders.
-- If Export finds an older month folder such as `04`, it renames it to the newer format such as `04 April` before saving the workbook.
-- If the sheet is missing time, Export can prompt to auto-balance downtime before writing the workbook.
-- If the sheet is already over shift, review or remove downtime manually before export.
-- After export, the workbook can be opened in the default application for review before using Print Last Export.
-- Import reads Excel using the same mapping definitions and reconstructs downtime stop times from the template's total-minute column.
-- Production-row import also detects workbook header labels so older logs that store Molds in column F and newer logs that store Molds in column G both load correctly.
-- Header fields can be configured as import-only so formula-driven workbook cells can be shown in the app without being overwritten on export.
-- If exported values land in the wrong place, check the mapping docs and Layout Manager.
+## Drafts and Recovery
 
-## Where To Edit JSON Files
+The draft status bar at the top of the **Form Loader** helps protect your work:
 
-- `layout_config.json` and `data/forms/<form_id>.json`: use Layout Manager when possible.
-- `settings.json`: use Settings Manager when possible.
-- `rates.json`: use Rate Manager when possible.
-- Draft files in `data/pending`: normally created and managed by Form Loader.
-- Recovery copies are stored under `data/backups`, per-form layout backup folders, and `data/pending/history`.
+- **Resume Latest**: Loads your most recent saved draft.
+- **Pending Drafts**: Opens a list of all saved drafts.
+- **Backup / Recovery**: Provides tools to restore from older snapshots or backup files.
+- **Delete Current Draft**: Clears the current draft file from the system.
 
-When you save settings, layout, or rates through the built-in tools, the suite now keeps extra restore copies automatically.
+> **Note:** If you try to load a draft or import an Excel file while you have
+> unsaved changes, the app will ask for your confirmation first to avoid
+> overwriting your work.
 
-Manual JSON editing is still possible, but the built-in editors are safer because they enforce more of the expected structure.
+---
 
-## JSON Reference
+## Excel Import & Export Guidelines
 
-Use the other Help tabs for the detailed structure of each JSON file used by the application.
+- **Exporting**: The app exports data using the template path set in your
+  active layout file.
+- **Organization**: If enabled, the app automatically organizes exports into folders
+  by year and month (e.g., `2026/06 June`). If it finds a folder named `06`, it
+  will rename it to `06 June` automatically.
+- **Downtime Balancing**: If your shift hours do not match the total production
+  and downtime, the app will ask if you want to balance your downtime before
+  saving.
+- **Importing**: You can load older Excel files back into the application.
+  The app is smart enough to detect columns correctly even if they differ
+  between older and newer templates.
 
-## App Icons
+---
 
-- The app icon files are hard-coded and documented in the App Icons help page.
-- Use that page when you need to replace the EXE icon, runtime PNG icon sizes, or the source icon artwork files.
+## Editing Data Files
 
-## License Access
+For safety, always use the built-in editors in the app instead of editing JSON
+files directly:
+- To edit rates, use the **Rate Manager** (edits `rates.json`).
+- To edit settings, use the **Settings Manager** (edits `settings.json`).
+- To edit layouts, use the **Layout Manager** (edits form layouts).
 
-- The full GNU GPL license text is available from the Help Center.
-- The About screen also provides an Open License button.
-- Module entries shown as `(external)` in About are currently being loaded from the external `the_golden_standard` folder instead of the bundled copy.
-- Packaged builds include `LICENSE.txt` so the license opens cleanly in Windows.
+The program automatically makes backup copies in the `data/backups/` folder
+every time you save settings, rates, or layouts.

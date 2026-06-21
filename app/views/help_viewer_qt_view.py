@@ -16,7 +16,7 @@
 import os
 
 __module_name__ = "Help Viewer Qt View"
-__version__ = "1.1.0"
+__version__ = "1.1.1"
 
 from PyQt6.QtCore import QSignalBlocker, Qt
 from PyQt6.QtWidgets import (
@@ -27,9 +27,9 @@ from PyQt6.QtWidgets import (
     QListWidgetItem,
     QMainWindow,
     QMessageBox,
-    QPlainTextEdit,
     QPushButton,
     QStatusBar,
+    QTextBrowser,
     QVBoxLayout,
     QWidget,
 )
@@ -137,9 +137,8 @@ class HelpViewerQtView(QMainWindow):
         self.doc_path_label.setObjectName("mutedLabel")
         right_layout.addWidget(self.doc_path_label)
 
-        self.doc_browser = QPlainTextEdit()
+        self.doc_browser = QTextBrowser()
         self.doc_browser.setReadOnly(True)
-        self.doc_browser.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
         right_layout.addWidget(self.doc_browser, 1)
 
         content_row.addWidget(right_panel, 3)
@@ -195,7 +194,7 @@ class HelpViewerQtView(QMainWindow):
         self.doc_title_label.setText(str(doc_name))
         self.doc_meta_label.setText(str(meta_label))
         self.doc_path_label.setText(str(doc_path))
-        self.doc_browser.setPlainText(content)
+        self.doc_browser.setMarkdown(content)
         target_scroll = 0 if restore_scroll is None else max(0, int(restore_scroll))
         self.doc_browser.verticalScrollBar().setValue(target_scroll)
 

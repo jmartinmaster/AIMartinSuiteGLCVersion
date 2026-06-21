@@ -1,92 +1,89 @@
 # Form Loader
 
-Use Form Loader, the preferred user-facing name for the permanent internal `production_log` family, to enter the current shift data.
+Use the **Form Loader** to enter data for the current shift. 
 
-- The active form selected through Layout Manager controls the layout and workbook mapping Form Loader uses.
+The layout, fields, and Excel mapping of the Form Loader are determined by the
+active form you select in the **Layout Manager**.
 
-## Current Built-In Field Set
+---
 
-The shipped built-in form currently exposes these header fields:
+## Fields in the Standard Form
 
-- `Date`
-- `Cast Date`
-- `Bond`
-- `EFF %`
-- `Shift`
-- `Shift Hours`
-- `Target Time`
-- `MTD %`
-- `Goal MPH`
-- `Total Molds`
-- `Ret North`
-- `Start Time`
-- `End Time`
-- `Ret South`
+The default form includes the following fields:
 
-The shipped built-in form currently exposes these production row fields:
+### Shift Details (Header)
+- **Date** & **Cast Date**
+- **Bond** (Sand strength rating)
+- **EFF %** (Shift efficiency)
+- **Shift** (1st, 2nd, or 3rd)
+- **Shift Hours** & **Target Time**
+- **MTD %** (Month-to-date efficiency)
+- **Goal MPH** (Target molds per hour)
+- **Total Molds** (Total molds produced)
+- **Ret North** & **Ret South** (Returns)
+- **Start Time** & **End Time**
 
-- `Shop Order`
-- `Part Number`
-- `Rate`
-- `Override`
-- `Molds`
-- `Time`
+### Production Rows
+- **Shop Order**: The manufacturing order number.
+- **Part Number**: The ID of the part being run.
+- **Rate**: The target molds per hour (filled in automatically).
+- **Override**: A checkbox to manually change the rate.
+- **Molds**: The number of molds produced.
+- **Time**: The calculated time to run the molds.
 
-The shipped built-in form currently exposes these downtime row fields:
+### Downtime Rows
+- **Start**: When the stoppage began.
+- **Stop**: When the stoppage ended.
+- **Code**: The numeric reason code for the downtime.
+- **Cause**: A brief description of the problem.
+- **Time**: The calculated minutes of downtime.
 
-- `Start`
-- `Stop`
-- `Code`
-- `Cause`
-- `Time`
+---
 
-Those lists describe the current shipped form, not the full future design envelope. Layout Manager can still reorder supported fields, restyle them, and add custom fields, but special runtime behavior is only guaranteed for the currently supported Form Loader section profiles and semantic roles.
+## Core Features and Tips
 
-- Header fields capture shift-level information such as date, cast date, shift, hours, goal MPH, and return counts.
-- The header includes a read-only Target Time field derived from shift hours, saved with the draft header data, and routed through the layout config for workbook export/import.
-- The header also includes Total Molds, which updates from the current production rows and is saved with the draft header data for workbook export.
-- Optional workbook-linked header fields can also display imported summary cells such as bond, percentages, and selected top-part values when they are configured in the layout.
-- Production rows capture shop order, part number, the active rate, a per-line override toggle for temporary corrections, and mold count.
-  - **Dynamic Rate Lookup**: When you type or correct a part number, the app automatically checks the rates database (`rates.json`) and updates the `Rate` column.
-  - **Rate Overrides**: The `Rate` column is normally read-only to prevent accidental edits. If you need to set a custom rate, check the native `Override` checkbox in that row. This unlocks the `Rate` cell. Unchecking `Override` will lock the cell again and restore the standard lookup rate.
-  - **Checkbutton Widgets**: Widgets defined as `checkbutton` (like `Override`) render as native checkboxes. You can toggle them by clicking or pressing the Spacebar when focused.
-- **Clean Table Growth (Open-Row Behavior)**: Form Loader keeps exactly one blank row at the bottom of repeating tables so you can enter data continuously. A new blank row is only appended when you enter actual content in a user-input field (such as `Shop Order`, `Part Number`, `Molds`, `Start`, or `Stop`). Pre-filled defaults, calculated/derived cells (such as minutes), and read-only cells will not trigger row growth.
-- The footer shows a derived Ghost Time value based on the difference between shift time and the combined production-plus-downtime total.
-- Ghost Time shows missing time in red and extra time in green.
-- Ghost Time is an internal balancing aid in the app and is not expected to exist in imported or exported production logs.
-- Downtime rows capture start time, stop time, code, and cause.
-- Excel export converts downtime stop times into the template's total-minute downtime column, and import converts those minutes back into stop times in the form.
-- Balance Downtime is shown in the footer action row and redistributes only missing downtime across existing downtime rows using their current durations as weights. If there is no recorded downtime yet, it falls back to a dedicated adjustment row.
-- If the sheet is already over shift, Balance Downtime stops and asks you to review or remove downtime manually instead of subtracting downtime automatically.
-- Calculate All updates efficiency for the current shift.
-- Save Draft stores the current work in `data/pending`.
-- Overwriting an existing draft keeps a recovery snapshot in `data/pending/history`.
-- The draft status strip keeps quick actions for resuming the latest draft, opening the pending-draft list, refreshing from the latest saved draft, and deleting the current saved draft.
-- Save and Open writes the current session into the configured production template and can immediately open the workbook in the default application for review.
-- Open Last Export reopens the most recent exported workbook so it can be checked again before printing.
-- Print Last Export sends the reviewed workbook to the default application print action on Windows. On non-Windows systems it opens the workbook for manual printing in the default application.
-- Import Excel loads an existing workbook back into the form.
+### Dynamic Rate Lookup
+When you enter a **Part Number**, the app automatically looks up its standard rate
+in the database and fills in the **Rate** column.
 
-## Draft Recovery Notes
+### Overriding a Rate
+The **Rate** column is locked by default. If you need to enter a custom rate:
+1. Check the **Override** box on that row.
+2. Enter the custom rate.
+3. Unchecking **Override** will lock the cell again and restore the standard rate.
 
-- Resume Latest loads the newest draft in `data/pending`.
-- Pending Drafts opens a focused list of active draft files.
-- Backup / Recovery provides the full restore workspace for recovery snapshots and JSON backups.
-- Delete Current Draft removes the active saved draft file.
-- The status line shows the latest draft name, current draft name, dirty/saved state, pending count, and recovery count.
-- Draft saves, imports, and exports use toast notifications for routine success messages.
+### continuous Row Entry (Open-Row Behavior)
+The tables always keep one empty row at the bottom. As soon as you start typing
+in a user field (like **Shop Order** or **Start** time), a new blank row is
+automatically added below it.
 
-If you load a draft or import Excel while unsaved changes exist, the app asks for confirmation before replacing the current session.
+### Ghost Time (Footer)
+The footer displays **Ghost Time**, which is the difference between your total
+shift hours and the sum of your production and downtime.
+- **Red**: Missing time (you need to log more production or downtime).
+- **Green**: Extra time logged.
 
-## Excel Import And Export Notes
+### Balancing Downtime
+If you have missing time, click **Balance Downtime** in the footer. The app will
+automatically distribute the missing minutes across your existing downtime rows
+based on how long they lasted. If no downtime has been added yet, it will create
+a new row for the adjustment.
+> **Note:** If you have logged more time than your shift hours, you must remove
+> or adjust downtime manually.
 
-- Export uses the template path stored in the active form layout file, which may be the default `layout_config.json` or a selected stored form under `data/forms`.
-- Export writes into the configured base export folder and, when date organization is enabled, uses `YYYY/MM MonthName` subfolders.
-- If Export finds an older month folder such as `04`, it renames it to the newer format such as `04 April` before saving the workbook.
-- If the sheet is missing time, Export can prompt to auto-balance downtime before writing the workbook.
-- If the sheet is already over shift, review or remove downtime manually before export.
-- After export, the workbook can be opened in the default application for review before using Print Last Export.
-- Import reads Excel using the same mapping definitions and reconstructs downtime stop times from the template's total-minute column.
-- Production-row import also detects workbook header labels so older logs that store Molds in column F and newer logs that store Molds in column G both load correctly.
-- Header fields can be configured as import-only so formula-driven workbook cells can be shown in the app without being overwritten on export.
-- If exported values land in the wrong place, check the mapping docs and Layout Manager.
+### Calculations and Saving
+- Click **Calculate All** to update your efficiency numbers.
+- Click **Save Draft** to save your progress. The app stores drafts safely in
+  `data/pending`.
+- Click **Save and Open** to write your current data into the Excel template and
+  open it for review.
+- Click **Print Last Export** to print the workbook.
+
+---
+
+## Excel Import & Export
+
+- **Exporting**: Shift records are saved in your export folder, automatically
+  organized into year and month folders (e.g., `2026/06 June`).
+- **Importing**: You can load an existing Excel workbook back into the form.
+  The app detects column locations and reconstructs downtime details.

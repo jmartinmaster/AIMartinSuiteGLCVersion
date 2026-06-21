@@ -24,7 +24,7 @@ from app.models.layout_manager_model import LayoutManagerModel
 from app.views.layout_manager_qt_view import LayoutManagerQtView
 
 __module_name__ = "Layout Manager Qt Controller"
-__version__ = "0.7.3"
+__version__ = "0.7.4"
 
 
 class LayoutManagerQtController:
@@ -363,11 +363,18 @@ class LayoutManagerQtController:
             editor_text,
             base_config=self.current_config,
         )
+        if self.view.is_json_editor_active():
+            return parsed_config, parsed_config, payload_details
+
         updated_config = deepcopy(parsed_config)
 
         updated_config, _status_message = self.model.update_template_path(
             updated_config,
             self.view.template_path_value(),
+        )
+        updated_config, _status_message = self.model.update_export_prefix(
+            updated_config,
+            self.view.export_prefix_value(),
         )
         updated_config, _status_message = self.model.replace_header_fields(
             updated_config,
@@ -1039,6 +1046,17 @@ class LayoutManagerQtController:
         finally:
             self.view.set_import_export_progress(False)
 
+    def apply_export_prefix_from_import_export(self):
+        self.view.set_import_export_progress(True, "Applying export prefix...")
+        try:
+            config = self._load_editor_config()
+            updated_config, status_message = self.model.update_export_prefix(config, self.view.export_prefix_value())
+            self._apply_layout_update(updated_config, status_message)
+        except Exception as exc:
+            self.view.set_status(f"Import/export error: {exc}", error=True)
+        finally:
+            self.view.set_import_export_progress(False)
+
     def browse_template_from_import_export(self):
         selected_file = self.view.choose_template_file(self.view.template_path_value())
         if not selected_file:
@@ -1293,28 +1311,24 @@ class LayoutManagerQtController:
         self._run_busy_action(f"Creating form '{name}'...", _execute)
 
     def create_blank_form(self):
-        name = self.view.prompt_text("Create Blank Form", "Form name:")
-        if not name:
+        from app.controllers.form_wizard_qt_controller import FormWizardQtController
+        
+        wizard = FormWizardQtController(parent_view=self.view)
+        if not wizard.exec():
             return
-        description = self.view.prompt_text("Create Blank Form", "Description:", default_text="") or ""
-
-        def _execute():
-            try:
-                form_info, blank_config = self.model.create_blank_form(name, description=description, activate=False)
-            except Exception as exc:
-                self.view.set_status(f"Create blank form failed: {exc}", error=True)
-                return
-            _ = blank_config
-            self.set_selected_form_id(form_info.get("id"))
-            self.refresh_forms()
-            action_message = (
-                f"Created blank form '{form_info.get('name', name)}'. Click Activate before editing or saving that form."
-            )
-            self.refresh_view(reason="Created blank stored form")
-            self.set_status_message(action_message)
-            self._emit_host_toast(action_message, bootstyle="success")
-
-        self._run_busy_action(f"Creating blank form '{name}'...", _execute)
+            
+        form_id = wizard.created_form_id
+        if not form_id:
+            return
+            
+        self.set_selected_form_id(form_id)
+        self.refresh_forms()
+        action_message = (
+            f"Created form '{wizard.created_form_name}'. Click Activate before editing or saving that form."
+        )
+        self.refresh_view(reason="Created blank stored form")
+        self.set_status_message(action_message)
+        self._emit_host_toast(action_message, bootstyle="success")
 
     def duplicate_form(self):
         source_form_id = self.view.current_form_id() or self.current_form_info.get("id")

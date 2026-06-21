@@ -35,6 +35,7 @@ The active layout controls four related parts of Form Loader:
 ```json
 {
   "template_path": "templates/disamatic_template.xlsx",
+  "export_prefix": "Disamatic Production Sheet",
   "header_fields": [],
   "production_row_fields": [],
   "downtime_row_fields": [],
@@ -47,6 +48,7 @@ The active layout controls four related parts of Form Loader:
 Required top-level keys in the normalized contract:
 
 - `template_path`
+- `export_prefix`
 - `header_fields`
 - `production_row_fields`
 - `downtime_row_fields`
@@ -61,6 +63,12 @@ The shipped built-in form uses `layout_config.json`. Custom forms created from L
 - Type: string
 - Purpose: Relative path to the Excel template used for export.
 - Leave it blank if you want export to create a minimal workbook from the configured mappings instead of copying a template first.
+
+## export_prefix
+
+- Type: string
+- Purpose: Default prefix prepended to the exported Excel workbook filename.
+- If not specified, it defaults to the active form's name (e.g. `"Temp Form Title"`).
 
 ## sections
 

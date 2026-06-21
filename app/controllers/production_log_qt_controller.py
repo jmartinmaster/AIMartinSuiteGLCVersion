@@ -22,7 +22,7 @@ from app.models.production_log_model import BALANCE_DOWNTIME_CAUSE, ProductionLo
 from app.views.production_log_qt_view import ProductionLogQtView
 
 __module_name__ = "Form Loader Qt Controller"
-__version__ = "1.3.2"
+__version__ = "1.4.0"
 
 
 class ProductionLogQtController:
@@ -269,11 +269,33 @@ class ProductionLogQtController:
         self._refresh_form_selector()
         self.balance_state = self.model.normalize_balance_state()
         self.current_draft_path = None
-        self.view.set_form_data(self._default_header_payload(), [{}], [{}])
+        
+        payload = {}
+        for section in self.sections:
+            section_id = str(section.get("id") or "").strip().lower()
+            if not section_id: continue
+            section_type = str(section.get("section_type") or "single").strip().lower()
+            
+            if section_type == "single":
+                sec_payload = {}
+                fields = self.section_field_configs.get(section_id) or []
+                for field in fields:
+                    field_id = str(field.get("id") or "").strip()
+                    if field_id:
+                        sec_payload[field_id] = str(field.get("default") or "")
+                
+                if section_id == self.header_section_id:
+                    sec_payload = self.model.normalize_header_data(sec_payload)
+                payload[section_id] = sec_payload
+            else:
+                payload[section_id] = [{}]
+                
+        self.view.set_form_data(payload)
         self.view.mark_clean(self.collect_ui_data())
         self.view.set_status("Form Loader ready.")
 
     def _default_header_payload(self):
+        # Kept for backward compatibility if any other method calls it
         payload = {}
         for field in self.header_fields:
             field_id = str(field.get("id") or "").strip()
@@ -357,12 +379,9 @@ class ProductionLogQtController:
         payload = dict(payload or {})
         self.balance_state = self.model.normalize_balance_state(payload.get("balance_state"))
         self.current_draft_path = draft_path
-        normalized_header = self.model.normalize_header_data(payload.get("header") or {})
-        production_rows = list(payload.get("production") or payload.get(self.production_section_id) or []) or [{}]
-        downtime_rows = list(payload.get("downtime") or payload.get(self.downtime_section_id) or []) or [{}]
         self.view.set_form_name(self.model.get_active_form_name())
         self._refresh_form_selector()
-        self.view.set_form_data(normalized_header, production_rows, downtime_rows)
+        self.view.set_form_data(payload)
         if mark_dirty_after_load:
             self.view.mark_dirty()
         else:
@@ -861,12 +880,26 @@ class ProductionLogQtController:
             return
         shift = str(self._header_value_by_role(ui_data.get("header", {}), "shift_number", fallback_id="shift", default="0"))
         date_text = str(self._header_value_by_role(ui_data.get("header", {}), "log_date", fallback_id="date", default="00-00-00")).replace("/", "")
+        
+        export_prefix = str(self.layout_config.get("export_prefix") or "").strip()
+        target_path_override = None
+        if not export_prefix:
+            log_date = str(self._header_value_by_role(ui_data.get("header", {}), "log_date", fallback_id="date", default="00-00-00"))
+            start_dir = self.model.data_handler.get_export_directory(log_date)
+            form_name = self.model.get_active_form_name()
+            default_filename = f"{form_name} {shift}{date_text}.xlsx"
+            target_path_override = self.view.ask_export_file_path(start_dir, default_filename)
+            if not target_path_override:
+                self.view.set_status("Export cancelled.")
+                return
+
         try:
             target_path = self.model.data_handler.export_to_template(
                 ui_data,
                 shift,
                 date_text,
                 calculation_settings=self.model.get_calculation_settings_copy(),
+                target_path_override=target_path_override,
             )
             self.view.last_export_path = target_path
             self.update_export_action_state()
@@ -880,6 +913,249 @@ class ProductionLogQtController:
         except Exception as exc:
             self.view.show_error("Export Error", f"Export failed:\n{exc}")
 
+    def _generate_text_dump(self, ui_data):
+        form_name = self.model.get_active_form_name()
+        lines = []
+        lines.append("=" * 80)
+        lines.append(f"PRODUCTION LOG DUMP - {form_name.upper()}")
+        lines.append("=" * 80)
+        
+        # Header Info
+        header = ui_data.get("header") or {}
+        lines.append("HEADER INFO:")
+        for field in self.header_fields:
+            field_id = field.get("id")
+            label = field.get("label") or field_id
+            val = header.get(field_id, "")
+            lines.append(f"  {label}: {val}")
+        lines.append("-" * 80)
+        
+        # Production Jobs
+        production = ui_data.get("production") or []
+        lines.append("PRODUCTION JOBS:")
+        if not production:
+            lines.append("  (No production rows)")
+        else:
+            prod_headers = [f.get("label") or f.get("id") for f in self.production_fields]
+            col_widths = []
+            for i, f in enumerate(self.production_fields):
+                field_id = f.get("id")
+                label = f.get("label") or field_id
+                max_w = len(label)
+                for row in production:
+                    max_w = max(max_w, len(str(row.get(field_id, ""))))
+                col_widths.append(max_w + 3)
+            
+            hdr_str = "  " + "".join(f"{name:<{col_widths[idx]}}" for idx, name in enumerate(prod_headers))
+            lines.append(hdr_str)
+            lines.append("  " + "-" * (sum(col_widths)))
+            for row in production:
+                row_str = "  " + "".join(f"{str(row.get(f.get('id'), '')):<{col_widths[idx]}}" for idx, f in enumerate(self.production_fields))
+                lines.append(row_str)
+        lines.append("-" * 80)
+        
+        # Downtime Issues
+        downtime = ui_data.get("downtime") or []
+        lines.append("DOWNTIME ISSUES:")
+        if not downtime:
+            lines.append("  (No downtime rows)")
+        else:
+            dt_headers = [f.get("label") or f.get("id") for f in self.downtime_fields]
+            col_widths = []
+            for i, f in enumerate(self.downtime_fields):
+                field_id = f.get("id")
+                label = f.get("label") or field_id
+                max_w = len(label)
+                for row in downtime:
+                    max_w = max(max_w, len(str(row.get(field_id, ""))))
+                col_widths.append(max_w + 3)
+            
+            hdr_str = "  " + "".join(f"{name:<{col_widths[idx]}}" for idx, name in enumerate(dt_headers))
+            lines.append(hdr_str)
+            lines.append("  " + "-" * (sum(col_widths)))
+            for row in downtime:
+                row_str = "  " + "".join(f"{str(row.get(f.get('id'), '')):<{col_widths[idx]}}" for idx, f in enumerate(self.downtime_fields))
+                lines.append(row_str)
+        lines.append("=" * 80)
+        return "\n".join(lines)
+
+    def _generate_word_dump(self, ui_data):
+        form_name = self.model.get_active_form_name()
+        html = []
+        html.append("<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>")
+        html.append("<head><title>Form Dump</title>")
+        html.append("<style>")
+        html.append("body { font-family: Arial, sans-serif; font-size: 11pt; color: #142129; background-color: #ffffff; }")
+        html.append("h1 { color: #157f94; font-size: 16pt; border-bottom: 2px solid #157f94; padding-bottom: 4px; margin-top: 10px; margin-bottom: 10px; }")
+        html.append("h2 { color: #36505b; font-size: 12pt; margin-top: 10px; margin-bottom: 5px; border-bottom: 1px solid #bfd1d8; padding-bottom: 2px; }")
+        html.append("table { border-collapse: collapse; width: 100%; margin-top: 10px; margin-bottom: 20px; }")
+        html.append("th, td { border: 1px solid #b7c8d0; padding: 8px 10px; text-align: left; }")
+        html.append("th { background-color: #eef5f7; color: #36505b; font-weight: bold; }")
+        html.append(".meta-table { border-collapse: collapse; width: 100%; border: none; margin-top: 5px; margin-bottom: 15px; }")
+        html.append(".meta-table td { border: none; padding: 2px 8px; text-align: left; font-size: 10pt; }")
+        html.append("</style>")
+        html.append("</head>")
+        html.append("<body style='font-family: Arial, sans-serif; font-size: 11pt; color: #142129; background-color: #ffffff;'>")
+        html.append(f"<h1 style='color: #157f94; font-size: 15pt; border-bottom: 2px solid #157f94; padding-bottom: 3px; margin-top: 4px; margin-bottom: 6px; mso-margin-top-alt: 4pt; mso-margin-bottom-alt: 6pt;'>Production Log Summary - {form_name}</h1>")
+        
+        # Header Info
+        header = ui_data.get("header") or {}
+        html.append("<h2 style='color: #36505b; font-size: 11pt; border-bottom: 1px solid #bfd1d8; padding-bottom: 2px; margin-top: 6px; margin-bottom: 3px; mso-margin-top-alt: 6pt; mso-margin-bottom-alt: 3pt;'>Header Information</h2>")
+        
+        max_row = 0
+        max_col = 0
+        for field in self.header_fields:
+            max_row = max(max_row, int(field.get("row") or 0))
+            max_col = max(max_col, int(field.get("col") or 0))
+            
+        grid = {}
+        for field in self.header_fields:
+            field_id = field.get("id")
+            label = field.get("label") or field_id
+            val = header.get(field_id, "")
+            r = int(field.get("row") or 0)
+            c = int(field.get("col") or 0)
+            grid[(r, c)] = f"<strong>{label}:</strong>"
+            grid[(r, c + 1)] = str(val)
+            
+        html.append("<table class='meta-table' style='border-collapse: collapse; width: 100%; border: none; margin-top: 4px; margin-bottom: 8px;'>")
+        for r in range(max_row + 1):
+            # Check if this row actually has content
+            row_has_content = False
+            for c in range(max_col + 2):
+                if (r, c) in grid:
+                    row_has_content = True
+                    break
+            if not row_has_content:
+                continue
+                
+            html.append("<tr style='margin: 0; padding: 0; mso-margin-top-alt: 0pt; mso-margin-bottom-alt: 0pt;'>")
+            for c in range(max_col + 2):
+                content = grid.get((r, c), "")
+                html.append(f"<td style='border: none; padding: 1px 8px; margin: 0; text-align: left; font-size: 9.5pt; line-height: 1.15; mso-line-height-rule: exactly; mso-padding-top-alt: 0pt; mso-padding-bottom-alt: 0pt; mso-margin-top-alt: 0pt; mso-margin-bottom-alt: 0pt;'>{content}</td>")
+            html.append("</tr>")
+        html.append("</table>")
+        
+        # Production Jobs
+        production = ui_data.get("production") or []
+        html.append("<h2 style='color: #36505b; font-size: 11pt; border-bottom: 1px solid #bfd1d8; padding-bottom: 2px; margin-top: 6px; margin-bottom: 3px; mso-margin-top-alt: 6pt; mso-margin-bottom-alt: 3pt;'>Production Jobs</h2>")
+        if not production:
+            html.append("<p style='margin: 4px 0; font-size: 10pt; mso-margin-top-alt: 2pt; mso-margin-bottom-alt: 2pt;'>No production rows recorded.</p>")
+        else:
+            html.append("<table style='border-collapse: collapse; width: 100%; margin-top: 4px; margin-bottom: 10px;'>")
+            html.append("<tr style='margin: 0; padding: 0;'>")
+            for f in self.production_fields:
+                label = f.get("label") or f.get("id")
+                html.append(f"<th style='border: 1px solid #b7c8d0; padding: 4px 6px; text-align: left; background-color: #eef5f7; color: #36505b; font-weight: bold; font-size: 9.5pt; mso-padding-top-alt: 2pt; mso-padding-bottom-alt: 2pt;'>{label}</th>")
+            html.append("</tr>")
+            for row in production:
+                html.append("<tr style='margin: 0; padding: 0;'>")
+                for f in self.production_fields:
+                    val = str(row.get(f.get("id"), ""))
+                    html.append(f"<td style='border: 1px solid #b7c8d0; padding: 4px 6px; text-align: left; font-size: 9.5pt; mso-padding-top-alt: 2pt; mso-padding-bottom-alt: 2pt;'>{val}</td>")
+                html.append("</tr>")
+            html.append("</table>")
+            
+        # Downtime Issues
+        downtime = ui_data.get("downtime") or []
+        html.append("<h2 style='color: #36505b; font-size: 11pt; border-bottom: 1px solid #bfd1d8; padding-bottom: 2px; margin-top: 6px; margin-bottom: 3px; mso-margin-top-alt: 6pt; mso-margin-bottom-alt: 3pt;'>Downtime Issues</h2>")
+        if not downtime:
+            html.append("<p style='margin: 4px 0; font-size: 10pt; mso-margin-top-alt: 2pt; mso-margin-bottom-alt: 2pt;'>No downtime issues recorded.</p>")
+        else:
+            html.append("<table style='border-collapse: collapse; width: 100%; margin-top: 4px; margin-bottom: 10px;'>")
+            html.append("<tr style='margin: 0; padding: 0;'>")
+            for f in self.downtime_fields:
+                label = f.get("label") or f.get("id")
+                html.append(f"<th style='border: 1px solid #b7c8d0; padding: 4px 6px; text-align: left; background-color: #eef5f7; color: #36505b; font-weight: bold; font-size: 9.5pt; mso-padding-top-alt: 2pt; mso-padding-bottom-alt: 2pt;'>{label}</th>")
+            html.append("</tr>")
+            for row in downtime:
+                html.append("<tr style='margin: 0; padding: 0;'>")
+                for f in self.downtime_fields:
+                    val = str(row.get(f.get("id"), ""))
+                    html.append(f"<td style='border: 1px solid #b7c8d0; padding: 4px 6px; text-align: left; font-size: 9.5pt; mso-padding-top-alt: 2pt; mso-padding-bottom-alt: 2pt;'>{val}</td>")
+                html.append("</tr>")
+            html.append("</table>")
+            
+        html.append("</body>")
+        html.append("</html>")
+        return "\n".join(html)
+
+    def export_to_text(self, target_path_override=None):
+        self.calculate_metrics()
+        ui_data = self.collect_ui_data()
+        if self.model.is_form_blank(ui_data):
+            self.view.show_info("Form Loader", "Enter data before saving.")
+            return
+        shift = str(self._header_value_by_role(ui_data.get("header", {}), "shift_number", fallback_id="shift", default="0"))
+        date_text = str(self._header_value_by_role(ui_data.get("header", {}), "log_date", fallback_id="date", default="00-00-00")).replace("/", "")
+        
+        if not target_path_override:
+            log_date = str(self._header_value_by_role(ui_data.get("header", {}), "log_date", fallback_id="date", default="00-00-00"))
+            start_dir = self.model.data_handler.get_export_directory(log_date)
+            form_name = self.model.get_active_form_name()
+            default_filename = f"{form_name} {shift}{date_text}.txt"
+            target_path_override = self.view.ask_export_file_path(
+                start_dir,
+                default_filename,
+                filter_string="Text Files (*.txt);;All Files (*)"
+            )
+            if not target_path_override:
+                self.view.set_status("Save cancelled.")
+                return
+
+        try:
+            content = self._generate_text_dump(ui_data)
+            with open(target_path_override, "w", encoding="utf-8") as f:
+                f.write(content)
+            self.view.last_export_path = target_path_override
+            self.update_export_action_state()
+            self.show_toast("Save Complete", f"Text export completed successfully: {os.path.basename(target_path_override)}", "success")
+            if self.view.ask_yes_no(
+                "Save Complete",
+                f"Text file created successfully.\n\n{target_path_override}\n\nOpen it now?",
+            ):
+                self.open_last_exported_file(show_prompt=False)
+        except Exception as exc:
+            self.view.show_error("Save Error", f"Save failed:\n{exc}")
+
+    def export_to_word(self, target_path_override=None):
+        self.calculate_metrics()
+        ui_data = self.collect_ui_data()
+        if self.model.is_form_blank(ui_data):
+            self.view.show_info("Form Loader", "Enter data before saving.")
+            return
+        shift = str(self._header_value_by_role(ui_data.get("header", {}), "shift_number", fallback_id="shift", default="0"))
+        date_text = str(self._header_value_by_role(ui_data.get("header", {}), "log_date", fallback_id="date", default="00-00-00")).replace("/", "")
+        
+        if not target_path_override:
+            log_date = str(self._header_value_by_role(ui_data.get("header", {}), "log_date", fallback_id="date", default="00-00-00"))
+            start_dir = self.model.data_handler.get_export_directory(log_date)
+            form_name = self.model.get_active_form_name()
+            default_filename = f"{form_name} {shift}{date_text}.doc"
+            target_path_override = self.view.ask_export_file_path(
+                start_dir,
+                default_filename,
+                filter_string="Word Documents (*.doc);;All Files (*)"
+            )
+            if not target_path_override:
+                self.view.set_status("Save cancelled.")
+                return
+
+        try:
+            content = self._generate_word_dump(ui_data)
+            with open(target_path_override, "w", encoding="utf-8") as f:
+                f.write(content)
+            self.view.last_export_path = target_path_override
+            self.update_export_action_state()
+            self.show_toast("Save Complete", f"Word export completed successfully: {os.path.basename(target_path_override)}", "success")
+            if self.view.ask_yes_no(
+                "Save Complete",
+                f"Word document created successfully.\n\n{target_path_override}\n\nOpen it now?",
+            ):
+                self.open_last_exported_file(show_prompt=False)
+        except Exception as exc:
+            self.view.show_error("Save Error", f"Save failed:\n{exc}")
+
     def import_from_excel_ui(self):
         file_path = self.view.ask_import_file_path()
         if not file_path:
@@ -887,7 +1163,7 @@ class ProductionLogQtController:
         if not self.view.confirm_discard_unsaved_changes():
             return
         try:
-            data = self.model.data_handler.import_from_excel(
+            data = self.model.data_handler.import_document(
                 file_path,
                 calculation_settings=self.model.get_calculation_settings_copy(),
             )
@@ -895,10 +1171,10 @@ class ProductionLogQtController:
             self.current_draft_path = None
             self._apply_loaded_payload(data, draft_path=None, mark_dirty_after_load=True)
             self.calculate_metrics()
-            self.show_toast("Import Complete", "Imported workbook into Form Loader.")
+            self.show_toast("Import Complete", "Imported document into Form Loader.")
             self._show_data_handler_warnings("import")
         except Exception as exc:
-            self.view.show_error("Import Error", f"Failed to import Excel:\n{exc}")
+            self.view.show_error("Import Error", f"Failed to import document:\n{exc}")
 
     def poll_commands(self):
         return None

@@ -141,10 +141,28 @@ class RecoveryViewerQtView(QMainWindow):
 
         self.tabs = QTabWidget()
         for record_type, tab_label in self._tab_definitions:
-            table = self._create_table_widget()
-            self._tables_by_record_type[record_type] = table
-            self._tab_row_to_global_index[record_type] = []
-            self.tabs.addTab(table, tab_label)
+            if record_type == "config_backup":
+                self.config_backup_tabs = QTabWidget()
+                self._config_backup_subtab_definitions = (
+                    ("settings", "Settings"),
+                    ("layouts", "Form Layouts"),
+                    ("form_definitions", "Form Definitions"),
+                    ("rates", "Rates"),
+                    ("calculations", "Form Calculations"),
+                )
+                self._config_backup_tables = {}
+                self._config_backup_row_to_global_index = {}
+                for sub_type, sub_label in self._config_backup_subtab_definitions:
+                    table = self._create_table_widget()
+                    self._config_backup_tables[sub_type] = table
+                    self._config_backup_row_to_global_index[sub_type] = []
+                    self.config_backup_tabs.addTab(table, sub_label)
+                self.tabs.addTab(self.config_backup_tabs, tab_label)
+            else:
+                table = self._create_table_widget()
+                self._tables_by_record_type[record_type] = table
+                self._tab_row_to_global_index[record_type] = []
+                self.tabs.addTab(table, tab_label)
         self.tabs.addTab(self._build_backup_policy_tab(), "Backup Policy")
         root_layout.addWidget(self.tabs, 1)
 
@@ -353,9 +371,25 @@ class RecoveryViewerQtView(QMainWindow):
         max_height = max(620, geometry.height() - int(padding))
         self.resize(min(int(requested_width), max_width), min(int(requested_height), max_height))
 
+    def _get_config_backup_subtab_category(self, record):
+        kind = str(record.get("kind") or "").lower()
+        if "settings" in kind:
+            return "settings"
+        elif "form definition" in kind:
+            return "form_definitions"
+        elif "rate" in kind:
+            return "rates"
+        elif "calculation" in kind:
+            return "calculations"
+        else:
+            return "layouts"
+
     def refresh_table(self, records):
         records = list(records or [])
+        # 1. Refresh non-config_backup tabs
         for tab_index, (record_type, _) in enumerate(self._tab_definitions):
+            if record_type == "config_backup":
+                continue
             table = self._tables_by_record_type[record_type]
             row_to_global_index = []
             table_records = [
@@ -374,6 +408,45 @@ class RecoveryViewerQtView(QMainWindow):
             self._tab_row_to_global_index[record_type] = row_to_global_index
             base_label = self._tab_base_labels.get(record_type, record_type)
             self.tabs.setTabText(tab_index, f"{base_label} ({len(table_records)})")
+
+        # 2. Refresh config_backup subtabs
+        config_backup_records = [
+            (global_index, record)
+            for global_index, record in enumerate(records)
+            if str(record.get("record_type") or "") == "config_backup"
+        ]
+        
+        # Categorize
+        subtab_records = {sub_type: [] for sub_type, _ in self._config_backup_subtab_definitions}
+        for global_index, record in config_backup_records:
+            category = self._get_config_backup_subtab_category(record)
+            if category in subtab_records:
+                subtab_records[category].append((global_index, record))
+                
+        # Populate each subtab table
+        for sub_index, (sub_type, sub_label) in enumerate(self._config_backup_subtab_definitions):
+            table = self._config_backup_tables[sub_type]
+            table_records = subtab_records[sub_type]
+            row_to_global_index = []
+            table.setRowCount(len(table_records))
+            for row_index, (global_index, record) in enumerate(table_records):
+                row_to_global_index.append(global_index)
+                table.setItem(row_index, 0, QTableWidgetItem(str(record.get("kind") or "")))
+                table.setItem(row_index, 1, QTableWidgetItem(str(record.get("name") or "")))
+                table.setItem(row_index, 2, QTableWidgetItem(str(record.get("form_name") or "System")))
+                table.setItem(row_index, 3, QTableWidgetItem(str(record.get("saved_at") or "")))
+                table.setItem(row_index, 4, QTableWidgetItem(str(record.get("restore_target") or "")))
+            self._config_backup_row_to_global_index[sub_type] = row_to_global_index
+            self.config_backup_tabs.setTabText(sub_index, f"{sub_label} ({len(table_records)})")
+            
+        # Update the main "Config Backups" tab text with total count
+        main_tab_index = 0
+        for idx, (r_type, _) in enumerate(self._tab_definitions):
+            if r_type == "config_backup":
+                main_tab_index = idx
+                break
+        self.tabs.setTabText(main_tab_index, f"Config Backups ({len(config_backup_records)})")
+        
         self.status_bar.showMessage(f"Loaded {len(records)} recovery item(s).", 5000)
 
     def _current_tab_record_type(self):
@@ -386,25 +459,45 @@ class RecoveryViewerQtView(QMainWindow):
         record_type = self._current_tab_record_type()
         if record_type is None:
             return None
-        table = self._tables_by_record_type[record_type]
-        selected_rows = table.selectionModel().selectedRows()
-        if not selected_rows:
-            return None
-        row_index = int(selected_rows[0].row())
-        row_to_global_index = self._tab_row_to_global_index.get(record_type) or []
-        if row_index < 0 or row_index >= len(row_to_global_index):
-            return None
-        return int(row_to_global_index[row_index])
+        if record_type == "config_backup":
+            sub_index = self.config_backup_tabs.currentIndex()
+            if sub_index < 0:
+                return None
+            sub_type = self._config_backup_subtab_definitions[sub_index][0]
+            table = self._config_backup_tables[sub_type]
+            selected_rows = table.selectionModel().selectedRows()
+            if not selected_rows:
+                return None
+            row_index = int(selected_rows[0].row())
+            row_to_global_index = self._config_backup_row_to_global_index.get(sub_type) or []
+            if row_index < 0 or row_index >= len(row_to_global_index):
+                return None
+            return int(row_to_global_index[row_index])
+        else:
+            table = self._tables_by_record_type[record_type]
+            selected_rows = table.selectionModel().selectedRows()
+            if not selected_rows:
+                return None
+            row_index = int(selected_rows[0].row())
+            row_to_global_index = self._tab_row_to_global_index.get(record_type) or []
+            if row_index < 0 or row_index >= len(row_to_global_index):
+                return None
+            return int(row_to_global_index[row_index])
 
     def set_selected_index(self, index):
         for table in self._tables_by_record_type.values():
             table.clearSelection()
+        if hasattr(self, "_config_backup_tables"):
+            for table in self._config_backup_tables.values():
+                table.clearSelection()
         if index is None:
             return
         global_index = int(index)
         if global_index < 0:
             return
         for tab_index, (record_type, _) in enumerate(self._tab_definitions):
+            if record_type == "config_backup":
+                continue
             row_to_global_index = self._tab_row_to_global_index.get(record_type) or []
             if global_index not in row_to_global_index:
                 continue
@@ -413,6 +506,22 @@ class RecoveryViewerQtView(QMainWindow):
             self.tabs.setCurrentIndex(tab_index)
             table.selectRow(row_index)
             return
+        if hasattr(self, "_config_backup_subtab_definitions"):
+            for sub_index, (sub_type, _) in enumerate(self._config_backup_subtab_definitions):
+                row_to_global_index = self._config_backup_row_to_global_index.get(sub_type) or []
+                if global_index not in row_to_global_index:
+                    continue
+                row_index = row_to_global_index.index(global_index)
+                table = self._config_backup_tables[sub_type]
+                main_tab_index = 0
+                for idx, (r_type, _) in enumerate(self._tab_definitions):
+                    if r_type == "config_backup":
+                        main_tab_index = idx
+                        break
+                self.tabs.setCurrentIndex(main_tab_index)
+                self.config_backup_tabs.setCurrentIndex(sub_index)
+                table.selectRow(row_index)
+                return
 
     def set_status(self, message):
         self.status_bar.showMessage(str(message), 5000)

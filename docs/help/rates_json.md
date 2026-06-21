@@ -1,15 +1,13 @@
 # rates.json Reference
 
-`rates.json` stores the standard molds-per-hour target for each part number.
+The `rates.json` file stores the standard molds-per-hour target for each part
+number.
 
-## Structure
+---
 
-The file is a single JSON object where:
+## File Structure
 
-- each key is a part number string
-- each value is the stored molds-per-hour target text for that part number
-
-Example:
+The file is a simple list of part numbers mapped to their targets in JSON format:
 
 ```json
 {
@@ -19,20 +17,27 @@ Example:
 }
 ```
 
+- **Key**: The part number string.
+- **Value**: The target molds-per-hour value (as a text string).
+
+---
+
 ## How It Is Used
 
-- Form Loader looks up the entered part number in this file.
-- If a part number is found, its target rate is used to estimate row time.
-- If a part number is not found, Form Loader falls back to the current goal MPH.
-- The active row rate is shown in Form Loader. If you need to temporarily override a rate, check the `Override` checkbox in that row to unlock the rate cell and enter a custom value. This custom value is saved with your log/draft and does not change the standard targets stored in `rates.json`.
+1. When an operator types a part number in the **Form Loader**, the app looks it
+   up in this file.
+2. If found, the app uses that rate to estimate the run time for the row.
+3. If not found, the app falls back to the default **Goal MPH** set in settings.
+4. **Temporary Overrides**: To temporarily change a rate for a specific row, check the
+   **Override** box on that row. This allows you to type a custom rate without modifying
+   the global `rates.json` file.
 
-## Good Practices
+---
 
-- Keep part numbers exactly as operators enter them.
-- Keep values as clean numeric text so Form Loader can convert them safely.
-- Avoid duplicate keys written in slightly different formats.
-- Avoid units or extra text such as `mph` in the stored value.
+## Guidelines
 
-## Recommended Editing Path
-
-Use Rate Manager instead of editing the file directly whenever possible.
+- Keep part numbers formatted exactly as operators write them.
+- Enter numbers only. Do not add units like `mph` or text labels.
+- Avoid duplicate keys.
+- **Best Practice**: Always use the built-in **Rate Manager** interface in the app
+  to make changes instead of editing this file manually.

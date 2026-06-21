@@ -17,7 +17,7 @@ from app.downtime_codes import get_code_options
 from app.theme_manager import get_qt_palette, get_qt_stylesheet
 
 __module_name__ = "Form Loader Qt View"
-__version__ = "1.3.8"
+__version__ = "1.4.0"
 
 from PyQt6.QtCore import QTimer, Qt
 from PyQt6.QtWidgets import (
@@ -33,12 +33,14 @@ from PyQt6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMainWindow,
+    QMenu,
     QMessageBox,
     QPushButton,
     QScrollArea,
     QStatusBar,
     QTableWidget,
     QTableWidgetItem,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -106,13 +108,14 @@ class ProductionLogQtView(QMainWindow):
         self.section_info_by_id = self._build_section_info_by_id()
         self.row_delete_policies = dict(row_delete_policies or {})
         self.header_widgets = {}
+        self.single_section_widgets = {}
         self.repeating_sections = {}
         self.action_buttons = []
         self.production_table = None
         self.downtime_table = None
         self.has_unsaved_changes = False
-        self.last_saved_signature = None
         self.last_export_path = None
+        self.export_mode = "excel"
         self._suspend_dirty_tracking = False
         self._build_ui()
         self.apply_theme(theme_tokens=self.theme_tokens)
@@ -416,11 +419,28 @@ class ProductionLogQtView(QMainWindow):
             self.controller.print_last_exported_file,
             enabled=False,
         )
+        self.save_excel_btn = QToolButton(action_panel)
+        self.save_excel_btn.setText("Save Excel")
+        self.save_excel_btn.setMinimumHeight(40)
+        self.save_excel_btn.setPopupMode(QToolButton.ToolButtonPopupMode.MenuButtonPopup)
+        self.save_excel_btn.clicked.connect(self.on_save_clicked)
+        
+        self.export_mode = "excel"
+        menu = QMenu(self.save_excel_btn)
+        excel_action = menu.addAction("Save Excel")
+        excel_action.triggered.connect(lambda: self.set_export_mode("excel"))
+        text_action = menu.addAction("Save Text File")
+        text_action.triggered.connect(lambda: self.set_export_mode("text"))
+        word_action = menu.addAction("Save Word Document")
+        word_action.triggered.connect(lambda: self.set_export_mode("word"))
+        self.save_excel_btn.setMenu(menu)
+        self.action_buttons.append(self.save_excel_btn)
+
         workbook_group = self._build_action_group(
             "Workbook",
             [
-                self._create_action_button("Import Excel", self.controller.import_from_excel_ui),
-                self._create_action_button("Export Excel", self.controller.export_to_excel),
+                self._create_action_button("Import Document", self.controller.import_from_excel_ui),
+                self.save_excel_btn,
                 self.open_export_button,
                 self.print_export_button,
             ],
@@ -480,6 +500,9 @@ class ProductionLogQtView(QMainWindow):
 
             label_widget = QLabel(label_text + ":", header_group)
             self.header_widgets[field_id] = field_widget
+            if section_id not in self.single_section_widgets:
+                self.single_section_widgets[section_id] = {}
+            self.single_section_widgets[section_id][field_id] = field_widget
             header_layout.addWidget(label_widget, grid_row, grid_col)
             header_layout.addWidget(field_widget, grid_row, grid_col + 1)
 
@@ -996,11 +1019,44 @@ class ProductionLogQtView(QMainWindow):
     def ask_import_file_path(self):
         file_path, _selected = QFileDialog.getOpenFileName(
             self,
-            "Import Form Loader Workbook",
+            "Import Form Document",
             "",
-            "Excel Workbooks (*.xlsx *.xlsm *.xls);;All Files (*)",
+            "Importable Files (*.xlsx *.xlsm *.xls *.txt *.doc);;Excel Workbooks (*.xlsx *.xlsm *.xls);;Text Files (*.txt);;Word Documents (*.doc);;All Files (*)",
         )
         return str(file_path or "").strip()
+
+    def ask_export_file_path(self, start_dir, default_filename, filter_string=None):
+        import os
+        initial_path = os.path.join(start_dir, default_filename)
+        if not filter_string:
+            filter_string = "Excel Workbooks (*.xlsx *.xlsm *.xls);;All Files (*)"
+        file_path, _selected = QFileDialog.getSaveFileName(
+            self,
+            "Select Export Location & Filename",
+            initial_path,
+            filter_string,
+        )
+        return str(file_path or "").strip()
+
+    def set_export_mode(self, mode):
+        self.export_mode = mode
+        if mode == "excel":
+            self.save_excel_btn.setText("Save Excel")
+            self.controller.export_to_excel()
+        elif mode == "text":
+            self.save_excel_btn.setText("Save Text File")
+            self.controller.export_to_text()
+        elif mode == "word":
+            self.save_excel_btn.setText("Save Word Document")
+            self.controller.export_to_word()
+
+    def on_save_clicked(self):
+        if self.export_mode == "excel":
+            self.controller.export_to_excel()
+        elif self.export_mode == "text":
+            self.controller.export_to_text()
+        elif self.export_mode == "word":
+            self.controller.export_to_word()
 
     def set_metrics(self, efficiency, ghost_minutes):
         self.efficiency_label.setText(f"EFF%: {float(efficiency):.2f}")
@@ -1036,45 +1092,42 @@ class ProductionLogQtView(QMainWindow):
         return rows
 
     def collect_form_data(self):
-        header_payload = {}
-        for field_id, widget in self.header_widgets.items():
-            if isinstance(widget, QComboBox):
-                header_payload[field_id] = str(widget.currentText())
-            else:
-                header_payload[field_id] = str(widget.text())
-        repeating_payload = {}
+        payload = {}
+        for section_id, section_widgets in self.single_section_widgets.items():
+            section_payload = {}
+            for field_id, widget in section_widgets.items():
+                if isinstance(widget, QComboBox):
+                    section_payload[field_id] = str(widget.currentText())
+                else:
+                    section_payload[field_id] = str(widget.text())
+            payload[section_id] = section_payload
+
         for section_id, runtime_info in self.repeating_sections.items():
             table = runtime_info.get("table") if isinstance(runtime_info, dict) else None
             field_configs = list(runtime_info.get("field_configs") or []) if isinstance(runtime_info, dict) else []
-            repeating_payload[section_id] = self._collect_rows(table, field_configs)
+            payload[section_id] = self._collect_rows(table, field_configs)
 
-        production_rows = list(repeating_payload.get(self.production_section_id) or [])
-        downtime_rows = list(repeating_payload.get(self.downtime_section_id) or [])
-        payload = {
-            "header": header_payload,
-            "production": production_rows,
-            "downtime": downtime_rows,
-        }
-        payload.update(repeating_payload)
         return payload
 
-    def set_form_data(self, header_payload, production_rows, downtime_rows):
-        header_payload = dict(header_payload or {})
+    def set_form_data(self, payload):
+        payload = dict(payload or {})
         self._suspend_dirty_tracking = True
-        for field_id, widget in self.header_widgets.items():
-            widget.blockSignals(True)
-            self._set_header_widget_value(widget, header_payload.get(field_id, ""))
-            widget.blockSignals(False)
-        self._set_table_rows(
-            self._get_section_table(self.production_section_id),
-            self._get_section_field_configs(self.production_section_id),
-            list(production_rows or []),
-        )
-        self._set_table_rows(
-            self._get_section_table(self.downtime_section_id),
-            self._get_section_field_configs(self.downtime_section_id),
-            list(downtime_rows or []),
-        )
+        
+        for section_id, section_widgets in self.single_section_widgets.items():
+            section_payload = dict(payload.get(section_id) or {})
+            for field_id, widget in section_widgets.items():
+                widget.blockSignals(True)
+                self._set_header_widget_value(widget, section_payload.get(field_id, ""))
+                widget.blockSignals(False)
+                
+        for section_id, runtime_info in self.repeating_sections.items():
+            section_rows = list(payload.get(section_id) or [])
+            self._set_table_rows(
+                runtime_info.get("table"),
+                list(runtime_info.get("field_configs") or []),
+                section_rows
+            )
+            
         self._suspend_dirty_tracking = False
 
     def set_form_name(self, form_name):

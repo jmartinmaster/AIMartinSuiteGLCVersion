@@ -479,7 +479,6 @@ class SettingsManagerView:
         fields = [
             ("export_directory", "Base Export Directory", "entry_browse"),
             ("organize_exports_by_date", "Organize Exports by Year/Month", "check"),
-            ("default_export_prefix", "Default Export Prefix", "entry"),
             ("theme", "Appearance Theme", "combo", theme_options),
             ("enable_screen_transitions", "Enable Screen Transitions", "check"),
             ("enable_module_update_notifications", "Check Module Updates On Startup", "check"),

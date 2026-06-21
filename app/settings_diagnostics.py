@@ -33,7 +33,6 @@ DEFAULT_SETTINGS_PAYLOAD = {
     "export_directory": "data/exports",
     "path_overrides": {},
     "organize_exports_by_date": True,
-    "default_export_prefix": "Disamatic Production Sheet",
     "update_repository_url": "https://github.com/jmartinmaster/AIMartinSuiteGLCVersion",
     "enable_advanced_dev_updates": False,
     "theme": DEFAULT_THEME,
@@ -296,7 +295,6 @@ def diagnose_and_repair_settings(
     for key, fallback_value in {
         "update_repository_url": defaults.get("update_repository_url", ""),
         "export_directory": defaults.get("export_directory", "data/exports"),
-        "default_export_prefix": defaults.get("default_export_prefix", "Disamatic Production Sheet"),
     }.items():
         original_value = effective.get(key, fallback_value)
         normalized_value = str(original_value or "").strip() or str(fallback_value)

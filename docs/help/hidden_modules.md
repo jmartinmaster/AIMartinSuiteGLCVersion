@@ -1,61 +1,32 @@
 # Hidden Modules
 
-These modules are bundled with Logging Center but intentionally do not appear in the left navigation because they are support components, internal services, or context-specific tools.
+These modules are bundled with the application but do not appear in the sidebar
+navigation because they run in the background as support services, internal utilities,
+or context-specific tools.
 
-## About System
+---
 
-- Shows module names and versions.
-- Marks loaded external override modules with `(external)`.
-- Opens license access from inside the app.
+## Background Services
 
-## App Logging
+- **About System**: Manages module version information, checks for custom override
+  files, and opens the GPL license screen.
+- **App Logging**: Captures background errors and exceptions for troubleshooting.
+- **Data Handler**: Manages Excel import and export logic, and formats header data.
+- **Downtime Codes**: Provides default reason codes and labels for downtime calculations.
+- **Help Viewer**: Displays these help documents when accessed from menu actions.
+- **Persistence**: Handles saving and loading JSON files (drafts, settings, rates)
+  with rotating backups.
+- **Security Blanket**: Handles password vault access, security bypass modes, and safeguards.
+- **Splash Screen**: Displays the startup screen when launching the program.
+- **Theme Manager**: Manages application styling, custom colors, and dark/light themes.
+- **Path Helpers**: Resolves file paths for both raw source code runs and packaged executables.
 
-- Captures internal exception logging.
-- Supports diagnostics without exposing a user-facing page.
+---
 
-## Data Handler
+## Technical Notes
 
-- Owns workbook import and export logic.
-- Normalizes Form Loader header values used by draft JSON and Excel routing.
-- Exists as a shared service module rather than a standalone page.
-
-## Downtime Codes
-
-- Provides the default downtime-code map and normalization helpers.
-- Supports Settings Manager and Form Loader without acting as its own screen.
-
-## Help Viewer
-
-- Powers the Help Center itself.
-- Stays out of sidebar navigation because it is opened from Help actions rather than treated as a workflow module.
-
-## Persistence
-
-- Writes JSON files with rotating backup copies.
-- Used by draft saves, settings saves, layout saves, rate saves, and updater restores.
-
-## Security Blanket
-
-- Owns vault authentication, persisted non-secure-mode state, external override trust state, and security-reset safeguards.
-- Supports the Settings Manager security flow without acting as a standalone navigation page.
-
-## Splash
-
-- Handles startup presentation behavior for the application launch sequence.
-- Not meant to be opened during normal in-app navigation.
-
-## Theme Manager
-
-- Applies theme normalization and readability overrides.
-- Supports live theme switching across the app.
-
-## Path Helpers
-
-- Resolves local, bundled, and external file paths.
-- Supports packaged and source workflows, including local `.venv` resolution for build tasks.
-
-## Notes
-
-- Hidden does not mean unused. These modules are active support layers used throughout Logging Center.
-- Backup / Recovery is user-facing and stays in the sidebar even though it works closely with the internal persistence helper.
-- Update Manager remains visible because it is a user workflow, even though some of its behavior also overlaps with internal support logic.
+- **Active Services**: Even though these modules are hidden from navigation, they are
+  crucial and run constantly in the background.
+- **User-Facing Exceptions**: The **Backup / Recovery** module remains visible in the
+  sidebar because it is a direct user workflow, even though it relies heavily on the
+  hidden persistence helper.
