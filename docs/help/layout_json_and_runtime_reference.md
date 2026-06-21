@@ -14,6 +14,7 @@ This page is the single reference for the layout JSON structure and the runtime 
 The full layout object must contain these top-level keys:
 
 - `template_path`
+- `export_prefix`
 - `header_fields`
 - `production_row_fields`
 - `downtime_row_fields`

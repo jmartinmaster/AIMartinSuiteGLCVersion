@@ -17,7 +17,7 @@ from app.downtime_codes import get_code_options
 from app.theme_manager import get_qt_palette, get_qt_stylesheet
 
 __module_name__ = "Form Loader Qt View"
-__version__ = "1.3.9"
+__version__ = "1.4.0"
 
 from PyQt6.QtCore import QTimer, Qt
 from PyQt6.QtWidgets import (
@@ -33,12 +33,14 @@ from PyQt6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMainWindow,
+    QMenu,
     QMessageBox,
     QPushButton,
     QScrollArea,
     QStatusBar,
     QTableWidget,
     QTableWidgetItem,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -112,8 +114,8 @@ class ProductionLogQtView(QMainWindow):
         self.production_table = None
         self.downtime_table = None
         self.has_unsaved_changes = False
-        self.last_saved_signature = None
         self.last_export_path = None
+        self.export_mode = "excel"
         self._suspend_dirty_tracking = False
         self._build_ui()
         self.apply_theme(theme_tokens=self.theme_tokens)
@@ -417,11 +419,28 @@ class ProductionLogQtView(QMainWindow):
             self.controller.print_last_exported_file,
             enabled=False,
         )
+        self.save_excel_btn = QToolButton(action_panel)
+        self.save_excel_btn.setText("Save Excel")
+        self.save_excel_btn.setMinimumHeight(40)
+        self.save_excel_btn.setPopupMode(QToolButton.ToolButtonPopupMode.MenuButtonPopup)
+        self.save_excel_btn.clicked.connect(self.on_save_clicked)
+        
+        self.export_mode = "excel"
+        menu = QMenu(self.save_excel_btn)
+        excel_action = menu.addAction("Save Excel")
+        excel_action.triggered.connect(lambda: self.set_export_mode("excel"))
+        text_action = menu.addAction("Save Text File")
+        text_action.triggered.connect(lambda: self.set_export_mode("text"))
+        word_action = menu.addAction("Save Word Document")
+        word_action.triggered.connect(lambda: self.set_export_mode("word"))
+        self.save_excel_btn.setMenu(menu)
+        self.action_buttons.append(self.save_excel_btn)
+
         workbook_group = self._build_action_group(
             "Workbook",
             [
-                self._create_action_button("Import Excel", self.controller.import_from_excel_ui),
-                self._create_action_button("Export Excel", self.controller.export_to_excel),
+                self._create_action_button("Import Document", self.controller.import_from_excel_ui),
+                self.save_excel_btn,
                 self.open_export_button,
                 self.print_export_button,
             ],
@@ -1000,11 +1019,44 @@ class ProductionLogQtView(QMainWindow):
     def ask_import_file_path(self):
         file_path, _selected = QFileDialog.getOpenFileName(
             self,
-            "Import Form Loader Workbook",
+            "Import Form Document",
             "",
-            "Excel Workbooks (*.xlsx *.xlsm *.xls);;All Files (*)",
+            "Importable Files (*.xlsx *.xlsm *.xls *.txt *.doc);;Excel Workbooks (*.xlsx *.xlsm *.xls);;Text Files (*.txt);;Word Documents (*.doc);;All Files (*)",
         )
         return str(file_path or "").strip()
+
+    def ask_export_file_path(self, start_dir, default_filename, filter_string=None):
+        import os
+        initial_path = os.path.join(start_dir, default_filename)
+        if not filter_string:
+            filter_string = "Excel Workbooks (*.xlsx *.xlsm *.xls);;All Files (*)"
+        file_path, _selected = QFileDialog.getSaveFileName(
+            self,
+            "Select Export Location & Filename",
+            initial_path,
+            filter_string,
+        )
+        return str(file_path or "").strip()
+
+    def set_export_mode(self, mode):
+        self.export_mode = mode
+        if mode == "excel":
+            self.save_excel_btn.setText("Save Excel")
+            self.controller.export_to_excel()
+        elif mode == "text":
+            self.save_excel_btn.setText("Save Text File")
+            self.controller.export_to_text()
+        elif mode == "word":
+            self.save_excel_btn.setText("Save Word Document")
+            self.controller.export_to_word()
+
+    def on_save_clicked(self):
+        if self.export_mode == "excel":
+            self.controller.export_to_excel()
+        elif self.export_mode == "text":
+            self.controller.export_to_text()
+        elif self.export_mode == "word":
+            self.controller.export_to_word()
 
     def set_metrics(self, efficiency, ghost_minutes):
         self.efficiency_label.setText(f"EFF%: {float(efficiency):.2f}")

@@ -4,6 +4,32 @@ This changelog tracks the main branch release line for Production Logging Center
 
 Version headings below are aligned to the current `2.x` release line used by Dispatcher Core. Earlier work has been grouped into practical release milestones so the shipped feature history is easier to follow without rewriting older module version markers.
 
+## [2.4.0] - 2026-06-21
+
+### Added
+
+- **Multi-Format Export Dropdown**:
+  - Replaced the "Save Excel" button with a split dropdown button (`QToolButton`), allowing operators to save logs as Excel Workbooks (`.xlsx`), plain text dumps (`.txt`), or Word Documents (`.doc`).
+  - Added plain-text summary layout exporter (`_generate_text_dump`) with dynamically aligned column formatting.
+  - Added Word Document template layout exporter (`_generate_word_dump`) using custom inline CSS styles for tight page layout and line-heights, optimizing print formatting and saving paper.
+- **Unified Document Import**:
+  - Replaced the "Import Excel" button with a unified "Import Document" button that parses all three exported formats (Excel, Text, and Word/HTML) and restores the data back into the form fields.
+  - Implemented a zero-dependency HTML parser (`WordDumpParser`) to extract headers and tables from exported Word Documents.
+  - Implemented character offset parser for plain text files to dynamically detect column boundaries.
+- **Form Layout Export Prefix Support**:
+  - Moved the configuration of the export prefix out of global settings and into individual layout configuration JSON files (`export_prefix`).
+  - Added automated fallback logic to use the active form name as the default prefix when `export_prefix` is omitted or empty.
+  - Added visual prompts and folder selector dialogs for blank export prefixes.
+
+### Changed
+
+- **Launcher Version Bump**:
+  - Promoted Dispatcher Core to stable version `2.4.0`.
+- **Module Version Bumps**:
+  - Bumped Form Loader Qt Controller to `1.4.0`.
+  - Bumped Form Loader Qt View to `1.4.0`.
+  - Bumped Data Handler Service to `1.2.0`.
+
 ## [2.3.2] - 2026-06-20
 
 ### Added

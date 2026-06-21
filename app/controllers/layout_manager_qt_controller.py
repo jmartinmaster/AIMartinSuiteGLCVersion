@@ -372,6 +372,10 @@ class LayoutManagerQtController:
             updated_config,
             self.view.template_path_value(),
         )
+        updated_config, _status_message = self.model.update_export_prefix(
+            updated_config,
+            self.view.export_prefix_value(),
+        )
         updated_config, _status_message = self.model.replace_header_fields(
             updated_config,
             self.view.header_field_table_values(),
@@ -1036,6 +1040,17 @@ class LayoutManagerQtController:
         try:
             config = self._load_editor_config()
             updated_config, status_message = self.model.update_template_path(config, self.view.template_path_value())
+            self._apply_layout_update(updated_config, status_message)
+        except Exception as exc:
+            self.view.set_status(f"Import/export error: {exc}", error=True)
+        finally:
+            self.view.set_import_export_progress(False)
+
+    def apply_export_prefix_from_import_export(self):
+        self.view.set_import_export_progress(True, "Applying export prefix...")
+        try:
+            config = self._load_editor_config()
+            updated_config, status_message = self.model.update_export_prefix(config, self.view.export_prefix_value())
             self._apply_layout_update(updated_config, status_message)
         except Exception as exc:
             self.view.set_status(f"Import/export error: {exc}", error=True)

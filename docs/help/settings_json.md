@@ -11,7 +11,6 @@ and options for the application.
 {
   "export_directory": "data/exports",
   "organize_exports_by_date": true,
-  "default_export_prefix": "Disamatic Production Sheet",
   "update_repository_url": "https://github.com/jmartinmaster/AIMartinSuiteGLCVersion.git",
   "enable_advanced_dev_updates": false,
   "theme": "martin_modern_light",
@@ -52,9 +51,7 @@ and options for the application.
 - **Type**: Boolean (`true`/`false`)
 - **Description**: If true, exports are sorted into year/month folders (e.g. `2026/06 June`).
 
-### **default_export_prefix**
-- **Type**: String
-- **Description**: Prefix prepended to the filenames of exported files.
+
 
 ### **update_repository_url**
 - **Type**: String

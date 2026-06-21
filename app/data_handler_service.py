@@ -20,6 +20,7 @@ import re
 import shutil
 from copy import deepcopy
 from datetime import date, datetime
+from html.parser import HTMLParser
 
 import openpyxl
 
@@ -31,7 +32,7 @@ from app.safe_expression import SafeExpressionEvaluator
 from app.utils import ensure_external_data_directory, external_path, local_or_resource_path, resource_path
 
 __module_name__ = "Data Handler"
-__version__ = "1.1.9"
+__version__ = "1.2.0"
 
 DEFAULT_SHIFT_TIME_SETTINGS = {
     "shift_total_rounding": "nearest",
@@ -212,6 +213,10 @@ class DataHandlerService:
         normalized = dict(config) if isinstance(config, dict) else {}
         normalized["sections"] = self._normalize_sections(normalized)
         normalized["header_fields"] = self._normalize_header_field_configs(normalized.get("header_fields"))
+        if "export_prefix" in normalized:
+            normalized["export_prefix"] = str(normalized["export_prefix"] if normalized["export_prefix"] is not None else "").strip()
+        else:
+            normalized["export_prefix"] = str(form_name).strip()
 
         if "production_row_fields" not in normalized or not normalized["production_row_fields"]:
             normalized["production_row_fields"] = deepcopy(DEFAULT_PRODUCTION_ROW_FIELDS)
@@ -375,7 +380,6 @@ class DataHandlerService:
         default_settings = {
             "export_directory": os.path.join("data", "exports"),
             "organize_exports_by_date": True,
-            "default_export_prefix": "Disamatic Production Sheet",
         }
         settings = self.data_registry.load_json("settings", default_factory=lambda: dict(default_settings))
         if not isinstance(settings, dict):
@@ -1245,13 +1249,19 @@ class DataHandlerService:
             workbook.active.title = "Production Log"
         return workbook
 
-    def export_to_template(self, ui_data, shift, date_str, calculation_settings=None):
+    def export_to_template(self, ui_data, shift, date_str, calculation_settings=None, target_path_override=None):
         self.clear_operation_warnings()
         self.collect_unsupported_profile_warnings("export")
-        clean_date = date_str.replace("/", "")
-        export_prefix = str(self.settings.get("default_export_prefix", "Disamatic Production Sheet") or "Disamatic Production Sheet").strip()
-        filename = f"{export_prefix} {shift}{clean_date}.xlsx"
-        target_path = os.path.join(self.get_export_directory(date_str), filename)
+        if target_path_override:
+            target_path = target_path_override
+        else:
+            clean_date = date_str.replace("/", "")
+            form_name = self.form_info.get("name", "Disamatic Production Sheet") if isinstance(self.form_info, dict) else "Disamatic Production Sheet"
+            export_prefix = str(self.config.get("export_prefix", form_name) or form_name).strip()
+            if not export_prefix:
+                export_prefix = form_name
+            filename = f"{export_prefix} {shift}{clean_date}.xlsx"
+            target_path = os.path.join(self.get_export_directory(date_str), filename)
         wb = self._create_export_workbook(target_path)
         ws = wb.active
         for field in self.get_header_fields():
@@ -1375,3 +1385,230 @@ class DataHandlerService:
         workbook.close()
         formula_workbook.close()
         return data
+
+    def import_document(self, file_path, calculation_settings=None):
+        if not file_path or not os.path.exists(file_path):
+            raise FileNotFoundError(f"Import file does not exist: {file_path}")
+        ext = os.path.splitext(file_path)[1].lower()
+        if ext == ".txt":
+            return self.import_from_text(file_path)
+        elif ext == ".doc":
+            return self.import_from_word(file_path)
+        else:
+            return self.import_from_excel(file_path, calculation_settings)
+
+    def import_from_text(self, file_path):
+        with open(file_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        lines = content.splitlines()
+        
+        data = {"header": {}}
+        for s_name in self.get_routed_repeating_section_profiles():
+            data[s_name] = []
+            
+        header_fields = self.get_header_fields()
+        label_to_id = { (f.get("label") or f.get("id")).strip().lower(): f.get("id") for f in header_fields }
+        
+        header_start = -1
+        for idx, line in enumerate(lines):
+            if line.strip() == "HEADER INFO:":
+                header_start = idx
+                break
+        if header_start != -1:
+            for idx in range(header_start + 1, len(lines)):
+                line = lines[idx]
+                if line.strip().startswith("-") or line.strip().startswith("=") or not line.strip() or line.strip() in ("PRODUCTION JOBS:", "DOWNTIME ISSUES:"):
+                    break
+                parts = line.strip().split(": ", 1)
+                if len(parts) == 2:
+                    lbl = parts[0].strip().lower()
+                    val = parts[1].strip()
+                    if lbl in label_to_id:
+                        data["header"][label_to_id[lbl]] = val
+                        
+        production_fields = self.get_section_field_configs("production")
+        data["production"] = self._parse_text_repeating_section(lines, "PRODUCTION JOBS:", production_fields)
+        
+        downtime_fields = self.get_section_field_configs("downtime")
+        data["downtime"] = self._parse_text_repeating_section(lines, "DOWNTIME ISSUES:", downtime_fields)
+        
+        return data
+
+    def _parse_text_repeating_section(self, lines, section_header, fields):
+        section_index = -1
+        for idx, line in enumerate(lines):
+            if line.strip() == section_header:
+                section_index = idx
+                break
+        if section_index == -1:
+            return []
+            
+        if section_index + 1 >= len(lines):
+            return []
+        next_line = lines[section_index + 1].strip()
+        if "(no" in next_line.lower():
+            return []
+            
+        headers_line = lines[section_index + 1]
+        
+        labels = [f.get("label") or f.get("id") for f in fields]
+        start_indices = []
+        current_pos = 2
+        for label in labels:
+            pos = headers_line.find(label, current_pos)
+            if pos != -1:
+                start_indices.append(pos)
+                current_pos = pos + len(label)
+            else:
+                start_indices.append(current_pos)
+                current_pos += len(label) + 3
+                
+        rows = []
+        for idx in range(section_index + 3, len(lines)):
+            line = lines[idx]
+            if line.strip().startswith("-") or line.strip().startswith("=") or not line.strip() or line.strip() in ("HEADER INFO:", "PRODUCTION JOBS:", "DOWNTIME ISSUES:"):
+                break
+                
+            row_data = {}
+            for i, f in enumerate(fields):
+                field_id = f.get("id")
+                start = start_indices[i]
+                end = start_indices[i+1] if i + 1 < len(start_indices) else len(line)
+                val = line[start:end].strip()
+                row_data[field_id] = val
+            rows.append(row_data)
+        return rows
+
+    def import_from_word(self, file_path):
+        with open(file_path, "r", encoding="utf-8") as f:
+            html_content = f.read()
+            
+        parser = WordDumpParser()
+        parser.feed(html_content)
+        
+        data = {"header": {}}
+        for s_name in self.get_routed_repeating_section_profiles():
+            data[s_name] = []
+            
+        header_fields = self.get_header_fields()
+        label_to_id = { (f.get("label") or f.get("id")).strip().lower(): f.get("id") for f in header_fields }
+        
+        meta_rows = parser.sections.get("meta-table") or []
+        for row in meta_rows:
+            for idx in range(0, len(row), 2):
+                if idx + 1 < len(row):
+                    lbl_cell = row[idx][1].replace('\xa0', ' ').strip()
+                    val_cell = row[idx+1][1].replace('\xa0', ' ').strip()
+                    if lbl_cell.endswith(":"):
+                        lbl_text = lbl_cell[:-1].strip().lower()
+                    else:
+                        lbl_text = lbl_cell.strip().lower()
+                    if lbl_text in label_to_id:
+                        data["header"][label_to_id[lbl_text]] = val_cell
+                        
+        production_fields = self.get_section_field_configs("production")
+        prod_rows = parser.sections.get("production jobs") or parser.sections.get("header information")
+        if not prod_rows:
+            for k, v in parser.sections.items():
+                if "production" in k:
+                    prod_rows = v
+                    break
+        if prod_rows:
+            data["production"] = self._parse_html_repeating_section(prod_rows, production_fields)
+            
+        downtime_fields = self.get_section_field_configs("downtime")
+        dt_rows = parser.sections.get("downtime issues")
+        if not dt_rows:
+            for k, v in parser.sections.items():
+                if "downtime" in k:
+                    dt_rows = v
+                    break
+        if dt_rows:
+            data["downtime"] = self._parse_html_repeating_section(dt_rows, downtime_fields)
+            
+        return data
+
+    def _parse_html_repeating_section(self, rows, fields):
+        if not rows:
+            return []
+        header_cells = [cell[1].replace('\xa0', ' ').strip().lower() for cell in rows[0]]
+        label_to_id = { (f.get("label") or f.get("id")).strip().lower(): f.get("id") for f in fields }
+        
+        col_mapping = {}
+        for col_idx, h_text in enumerate(header_cells):
+            if h_text in label_to_id:
+                col_mapping[col_idx] = label_to_id[h_text]
+                
+        parsed_rows = []
+        for r_idx in range(1, len(rows)):
+            row = rows[r_idx]
+            row_data = {}
+            for col_idx, cell in enumerate(row):
+                if col_idx in col_mapping:
+                    field_id = col_mapping[col_idx]
+                    row_data[field_id] = cell[1].replace('\xa0', ' ').strip()
+            if any(row_data.values()):
+                parsed_rows.append(row_data)
+        return parsed_rows
+
+
+class WordDumpParser(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.current_tag = None
+        self.current_table_class = None
+        self.in_table = False
+        self.in_tr = False
+        self.in_td = False
+        self.in_th = False
+        self.in_h2 = False
+        self.h2_text = ""
+        self.current_cell_text = []
+        self.table_rows = []
+        self.current_row = []
+        self.sections = {}
+        self.last_h2 = ""
+
+    def handle_starttag(self, tag, attrs):
+        self.current_tag = tag
+        attrs_dict = dict(attrs)
+        if tag == "h2":
+            self.in_h2 = True
+            self.h2_text = ""
+        elif tag == "table":
+            self.in_table = True
+            self.current_table_class = attrs_dict.get("class")
+            self.table_rows = []
+        elif tag == "tr":
+            self.in_tr = True
+            self.current_row = []
+        elif tag == "td":
+            self.in_td = True
+            self.current_cell_text = []
+        elif tag == "th":
+            self.in_th = True
+            self.current_cell_text = []
+
+    def handle_endtag(self, tag):
+        if tag == "h2":
+            self.in_h2 = False
+            self.last_h2 = self.h2_text.strip().lower()
+        elif tag == "td" or tag == "th":
+            self.in_td = False
+            self.in_th = False
+            cell_content = "".join(self.current_cell_text).strip()
+            self.current_row.append((tag, cell_content))
+        elif tag == "tr":
+            self.in_tr = False
+            if self.current_row:
+                self.table_rows.append(self.current_row)
+        elif tag == "table":
+            self.in_table = False
+            section_key = self.current_table_class or self.last_h2
+            self.sections[section_key] = self.table_rows
+
+    def handle_data(self, data):
+        if self.in_h2:
+            self.h2_text += data
+        elif self.in_td or self.in_th:
+            self.current_cell_text.append(data)

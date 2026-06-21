@@ -720,13 +720,23 @@ class LayoutManagerQtView(QMainWindow):
         template_store_button.clicked.connect(self.controller.store_template_with_active_form_from_import_export)
         template_layout.addWidget(template_store_button)
 
+        prefix_group = QGroupBox("Export Filename Prefix")
+        prefix_layout = QHBoxLayout(prefix_group)
+        prefix_layout.addWidget(QLabel("export_prefix"))
+        self.export_prefix_input = QLineEdit()
+        prefix_layout.addWidget(self.export_prefix_input)
+        prefix_apply_button = QPushButton("Apply")
+        prefix_apply_button.clicked.connect(self.controller.apply_export_prefix_from_import_export)
+        prefix_layout.addWidget(prefix_apply_button)
+
         template_tab = QWidget()
         template_tab_layout = QVBoxLayout(template_tab)
         template_tab_layout.setContentsMargins(8, 8, 8, 8)
         template_tab_layout.setSpacing(8)
         template_tab_layout.addWidget(template_group)
+        template_tab_layout.addWidget(prefix_group)
         template_tab_layout.addStretch(1)
-        import_export_views_tabs.addTab(template_tab, "Template Path")
+        import_export_views_tabs.addTab(template_tab, "Template & Prefix")
 
         mapping_group = QGroupBox("Row Mapping")
         mapping_layout = QVBoxLayout(mapping_group)
@@ -2160,6 +2170,7 @@ class LayoutManagerQtView(QMainWindow):
     def render_import_export_authoring(self, config, metadata=None):
         self._refresh_repeating_section_selectors(config)
         self.template_path_input.setText(str(config.get("template_path") or ""))
+        self.export_prefix_input.setText(str(config.get("export_prefix") or ""))
         self.render_import_export_metadata(metadata)
         self.render_mapping_authoring(config)
 
@@ -2377,6 +2388,12 @@ class LayoutManagerQtView(QMainWindow):
     def set_template_path_value(self, template_path):
         self.template_path_input.setText(str(template_path or "").strip())
 
+    def export_prefix_value(self):
+        return str(self.export_prefix_input.text()).strip()
+
+    def set_export_prefix_value(self, export_prefix):
+        self.export_prefix_input.setText(str(export_prefix or "").strip())
+
     def choose_template_file(self, initial_path=""):
         initial_value = str(initial_path or "").strip()
         initial_directory = ""
@@ -2553,6 +2570,12 @@ class LayoutManagerQtView(QMainWindow):
 
     def show_warning(self, title, message):
         QMessageBox.warning(self, title, message)
+
+    def show_info(self, title, message):
+        QMessageBox.information(self, title, message)
+
+    def show_error(self, title, message):
+        QMessageBox.critical(self, title, message)
 
     def raise_window(self):
         self.showNormal()

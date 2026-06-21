@@ -86,6 +86,7 @@ class LayoutManagerModel:
         "template_path",
         "header_fields",
         "sections",
+        "export_prefix",
     )
     EDITOR_REQUIRED_TOP_LEVEL_KEYS = REQUIRED_TOP_LEVEL_KEYS
     EDITOR_OPTIONAL_TOP_LEVEL_KEYS = ("editor_presets", "calculations")
@@ -172,6 +173,16 @@ class LayoutManagerModel:
                         row_fields=normalized_default.get(section_name),
                     )
             normalized_default["template_path"] = str(normalized_default.get("template_path") or "")
+            active_info = None
+            try:
+                active_info = self.service.get_active_form_info()
+            except Exception:
+                pass
+            fallback_prefix = active_info.get("name", "Disamatic Production Sheet") if active_info else "Disamatic Production Sheet"
+            if "export_prefix" in normalized_default:
+                normalized_default["export_prefix"] = str(normalized_default["export_prefix"] if normalized_default["export_prefix"] is not None else "").strip()
+            else:
+                normalized_default["export_prefix"] = str(fallback_prefix).strip()
             if "calculations" in normalized_default and isinstance(normalized_default.get("calculations"), dict):
                 normalized_default["calculations"] = deepcopy(normalized_default.get("calculations"))
             self._default_config_template = normalized_default
@@ -869,7 +880,7 @@ class LayoutManagerModel:
             and str(section.get("mapping_key") or "").strip()
         ]
 
-    def normalize_config(self, config):
+    def normalize_config(self, config, form_info=None):
         if not isinstance(config, dict):
             return self._get_default_config_template()
 
@@ -899,6 +910,23 @@ class LayoutManagerModel:
         normalized["calculations"] = self._normalize_calculations_metadata(normalized)
         if "template_path" in normalized:
             normalized["template_path"] = str(normalized.get("template_path") or "")
+
+        form_name = None
+        if isinstance(form_info, dict):
+            form_name = form_info.get("name")
+        if not form_name:
+            try:
+                active_info = self.service.get_active_form_info()
+                form_name = active_info.get("name")
+            except Exception:
+                pass
+        if not form_name:
+            form_name = "Disamatic Production Sheet"
+
+        if "export_prefix" in normalized:
+            normalized["export_prefix"] = str(normalized["export_prefix"] if normalized["export_prefix"] is not None else "").strip()
+        else:
+            normalized["export_prefix"] = str(form_name).strip()
         return normalized
 
     def migrate_forms_to_scoped_storage(self):
@@ -923,8 +951,11 @@ class LayoutManagerModel:
             if not isinstance(form_record, dict):
                 continue
             form_id = str(form_record.get("id") or "").strip().lower()
-            if not form_id or form_record.get("built_in"):
-                skipped.append(form_id or f"index:{index}")
+            if not form_id:
+                skipped.append(f"index:{index} (Missing ID)")
+                continue
+            if form_record.get("built_in"):
+                skipped.append(f"{form_id} (Built-in default)")
                 continue
 
             form_info = registry.enrich_form_record(form_record, active_form_id=registry_payload.get("active_form_id"))
@@ -938,11 +969,11 @@ class LayoutManagerModel:
             try:
                 with open(form_info.get("load_path"), "r", encoding="utf-8") as handle:
                     config_payload = json.load(handle)
-            except Exception:
-                skipped.append(form_id)
+            except Exception as exc:
+                skipped.append(f"{form_id} (Load error: {exc})")
                 continue
 
-            normalized_config = self.normalize_config(config_payload)
+            normalized_config = self.normalize_config(config_payload, form_info=form_info)
             normalized_config["calculations"] = self._normalize_calculations_metadata(normalized_config, form_id=form_id)
             normalized_config["calculations"]["companion_relative_path"] = target_calculation_relative_path
 
@@ -1040,14 +1071,19 @@ class LayoutManagerModel:
 
         normalized_payload, payload_details = self._normalize_editor_payload(payload, base_config=base_config)
         self.validate_editor_payload_preserves_required_structure(normalized_payload, payload_details)
-        normalized_config = self.normalize_config(normalized_payload)
+        active_form_info = None
+        try:
+            active_form_info = self.service.get_active_form_info()
+        except Exception:
+            pass
+        normalized_config = self.normalize_config(normalized_payload, form_info=active_form_info)
         self.validate_config(normalized_config)
         return normalized_config, payload_details
 
     def load_current_config(self):
         form_info = self.service.get_active_form_info()
         config, source_path = self.service.load_form(form_info=form_info)
-        config = self.normalize_config(config)
+        config = self.normalize_config(config, form_info=form_info)
         self.validate_config(config)
         self.current_source_path = source_path
         self.current_save_path = form_info.get("save_path", source_path)
@@ -1062,7 +1098,7 @@ class LayoutManagerModel:
     def load_form_config(self, form_id):
         form_info = self.service.get_form_info(form_id)
         config, source_path = self.service.load_form(form_info=form_info)
-        config = self.normalize_config(config)
+        config = self.normalize_config(config, form_info=form_info)
         self.validate_config(config)
         self.current_source_path = source_path
         self.current_save_path = form_info.get("save_path", source_path)
@@ -1077,7 +1113,7 @@ class LayoutManagerModel:
     def load_default_config(self):
         config, source_path = self.service.load_default()
         active_form_info = self.service.get_active_form_info()
-        config = self.normalize_config(config)
+        config = self.normalize_config(config, form_info=active_form_info)
         self.validate_config(config)
         self.current_source_path = source_path
         self.current_save_path = active_form_info.get("save_path", source_path)
@@ -1089,7 +1125,8 @@ class LayoutManagerModel:
         return text
 
     def save_config(self, config, form_info=None):
-        config = self.normalize_config(config)
+        resolved_form_info = dict(form_info) if isinstance(form_info, dict) else self.service.get_active_form_info()
+        config = self.normalize_config(config, form_info=resolved_form_info)
         self.validate_config(config)
         resolved_form_info = dict(form_info) if isinstance(form_info, dict) else self.service.get_active_form_info()
         backup_info = self.service.save_config(config, form_info=resolved_form_info)
@@ -1100,9 +1137,9 @@ class LayoutManagerModel:
 
     def save_config_text(self, text, config=None, form_info=None):
         raw_text = str(text or "")
-        resolved_config = self.normalize_config(config) if isinstance(config, dict) else self.parse_editor_text(raw_text)
-        self.validate_config(resolved_config)
         resolved_form_info = dict(form_info) if isinstance(form_info, dict) else self.service.get_active_form_info()
+        resolved_config = self.normalize_config(config, form_info=resolved_form_info) if isinstance(config, dict) else self.parse_editor_text(raw_text)
+        self.validate_config(resolved_config)
         backup_info = self.service.save_config_text(raw_text, form_info=resolved_form_info)
         self.current_source_path = resolved_form_info.get("save_path", self.current_source_path)
         self.current_save_path = resolved_form_info.get("save_path", self.current_save_path)
@@ -1117,8 +1154,9 @@ class LayoutManagerModel:
         return form_info
 
     def create_form_from_config(self, name, config, description="", activate=False):
-        config = self.normalize_config(config)
         form_id = self.service.registry.canonical_form_id(name) or self.service.registry.normalize_form_id(name)
+        form_info = {"id": form_id, "name": name, "description": description}
+        config = self.normalize_config(config, form_info=form_info)
         config = self.service.registry._ensure_calculation_metadata(config, form_id)
         self.validate_config(config)
         form_info = self.service.create_form(name, config, description=description, activate=activate)
@@ -1164,8 +1202,15 @@ class LayoutManagerModel:
 
     def build_blank_form_config(self):
         default_config = self._get_default_config_template()
+        active_form_info = None
+        try:
+            active_form_info = self.service.get_active_form_info()
+        except Exception:
+            pass
+        fallback_prefix = active_form_info.get("name", "Disamatic Production Sheet") if active_form_info else "Disamatic Production Sheet"
         blank_config = {
             "template_path": str(default_config.get("template_path", "")),
+            "export_prefix": str(default_config.get("export_prefix", fallback_prefix)),
             "header_fields": [],
             "sections": [],
             "editor_presets": {},
@@ -1188,6 +1233,7 @@ class LayoutManagerModel:
         # 1. Start with the minimal config template structure
         config = {
             "template_path": "",
+            "export_prefix": str(name).strip(),
             "header_fields": [],
             "sections": [],
             "editor_presets": {},
@@ -1229,6 +1275,10 @@ class LayoutManagerModel:
                     break
         
         config["template_path"] = str(default_config.get("template_path", ""))
+        if "export_prefix" in default_config:
+            config["export_prefix"] = str(default_config["export_prefix"] if default_config["export_prefix"] is not None else "").strip()
+        else:
+            config["export_prefix"] = str(name).strip()
         
         # 3. Ensure calculation metadata based on name/form_id
         form_id = self.service.registry.canonical_form_id(name) or self.service.registry.normalize_form_id(name)
@@ -1340,6 +1390,11 @@ class LayoutManagerModel:
     def validate_config(self, config):
         if not isinstance(config, dict):
             raise ValueError("Config must be a JSON object.")
+
+        if "export_prefix" not in config:
+            raise ValueError("export_prefix is required in layout config.")
+        if not isinstance(config.get("export_prefix"), str):
+            raise ValueError("export_prefix must be a string.")
 
         if "sections" in config and not isinstance(config.get("sections"), list):
             raise ValueError("sections must be a list.")
@@ -2191,6 +2246,10 @@ class LayoutManagerModel:
         config["template_path"] = str(template_path_value or "").strip()
         return config, "Updated export template path"
 
+    def update_export_prefix(self, config, export_prefix_value):
+        config["export_prefix"] = str(export_prefix_value or "").strip()
+        return config, "Updated export filename prefix"
+
     def resolve_template_path(self, template_path_value):
         normalized_path = str(template_path_value or "").strip()
         if not normalized_path:
@@ -2288,7 +2347,7 @@ class LayoutManagerModel:
                 "form_name": form_name,
                 "label": snapshot_label,
                 "created_at": timestamp,
-                "config": self.normalize_config(deepcopy(config)),
+                "config": self.normalize_config(deepcopy(config), form_info=form_info),
             }
         )
         snapshots = snapshots[-50:]
@@ -2313,7 +2372,8 @@ class LayoutManagerModel:
 
     def restore_form_snapshot(self, snapshot_id):
         snapshot = self.get_form_snapshot(snapshot_id)
-        config = self.normalize_config(deepcopy(snapshot.get("config") or {}))
+        form_info = {"id": snapshot.get("form_id"), "name": snapshot.get("form_name")}
+        config = self.normalize_config(deepcopy(snapshot.get("config") or {}), form_info=form_info)
         self.validate_config(config)
         return config, snapshot
 
@@ -2709,8 +2769,12 @@ class LayoutManagerModel:
         required_keys = tuple(dict.fromkeys((*self.EDITOR_REQUIRED_TOP_LEVEL_KEYS, *sorted(dynamic_required_keys))))
         missing_keys = [key for key in required_keys if key not in payload]
         if missing_keys:
-            fallback_config = base_config if isinstance(base_config, dict) else self._get_default_config_template()
-            fallback_payload = self.normalize_config(deepcopy(fallback_config))
+            active_form_info = None
+            try:
+                active_form_info = self.service.get_active_form_info()
+            except Exception:
+                pass
+            fallback_payload = self.normalize_config(deepcopy(fallback_config), form_info=active_form_info)
             merged_payload = deepcopy(fallback_payload)
             merged_payload.update(payload)
 

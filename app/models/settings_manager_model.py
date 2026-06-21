@@ -336,7 +336,6 @@ class SettingsManagerModel:
         default_export_directory = self._default_export_directory_setting()
         export_override = settings.get("path_overrides", {}).get("exports_root")
         settings["export_directory"] = str(export_override or default_export_directory).strip() or default_export_directory
-        settings["default_export_prefix"] = str(settings.get("default_export_prefix", "Disamatic Production Sheet") or "").strip() or "Disamatic Production Sheet"
         return settings
 
     def get_path_override_definitions(self):
