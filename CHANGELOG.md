@@ -4,6 +4,22 @@ This changelog tracks the main branch release line for Production Logging Center
 
 Version headings below are aligned to the current `2.x` release line used by Dispatcher Core. Earlier work has been grouped into practical release milestones so the shipped feature history is easier to follow without rewriting older module version markers.
 
+## [2.4.1] - 2026-06-22
+
+### Added
+
+- **Collapsible Diagnostics**: Nest 20 diagnostic, configuration, and job fields inside a collapsible `QTreeWidget` with automated height adjustment to prevent wasting vertical screen space.
+- **Categorized Payload Tabs**: Organized the module updates view into a `QTabWidget` with four categories: User Facing, Admin, Dev, and Back End modules.
+- **Content-Based Update Fallback**: Implemented a fallback update comparison that matches the raw code content of local and remote Python files when their version strings are unversioned (`"Unknown"`).
+- **Metadata Definitions**: Declared `__module_name__` and `__version__` tags in `app/app_identity.py`, `app/app_platform.py`, `app/update_bindings.py`, and `app/update_state.py` for correct indexing.
+
+### Changed
+
+- **UI Layout Optimization**: Relocated the action buttons (Check Repository, Apply Stable Updates, Refresh Status) from the bottom of the Update Manager view to the top.
+- **Direct Launcher Version Check**: Directed the core update manager to check `launcher.py` instead of `main.py` for repository version strings, fixing `"Remote version unreadable"` and `"Unknown"` version errors.
+- **Launcher Version Bump**: Bumped Dispatcher Core version to `2.4.1` in `launcher.py` and `launcher-HPLaptop.py`.
+- **Module Version Bumps**: Bumped Update Manager to `2.1.7` in `app/update_manager.py` and `app/models/update_manager_model.py`.
+
 ## [2.4.0] - 2026-06-21
 
 ### Added

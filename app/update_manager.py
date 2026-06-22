@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 __module_name__ = "Update Manager"
-__version__ = "2.1.6"
+__version__ = "2.1.7"
 
 
 def get_ui(parent, dispatcher):

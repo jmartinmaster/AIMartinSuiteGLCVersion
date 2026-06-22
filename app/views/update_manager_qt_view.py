@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 __module_name__ = "Update Manager Qt View"
-__version__ = "1.5.1"
+__version__ = "1.5.2"
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
@@ -29,7 +29,10 @@ from PyQt6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QStatusBar,
+    QTabWidget,
     QTextEdit,
+    QTreeWidget,
+    QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -39,6 +42,30 @@ PYQT6_AVAILABLE = True
 
 def is_update_manager_qt_runtime_available():
     return PYQT6_AVAILABLE
+
+
+def get_option_category(option):
+    from app.module_registry import ModuleRegistry
+    try:
+        registry = ModuleRegistry()
+        reg_mod = registry.get_module(option["key"])
+        allowed_roles = reg_mod.get("allowed_roles", [])
+        if "admin" in allowed_roles:
+            return "admin"
+        elif "developer" in allowed_roles:
+            return "dev"
+        elif reg_mod.get("navigation_visible"):
+            return "user facing"
+        else:
+            return "back end"
+    except Exception:
+        # Fallback for options not in the module registry (like JSON config payloads)
+        key = option.get("key", "")
+        if key == "production_log_calculations":
+            return "dev"
+        elif key in ("layout_config", "form_definitions", "rates"):
+            return "user facing"
+        return "back end"
 
 
 class UpdateManagerQtView(QMainWindow):
@@ -53,7 +80,8 @@ class UpdateManagerQtView(QMainWindow):
         self.value_labels = {}
         self.target_name_label = None
         self.runtime_status_value_label = None
-        self.payload_selector = None
+        self.payload_tabs = None
+        self.tab_combos = {}
         self.payload_name_label = None
         self.payload_path_label = None
         self.payload_local_version_label = None
@@ -116,6 +144,20 @@ class UpdateManagerQtView(QMainWindow):
         subtitle_label.setWordWrap(True)
         content_layout.addWidget(subtitle_label)
 
+        # Relocated controls layout (Check Repository, Apply Stable Updates, Refresh Status buttons)
+        controls = QHBoxLayout()
+        check_button = QPushButton("Check Repository")
+        check_button.clicked.connect(self.controller.check_for_updates)
+        controls.addWidget(check_button)
+        apply_button = QPushButton("Apply Stable Updates")
+        apply_button.clicked.connect(self.controller.apply_updates)
+        controls.addWidget(apply_button)
+        refresh_button = QPushButton("Refresh Status")
+        refresh_button.clicked.connect(self.controller.refresh_snapshot)
+        controls.addWidget(refresh_button)
+        controls.addStretch(1)
+        content_layout.addLayout(controls)
+
         summary_group = QGroupBox("Current Update Status")
         summary_form = QFormLayout(summary_group)
 
@@ -124,44 +166,109 @@ class UpdateManagerQtView(QMainWindow):
         self.target_name_label.setWordWrap(True)
         summary_form.addRow(QLabel("Release Target"), self.target_name_label)
 
-        for key, label in [
-            ("repository", "Repository"),
-            ("branch", "Branch"),
-            ("stable_artifact", "Stable Artifact"),
-            ("updates_configured", "Updates Configured"),
-            ("local_version", "Local Version"),
-            ("remote_version", "Repository Version"),
-            ("status", "Status"),
-            ("job_phase", "Job Phase"),
-            ("job_detail", "Job Detail"),
-            ("summary_note", "Stable Summary"),
-            ("module_payloads", "Tracked Module Payloads"),
-            ("module_payload_selected", "Selected Module Payload"),
-            ("module_payload_path", "Selected Payload Path"),
-            ("documentation_payloads", "Tracked Documentation Payloads"),
-            ("documentation_remote_state", "Documentation Remote State"),
-            ("documentation_status", "Documentation Status"),
-            ("documentation_note", "Documentation Note"),
-            ("advanced_channel_enabled", "Advanced Channel Enabled"),
-            ("advanced_source_phase", "Advanced Source Phase"),
-            ("advanced_source_detail", "Advanced Source Detail"),
-            ("advanced_recovery_available", "Advanced Recovery Available"),
-            ("advanced_build_log", "Advanced Build Log"),
-            ("configuration_note", "Configuration Note"),
-        ]:
-            value_label = QLabel("-")
-            value_label.setWordWrap(True)
-            self.value_labels[key] = value_label
-            summary_form.addRow(QLabel(label), value_label)
+        self.local_version_label = QLabel("-")
+        self.local_version_label.setWordWrap(True)
+        self.value_labels["local_version"] = self.local_version_label
+        summary_form.addRow(QLabel("Local Version"), self.local_version_label)
+
+        self.repository_version_label = QLabel("-")
+        self.repository_version_label.setWordWrap(True)
+        self.value_labels["remote_version"] = self.repository_version_label
+        summary_form.addRow(QLabel("Repository Version"), self.repository_version_label)
+
+        self.status_label = QLabel("-")
+        self.status_label.setWordWrap(True)
+        self.value_labels["status"] = self.status_label
+        summary_form.addRow(QLabel("Status"), self.status_label)
+
+        # Collapsible Tree Widget for detailed/diagnostic information
+        self.tree_widget = QTreeWidget()
+        self.tree_widget.setColumnCount(2)
+        self.tree_widget.setHeaderLabels(["Property", "Value"])
+        self.tree_widget.setColumnWidth(0, 240)
+        self.tree_widget.setMinimumHeight(64)
+
+        # Root category item
+        root_item = QTreeWidgetItem(self.tree_widget, ["Detailed Diagnostics & Configuration", ""])
+        
+        # Categories
+        repo_cat = QTreeWidgetItem(root_item, ["Repository & Configuration", ""])
+        job_cat = QTreeWidgetItem(root_item, ["Job Status & Summary", ""])
+        payload_cat = QTreeWidgetItem(root_item, ["Modules & Documentation Overview", ""])
+        adv_cat = QTreeWidgetItem(root_item, ["Advanced Source Operations", ""])
+
+        self.tree_items = {
+            "repository": QTreeWidgetItem(repo_cat, ["Repository", "-"]),
+            "branch": QTreeWidgetItem(repo_cat, ["Branch", "-"]),
+            "stable_artifact": QTreeWidgetItem(repo_cat, ["Stable Artifact", "-"]),
+            "updates_configured": QTreeWidgetItem(repo_cat, ["Updates Configured", "-"]),
+            "advanced_channel_enabled": QTreeWidgetItem(repo_cat, ["Advanced Channel Enabled", "-"]),
+            "configuration_note": QTreeWidgetItem(repo_cat, ["Configuration Note", "-"]),
+            
+            "job_phase": QTreeWidgetItem(job_cat, ["Job Phase", "-"]),
+            "job_detail": QTreeWidgetItem(job_cat, ["Job Detail", "-"]),
+            "summary_note": QTreeWidgetItem(job_cat, ["Stable Summary", "-"]),
+            
+            "module_payloads": QTreeWidgetItem(payload_cat, ["Tracked Module Payloads", "-"]),
+            "module_payload_selected": QTreeWidgetItem(payload_cat, ["Selected Module Payload", "-"]),
+            "module_payload_path": QTreeWidgetItem(payload_cat, ["Selected Payload Path", "-"]),
+            "documentation_payloads": QTreeWidgetItem(payload_cat, ["Tracked Documentation Payloads", "-"]),
+            "documentation_remote_state": QTreeWidgetItem(payload_cat, ["Documentation Remote State", "-"]),
+            "documentation_status": QTreeWidgetItem(payload_cat, ["Documentation Status", "-"]),
+            "documentation_note": QTreeWidgetItem(payload_cat, ["Documentation Note", "-"]),
+            
+            "advanced_source_phase": QTreeWidgetItem(adv_cat, ["Advanced Source Phase", "-"]),
+            "advanced_source_detail": QTreeWidgetItem(adv_cat, ["Advanced Source Detail", "-"]),
+            "advanced_recovery_available": QTreeWidgetItem(adv_cat, ["Advanced Recovery Available", "-"]),
+            "advanced_build_log": QTreeWidgetItem(adv_cat, ["Advanced Build Log", "-"]),
+        }
+
+        # Add tree items to value_labels
+        for key, item in self.tree_items.items():
+            self.value_labels[key] = item
+
+        # Expand child categories, collapse root by default
+        self.tree_widget.expandItem(repo_cat)
+        self.tree_widget.expandItem(job_cat)
+        self.tree_widget.expandItem(payload_cat)
+        self.tree_widget.expandItem(adv_cat)
+        self.tree_widget.collapseItem(root_item)
+
+        # Wire up dynamic height adjustments
+        self.tree_widget.itemExpanded.connect(self._adjust_tree_height)
+        self.tree_widget.itemCollapsed.connect(self._adjust_tree_height)
+
+        summary_form.addRow(QLabel("Diagnostics"), self.tree_widget)
 
         content_layout.addWidget(summary_group)
 
+        # Module Payload Updates Group with Tab Widget
         payload_group = QGroupBox("Module Payload Updates")
         payload_layout = QFormLayout(payload_group)
 
-        self.payload_selector = QComboBox()
-        self.payload_selector.currentIndexChanged.connect(self._on_payload_selection_changed)
-        payload_layout.addRow(QLabel("Payload"), self.payload_selector)
+        self.payload_tabs = QTabWidget()
+        self.tab_combos = {}
+        categories = [
+            ("user facing", "User Facing Modules"),
+            ("admin", "Admin Modules"),
+            ("dev", "Dev Modules"),
+            ("back end", "Back End Modules")
+        ]
+        for cat_key, cat_name in categories:
+            tab_widget = QWidget()
+            tab_layout = QHBoxLayout(tab_widget)
+            tab_layout.setContentsMargins(0, 4, 0, 4)
+            
+            combo = QComboBox()
+            combo.currentIndexChanged.connect(self._on_payload_selection_changed)
+            tab_layout.addWidget(QLabel("Select Payload:"))
+            tab_layout.addWidget(combo, 1)
+            
+            self.payload_tabs.addTab(tab_widget, cat_name)
+            self.tab_combos[cat_key] = combo
+            
+        self.payload_tabs.currentChanged.connect(self._on_tab_changed)
+        payload_layout.addRow(QLabel("Payload Sections"), self.payload_tabs)
 
         self.payload_name_label = QLabel("No payload selected")
         self.payload_name_label.setWordWrap(True)
@@ -202,6 +309,7 @@ class UpdateManagerQtView(QMainWindow):
 
         content_layout.addWidget(payload_group)
 
+        # Documentation Updates
         documentation_group = QGroupBox("Documentation Updates")
         documentation_layout = QFormLayout(documentation_group)
 
@@ -232,6 +340,7 @@ class UpdateManagerQtView(QMainWindow):
         documentation_layout.addRow(QLabel("Actions"), documentation_actions)
         content_layout.addWidget(documentation_group)
 
+        # Advanced Source Operations
         advanced_group = QGroupBox("Advanced Source Operations")
         advanced_layout = QFormLayout(advanced_group)
 
@@ -272,6 +381,7 @@ class UpdateManagerQtView(QMainWindow):
         advanced_layout.addRow(QLabel("Actions"), advanced_actions)
         content_layout.addWidget(advanced_group)
 
+        # Runtime Status
         runtime_status_group = QGroupBox("Runtime Status")
         runtime_status_layout = QVBoxLayout(runtime_status_group)
         self.runtime_status_value_label = QLabel("Ready")
@@ -279,18 +389,6 @@ class UpdateManagerQtView(QMainWindow):
         runtime_status_layout.addWidget(self.runtime_status_value_label)
         content_layout.addWidget(runtime_status_group)
 
-        controls = QHBoxLayout()
-        check_button = QPushButton("Check Repository")
-        check_button.clicked.connect(self.controller.check_for_updates)
-        controls.addWidget(check_button)
-        apply_button = QPushButton("Apply Stable Updates")
-        apply_button.clicked.connect(self.controller.apply_updates)
-        controls.addWidget(apply_button)
-        refresh_button = QPushButton("Refresh Status")
-        refresh_button.clicked.connect(self.controller.refresh_snapshot)
-        controls.addWidget(refresh_button)
-        controls.addStretch(1)
-        content_layout.addLayout(controls)
         content_layout.addStretch(1)
 
         scroll_area.setWidget(scroll_content)
@@ -298,6 +396,35 @@ class UpdateManagerQtView(QMainWindow):
         self.setCentralWidget(central_widget)
         self.status_bar = QStatusBar(self)
         self.setStatusBar(self.status_bar)
+
+        self._adjust_tree_height()
+
+    def _adjust_tree_height(self):
+        visible_count = 0
+        def count_visible(item):
+            nonlocal visible_count
+            visible_count += 1
+            if item.isExpanded():
+                for i in range(item.childCount()):
+                    count_visible(item.child(i))
+                    
+        for i in range(self.tree_widget.topLevelItemCount()):
+            count_visible(self.tree_widget.topLevelItem(i))
+            
+        row_height = 24
+        header_height = 30
+        margin = 10
+        total_height = header_height + (visible_count * row_height) + margin
+        total_height = max(64, min(total_height, 450))
+        self.tree_widget.setFixedHeight(total_height)
+
+    def _on_tab_changed(self, index):
+        cat_keys = ["user facing", "admin", "dev", "back end"]
+        if 0 <= index < len(cat_keys):
+            combo = self.tab_combos[cat_keys[index]]
+            payload_key = str(combo.currentData() or "").strip()
+            if payload_key:
+                self.controller.on_payload_selection_changed(payload_key)
 
     def _available_screen_geometry(self):
         window_handle = self.windowHandle()
@@ -324,8 +451,13 @@ class UpdateManagerQtView(QMainWindow):
     def render_snapshot(self, snapshot):
         snapshot = snapshot if isinstance(snapshot, dict) else {}
         self.target_name_label.setText(str(snapshot.get("target_name") or "Dispatcher Core"))
-        for key, label_widget in self.value_labels.items():
-            label_widget.setText(str(snapshot.get(key, "-")))
+        for key, widget in self.value_labels.items():
+            val_str = str(snapshot.get(key, "-"))
+            if isinstance(widget, QLabel):
+                widget.setText(val_str)
+            elif isinstance(widget, QTreeWidgetItem):
+                widget.setText(1, val_str)
+                widget.setToolTip(1, val_str)
         if self.note_text is not None:
             self.note_text.setPlainText(str(snapshot.get("note") or ""))
         self.payload_name_label.setText(str(snapshot.get("module_payload_selected") or "No payload selected"))
@@ -350,26 +482,63 @@ class UpdateManagerQtView(QMainWindow):
     def set_module_payload_options(self, options, selected_key):
         options = options if isinstance(options, list) else []
         selected_key = str(selected_key or "")
-        self.payload_selector.blockSignals(True)
+        
+        self.payload_tabs.blockSignals(True)
+        for combo in self.tab_combos.values():
+            combo.blockSignals(True)
+            
         try:
-            self.payload_selector.clear()
-            selected_index = -1
-            for index, option in enumerate(options):
-                key = str(option.get("key") or "").strip()
-                display = str(option.get("display") or key)
-                self.payload_selector.addItem(display, key)
-                if key == selected_key:
-                    selected_index = index
-            if selected_index < 0 and self.payload_selector.count() > 0:
-                selected_index = 0
-            if selected_index >= 0:
-                self.payload_selector.setCurrentIndex(selected_index)
+            for combo in self.tab_combos.values():
+                combo.clear()
+                
+            categorized_options = {
+                "user facing": [],
+                "admin": [],
+                "dev": [],
+                "back end": []
+            }
+            
+            for option in options:
+                cat = get_option_category(option)
+                categorized_options[cat].append(option)
+                
+            for cat_key, cat_options in categorized_options.items():
+                combo = self.tab_combos[cat_key]
+                selected_index = -1
+                for index, option in enumerate(cat_options):
+                    key = str(option.get("key") or "").strip()
+                    display = str(option.get("display") or key)
+                    combo.addItem(display, key)
+                    if key == selected_key:
+                        selected_index = index
+                if selected_index < 0 and combo.count() > 0:
+                    selected_index = 0
+                if selected_index >= 0:
+                    combo.setCurrentIndex(selected_index)
+                    
+            selected_cat = None
+            for option in options:
+                if str(option.get("key") or "").strip() == selected_key:
+                    selected_cat = get_option_category(option)
+                    break
+            
+            if selected_cat is not None:
+                cat_keys = ["user facing", "admin", "dev", "back end"]
+                if selected_cat in cat_keys:
+                    self.payload_tabs.setCurrentIndex(cat_keys.index(selected_cat))
         finally:
-            self.payload_selector.blockSignals(False)
+            self.payload_tabs.blockSignals(False)
+            for combo in self.tab_combos.values():
+                combo.blockSignals(False)
 
     def _on_payload_selection_changed(self):
-        payload_key = str(self.payload_selector.currentData() or "").strip()
-        self.controller.on_payload_selection_changed(payload_key)
+        index = self.payload_tabs.currentIndex()
+        cat_keys = ["user facing", "admin", "dev", "back end"]
+        if 0 <= index < len(cat_keys):
+            combo = self.tab_combos[cat_keys[index]]
+            payload_key = str(combo.currentData() or "").strip()
+            if payload_key:
+                self.controller.on_payload_selection_changed(payload_key)
 
     def ask_yes_no(self, title, message):
         response = QMessageBox.question(self, title, message)

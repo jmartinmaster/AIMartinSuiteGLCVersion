@@ -17,6 +17,9 @@
 import os
 import re
 
+__module_name__ = "App Identity"
+__version__ = "1.0.0"
+
 
 APP_NAME = "Production Logging Center_GLC"
 APP_MAINTAINER = "Jamie Martin"
@@ -72,14 +75,26 @@ def parse_versioned_exe_name(file_name):
 
 
 def load_version_from_main(main_file_path=None, default="0.0.0"):
-    file_path = main_file_path or os.path.join(os.path.dirname(__file__), MAIN_FILE_NAME)
-    try:
-        with open(file_path, "r", encoding="utf-8") as handle:
-            file_text = handle.read()
-    except OSError:
-        return default
-
-    match = VERSION_PATTERN.search(file_text)
-    if not match:
-        return default
-    return match.group(1)
+    paths_to_try = []
+    if main_file_path:
+        paths_to_try.append(main_file_path)
+        if main_file_path.endswith("main.py"):
+            paths_to_try.append(main_file_path[:-7] + "launcher.py")
+            
+    app_dir = os.path.dirname(os.path.abspath(__file__))
+    root_dir = os.path.dirname(app_dir)
+    paths_to_try.append(os.path.join(root_dir, "launcher.py"))
+    paths_to_try.append(os.path.join(root_dir, "main.py"))
+    paths_to_try.append(os.path.join(app_dir, "main.py"))
+    
+    for path in paths_to_try:
+        if path and os.path.exists(path):
+            try:
+                with open(path, "r", encoding="utf-8") as handle:
+                    file_text = handle.read()
+                match = VERSION_PATTERN.search(file_text)
+                if match:
+                    return match.group(1)
+            except OSError:
+                continue
+    return default

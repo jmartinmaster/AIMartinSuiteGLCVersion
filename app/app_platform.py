@@ -13,6 +13,9 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
+__module_name__ = "App Platform"
+__version__ = "1.0.0"
+
 import os
 import sys
 import ctypes

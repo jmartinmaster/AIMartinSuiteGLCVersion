@@ -34,13 +34,13 @@ from app.persistence import write_json_with_backup, write_text_with_backup
 from app.utils import ensure_external_directory, external_path, local_or_resource_path, resolve_local_venv_python
 
 __module_name__ = "Update Manager"
-__version__ = "2.1.6"
+__version__ = "2.1.7"
 
 
 GITHUB_REMOTE_PATTERN = re.compile(r"github\.com[:/](?P<owner>[^/]+)/(?P<repo>[^/.]+?)(?:\.git)?$")
 MODULE_NAME_PATTERN = re.compile(r"__module_name__\s*=\s*[\"']([^\"']+)[\"']")
 VERSION_PATTERN = re.compile(r"__version__\s*=\s*[\"']([^\"']+)[\"']")
-MASTER_VERSION_PATH = "main.py"
+MASTER_VERSION_PATH = "launcher.py"
 LEGACY_REMOTE_EXE_PATH = "dist/TheMartinSuite_GLC.exe"
 LEGACY_REMOTE_DEB_PATH = f"dist/ubuntu/{DEB_PACKAGE_NAME}.deb"
 MODULE_PAYLOAD_EXCLUDED_KEYS = {"__init__", "update_manager"}
@@ -137,6 +137,7 @@ def _parse_module_metadata(file_text, fallback_name):
     return {
         "module_name": module_name_match.group(1) if module_name_match else fallback_name,
         "version": version_match.group(1) if version_match else "Unknown",
+        "compare_token": file_text.replace("\r\n", "\n") if file_text else None,
     }
 
 
@@ -473,12 +474,24 @@ def evaluate_module_payload_option(modules_path, loaded_modules, option, branch_
             status = "Module update available"
             note = f"A newer {module_name} payload is available and can be installed without rebuilding the EXE."
             update_available = True
-        elif remote_version == local_version:
+        elif remote_version == local_version and remote_version != "Unknown":
             status = "Up to date"
             note = f"The selected {module_name} payload already matches the repository version."
         else:
-            status = "Module version unreadable"
-            note = f"The selected {module_name} payload could not be compared cleanly."
+            # Fallback to source code comparison if version is Unknown
+            local_token = local_metadata.get("compare_token")
+            remote_token = remote_metadata.get("compare_token")
+            if local_token and remote_token:
+                if local_token.strip() == remote_token.strip():
+                    status = "Up to date"
+                    note = f"The selected {module_name} payload already matches the repository version."
+                else:
+                    status = "Module update available"
+                    note = f"The local {module_name} payload differs from the repository version and can be updated."
+                    update_available = True
+            else:
+                status = "Module version unreadable"
+                note = f"The selected {module_name} payload could not be compared cleanly."
 
     return {
         "option": current_option,
