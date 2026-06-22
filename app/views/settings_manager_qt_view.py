@@ -38,6 +38,7 @@ from PyQt6.QtWidgets import (
     QScrollArea,
     QSpinBox,
     QStatusBar,
+    QTabWidget,
     QTableWidget,
     QTableWidgetItem,
     QTextEdit,
@@ -386,7 +387,15 @@ class SettingsManagerQtView(QMainWindow):
         content_layout.addWidget(self.security_admin_group)
 
         self.developer_admin_group = QGroupBox("Developer & Admin Tools")
-        developer_layout = QFormLayout(self.developer_admin_group)
+        developer_group_layout = QVBoxLayout(self.developer_admin_group)
+
+        self.developer_tab_widget = QTabWidget()
+        developer_group_layout.addWidget(self.developer_tab_widget)
+
+        # Tab 1: Settings
+        dev_settings_tab = QWidget()
+        developer_layout = QFormLayout(dev_settings_tab)
+        self.developer_tab_widget.addTab(dev_settings_tab, "Developer Settings")
 
         self.developer_access_label = QLabel("Admin or developer session required")
         self.developer_access_label.setWordWrap(True)
@@ -493,6 +502,36 @@ class SettingsManagerQtView(QMainWindow):
         save_developer_button.clicked.connect(self.controller.save_current_developer_admin_settings)
         self.developer_save_button = save_developer_button
         developer_layout.addRow(QLabel("Actions"), save_developer_button)
+
+        # Tab 2: Crash Reports
+        crash_reports_tab = QWidget()
+        crash_reports_layout = QVBoxLayout(crash_reports_tab)
+        self.developer_tab_widget.addTab(crash_reports_tab, "Crash Reports")
+
+        crash_select_layout = QHBoxLayout()
+        crash_select_layout.setSpacing(10)
+        crash_select_layout.addWidget(QLabel("Select Report:"))
+
+        self.developer_crash_combo = QComboBox()
+        self.developer_crash_combo.currentIndexChanged.connect(self._on_crash_report_selected)
+        crash_select_layout.addWidget(self.developer_crash_combo, 1)
+
+        self.developer_crash_refresh_button = QPushButton("Refresh")
+        self.developer_crash_refresh_button.clicked.connect(self._on_crash_reports_refresh_clicked)
+        crash_select_layout.addWidget(self.developer_crash_refresh_button)
+
+        self.developer_crash_delete_button = QPushButton("Delete Report")
+        self.developer_crash_delete_button.clicked.connect(self._on_crash_report_delete_clicked)
+        crash_select_layout.addWidget(self.developer_crash_delete_button)
+
+        crash_reports_layout.addLayout(crash_select_layout)
+
+        self.developer_crash_viewer = QTextEdit()
+        self.developer_crash_viewer.setReadOnly(True)
+        self.developer_crash_viewer.setStyleSheet(
+            "font-family: Consolas, Monaco, monospace; font-size: 9pt;"
+        )
+        crash_reports_layout.addWidget(self.developer_crash_viewer)
 
         content_layout.addWidget(self.developer_admin_group)
 
@@ -937,6 +976,32 @@ class SettingsManagerQtView(QMainWindow):
         if self.developer_unlock_button is not None:
             self.developer_unlock_button.setText("Re-authenticate Developer Tools" if can_manage_developer else "Unlock Developer Tools")
 
+        # Update crash reports combobox
+        crash_reports = state.get("crash_reports", [])
+        self.developer_crash_combo.blockSignals(True)
+        current_selection = self.developer_crash_combo.currentText()
+        self.developer_crash_combo.clear()
+        if crash_reports:
+            self.developer_crash_combo.addItems(crash_reports)
+            idx = self.developer_crash_combo.findText(current_selection)
+            if idx >= 0:
+                self.developer_crash_combo.setCurrentIndex(idx)
+            else:
+                self.developer_crash_combo.setCurrentIndex(0)
+            self.developer_crash_delete_button.setEnabled(can_manage_developer)
+        else:
+            self.developer_crash_combo.addItem("No crash reports found")
+            self.developer_crash_delete_button.setEnabled(False)
+        self.developer_crash_combo.blockSignals(False)
+
+        self.developer_crash_combo.setEnabled(can_manage_developer)
+        self.developer_crash_viewer.setEnabled(can_manage_developer)
+        self.developer_crash_refresh_button.setEnabled(can_manage_developer)
+
+        # Load active report
+        self._on_crash_report_selected()
+
+
     def get_runtime_path_overrides(self):
         return {
             key: widget.text().strip()
@@ -1034,3 +1099,22 @@ class SettingsManagerQtView(QMainWindow):
     def closeEvent(self, event):
         self.controller.handle_close()
         super().closeEvent(event)
+
+    def _on_crash_report_selected(self):
+        filename = self.developer_crash_combo.currentText()
+        if filename and filename != "No crash reports found":
+            content = self.controller.load_crash_report(filename)
+            self.developer_crash_viewer.setPlainText(content)
+        else:
+            self.developer_crash_viewer.setPlainText("No crash report selected.")
+
+    def _on_crash_reports_refresh_clicked(self):
+        self.controller.refresh_snapshot(initial=False)
+
+    def _on_crash_report_delete_clicked(self):
+        filename = self.developer_crash_combo.currentText()
+        if not filename or filename == "No crash reports found":
+            return
+        if self.ask_yes_no("Delete Crash Report", f"Are you sure you want to delete {filename}?"):
+            self.controller.delete_crash_report(filename)
+

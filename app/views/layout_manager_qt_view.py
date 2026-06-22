@@ -266,6 +266,225 @@ class BlankFormWizardDialog(QDialog):
         }
 
 
+class InjectMissingFieldsDialog(QDialog):
+    def __init__(self, parent=None, missing_fields=None, suggestions=None):
+        super().__init__(parent)
+        self.setWindowTitle("Inject Missing Standard Fields")
+        self.resize(950, 600)
+        self.setMinimumSize(900, 500)
+        
+        self.missing_fields = missing_fields or {"header": [], "production": [], "downtime": [], "metadata": {}}
+        self.suggestions = suggestions or {"header": {}, "production": {}, "downtime": {}, "form_name": "", "description": "", "export_prefix": ""}
+        
+        main_layout = QVBoxLayout(self)
+        main_layout.setSpacing(12)
+        main_layout.setContentsMargins(16, 16, 16, 16)
+        
+        title_label = QLabel("Inject Missing Standard Fields & Metadata", self)
+        title_font = title_label.font()
+        title_font.setBold(True)
+        title_font.setPointSize(12)
+        title_label.setFont(title_font)
+        main_layout.addWidget(title_label)
+        
+        desc_label = QLabel("The configuration is missing standard form metadata or semantic fields needed to function correctly. Review, configure, and selectively inject them below.")
+        desc_label.setWordWrap(True)
+        main_layout.addWidget(desc_label)
+        
+        meta_group = QGroupBox("Form Identity / Metadata", self)
+        meta_layout = QFormLayout(meta_group)
+        meta_layout.setSpacing(8)
+        
+        self.name_edit = QLineEdit(self)
+        self.name_edit.setText(self.suggestions.get("form_name", ""))
+        self.name_edit.setPlaceholderText("e.g. Injection Molding Log")
+        meta_layout.addRow("Form Name *", self.name_edit)
+        
+        self.desc_edit = QLineEdit(self)
+        self.desc_edit.setText(self.suggestions.get("description", ""))
+        self.desc_edit.setPlaceholderText("e.g. Logs parts, molds, and downtime codes")
+        meta_layout.addRow("Description", self.desc_edit)
+        
+        self.prefix_edit = QLineEdit(self)
+        self.prefix_edit.setText(self.suggestions.get("export_prefix", ""))
+        self.prefix_edit.setPlaceholderText("e.g. Injection Molding Log")
+        meta_layout.addRow("Export Filename Prefix *", self.prefix_edit)
+        
+        main_layout.addWidget(meta_group)
+        
+        main_layout.addWidget(QLabel("Select Fields / Roles to Inject:", self))
+        self.table = QTableWidget(self)
+        self.table.setColumnCount(8)
+        self.table.setHorizontalHeaderLabels([
+            "Inject?", "Role Name", "Field ID *", "Header Label *", "Section", "Mapping (Cell/Col)", "Widget Type", "Suggestion Reason"
+        ])
+        self.table.horizontalHeader().setStretchLastSection(True)
+        main_layout.addWidget(self.table)
+        
+        self.row_widgets = []
+        self._populate_table()
+        
+        button_layout = QHBoxLayout()
+        self.inject_btn = QPushButton("Inject Selected Fields", self)
+        self.inject_btn.clicked.connect(self.validate_and_accept)
+        self.skip_btn = QPushButton("Skip Injection", self)
+        self.skip_btn.clicked.connect(self.reject)
+        
+        button_layout.addStretch(1)
+        button_layout.addWidget(self.inject_btn)
+        button_layout.addWidget(self.skip_btn)
+        main_layout.addLayout(button_layout)
+        
+    def _populate_table(self):
+        row_idx = 0
+        role_defaults = {
+            "log_date": ("date", "Date", "header", "entry"),
+            "shift_number": ("shift", "Shift", "header", "entry"),
+            "shift_hours": ("hours", "Hours", "header", "entry"),
+            "operator_name": ("operator", "Operator", "header", "entry"),
+            "shift_leader": ("shift_leader", "Shift Leader", "header", "entry"),
+            "production_line": ("production_line", "Line", "header", "entry"),
+            "goal_rate": ("goal_mph", "Goal MPH", "header", "entry"),
+            "total_molds": ("total_molds", "Total Molds", "header", "entry"),
+            "shift_start_time": ("start_time", "Start Time", "header", "entry"),
+            "shift_end_time": ("end_time", "End Time", "header", "entry"),
+            "target_time": ("target_time", "Target Time", "header", "entry"),
+            "cast_date": ("cast_date", "Cast Date", "header", "entry"),
+            
+            "job_order": ("shop_order", "Shop Order", "production", "entry"),
+            "part_number": ("part_number", "Part Number", "production", "entry"),
+            "rate_value": ("rate_lookup", "Rate", "production", "entry"),
+            "rate_override_toggle": ("rate_override_enabled", "Override", "production", "checkbutton"),
+            "mold_count": ("molds", "Molds", "production", "entry"),
+            "duration_minutes": ("time_calc", "Time", "production", "display"),
+            
+            "start_clock": ("start", "Start", "downtime", "entry"),
+            "stop_clock": ("stop", "Stop", "downtime", "entry"),
+            "downtime_code": ("code", "Code", "downtime", "combobox"),
+            "cause_text": ("cause", "Cause", "downtime", "entry"),
+        }
+        
+        all_missing = []
+        for role in self.missing_fields.get("header", []):
+            all_missing.append(("header", role))
+        for role in self.missing_fields.get("production", []):
+            all_missing.append(("production", role))
+        for role in self.missing_fields.get("downtime", []):
+            all_missing.append(("downtime", role))
+            
+        self.table.setRowCount(len(all_missing))
+        
+        for section, role in all_missing:
+            chk_box = QCheckBox(self)
+            chk_box.setChecked(True)
+            chk_widget = QWidget(self)
+            chk_layout = QHBoxLayout(chk_widget)
+            chk_layout.addWidget(chk_box)
+            chk_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            chk_layout.setContentsMargins(0, 0, 0, 0)
+            self.table.setCellWidget(row_idx, 0, chk_widget)
+            
+            self.table.setItem(row_idx, 1, QTableWidgetItem(role))
+            self.table.item(row_idx, 1).setFlags(Qt.ItemFlag.ItemIsEnabled)
+            
+            default_id, default_lbl, default_sec, default_widget = role_defaults.get(role, (role, role.replace("_", " ").title(), section, "entry"))
+            
+            suggestion = self.suggestions.get(section, {}).get(role, {})
+            suggested_mapping = suggestion.get("cell") if section == "header" else suggestion.get("column", "")
+            reason = suggestion.get("reason", "Fallback default configuration")
+            
+            id_edit = QLineEdit(self)
+            id_edit.setText(default_id)
+            self.table.setCellWidget(row_idx, 2, id_edit)
+            
+            lbl_edit = QLineEdit(self)
+            lbl_edit.setText(default_lbl)
+            self.table.setCellWidget(row_idx, 3, lbl_edit)
+            
+            sec_combo = QComboBox(self)
+            sec_combo.addItems(["header", "production", "downtime"])
+            sec_combo.setCurrentText(section)
+            self.table.setCellWidget(row_idx, 4, sec_combo)
+            
+            map_edit = QLineEdit(self)
+            map_edit.setText(suggested_mapping)
+            self.table.setCellWidget(row_idx, 5, map_edit)
+            
+            w_combo = QComboBox(self)
+            w_combo.addItems(["entry", "display", "checkbutton", "combobox"])
+            w_combo.setCurrentText(default_widget)
+            self.table.setCellWidget(row_idx, 6, w_combo)
+            
+            self.table.setItem(row_idx, 7, QTableWidgetItem(reason))
+            self.table.item(row_idx, 7).setFlags(Qt.ItemFlag.ItemIsEnabled)
+            
+            self.row_widgets.append({
+                "chk_box": chk_box,
+                "role": role,
+                "id_edit": id_edit,
+                "lbl_edit": lbl_edit,
+                "sec_combo": sec_combo,
+                "map_edit": map_edit,
+                "w_combo": w_combo
+            })
+            
+            row_idx += 1
+            
+    def validate_and_accept(self):
+        name = self.name_edit.text().strip()
+        prefix = self.prefix_edit.text().strip()
+        
+        if not name:
+            QMessageBox.warning(self, "Validation Error", "Form Name is required.")
+            return
+        if not prefix:
+            QMessageBox.warning(self, "Validation Error", "Export Filename Prefix is required.")
+            return
+            
+        seen_ids = set()
+        for idx, row in enumerate(self.row_widgets):
+            if not row["chk_box"].isChecked():
+                continue
+            field_id = row["id_edit"].text().strip()
+            label = row["lbl_edit"].text().strip()
+            
+            if not field_id:
+                QMessageBox.warning(self, "Validation Error", f"Field ID at row {idx+1} cannot be empty.")
+                return
+            if not label:
+                QMessageBox.warning(self, "Validation Error", f"Label at row {idx+1} cannot be empty.")
+                return
+            if field_id in seen_ids:
+                QMessageBox.warning(self, "Validation Error", f"Duplicate Field ID '{field_id}' found.")
+                return
+            seen_ids.add(field_id)
+            
+        self.accept()
+        
+    def get_values(self):
+        fields_to_inject = []
+        for row in self.row_widgets:
+            if not row["chk_box"].isChecked():
+                continue
+            fields_to_inject.append({
+                "section": row["sec_combo"].currentText(),
+                "role": row["role"],
+                "id": row["id_edit"].text().strip(),
+                "label": row["lbl_edit"].text().strip(),
+                "mapping": row["map_edit"].text().strip(),
+                "widget": row["w_combo"].currentText()
+            })
+            
+        return {
+            "metadata": {
+                "name": self.name_edit.text().strip(),
+                "description": self.desc_edit.text().strip(),
+                "export_prefix": self.prefix_edit.text().strip()
+            },
+            "fields": fields_to_inject
+        }
+
+
 class LayoutManagerQtView(QMainWindow):
     def __init__(self, controller, theme_tokens=None):
         if not PYQT6_AVAILABLE:
@@ -381,60 +600,97 @@ class LayoutManagerQtView(QMainWindow):
         form_manage_row = QHBoxLayout(form_manage_group)
         form_manage_row.setSpacing(6)
         form_manage_row.setContentsMargins(8, 8, 8, 8)
-        create_button = QPushButton("Create")
-        create_button.clicked.connect(self.controller.create_form)
-        create_button.setMinimumHeight(26)
-        form_manage_row.addWidget(create_button)
 
-        create_blank_button = QPushButton("Create Blank")
-        create_blank_button.clicked.connect(self.controller.create_blank_form)
-        create_blank_button.setMinimumHeight(26)
-        form_manage_row.addWidget(create_blank_button)
+        # "New/Import" Dropdown
+        new_import_btn = QPushButton("New / Import")
+        new_import_btn.setMinimumHeight(26)
+        new_import_menu = QMenu(self)
+        
+        create_act = new_import_menu.addAction("Create Form from Editor")
+        create_act.triggered.connect(self.controller.create_form)
+        
+        create_blank_act = new_import_menu.addAction("Create Blank Form...")
+        create_blank_act.triggered.connect(self.controller.create_blank_form)
+        
+        duplicate_act = new_import_menu.addAction("Duplicate Current Form")
+        duplicate_act.triggered.connect(self.controller.duplicate_form)
+        
+        import_act = new_import_menu.addAction("Import Form Layout JSON...")
+        import_act.triggered.connect(self.controller.import_form)
+        
+        new_import_btn.setMenu(new_import_menu)
+        form_manage_row.addWidget(new_import_btn)
 
-        duplicate_button = QPushButton("Duplicate")
-        duplicate_button.clicked.connect(self.controller.duplicate_form)
-        duplicate_button.setMinimumHeight(26)
-        form_manage_row.addWidget(duplicate_button)
+        # "Form Actions" Dropdown
+        form_actions_btn = QPushButton("Form Actions")
+        form_actions_btn.setMinimumHeight(26)
+        form_actions_menu = QMenu(self)
+        
+        rename_act = form_actions_menu.addAction("Rename Form...")
+        rename_act.triggered.connect(self.controller.rename_form)
+        
+        delete_act = form_actions_menu.addAction("Delete Form")
+        delete_act.triggered.connect(self.controller.delete_form)
+        
+        migrate_act = form_actions_menu.addAction("Migrate Stored Forms")
+        migrate_act.triggered.connect(self.controller.migrate_forms_storage)
+        
+        form_actions_btn.setMenu(form_actions_menu)
+        form_manage_row.addWidget(form_actions_btn)
 
-        rename_button = QPushButton("Rename")
-        rename_button.clicked.connect(self.controller.rename_form)
-        rename_button.setMinimumHeight(26)
-        form_manage_row.addWidget(rename_button)
-
-        delete_button = QPushButton("Delete")
-        delete_button.clicked.connect(self.controller.delete_form)
-        delete_button.setMinimumHeight(26)
-        form_manage_row.addWidget(delete_button)
-
-        migrate_button = QPushButton("Migrate Forms")
-        migrate_button.clicked.connect(self.controller.migrate_forms_storage)
-        migrate_button.setMinimumHeight(26)
-        form_manage_row.addWidget(migrate_button)
         ribbon_row.addWidget(form_manage_group, 2)
 
         editor_group = QGroupBox("Editor")
         action_row = QHBoxLayout(editor_group)
         action_row.setSpacing(6)
         action_row.setContentsMargins(8, 8, 8, 8)
-        for label_text, callback in (
-            ("Reload Current", self.controller.reload_current),
-            ("Load Default", self.controller.load_default),
-            ("Format JSON", self.controller.format_editor),
-            ("Validate JSON", self.controller.validate_editor),
-            ("Save", self.controller.save_current),
-        ):
-            button = QPushButton(label_text)
-            button.clicked.connect(callback)
-            button.setMinimumHeight(26)
-            action_row.addWidget(button)
+
+        # "Load / Reload" Dropdown
+        load_reload_btn = QPushButton("Load / Reload")
+        load_reload_btn.setMinimumHeight(26)
+        load_reload_menu = QMenu(self)
+        
+        reload_act = load_reload_menu.addAction("Reload Current from Disk")
+        reload_act.triggered.connect(self.controller.reload_current)
+        
+        load_default_act = load_reload_menu.addAction("Load Default Template")
+        load_default_act.triggered.connect(self.controller.load_default)
+        
+        load_reload_btn.setMenu(load_reload_menu)
+        action_row.addWidget(load_reload_btn)
+
+        # "JSON Tools" Dropdown
+        json_tools_btn = QPushButton("JSON Tools")
+        json_tools_btn.setMinimumHeight(26)
+        json_tools_menu = QMenu(self)
+        
+        format_act = json_tools_menu.addAction("Format JSON Code")
+        format_act.triggered.connect(self.controller.format_editor)
+        
+        validate_act = json_tools_menu.addAction("Validate JSON Schema")
+        validate_act.triggered.connect(self.controller.validate_editor)
+        
+        json_tools_btn.setMenu(json_tools_menu)
+        action_row.addWidget(json_tools_btn)
+
+        # "Save" button
+        save_button = QPushButton("Save")
+        save_button.clicked.connect(self.controller.save_current)
+        save_button.setMinimumHeight(26)
+        action_row.addWidget(save_button)
+
+        # "Undo" button
         undo_button = QPushButton("Undo")
         undo_button.clicked.connect(self.controller.undo_last_change)
         undo_button.setMinimumHeight(26)
         action_row.addWidget(undo_button)
+
+        # "Redo" button
         redo_button = QPushButton("Redo")
         redo_button.clicked.connect(self.controller.redo_last_change)
         redo_button.setMinimumHeight(26)
         action_row.addWidget(redo_button)
+
         ribbon_row.addWidget(editor_group, 3)
         ribbon_row.addStretch(1)
         content_layout.addLayout(ribbon_row)
@@ -2414,6 +2670,15 @@ class LayoutManagerQtView(QMainWindow):
             "Select Export Template",
             initial_directory,
             "Excel templates (*.xlsx *.xlsm *.xltx *.xltm);;All files (*.*)",
+        )
+        return str(selected_file or "").strip()
+
+    def choose_import_json_file(self):
+        selected_file, _ = QFileDialog.getOpenFileName(
+            self,
+            "Import Form Layout JSON",
+            "",
+            "JSON files (*.json);;All files (*.*)",
         )
         return str(selected_file or "").strip()
 

@@ -2989,3 +2989,467 @@ class LayoutManagerModel:
                 "total_fields": total_fields,
             },
         }
+
+    def _resolve_field_role(self, section, field_dict):
+        if not isinstance(field_dict, dict):
+            return ""
+        return str(field_dict.get("role") or "").strip().lower()
+
+    def detect_missing_standard_fields(self, config):
+        """
+        Detects missing standard roles/fields in the given layout configuration.
+        """
+        # Header roles
+        header_fields = config.get("header_fields", [])
+        existing_header_roles = {self._resolve_field_role("header", f) for f in header_fields if isinstance(f, dict)}
+        existing_header_roles.discard("")
+        
+        standard_header_roles = [
+            "log_date", "shift_number", "shift_hours", "operator_name", "shift_leader", 
+            "production_line", "goal_rate", "total_molds", "shift_start_time", 
+            "shift_end_time", "target_time", "cast_date"
+        ]
+        missing_header = [role for role in standard_header_roles if role not in existing_header_roles]
+        
+        # Repeating sections
+        repeating_bindings = self._iter_repeating_section_bindings(config)
+        prod_fields_key = None
+        down_fields_key = None
+        for binding in repeating_bindings:
+            profile = str(binding.get("behavior_profile") or "").strip().lower()
+            if profile == "production":
+                prod_fields_key = binding["fields_key"]
+            elif profile == "downtime":
+                down_fields_key = binding["fields_key"]
+                
+        # Production roles
+        standard_prod_roles = [
+            "job_order", "part_number", "rate_value", "rate_override_toggle", "mold_count", "duration_minutes"
+        ]
+        missing_prod = []
+        if prod_fields_key:
+            existing_prod_roles = {
+                self._resolve_field_role("production", f) 
+                for f in config.get(prod_fields_key, []) 
+                if isinstance(f, dict)
+            }
+            existing_prod_roles.discard("")
+            missing_prod = [role for role in standard_prod_roles if role not in existing_prod_roles]
+        else:
+            missing_prod = list(standard_prod_roles)
+            
+        # Downtime roles
+        standard_down_roles = [
+            "start_clock", "stop_clock", "downtime_code", "cause_text", "duration_minutes"
+        ]
+        missing_down = []
+        if down_fields_key:
+            existing_down_roles = {
+                self._resolve_field_role("downtime", f) 
+                for f in config.get(down_fields_key, []) 
+                if isinstance(f, dict)
+            }
+            existing_down_roles.discard("")
+            missing_down = [role for role in standard_down_roles if role not in existing_down_roles]
+        else:
+            missing_down = list(standard_down_roles)
+            
+        # Check metadata
+        active_form_info = None
+        try:
+            active_form_info = self.service.get_active_form_info()
+        except Exception:
+            pass
+            
+        name_missing = not bool(config.get("export_prefix")) and (not active_form_info or not active_form_info.get("name"))
+        desc_missing = not active_form_info or not active_form_info.get("description")
+        
+        return {
+            "header": missing_header,
+            "production": missing_prod,
+            "downtime": missing_down,
+            "metadata": {
+                "name_missing": name_missing,
+                "description_missing": desc_missing
+            }
+        }
+
+    def get_column_letter(self, col_idx):
+        result = ""
+        while col_idx > 0:
+            col_idx, remainder = divmod(col_idx - 1, 26)
+            result = chr(65 + remainder) + result
+        return result
+
+    def get_missing_fields_suggestions(self, config, filename=None):
+        """
+        Scans filename, form config, and the template path to suggest cell coordinates, 
+        column mappings, and names.
+        """
+        suggestions = {
+            "header": {},
+            "production": {},
+            "downtime": {},
+            "form_name": "",
+            "description": "",
+            "export_prefix": ""
+        }
+        
+        # Analyze filename for Form Name suggestions
+        if filename:
+            base_name = os.path.splitext(os.path.basename(filename))[0]
+            clean_name = base_name.replace("_", " ").replace("-", " ").title()
+            suggestions["form_name"] = clean_name
+            suggestions["export_prefix"] = clean_name
+            suggestions["description"] = f"Imported from {os.path.basename(filename)}"
+            
+        # Scan Excel template if available
+        template_path = config.get("template_path", "")
+        if template_path:
+            excel_suggestions = self._scan_excel_template_for_roles(template_path)
+            suggestions["header"].update(excel_suggestions.get("header", {}))
+            suggestions["production"].update(excel_suggestions.get("production", {}))
+            suggestions["downtime"].update(excel_suggestions.get("downtime", {}))
+            
+        # Add fallback/default suggestions for roles that weren't found in Excel
+        default_header_mapping = {
+            "log_date": ("C4", "Default cell C4"),
+            "shift_number": ("C5", "Default cell C5"),
+            "shift_hours": ("C6", "Default cell C6"),
+            "operator_name": ("C7", "Default cell C7"),
+            "shift_leader": ("C8", "Default cell C8"),
+            "production_line": ("C9", "Default cell C9"),
+            "goal_rate": ("C10", "Default cell C10"),
+            "total_molds": ("C11", "Default cell C11"),
+            "shift_start_time": ("C12", "Default cell C12"),
+            "shift_end_time": ("C13", "Default cell C13"),
+            "target_time": ("C14", "Default cell C14"),
+            "cast_date": ("C15", "Default cell C15")
+        }
+        for role, (cell, reason) in default_header_mapping.items():
+            if role not in suggestions["header"]:
+                suggestions["header"][role] = {"cell": cell, "reason": reason}
+                
+        default_prod_mapping = {
+            "job_order": ("A", 8, "Default column A"),
+            "part_number": ("B", 8, "Default column B"),
+            "rate_value": ("C", 8, "Default column C"),
+            "rate_override_toggle": ("D", 8, "Default column D"),
+            "mold_count": ("E", 8, "Default column E"),
+            "duration_minutes": ("F", 8, "Default column F")
+        }
+        for role, (col, start_row, reason) in default_prod_mapping.items():
+            if role not in suggestions["production"]:
+                suggestions["production"][role] = {"column": col, "start_row": start_row, "reason": reason}
+                
+        default_down_mapping = {
+            "start_clock": ("A", 8, "Default column A"),
+            "stop_clock": ("B", 8, "Default column B"),
+            "downtime_code": ("C", 8, "Default column C"),
+            "cause_text": ("D", 8, "Default column D"),
+            "duration_minutes": ("E", 8, "Default column E")
+        }
+        for role, (col, start_row, reason) in default_down_mapping.items():
+            if role not in suggestions["downtime"]:
+                suggestions["downtime"][role] = {"column": col, "start_row": start_row, "reason": reason}
+                
+        return suggestions
+
+    def _scan_excel_template_for_roles(self, template_path):
+        resolved_path = self.resolve_template_path(template_path)
+        if not resolved_path or not os.path.exists(resolved_path) or load_workbook is None:
+            return {"header": {}, "production": {}, "downtime": {}}
+            
+        header_suggestions = {}
+        production_suggestions = {}
+        downtime_suggestions = {}
+        
+        # Keyword mappings
+        header_keywords = {
+            "log_date": ["date", "log date", "run date", "production date"],
+            "shift_number": ["shift", "shift no", "shift number", "shift #"],
+            "shift_hours": ["hours", "shift hours", "run hours", "total hours"],
+            "operator_name": ["operator", "op", "operator name", "run by"],
+            "shift_leader": ["leader", "shift leader", "supervisor"],
+            "production_line": ["line", "machine", "line number", "press", "machine #"],
+            "goal_rate": ["goal mph", "goal rate", "mph goal", "target mph", "target rate"],
+            "total_molds": ["total molds", "molds total", "actual molds"],
+            "shift_start_time": ["start time", "shift start", "run start"],
+            "shift_end_time": ["end time", "shift end", "run end"],
+            "target_time": ["target time", "scheduled time", "minutes target"],
+            "cast_date": ["cast date", "cast date #"]
+        }
+        
+        prod_keywords = {
+            "job_order": ["order", "shop order", "job order", "order number", "order #"],
+            "part_number": ["part", "part number", "part #", "pattern", "pattern #"],
+            "rate_value": ["rate", "standard rate", "parts/hour", "mph", "pcs/hr"],
+            "rate_override_toggle": ["override", "rate override"],
+            "mold_count": ["molds", "actual molds", "mold count", "molds count", "mold"],
+            "duration_minutes": ["time", "duration", "run time", "minutes"]
+        }
+        
+        down_keywords = {
+            "start_clock": ["start", "start clock", "downtime start", "start time"],
+            "stop_clock": ["stop", "stop clock", "downtime stop", "end time"],
+            "downtime_code": ["code", "downtime code", "dt code", "code #"],
+            "cause_text": ["cause", "reason", "comments", "explanation", "description"],
+            "duration_minutes": ["time", "downtime minutes", "duration"]
+        }
+        
+        try:
+            wb = load_workbook(resolved_path, data_only=True, read_only=True)
+            ws = wb.active
+            if ws is None and wb.worksheets:
+                ws = wb.worksheets[0]
+                
+            if ws is not None:
+                max_scan_row = min(ws.max_row or 50, 50)
+                max_scan_col = min(ws.max_column or 15, 15)
+                
+                cells_grid = []
+                for r in range(1, max_scan_row + 1):
+                    row_vals = []
+                    for c in range(1, max_scan_col + 1):
+                        try:
+                            val = ws.cell(row=r, column=c).value
+                        except Exception:
+                            val = None
+                        row_vals.append((c, val))
+                    cells_grid.append((r, row_vals))
+                    
+                for r, row_vals in cells_grid:
+                    for c, val in row_vals:
+                        if not val or not isinstance(val, str):
+                            continue
+                        clean_val = val.strip().lower().replace(":", "").replace("-", " ")
+                        
+                        for role, keywords in header_keywords.items():
+                            if role in header_suggestions:
+                                continue
+                            if any(k in clean_val for k in keywords):
+                                target_col = self.get_column_letter(c + 1)
+                                target_cell = f"{target_col}{r}"
+                                header_suggestions[role] = {
+                                    "cell": target_cell,
+                                    "reason": f"Found label '{val.strip()}' in cell {self.get_column_letter(c)}{r}"
+                                }
+                                
+                prod_row_candidates = []
+                down_row_candidates = []
+                
+                for r, row_vals in cells_grid[:30]:
+                    prod_matches = {}
+                    down_matches = {}
+                    
+                    for c, val in row_vals:
+                        if not val or not isinstance(val, str):
+                            continue
+                        clean_val = val.strip().lower().replace(":", "").replace("-", " ")
+                        
+                        for role, keywords in prod_keywords.items():
+                            if any(k in clean_val for k in keywords):
+                                prod_matches[role] = c
+                        for role, keywords in down_keywords.items():
+                            if any(k in clean_val for k in keywords):
+                                down_matches[role] = c
+                                
+                    if len(prod_matches) >= 2:
+                        prod_row_candidates.append((r, prod_matches))
+                    if len(down_matches) >= 2:
+                        down_row_candidates.append((r, down_matches))
+                        
+                if prod_row_candidates:
+                    best_row, best_matches = max(prod_row_candidates, key=lambda x: len(x[1]))
+                    for role, col_idx in best_matches.items():
+                        col_letter = self.get_column_letter(col_idx)
+                        production_suggestions[role] = {
+                            "column": col_letter,
+                            "start_row": best_row + 1,
+                            "reason": f"Found column header in template row {best_row}"
+                        }
+                        
+                if down_row_candidates:
+                    best_row, best_matches = max(down_row_candidates, key=lambda x: len(x[1]))
+                    for role, col_idx in best_matches.items():
+                        col_letter = self.get_column_letter(col_idx)
+                        downtime_suggestions[role] = {
+                            "column": col_letter,
+                            "start_row": best_row + 1,
+                            "reason": f"Found column header in template row {best_row}"
+                        }
+            wb.close()
+        except Exception as exc:
+            print(f"Excel template scan error: {exc}")
+            
+        return {
+            "header": header_suggestions,
+            "production": production_suggestions,
+            "downtime": downtime_suggestions
+        }
+
+    def inject_fields_into_config(self, config, fields_to_inject):
+        """
+        Mutates and normalizes layout configuration to inject the selected fields.
+        """
+        updated_config = deepcopy(config)
+        
+        if "sections" not in updated_config or not isinstance(updated_config.get("sections"), list):
+            updated_config["sections"] = self._normalize_sections(updated_config)
+            
+        repeating_bindings = self._iter_repeating_section_bindings(updated_config)
+        prod_fields_key = "production_row_fields"
+        prod_mapping_key = "production_mapping"
+        down_fields_key = "downtime_row_fields"
+        down_mapping_key = "downtime_mapping"
+        
+        for binding in repeating_bindings:
+            profile = str(binding.get("behavior_profile") or "").strip().lower()
+            if profile == "production":
+                prod_fields_key = binding["fields_key"]
+                prod_mapping_key = binding["mapping_key"]
+            elif profile == "downtime":
+                down_fields_key = binding["fields_key"]
+                down_mapping_key = binding["mapping_key"]
+                
+        if "header_fields" not in updated_config:
+            updated_config["header_fields"] = []
+        if prod_fields_key not in updated_config:
+            updated_config[prod_fields_key] = []
+        if down_fields_key not in updated_config:
+            updated_config[down_fields_key] = []
+            
+        if prod_mapping_key not in updated_config:
+            updated_config[prod_mapping_key] = {"start_row": 8, "max_rows": DEFAULT_MAPPING_MAX_ROWS, "columns": {}}
+        if down_mapping_key not in updated_config:
+            updated_config[down_mapping_key] = {"start_row": 8, "max_rows": DEFAULT_MAPPING_MAX_ROWS, "columns": {}}
+            
+        for f in fields_to_inject:
+            section = f.get("section")
+            role = f.get("role")
+            field_id = f.get("id")
+            label = f.get("label")
+            mapping_val = f.get("mapping")
+            widget = f.get("widget", "entry")
+            
+            if section == "header":
+                header_fields = updated_config.get("header_fields", [])
+                max_row = max((int(x.get("row", 0)) for x in header_fields), default=-1)
+                new_row = max_row + 1
+                
+                if any(x.get("id") == field_id or x.get("role") == role for x in header_fields):
+                    continue
+                    
+                field_entry = {
+                    "id": field_id,
+                    "label": label,
+                    "row": new_row,
+                    "col": 0,
+                    "width": 10,
+                    "role": role,
+                    "widget": widget,
+                    "import_enabled": True,
+                    "export_enabled": True
+                }
+                if mapping_val:
+                    field_entry["cell"] = mapping_val
+                if role == "cast_date":
+                    field_entry["readonly"] = True
+                    
+                header_fields.append(field_entry)
+                
+            elif section == "production":
+                prod_fields = updated_config.get(prod_fields_key, [])
+                if any(x.get("id") == field_id or x.get("role") == role for x in prod_fields):
+                    continue
+                    
+                field_entry = {
+                    "id": field_id,
+                    "label": label,
+                    "widget": widget,
+                    "width": 12,
+                    "role": role,
+                    "user_input": True
+                }
+                if role in {"part_number", "rate_value", "mold_count"}:
+                    field_entry["math_trigger"] = True
+                if role in {"job_order", "part_number", "mold_count"}:
+                    field_entry["open_row_trigger"] = True
+                if role in {"rate_value", "duration_minutes"}:
+                    field_entry["derived"] = True
+                    field_entry.pop("user_input", None)
+                if role == "rate_value":
+                    field_entry["readonly"] = True
+                    field_entry["lookup_source"] = "part_number_rate"
+                    field_entry["lookup_key_role"] = "part_number"
+                    field_entry["override_toggle_role"] = "rate_override_toggle"
+                if role == "rate_override_toggle":
+                    field_entry["toggle_target_role"] = "rate_value"
+                    field_entry["default"] = False
+                    field_entry["widget"] = "checkbutton"
+                if role == "duration_minutes":
+                    field_entry["widget"] = "display"
+                    field_entry["default"] = "0 min"
+                    field_entry["sticky"] = "e"
+                    field_entry["bold"] = True
+                    
+                prod_fields.append(field_entry)
+                
+                if mapping_val:
+                    mapping_cols = updated_config[prod_mapping_key].setdefault("columns", {})
+                    mapping_cols[field_id] = {
+                        "column": mapping_val,
+                        "import_enabled": True,
+                        "export_enabled": True,
+                        "import_transform": "value",
+                        "export_transform": "value"
+                    }
+                    
+            elif section == "downtime":
+                down_fields = updated_config.get(down_fields_key, [])
+                if any(x.get("id") == field_id or x.get("role") == role for x in down_fields):
+                    continue
+                    
+                field_entry = {
+                    "id": field_id,
+                    "label": label,
+                    "widget": widget,
+                    "width": 12,
+                    "role": role,
+                    "user_input": True
+                }
+                if role in {"start_clock", "stop_clock"}:
+                    field_entry["math_trigger"] = True
+                if role in {"start_clock", "stop_clock", "downtime_code", "cause_text"}:
+                    field_entry["open_row_trigger"] = True
+                if role == "duration_minutes":
+                    field_entry["derived"] = True
+                    field_entry.pop("user_input", None)
+                    field_entry["widget"] = "display"
+                    field_entry["default"] = "0 min"
+                    field_entry["sticky"] = "e"
+                    field_entry["bold"] = True
+                    field_entry["bootstyle"] = "danger"
+                if role == "downtime_code":
+                    field_entry["widget"] = "combobox"
+                    field_entry["state"] = "readonly"
+                    field_entry["options_source"] = "downtime_codes"
+                    field_entry["width"] = 18
+                if role == "cause_text":
+                    field_entry["width"] = 24
+                    field_entry["expand"] = True
+                    field_entry["sticky"] = "ew"
+                    
+                down_fields.append(field_entry)
+                
+                if mapping_val:
+                    mapping_cols = updated_config[down_mapping_key].setdefault("columns", {})
+                    mapping_cols[field_id] = {
+                        "column": mapping_val,
+                        "import_enabled": True,
+                        "export_enabled": True,
+                        "import_transform": "value",
+                        "export_transform": "value"
+                    }
+                    
+        return self.normalize_config(updated_config)

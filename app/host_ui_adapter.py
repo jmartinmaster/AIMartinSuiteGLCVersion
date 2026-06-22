@@ -111,8 +111,8 @@ class _QtToastPresenter(QFrame if QFrame is not None else object):
         self._configure_effects()
 
     def _build_ui(self):
-        self.setMinimumWidth(280)
-        self.setMaximumWidth(420)
+        self.setMinimumWidth(320)
+        self.setMaximumWidth(500)
 
         root_layout = QHBoxLayout(self)
         root_layout.setContentsMargins(0, 0, 0, 0)
@@ -124,7 +124,7 @@ class _QtToastPresenter(QFrame if QFrame is not None else object):
 
         body_widget = QWidget(self)
         body_layout = QVBoxLayout(body_widget)
-        body_layout.setContentsMargins(14, 12, 14, 12)
+        body_layout.setContentsMargins(16, 12, 20, 12)
         body_layout.setSpacing(4)
 
         self.title_label = QLabel(body_widget)
@@ -203,9 +203,9 @@ class _QtToastPresenter(QFrame if QFrame is not None else object):
         if QWidget is None:
             return
         available_width = max(240, self.host_window.width() - 48)
-        max_width = min(420, available_width)
+        max_width = min(500, available_width)
         self.setMaximumWidth(max_width)
-        text_width = max(200, max_width - 54)
+        text_width = max(200, max_width - 64)
         self.title_label.setMaximumWidth(text_width)
         self.message_label.setMaximumWidth(text_width)
         self.reposition()
@@ -475,6 +475,26 @@ class PyQt6HostUiAdapter(QObject if QObject is not None else object):
         return None
 
     def show_toast(self, title, message, bootstyle=None, duration_ms=None):
+        import datetime
+        timestamp = datetime.datetime.now().strftime("%H:%M:%S")
+        if not hasattr(self, "_notification_history"):
+            self._notification_history = []
+        self._notification_history.append({
+            "title": str(title or "Notification"),
+            "message": str(message or ""),
+            "bootstyle": bootstyle,
+            "time": timestamp,
+            "read": False
+        })
+        
+        update_notif_btn = getattr(self.host_window, "update_notification_button", None)
+        if callable(update_notif_btn):
+            try:
+                unread_count = sum(1 for n in self._notification_history if not n.get("read", False))
+                update_notif_btn(unread_count)
+            except Exception:
+                pass
+
         payload = {
             "title": str(title or ""),
             "message": str(message or ""),
@@ -484,6 +504,18 @@ class PyQt6HostUiAdapter(QObject if QObject is not None else object):
             "has_presenter": self._toast_presenter is not None,
         }
         return self.run_on_main_thread(lambda current_payload=payload: self._present_toast(current_payload))
+
+    def mark_all_notifications_read(self):
+        if not hasattr(self, "_notification_history"):
+            return
+        for item in self._notification_history:
+            item["read"] = True
+        update_notif_btn = getattr(self.host_window, "update_notification_button", None)
+        if callable(update_notif_btn):
+            try:
+                update_notif_btn(0)
+            except Exception:
+                pass
 
     def eventFilter(self, watched, event):
         if watched is self.host_window and event is not None and self._toast_presenter is not None:

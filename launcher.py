@@ -43,7 +43,7 @@ from app.controllers.app_controller import Dispatcher
 from app.app_platform import SPLASH_LOGO_RELATIVE_PATH, apply_app_icon, apply_windows_app_id
 
 __module_name__ = "Dispatcher Core"
-__version__ = "2.4.1"
+__version__ = "2.4.2"
 LAYOUT_MANAGER_QT_SESSION_ENV = "AIMARTIN_LAYOUT_MANAGER_QT_SESSION"
 
 
@@ -278,6 +278,16 @@ def build_argument_parser():
 
 
 def main(argv=None):
+    if os.environ.get("AIMARTIN_CHILD_PROCESS") != "1":
+        from app.crash_handler import run_monitor_loop
+
+        run_monitor_loop()
+        return 0
+    else:
+        from app.crash_handler import install_child_crash_handler
+
+        install_child_crash_handler()
+
     special_mode_exit_code = run_special_mode_from_environment()
     if special_mode_exit_code is not None:
         return special_mode_exit_code
@@ -288,3 +298,4 @@ def main(argv=None):
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

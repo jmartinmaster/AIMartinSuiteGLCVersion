@@ -12,6 +12,10 @@ Version headings below are aligned to the current `2.x` release line used by Dis
 - **Categorized Payload Tabs**: Organized the module updates view into a `QTabWidget` with four categories: User Facing, Admin, Dev, and Back End modules.
 - **Content-Based Update Fallback**: Implemented a fallback update comparison that matches the raw code content of local and remote Python files when their version strings are unversioned (`"Unknown"`).
 - **Metadata Definitions**: Declared `__module_name__` and `__version__` tags in `app/app_identity.py`, `app/app_platform.py`, `app/update_bindings.py`, and `app/update_state.py` for correct indexing.
+- **Visual Progress Indicator**: Integrated an indeterminate `QProgressBar` in the Update Manager's Runtime Status layout that dynamically displays and animates during background operations.
+- **Session Notification History**: Implemented in-RAM logging for all runtime alerts and toast notifications shown during the session.
+- **Status Bar Notification Center**: Added a permanent, clickable `Notifications (X)` badge on the right side of the main status bar that triggers a scrollable history modal.
+- **Improved Toast Readability**: Expanded toast width bounds (320-500px) and padded internal right margins to prevent text clipping and awkward word wraps.
 
 ### Changed
 

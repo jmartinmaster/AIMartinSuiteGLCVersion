@@ -463,6 +463,17 @@ class PyQt6HostShellView(QMainWindow):
         self.setStatusBar(self.status_bar)
         self.status_bar.showMessage("Ready.", 5000)
 
+        self.notifications_btn = QPushButton("Notifications (0)", self)
+        self.notifications_btn.setObjectName("notificationsButton")
+        self.notifications_btn.setFlat(True)
+        accent_color = self.theme_tokens.get("accent", "#0f7c8f")
+        self.notifications_btn.setStyleSheet(
+            f"QPushButton {{ color: {accent_color}; font-weight: bold; border: none; padding: 2px 8px; }}"
+            f"QPushButton:hover {{ background-color: rgba(15, 124, 143, 0.1); border-radius: 4px; }}"
+        )
+        self.notifications_btn.clicked.connect(self.show_notification_center)
+        self.status_bar.addPermanentWidget(self.notifications_btn)
+
         self._apply_update_status_style()
         self.show_viewport_placeholder()
         self._refresh_nav_button_states()
@@ -1093,6 +1104,141 @@ class PyQt6HostShellView(QMainWindow):
                 message=message,
                 hint="Select another module from the navigation to continue working.",
             )
+
+    def update_notification_button(self, count):
+        if hasattr(self, "notifications_btn") and self.notifications_btn is not None:
+            self.notifications_btn.setText(f"Notifications ({count})")
+
+    def show_notification_center(self):
+        from PyQt6.QtWidgets import QDialog, QVBoxLayout, QLabel, QScrollArea, QDialogButtonBox, QFrame, QHBoxLayout
+        
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Notification History")
+        dialog.resize(500, 400)
+        dialog.setObjectName("notificationCenterDialog")
+        
+        surface_bg = self.theme_tokens.get("surface_bg", "#ffffff")
+        surface_fg = self.theme_tokens.get("surface_fg", "#152129")
+        muted_fg = self.theme_tokens.get("muted_fg", "#64748b")
+        border_color = self.theme_tokens.get("border_color", "#e2e8f0")
+        
+        dialog.setStyleSheet(
+            f"QDialog#notificationCenterDialog {{"
+            f"  background-color: {surface_bg};"
+            f"  border: 1px solid {border_color};"
+            f"}}"
+        )
+        
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(12)
+        
+        title_label = QLabel("Session Notifications", dialog)
+        title_label.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {surface_fg};")
+        layout.addWidget(title_label)
+        
+        scroll = QScrollArea(dialog)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        scroll.setStyleSheet("background: transparent;")
+        
+        scroll_content = QWidget()
+        scroll_content.setObjectName("scrollContent")
+        scroll_content.setStyleSheet("background: transparent;")
+        scroll_layout = QVBoxLayout(scroll_content)
+        scroll_layout.setContentsMargins(0, 0, 0, 0)
+        scroll_layout.setSpacing(10)
+        
+        history = getattr(self.host_ui_adapter, "_notification_history", [])
+        unread_ids = {id(item) for item in history if not item.get("read", False)}
+        
+        if hasattr(self.host_ui_adapter, "mark_all_notifications_read"):
+            self.host_ui_adapter.mark_all_notifications_read()
+        else:
+            for item in history:
+                item["read"] = True
+            self.update_notification_button(0)
+            
+        if not history:
+            no_notif = QLabel("No notifications received in this session.", scroll_content)
+            no_notif.setStyleSheet(f"color: {muted_fg}; font-style: italic; padding: 10px;")
+            scroll_layout.addWidget(no_notif)
+        else:
+            for item in reversed(history):
+                card = QFrame(scroll_content)
+                is_new = id(item) in unread_ids
+                
+                if is_new:
+                    bg_color = self.theme_tokens.get("accent_soft", "#eff6ff")
+                    card_border_color = self.theme_tokens.get("accent", "#3b82f6")
+                else:
+                    bg_color = self.theme_tokens.get("content_bg", "#f8fafc")
+                    card_border_color = border_color
+                
+                accent_color = self.theme_tokens.get("accent", "#0f7c8f")
+                bootstyle = str(item.get("bootstyle") or "info").strip().lower()
+                if bootstyle in {"success"}:
+                    accent_color = "#10b981"
+                elif bootstyle in {"warning"}:
+                    accent_color = "#f59e0b"
+                elif bootstyle in {"danger", "error", "critical"}:
+                    accent_color = "#ef4444"
+                
+                card.setStyleSheet(
+                    f"QFrame {{"
+                    f"  background-color: {bg_color};"
+                    f"  border: 1px solid {card_border_color};"
+                    f"  border-left: 4px solid {accent_color};"
+                    f"  border-radius: 6px;"
+                    f"}}"
+                )
+                
+                card_layout = QVBoxLayout(card)
+                card_layout.setContentsMargins(12, 10, 12, 10)
+                card_layout.setSpacing(4)
+                
+                header = QHBoxLayout()
+                card_title = QLabel(item.get("title", "Notification"), card)
+                card_title.setStyleSheet(f"font-weight: bold; color: {surface_fg}; border: none; background: transparent;")
+                header.addWidget(card_title)
+                
+                if is_new:
+                    new_badge = QLabel("NEW", card)
+                    badge_fg = self.theme_tokens.get("sidebar_button_active_fg", "#ffffff")
+                    badge_bg = self.theme_tokens.get("accent", "#0f7c8f")
+                    new_badge.setStyleSheet(
+                        f"color: {badge_fg};"
+                        f"background-color: {badge_bg};"
+                        f"font-size: 9px;"
+                        f"font-weight: bold;"
+                        f"padding: 1px 4px;"
+                        f"border-radius: 3px;"
+                        f"border: none;"
+                    )
+                    header.addWidget(new_badge)
+                
+                header.addStretch(1)
+                card_time = QLabel(item.get("time", ""), card)
+                card_time.setStyleSheet(f"color: {muted_fg}; font-size: 11px; border: none; background: transparent;")
+                header.addWidget(card_time)
+                card_layout.addLayout(header)
+                
+                card_msg = QLabel(item.get("message", ""), card)
+                card_msg.setWordWrap(True)
+                card_msg.setStyleSheet(f"color: {surface_fg}; border: none; background: transparent;")
+                card_layout.addWidget(card_msg)
+                
+                scroll_layout.addWidget(card)
+                
+        scroll_layout.addStretch(1)
+        scroll.setWidget(scroll_content)
+        layout.addWidget(scroll, 1)
+        
+        btn_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Close, dialog)
+        btn_box.rejected.connect(dialog.reject)
+        layout.addWidget(btn_box)
+        
+        dialog.exec()
         
     def closeEvent(self, event):
         if self._window_close_callback is not None and not self._closing_via_dispatcher:

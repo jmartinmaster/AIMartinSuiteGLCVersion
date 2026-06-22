@@ -649,6 +649,10 @@ class SettingsManagerQtController:
                     "can_edit": can_edit_entry,
                 }
             )
+
+        from app.crash_handler import list_crash_reports
+        crash_reports = list_crash_reports()
+
         return {
             "can_manage_developer": can_manage_developer,
             "session_summary": gatekeeper.get_session_summary(),
@@ -659,7 +663,28 @@ class SettingsManagerQtController:
             "external_modules_status": self.external_modules_status or "External override status is provided by the host dispatcher.",
             "runtime_path_overrides": path_overrides,
             "runtime_settings_path": runtime_path_state.get("settings_path"),
+            "crash_reports": crash_reports,
         }
+
+    def load_crash_report(self, filename):
+        if not filename:
+            return ""
+        from app.crash_handler import read_crash_report_by_name
+        return read_crash_report_by_name(filename)
+
+    def delete_crash_report(self, filename):
+        if not filename:
+            return
+        if not self._ensure_developer_access(prompt_if_needed=True, show_error=True):
+            return
+        from app.crash_handler import delete_crash_report_by_name
+        success = delete_crash_report_by_name(filename)
+        if success:
+            self.show_toast("Developer Tools", f"Deleted crash report: {filename}")
+            self.refresh_snapshot(initial=False)
+        else:
+            self.view.show_error("Developer Tools", f"Failed to delete crash report: {filename}")
+
 
     def save_current_developer_admin_settings(self):
         if not self._ensure_developer_access(prompt_if_needed=True, show_error=True):

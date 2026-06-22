@@ -124,6 +124,9 @@ class LayoutManagerViewContract(Protocol):
     def show_save_success(self, save_path: str, backup_info: Mapping[str, Any] | None) -> None:
         ...
 
+    def choose_import_json_file(self) -> str:
+        ...
+
     def on_hide(self) -> None:
         ...
 

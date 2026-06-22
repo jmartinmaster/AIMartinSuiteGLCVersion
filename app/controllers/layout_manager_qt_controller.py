@@ -73,18 +73,85 @@ class LayoutManagerQtController:
         self.view.set_dirty(self.dirty)
         self.write_state(status="running", message="Layout Manager Qt window is ready.")
 
+    def check_and_prompt_for_missing_fields(self, config, filename=None):
+        """
+        Detects missing standard fields/roles or metadata in configuration.
+        If found, prompts the user via InjectMissingFieldsDialog to inject them.
+        Returns (updated_config, form_name, description).
+        """
+        # Auto missing field injection has been disabled
+        return config, None, None
+        
+        has_missing_header = len(missing_data.get("header", [])) > 0
+        has_missing_prod = len(missing_data.get("production", [])) > 0
+        has_missing_down = len(missing_data.get("downtime", [])) > 0
+        
+        metadata_check = missing_data.get("metadata", {})
+        name_missing = metadata_check.get("name_missing")
+        desc_missing = metadata_check.get("description_missing")
+        
+        if not (has_missing_header or has_missing_prod or has_missing_down or name_missing or desc_missing):
+            return config, None, None
+            
+        suggestions = self.model.get_missing_fields_suggestions(config, filename)
+        
+        from app.views.layout_manager_qt_view import InjectMissingFieldsDialog
+        dialog = InjectMissingFieldsDialog(self.view, missing_fields=missing_data, suggestions=suggestions)
+        if dialog.exec():
+            result = dialog.get_values()
+            metadata = result.get("metadata", {})
+            fields_to_inject = result.get("fields", [])
+            
+            # Inject standard fields
+            updated_config = self.model.inject_fields_into_config(config, fields_to_inject)
+            
+            # Make sure export_prefix is updated in the configuration
+            if metadata.get("export_prefix"):
+                updated_config["export_prefix"] = metadata.get("export_prefix")
+                
+            return updated_config, metadata.get("name"), metadata.get("description")
+            
+        return config, None, None
+
+    def check_and_prompt_active_form(self):
+        """
+        Checks the currently loaded active form for missing fields and prompts if necessary.
+        """
+        updated_config, name, description = self.check_and_prompt_for_missing_fields(
+            self.current_config, filename=self.current_source_path
+        )
+        if updated_config != self.current_config or name or description:
+            form_id = self.loaded_form_id()
+            if form_id and (name or description):
+                curr_name = self.current_form_info.get("name")
+                curr_desc = self.current_form_info.get("description")
+                if (name and name != curr_name) or (description is not None and description != curr_desc):
+                    self.model.rename_form(form_id, name or curr_name, description=description if description is not None else curr_desc)
+                    # Reload the new state
+                    self.current_config, self.current_source_path, self.current_form_info = self.model.load_form_config(form_id)
+            
+            # Save config
+            self.current_config = updated_config
+            self.model.save_config(self.current_config, form_info=self.current_form_info)
+            self.dirty = False
+            self.refresh_forms()
+            serialized = self.model.serialize_config(self.current_config)
+            self.refresh_view(reason="Injected missing fields/metadata on active form", editor_text_override=serialized)
+
     def show(self):
         self.view.show()
         self.view.raise_window()
         if not self._initial_view_rendered:
             self._initial_view_rendered = True
-            QTimer.singleShot(
-                0,
-                lambda: self.refresh_view(
+            
+            def _setup_initial():
+                self.refresh_view(
                     reason="Loaded layout manager session",
                     editor_text_override=self.current_editor_text,
-                ),
-            )
+                )
+                self.check_and_prompt_active_form()
+                
+            QTimer.singleShot(0, _setup_initial)
         self.write_state(status="running", message="Layout Manager Qt window is visible.")
 
     def _run_busy_action(self, message, callback):
@@ -1198,6 +1265,7 @@ class LayoutManagerQtController:
             self.dirty = False
             self.refresh_view(reason="Reloaded active layout from disk", editor_text_override=editor_text)
             self.write_state(message="Reloaded active layout from disk.")
+            self.check_and_prompt_active_form()
 
         self._run_busy_action("Reloading active layout...", _execute)
 
@@ -1284,6 +1352,7 @@ class LayoutManagerQtController:
             self.mark_clean(action_message)
             self.refresh_view(reason="Activated selected form", editor_text_override=editor_text)
             self._emit_host_toast(action_message, bootstyle="success")
+            self.check_and_prompt_active_form()
 
         self._run_busy_action(f"Activating form '{form_id}'...", _execute)
 
@@ -1329,6 +1398,70 @@ class LayoutManagerQtController:
         self.refresh_view(reason="Created blank stored form")
         self.set_status_message(action_message)
         self._emit_host_toast(action_message, bootstyle="success")
+        
+        # Check for missing standard fields and prompt to inject
+        try:
+            config, source_path, form_info = self.model.load_form_config(form_id)
+            updated_config, name, description = self.check_and_prompt_for_missing_fields(config, filename=source_path)
+            if updated_config != config or name or description:
+                if name or description:
+                    curr_name = form_info.get("name")
+                    curr_desc = form_info.get("description")
+                    if (name and name != curr_name) or (description is not None and description != curr_desc):
+                        form_info = self.model.rename_form(form_id, name or curr_name, description=description if description is not None else curr_desc)
+                self.model.save_config(updated_config, form_info=form_info)
+                self.set_selected_form_id(form_info.get("id"))
+                self.refresh_forms()
+                self.refresh_view(reason="Created blank stored form with injected fields")
+        except Exception as exc:
+            self.set_status_message(f"Check for missing fields failed on blank creation: {exc}", error=True)
+
+    def import_form(self):
+        selected_file = self.view.choose_import_json_file()
+        if not selected_file:
+            return
+
+        def _execute():
+            try:
+                import os
+                with open(selected_file, "r", encoding="utf-8") as f:
+                    config = json.load(f)
+            except Exception as exc:
+                self.view.show_error("Import Error", f"Failed to parse JSON file:\n{exc}")
+                return
+
+            try:
+                # Detect missing fields and metadata
+                updated_config, name, description = self.check_and_prompt_for_missing_fields(config, filename=selected_file)
+                
+                # Ensure we have a form name
+                if not name:
+                    base_name = os.path.splitext(os.path.basename(selected_file))[0]
+                    clean_name = base_name.replace("_", " ").replace("-", " ").title()
+                    name = self.view.prompt_text("Import Form", "Form name:", default_text=clean_name)
+                    if not name:
+                        return
+                    description = self.view.prompt_text("Import Form", "Description:", default_text=f"Imported from {os.path.basename(selected_file)}") or ""
+                
+                if not updated_config.get("export_prefix"):
+                    updated_config["export_prefix"] = name
+
+                # Create/register the new form from config
+                form_info = self.model.create_form_from_config(name, updated_config, description=description, activate=False)
+                
+                form_id = form_info.get("id")
+                self.set_selected_form_id(form_id)
+                self.refresh_forms()
+                
+                action_message = f"Imported form '{name}'. Click Activate before editing or saving that form."
+                self.refresh_view(reason="Imported form layout configuration")
+                self.set_status_message(action_message)
+                self._emit_host_toast(action_message, bootstyle="success")
+            except Exception as exc:
+                self.set_status_message(f"Import form failed: {exc}", error=True)
+                self.view.show_error("Import Form Failed", f"An error occurred during import:\n{exc}")
+
+        self._run_busy_action(f"Importing form from '{os.path.basename(selected_file)}'...", _execute)
 
     def duplicate_form(self):
         source_form_id = self.view.current_form_id() or self.current_form_info.get("id")
@@ -1453,6 +1586,32 @@ class LayoutManagerQtController:
 
         def _execute():
             try:
+                import os
+                # Check and prompt for missing standard fields before migrating
+                registry = self.model.service.registry
+                registry_payload = registry.get_registry()
+                forms = registry_payload.get("forms") if isinstance(registry_payload.get("forms"), list) else []
+                
+                for form_record in forms:
+                    if not isinstance(form_record, dict) or form_record.get("built_in"):
+                        continue
+                    form_id = form_record.get("id")
+                    if not form_id:
+                        continue
+                        
+                    try:
+                        config, source_path, form_info = self.model.load_form_config(form_id)
+                        updated_config, name, description = self.check_and_prompt_for_missing_fields(config, filename=source_path)
+                        if updated_config != config or name or description:
+                            if name or description:
+                                curr_name = form_info.get("name")
+                                curr_desc = form_info.get("description")
+                                if (name and name != curr_name) or (description is not None and description != curr_desc):
+                                    form_info = self.model.rename_form(form_id, name or curr_name, description=description if description is not None else curr_desc)
+                            self.model.save_config(updated_config, form_info=form_info)
+                    except Exception as exc:
+                        print(f"Error checking form '{form_id}' during migration: {exc}")
+
                 result = self.model.migrate_forms_to_scoped_storage()
                 migrated = list(result.get("migrated") or [])
                 skipped = list(result.get("skipped") or [])

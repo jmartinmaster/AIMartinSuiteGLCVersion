@@ -26,6 +26,7 @@ from PyQt6.QtWidgets import (
     QLabel,
     QMainWindow,
     QMessageBox,
+    QProgressBar,
     QPushButton,
     QScrollArea,
     QStatusBar,
@@ -387,6 +388,18 @@ class UpdateManagerQtView(QMainWindow):
         self.runtime_status_value_label = QLabel("Ready")
         self.runtime_status_value_label.setWordWrap(True)
         runtime_status_layout.addWidget(self.runtime_status_value_label)
+        
+        self.progress_bar = QProgressBar(runtime_status_group)
+        self.progress_bar.setTextVisible(False)
+        self.progress_bar.setFixedHeight(6)
+        self.progress_bar.setRange(0, 0)
+        self.progress_bar.hide()
+        self.progress_bar.setStyleSheet(
+            "QProgressBar { background-color: #e2e8f0; border-radius: 3px; border: none; }"
+            "QProgressBar::chunk { background-color: #0f7c8f; border-radius: 3px; }"
+        )
+        runtime_status_layout.addWidget(self.progress_bar)
+        
         content_layout.addWidget(runtime_status_group)
 
         content_layout.addStretch(1)
@@ -478,6 +491,21 @@ class UpdateManagerQtView(QMainWindow):
         runtime_status = str(snapshot.get("runtime_status") or "Ready")
         self.runtime_status_value_label.setText(runtime_status)
         self.status_bar.showMessage(runtime_status, 4000)
+
+        status_lower = runtime_status.lower()
+        is_running = False
+        if (
+            "downloading" in status_lower
+            or "building" in status_lower
+            or "rebuild" in status_lower
+            or "preparing" in status_lower
+            or "extracting" in status_lower
+            or "staging" in status_lower
+            or "installing" in status_lower
+            or snapshot.get("advanced_source_phase", "idle") not in {"idle", "failed", "source_complete", "complete"}
+        ):
+            is_running = True
+        self.progress_bar.setVisible(is_running)
 
     def set_module_payload_options(self, options, selected_key):
         options = options if isinstance(options, list) else []

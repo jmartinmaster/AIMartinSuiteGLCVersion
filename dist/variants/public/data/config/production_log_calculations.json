@@ -1,25 +1,32 @@
 {
-    "production_minutes_rounding": "floor",
-    "shift_total_rounding": "nearest",
-    "missing_rate_fallback_mode": "header_goal",
-    "missing_rate_fallback_value": 240.0,
-    "shift_1_anchor_mode": "start",
-    "shift_1_reference_time": "0600",
-    "shift_2_anchor_mode": "midpoint",
-    "shift_2_reference_time": "1800",
-    "shift_3_anchor_mode": "end",
-    "shift_3_reference_time": "0600",
-    "allow_overnight_downtime": true,
-    "negative_ghost_mode": "allow_negative",
-    "default_balance_mix_pct": 100.0,
-    "formulas": {
-        "production_minutes": "round_minutes((molds / rate) * 60, production_minutes_rounding)",
-        "shift_total_minutes": "round_minutes(hours * 60, shift_total_rounding)",
-        "shift_start_time": "format_clock(default_start_minutes)",
-        "shift_end_time": "format_clock(default_end_minutes)",
-        "downtime_minutes": "if_value(stop_minutes < start_minutes, if_value(allow_overnight_downtime, (stop_minutes + day_minutes) - start_minutes, invalid_value), stop_minutes - start_minutes)",
-        "downtime_stop_clock": "format_clock(default_stop_minutes)",
-        "ghost_minutes": "shift_total_minutes - production_total_minutes - downtime_total_minutes",
-        "efficiency_pct": "if_value((hours <= 0) or (goal_rate <= 0), 0, (total_molds / (hours * goal_rate)) * 100)"
-    }
+  "shift_total_rounding": "nearest",
+  "shift_1_anchor_mode": "start",
+  "shift_1_reference_time": "0600",
+  "shift_2_anchor_mode": "midpoint",
+  "shift_2_reference_time": "1800",
+  "shift_3_anchor_mode": "end",
+  "shift_3_reference_time": "0600",
+  "production_minutes_rounding": "floor",
+  "missing_rate_fallback_mode": "header_goal",
+  "missing_rate_fallback_value": 240.0,
+  "allow_overnight_downtime": true,
+  "negative_ghost_mode": "allow_negative",
+  "default_balance_mix_pct": 100.0,
+  "display_targets": {
+    "production_minutes_role": "duration_minutes",
+    "downtime_minutes_role": "duration_minutes",
+    "efficiency_header_role": "efficiency_pct",
+    "ghost_display_mode": "metrics_only",
+    "ghost_header_role": "target_time"
+  },
+  "formulas": {
+    "production_minutes": "round_minutes((molds / rate) * 60, production_minutes_rounding)",
+    "shift_total_minutes": "round_minutes(hours * 60, shift_total_rounding)",
+    "shift_start_time": "format_clock(default_start_minutes)",
+    "shift_end_time": "format_clock(default_end_minutes)",
+    "downtime_minutes": "if_value(stop_minutes < start_minutes, if_value(allow_overnight_downtime, (stop_minutes + day_minutes) - start_minutes, invalid_value), stop_minutes - start_minutes)",
+    "downtime_stop_clock": "format_clock(default_stop_minutes)",
+    "ghost_minutes": "shift_total_minutes - production_total_minutes - downtime_total_minutes",
+    "efficiency_pct": "if_value((hours <= 0) or (goal_rate <= 0), 0, (total_molds / (hours * goal_rate)) * 100)"
+  }
 }

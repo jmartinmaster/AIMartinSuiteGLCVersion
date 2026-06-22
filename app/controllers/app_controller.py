@@ -470,7 +470,43 @@ class Dispatcher:
             if module_name == "main":
                 continue
             self.loaded_modules.pop(module_name, None)
+        core_app_modules = {
+            "app",
+            "app.security",
+            "app.security_service",
+            "app.app_logging",
+            "app.app_platform",
+            "app.external_data_registry",
+            "app.module_registry",
+            "app.utils",
+            "app.splash",
+            "app.theme_manager",
+            "app.app_identity",
+            "app.data_request_worker",
+            "app.data_handler_service",
+            "app.form_definition_registry",
+            "app.layout_config_service",
+            "app.layout_manager_dispatcher",
+            "app.native_security_verifier",
+            "app.persistence",
+            "app.safe_expression",
+            "app.settings_diagnostics",
+            "app.update_bindings",
+            "app.update_state",
+            "app.dev_logging",
+            "app.downtime_codes",
+            "app.controllers",
+            "app.controllers.app_controller",
+            "app.views",
+            "app.views.pyqt6_host_shell_view",
+            "app.views.host_ui_adapter",
+            "app.models",
+            "app.models.app_model",
+            "app.models.security_model",
+        }
         for module_key in [key for key in sys.modules if key.startswith("app.")]:
+            if module_key in core_app_modules or any(module_key.startswith(core_m + ".") for core_m in core_app_modules):
+                continue
             sys.modules.pop(module_key, None)
         importlib.invalidate_caches()
 

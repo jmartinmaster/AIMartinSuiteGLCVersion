@@ -13,10 +13,19 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
+import os
+import sys
+
 from app.controllers.app_controller import Dispatcher
 from launcher import __module_name__, __version__, main as launcher_main, run_application, run_special_mode_from_environment
 from app.app_platform import apply_app_icon, apply_windows_app_id, apply_windows_window_icons, convert_png_to_ico, get_obsolete_local_executables, get_work_area_insets
+from app.crash_handler import run_monitor_loop, install_child_crash_handler
 
 
 if __name__ == "__main__":
-    raise SystemExit(launcher_main())
+    if os.environ.get("AIMARTIN_CHILD_PROCESS") != "1":
+        run_monitor_loop()
+    else:
+        install_child_crash_handler()
+        raise SystemExit(launcher_main())
+
