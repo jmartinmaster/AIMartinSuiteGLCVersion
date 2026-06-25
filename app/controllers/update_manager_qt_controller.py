@@ -255,3 +255,9 @@ class UpdateManagerQtController:
             self.view.close()
         except Exception:
             pass
+        if hasattr(self, "view") and self.view is not None:
+            if hasattr(self.view, "controller"):
+                self.view.controller = None
+            self.view = None
+        self.dispatcher = None
+        self.parent = None

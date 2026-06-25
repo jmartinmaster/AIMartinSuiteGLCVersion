@@ -71,6 +71,18 @@ EDITOR_SECTIONS = [
                 "help": "Default weighted downtime distribution applied when Form Loader opens or refreshes.",
             },
             {
+                "key": "downtime_code_export_mode",
+                "path": ("downtime_code_export_mode",),
+                "label": "Downtime Code Export Mode",
+                "kind": "choice",
+                "options": (
+                    ("Code and Description (e.g. '1 Misc Reason')", "both"),
+                    ("Code Only (e.g. '1')", "code"),
+                    ("Description Only (e.g. 'Misc Reason')", "description"),
+                ),
+                "help": "Controls how downtime codes and descriptions are formatted when exporting to Excel.",
+            },
+            {
                 "key": "allow_overnight_downtime",
                 "path": ("allow_overnight_downtime",),
                 "label": "Allow overnight downtime rollover when stop time is earlier than start time",

@@ -5,217 +5,278 @@
     "header_fields": [
         {
             "id": "date",
-            "role": "log_date",
             "label": "Date",
-            "row": 0,
-            "col": 0,
-            "width": 10,
+            "row": "0",
+            "col": "0",
             "cell": "A2",
+            "width": "10",
+            "readonly": true,
+            "default": "",
+            "role": "log_date",
             "import_enabled": true,
-            "export_enabled": true
+            "export_enabled": true,
+            "widget": "entry"
         },
         {
             "id": "cast_date",
-            "role": "cast_date",
             "label": "Cast Date",
-            "row": 0,
-            "col": 2,
-            "width": 10,
+            "row": "0",
+            "col": "2",
             "cell": "B2",
+            "width": "10",
+            "readonly": true,
+            "role": "cast_date",
             "import_enabled": true,
             "export_enabled": true,
-            "readonly": true
+            "widget": "entry"
         },
         {
             "id": "bond",
-            "role": "bond",
             "label": "Bond",
-            "row": 0,
-            "col": 4,
-            "width": 12,
+            "row": "0",
+            "col": "4",
             "cell": "E2",
+            "width": "12",
+            "default": "",
+            "role": "bond",
             "import_enabled": true,
-            "export_enabled": true
+            "export_enabled": true,
+            "widget": "entry"
         },
         {
             "id": "eff_pct",
-            "role": "efficiency_pct",
             "label": "EFF %",
-            "row": 0,
-            "col": 6,
-            "width": 8,
-            "readonly": true,
+            "row": "0",
+            "col": "6",
             "cell": "H1",
+            "width": "8",
+            "readonly": true,
+            "default": "",
+            "role": "efficiency_pct",
+            "import_enabled": true,
             "export_enabled": false,
-            "import_enabled": true
+            "widget": "entry"
         },
         {
             "id": "shift",
-            "role": "shift_number",
             "label": "Shift",
-            "row": 1,
-            "col": 0,
-            "width": 10,
+            "row": "1",
+            "col": "0",
             "cell": "C2",
+            "width": "10",
+            "default": "",
+            "role": "shift_number",
             "import_enabled": true,
-            "export_enabled": true
+            "export_enabled": true,
+            "widget": "combobox",
+            "options_source": "",
+            "values": [
+                "1",
+                "2",
+                "3"
+            ]
         },
         {
             "id": "hours",
-            "role": "shift_hours",
             "label": "Shift Hours",
-            "row": 1,
-            "col": 2,
-            "width": 10,
+            "row": "1",
+            "col": "2",
             "cell": "D2",
+            "width": "10",
+            "default": "",
+            "role": "shift_hours",
             "import_enabled": true,
-            "export_enabled": true
+            "export_enabled": true,
+            "widget": "entry"
         },
         {
             "id": "target_time",
-            "role": "target_time",
             "label": "Target Time",
-            "row": 3,
-            "col": 4,
-            "width": 12,
+            "row": "3",
+            "col": "4",
             "cell": "C4",
+            "width": "12",
+            "default": "",
+            "role": "target_time",
+            "import_enabled": true,
             "export_enabled": true,
-            "import_enabled": true
+            "widget": "entry"
         },
         {
             "id": "mtd_pct",
-            "role": "mtd_percentage",
             "label": "MTD %",
-            "row": 1,
-            "col": 6,
-            "width": 8,
-            "readonly": true,
+            "row": "1",
+            "col": "6",
             "cell": "H2",
+            "width": "8",
+            "readonly": true,
+            "default": "",
+            "role": "mtd_percentage",
+            "import_enabled": true,
             "export_enabled": false,
-            "import_enabled": true
+            "widget": "entry"
         },
         {
             "id": "goal_mph",
-            "role": "goal_rate",
             "label": "Goal MPH",
-            "row": 1,
-            "col": 4,
-            "width": 10,
+            "row": "1",
+            "col": "4",
             "cell": "G5",
+            "width": "10",
             "default": "240",
+            "role": "goal_rate",
             "import_enabled": true,
-            "export_enabled": true
+            "export_enabled": true,
+            "widget": "entry"
         },
         {
             "id": "total_molds",
-            "role": "total_molds",
             "label": "Total Molds",
-            "row": 2,
-            "col": 0,
-            "width": 10,
+            "row": "2",
+            "col": "0",
             "cell": "H27",
+            "width": "10",
+            "default": "",
+            "role": "total_molds",
+            "import_enabled": false,
             "export_enabled": true,
-            "import_enabled": false
+            "widget": "entry"
         },
         {
             "id": "ret_north",
-            "role": "ret_north",
             "label": "Ret North",
-            "row": 2,
-            "col": 2,
-            "width": 10,
+            "row": "2",
+            "col": "2",
             "cell": "",
+            "width": "10",
+            "default": "",
+            "role": "ret_north",
             "import_enabled": true,
-            "export_enabled": true
+            "export_enabled": true,
+            "widget": "entry"
         },
         {
             "id": "start_time",
-            "role": "shift_start_time",
             "label": "Start Time",
-            "row": 3,
-            "col": 0,
-            "width": 10,
+            "row": "3",
+            "col": "0",
             "cell": "B4",
+            "width": "10",
+            "default": "",
+            "role": "shift_start_time",
+            "import_enabled": true,
             "export_enabled": true,
-            "import_enabled": true
+            "widget": "entry"
         },
         {
             "id": "end_time",
-            "role": "shift_end_time",
             "label": "End Time",
-            "row": 3,
-            "col": 2,
-            "width": 10,
+            "row": "3",
+            "col": "2",
             "cell": "A4",
+            "width": "10",
+            "default": "",
+            "role": "shift_end_time",
+            "import_enabled": true,
             "export_enabled": true,
-            "import_enabled": true
+            "widget": "entry"
         },
         {
             "id": "ret_south",
-            "role": "ret_south",
             "label": "Ret South",
-            "row": 3,
-            "col": 6,
-            "width": 10,
+            "row": "3",
+            "col": "6",
             "cell": "G3",
+            "width": "10",
+            "default": "",
+            "role": "ret_south",
+            "import_enabled": true,
             "export_enabled": true,
-            "import_enabled": true
+            "widget": "entry"
         }
     ],
     "production_row_fields": [
         {
             "id": "shop_order",
-            "role": "job_order",
             "label": "Shop Order",
             "widget": "entry",
-            "width": 15,
+            "width": "15",
+            "role": "job_order",
             "open_row_trigger": true,
-            "user_input": true
+            "user_input": true,
+            "default": "",
+            "sticky": "",
+            "state": "",
+            "options_source": "",
+            "bootstyle": ""
         },
         {
             "id": "part_number",
-            "role": "part_number",
             "label": "Part Number",
             "widget": "entry",
-            "width": 15,
+            "width": "15",
+            "role": "part_number",
             "open_row_trigger": true,
-            "user_input": true
+            "user_input": true,
+            "default": "",
+            "sticky": "",
+            "state": "",
+            "options_source": "",
+            "bootstyle": ""
         },
         {
             "id": "rate_lookup",
-            "role": "rate_value",
             "label": "Rate",
             "widget": "entry",
-            "width": 12,
+            "width": "12",
+            "role": "rate_value",
             "readonly": true,
-            "derived": true
+            "derived": true,
+            "default": "",
+            "sticky": "",
+            "state": "",
+            "options_source": "",
+            "bootstyle": ""
         },
         {
             "id": "rate_override_enabled",
-            "role": "rate_override_toggle",
             "label": "Override",
             "widget": "checkbutton",
-            "default": false
+            "width": "",
+            "role": "rate_override_toggle",
+            "default": "False",
+            "sticky": "",
+            "state": "",
+            "options_source": "",
+            "bootstyle": ""
         },
         {
             "id": "molds",
-            "role": "mold_count",
             "label": "Molds",
             "widget": "entry",
-            "width": 10,
+            "width": "10",
+            "role": "mold_count",
             "open_row_trigger": true,
-            "user_input": true
+            "user_input": true,
+            "default": "",
+            "sticky": "",
+            "state": "",
+            "options_source": "",
+            "bootstyle": ""
         },
         {
             "id": "time_calc",
-            "role": "duration_minutes",
             "label": "Time",
             "widget": "display",
-            "width": 10,
+            "width": "10",
+            "role": "duration_minutes",
+            "derived": true,
+            "bold": true,
             "default": "0 min",
             "sticky": "e",
-            "bold": true,
-            "derived": true
+            "state": "",
+            "options_source": "",
+            "bootstyle": ""
         }
     ],
     "downtime_row_fields": [
@@ -275,10 +336,29 @@
     "production_mapping": {
         "start_row": 19,
         "columns": {
-            "shop_order": "A",
-            "part_number": "E",
-            "molds": "G"
-        }
+            "shop_order": {
+                "column": "A",
+                "import_enabled": true,
+                "export_enabled": true,
+                "import_transform": "value",
+                "export_transform": "value"
+            },
+            "part_number": {
+                "column": "E",
+                "import_enabled": true,
+                "export_enabled": true,
+                "import_transform": "value",
+                "export_transform": "value"
+            },
+            "molds": {
+                "column": "G",
+                "import_enabled": true,
+                "export_enabled": true,
+                "import_transform": "value",
+                "export_transform": "value"
+            }
+        },
+        "max_rows": 25
     },
     "downtime_mapping": {
         "start_row": 6,

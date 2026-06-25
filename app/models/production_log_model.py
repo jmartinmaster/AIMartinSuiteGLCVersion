@@ -50,6 +50,7 @@ DEFAULT_CALCULATION_SETTINGS = {
     "allow_overnight_downtime": True,
     "negative_ghost_mode": "allow_negative",
     "default_balance_mix_pct": 100.0,
+    "downtime_code_export_mode": "both",
     "display_targets": {
         "production_minutes_role": "duration_minutes",
         "downtime_minutes_role": "duration_minutes",
@@ -753,6 +754,11 @@ class ProductionLogModel:
             raw_settings.get("negative_ghost_mode"),
             {"allow_negative", "clamp_zero"},
             defaults["negative_ghost_mode"],
+        )
+        normalized_settings["downtime_code_export_mode"] = self._normalize_choice(
+            raw_settings.get("downtime_code_export_mode"),
+            {"both", "code", "description"},
+            defaults["downtime_code_export_mode"],
         )
         normalized_settings["default_balance_mix_pct"] = max(
             0.0,

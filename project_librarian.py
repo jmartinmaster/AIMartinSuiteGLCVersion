@@ -28,6 +28,58 @@ SNAPSHOT_NAME = "librarian-snapshot.json"
 HISTORY_NAME = "change-history.jsonl"
 CORPUS_NAME = "search-corpus.json"
 EXCEL_LIBRARY_CONFIG_NAME = "excel_library_config.json"
+ANTI_PATTERN_CONFIG_NAME = "anti_pattern_config.json"
+DEFAULT_ANTI_PATTERNS = [
+    {
+        "name": "Bare Except",
+        "regex": r"except\s*:",
+        "description": "Using except: without specifying an exception class catches system exits and interrupts.",
+        "severity": "warning",
+        "enabled": True,
+    },
+    {
+        "name": "Wildcard Import",
+        "regex": r"from\s+\S+\s+import\s+\*",
+        "description": "Importing * pollutes the namespace and can mask other symbols.",
+        "severity": "warning",
+        "enabled": True,
+    },
+    {
+        "name": "Mutable Default Argument",
+        "regex": r"def\s+\w+\([^)]*=\s*[\[\{]",
+        "description": "Mutable default arguments are shared across all function calls, leading to potential state pollution.",
+        "severity": "warning",
+        "enabled": True,
+    },
+    {
+        "name": "Eval / Exec Usage",
+        "regex": r"\b(eval|exec)\s*\(",
+        "description": "Using eval() or exec() can run arbitrary code, presenting security risks.",
+        "severity": "error",
+        "enabled": True,
+    },
+    {
+        "name": "Breakpoint left in code",
+        "regex": r"\b(breakpoint|pdb\.set_trace)\s*\(",
+        "description": "Debugger checkpoints should not be committed to production code.",
+        "severity": "error",
+        "enabled": True,
+    },
+    {
+        "name": "Todo Left in Code",
+        "regex": r"#\s*TODO\b",
+        "description": "Pending tasks or fixes left unresolved.",
+        "severity": "info",
+        "enabled": False,
+    },
+    {
+        "name": "Bare Print Statement",
+        "regex": r"\bprint\s*\(",
+        "description": "Using print() instead of a logger can pollute stdout.",
+        "severity": "info",
+        "enabled": False,
+    }
+]
 EXCEL_EXTENSIONS = (".xlsx", ".xls", ".xlsm", ".xlsb", ".csv")
 DEFAULT_EXCEL_KEYWORD_COLUMNS = ["Downtime Code", "Shop Order", "Part Number", "Date"]
 DRAFTS_DIR_NAME = "drafts"
@@ -191,6 +243,7 @@ class LibrarianService:
             refresh_first=refresh_first,
         )
         self._last_refresh_at = _utc_now_text()
+        self._tracemalloc_snapshots = {}
         self.configure_library_watcher(force_restart=True)
         if start_refresh_worker and self.refresh_interval_seconds > 0:
             self.start_refresh_worker()
@@ -463,6 +516,263 @@ class LibrarianService:
             return result
 
         return self._with_workspace(_build)
+
+    def profile_memory_payload(self, action, snapshot_name=None, other_snapshot_name=None, key_type="lineno", limit=20, n_frames=10):
+        import tracemalloc
+        
+        normalized_action = action.strip().lower()
+        is_tracing = tracemalloc.is_tracing()
+
+        if normalized_action == "start":
+            if is_tracing:
+                return {"ok": True, "message": f"Memory profiling is already active (tracing {n_frames} frames)."}
+            tracemalloc.start(n_frames)
+            return {"ok": True, "message": f"Memory profiling started successfully (tracing {n_frames} frames)."}
+
+        elif normalized_action == "stop":
+            if not is_tracing:
+                return {"ok": True, "message": "Memory profiling is not active."}
+            tracemalloc.stop()
+            if hasattr(self, "_tracemalloc_snapshots"):
+                self._tracemalloc_snapshots.clear()
+            return {"ok": True, "message": "Memory profiling stopped, all saved snapshots cleared."}
+
+        elif normalized_action == "status":
+            snapshots_list = list(self._tracemalloc_snapshots.keys()) if hasattr(self, "_tracemalloc_snapshots") else []
+            return {
+                "active": is_tracing,
+                "saved_snapshots_count": len(snapshots_list),
+                "saved_snapshots": snapshots_list,
+                "message": "Tracing is active." if is_tracing else "Tracing is inactive."
+            }
+
+        elif normalized_action == "take_snapshot":
+            if not is_tracing:
+                tracemalloc.start(n_frames)
+            snapshot = tracemalloc.take_snapshot()
+            if not hasattr(self, "_tracemalloc_snapshots"):
+                self._tracemalloc_snapshots = {}
+            name = snapshot_name or f"snapshot_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
+            self._tracemalloc_snapshots[name] = snapshot
+            
+            stats = snapshot.statistics(key_type)
+            return {
+                "ok": True,
+                "snapshot_name": name,
+                "total_allocated_kb": round(sum(s.size for s in stats) / 1024, 2),
+                "top_allocations": [
+                    {"size_kb": round(s.size / 1024, 2), "count": s.count, "traceback": str(s.traceback)}
+                    for s in stats[:limit]
+                ]
+            }
+
+        elif normalized_action == "get_stats":
+            if not hasattr(self, "_tracemalloc_snapshots") or not self._tracemalloc_snapshots:
+                return {"ok": False, "error": "No saved snapshots found. Take a snapshot first."}
+            name = snapshot_name or list(self._tracemalloc_snapshots.keys())[-1]
+            snapshot = self._tracemalloc_snapshots.get(name)
+            if not snapshot:
+                return {"ok": False, "error": f"Snapshot '{name}' not found."}
+            stats = snapshot.statistics(key_type)
+            return {
+                "snapshot_name": name,
+                "total_allocated_kb": round(sum(s.size for s in stats) / 1024, 2),
+                "top_allocations": [
+                    {"size_kb": round(s.size / 1024, 2), "count": s.count, "traceback": str(s.traceback)}
+                    for s in stats[:limit]
+                ]
+            }
+
+        elif normalized_action == "compare":
+            if not hasattr(self, "_tracemalloc_snapshots"):
+                return {"ok": False, "error": "No snapshots saved yet."}
+            if not snapshot_name or not other_snapshot_name:
+                return {"ok": False, "error": "Both snapshot_name and other_snapshot_name are required."}
+            snap1 = self._tracemalloc_snapshots.get(snapshot_name)
+            snap2 = self._tracemalloc_snapshots.get(other_snapshot_name)
+            if not snap1:
+                return {"ok": False, "error": f"Snapshot '{snapshot_name}' not found."}
+            if not snap2:
+                return {"ok": False, "error": f"Snapshot '{other_snapshot_name}' not found."}
+            stats = snap2.compare_to(snap1, key_type)
+            return {
+                "comparison": f"Comparing '{other_snapshot_name}' (new) to '{snapshot_name}' (old)",
+                "top_differences": [
+                    {
+                        "size_diff_kb": round(s.size_diff / 1024, 2),
+                        "size_kb": round(s.size / 1024, 2),
+                        "count_diff": s.count_diff,
+                        "count": s.count,
+                        "traceback": str(s.traceback)
+                    }
+                    for s in stats[:limit]
+                ]
+            }
+        return {"ok": False, "error": f"Unknown action '{action}'"}
+
+    def test_navigation_leaks_payload(self, cycles=5):
+        import gc
+        import tracemalloc
+        import threading
+        from PyQt6.QtWidgets import QApplication
+        
+        app = QApplication.instance()
+        if not app:
+            return {"error": "QApplication instance not found"}
+            
+        dispatcher = None
+        for widget in app.topLevelWidgets():
+            if hasattr(widget, "dispatcher") and widget.dispatcher is not None:
+                dispatcher = widget.dispatcher
+                break
+                
+        if not dispatcher:
+            return {"error": "Dispatcher instance not found in top level widgets"}
+            
+        if not tracemalloc.is_tracing():
+            tracemalloc.start(25)
+            
+        # 1. Warm up by visiting each module once to complete first-time imports
+        warmup_event = threading.Event()
+        error_container = []
+        
+        def _warmup():
+            try:
+                modules = ["about", "help_viewer", "recovery_viewer", "rate_manager", "settings_manager"]
+                for mod in modules:
+                    dispatcher.load_module(mod, use_transition=False)
+                    app.processEvents()
+                dispatcher.load_module("about", use_transition=False)
+                app.processEvents()
+            except Exception as e:
+                error_container.append(str(e))
+            finally:
+                warmup_event.set()
+                
+        dispatcher.run_on_main_thread(_warmup)
+        warmup_event.wait()
+        
+        if error_container:
+            return {"error": f"Warmup failed: {error_container[0]}"}
+            
+        # Clean up memory to baseline
+        for _ in range(3):
+            gc.collect()
+            
+        baseline_snapshot = tracemalloc.take_snapshot()
+        
+        # 2. Run cycles of navigation
+        event = threading.Event()
+        
+        def _cycle():
+            try:
+                modules = ["about", "help_viewer", "recovery_viewer", "rate_manager", "settings_manager"]
+                for cycle_idx in range(cycles):
+                    for mod in modules:
+                        dispatcher.load_module(mod, use_transition=False)
+                        app.processEvents()
+                # Return to about tab at the end
+                dispatcher.load_module("about", use_transition=False)
+                app.processEvents()
+            except Exception as e:
+                error_container.append(str(e))
+            finally:
+                event.set()
+                
+        dispatcher.run_on_main_thread(_cycle)
+        event.wait()
+        
+        if error_container:
+            return {"error": error_container[0]}
+            
+        for _ in range(3):
+            gc.collect()
+            
+        current_snapshot = tracemalloc.take_snapshot()
+        stats = current_snapshot.compare_to(baseline_snapshot, "lineno")
+        
+        top_differences = []
+        for s in stats[:20]:
+            if s.size_diff > 0:
+                top_differences.append({
+                    "size_diff_kb": round(s.size_diff / 1024, 2),
+                    "size_kb": round(s.size / 1024, 2),
+                    "count_diff": s.count_diff,
+                    "count": s.count,
+                    "traceback": [str(frame) for frame in s.traceback]
+                })
+                
+        total_allocated_after_kb = round(sum(s.size for s in current_snapshot.statistics("lineno")) / 1024, 2)
+        total_allocated_before_kb = round(sum(s.size for s in baseline_snapshot.statistics("lineno")) / 1024, 2)
+        
+        return {
+            "ok": True,
+            "cycles_run": cycles,
+            "size_growth_kb": round(total_allocated_after_kb - total_allocated_before_kb, 2),
+            "total_allocated_before_kb": total_allocated_before_kb,
+            "total_allocated_after_kb": total_allocated_after_kb,
+            "top_differences": top_differences
+        }
+
+    def anti_pattern_config_payload(self, action="get", presets=None, scope="all", path_filter=None):
+        if action == "get":
+            return _load_anti_pattern_config(self.output_dir)
+        elif action == "save":
+            if presets is None:
+                raise ProjectLibrarianError("Presets list is required for save action.")
+            normalized_presets = []
+            for p in presets:
+                if not isinstance(p, dict) or "name" not in p or "regex" not in p:
+                    raise ProjectLibrarianError("Each preset must be a dict with name and regex keys.")
+                normalized_presets.append({
+                    "name": str(p["name"]),
+                    "regex": str(p["regex"]),
+                    "description": str(p.get("description", "")),
+                    "severity": str(p.get("severity", "warning")),
+                    "enabled": bool(p.get("enabled", True))
+                })
+            config = {"presets": normalized_presets}
+            _save_anti_pattern_config(self.output_dir, config)
+            return config
+        elif action == "search":
+            config = _load_anti_pattern_config(self.output_dir)
+            active_presets = [p for p in config["presets"] if p.get("enabled", True)]
+            if not active_presets:
+                return {"results": [], "message": "No active anti-pattern presets configured."}
+            
+            compiled = []
+            for p in active_presets:
+                try:
+                    compiled.append((p, re.compile(p["regex"])))
+                except re.error as exc:
+                    pass
+            
+            results = []
+            def _scan(workspace):
+                changed_paths = {item.get("path") for item in workspace.snapshot.get("git", {}).get("changed_files", []) if item.get("path")}
+                for rel_path, file_text in workspace.corpus.items():
+                    if path_filter and path_filter.lower() not in rel_path.lower():
+                        continue
+                    if scope == "changed" and rel_path not in changed_paths:
+                        continue
+                    
+                    lines = file_text.splitlines()
+                    for line_idx, line in enumerate(lines, start=1):
+                        for preset, pattern in compiled:
+                            for match in pattern.finditer(line):
+                                results.append({
+                                    "file": rel_path,
+                                    "line": line_idx,
+                                    "match": match.group(0),
+                                    "preset_name": preset["name"],
+                                    "description": preset["description"],
+                                    "severity": preset["severity"],
+                                    "content": line.strip()
+                                })
+            self._with_workspace(_scan)
+            return {"results": results, "count": len(results)}
+        else:
+            raise ProjectLibrarianError(f"Unsupported anti-pattern action: {action}")
 
 
 def _repo_root_from_here():
@@ -2285,6 +2595,7 @@ def _render_dashboard_html(auth_enabled=False, bootstrap_payload=None):
             <button class='tab-btn' data-tab='git-controls' role='tab' type='button'>Git Controls</button>
             <button class='tab-btn' data-tab='index-browser' role='tab' type='button'>Index Browser</button>
             <button class='tab-btn' data-tab='task-board' role='tab' type='button'>Task Board</button>
+            <button class='tab-btn' data-tab='memory-profiler' role='tab' type='button'>Memory Profiler</button>
         </nav>
 
         <div class='tab-pane active' id='tab-librarian'>
@@ -2624,6 +2935,73 @@ def _render_dashboard_html(auth_enabled=False, bootstrap_payload=None):
                         <li><span style="color: var(--accent); font-weight: bold; font-size: 1.1rem; margin-right: 6px;">[x]</span> <strong>Completed:</strong> Successfully done. Toggles back to Todo.</li>
                     </ul>
                     <p style="margin-top: 10px; font-size: 0.85rem;" class="muted">Note: Checking off or adding tasks modifies the markdown file directly in your local repository. The changes are saved automatically.</p>
+                </section>
+            </div>
+        </div>
+        </div>
+
+        <div class='tab-pane' id='tab-memory-profiler'>
+        <div class='layout'>
+            <div>
+                <section class='panel'>
+                    <h2>Live Memory Profiler (tracemalloc)</h2>
+                    <p class='muted'>Control and query the Python tracemalloc memory allocation tracer running inside the Librarian server process.</p>
+                    <div class='controls' style='grid-template-columns: repeat(4, 1fr); align-items: end;'>
+                        <div>
+                            <label class='label' for='mem-action'>Action</label>
+                            <select id='mem-action'>
+                                <option value='status'>Get Status</option>
+                                <option value='start'>Start Tracing</option>
+                                <option value='take_snapshot'>Take Snapshot</option>
+                                <option value='get_stats'>Get Top Stats</option>
+                                <option value='compare'>Compare Snapshots</option>
+                                <option value='stop'>Stop &amp; Clear</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class='label' for='mem-snapshot-name'>Snapshot Name</label>
+                            <input id='mem-snapshot-name' type='text' placeholder='e.g. snap1'>
+                        </div>
+                        <div>
+                            <label class='label' for='mem-other-snapshot-name'>Compare Target</label>
+                            <input id='mem-other-snapshot-name' type='text' placeholder='e.g. snap2'>
+                        </div>
+                        <div>
+                            <label class='label' for='mem-key-type'>Group By</label>
+                            <select id='mem-key-type'>
+                                <option value='lineno'>Line Number</option>
+                                <option value='filename'>File Name</option>
+                                <option value='traceback'>Full Traceback</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class='controls' style='grid-template-columns: 1fr 1fr; margin-top: 10px;'>
+                        <div>
+                            <label class='label' for='mem-limit'>Limit Top Allocations</label>
+                            <input id='mem-limit' type='number' value='20' min='1' max='200'>
+                        </div>
+                        <div>
+                            <label class='label' for='mem-frames'>Traceback Frames Depth</label>
+                            <input id='mem-frames' type='number' value='10' min='1' max='50'>
+                        </div>
+                    </div>
+                    <div class='panel-actions'>
+                        <button class='primary' id='mem-run-action' type='button'>Run Action</button>
+                    </div>
+                    <div class='message' id='mem-message'></div>
+                </section>
+                
+                <section class='panel'>
+                    <h2>Profiler Output</h2>
+                    <pre class='preview' id='mem-output-pre'>Tracer output will be displayed here.</pre>
+                </section>
+            </div>
+            <div>
+                <section class='panel'>
+                    <h2>Tracer Status &amp; Snapshots</h2>
+                    <div id='mem-status-container'>
+                        <p class='muted'>Tracer status and saved snapshot references will be shown here.</p>
+                    </div>
                 </section>
             </div>
         </div>
@@ -3305,6 +3683,9 @@ def _render_dashboard_html(auth_enabled=False, bootstrap_payload=None):
                     if (btn.dataset.tab === 'task-board') {
                         loadTasks().catch((error) => setMessage(byId('tasks-message'), error.message, true));
                     }
+                    if (btn.dataset.tab === 'memory-profiler') {
+                        updateMemoryProfilerStatus().catch((error) => setMessage(byId('mem-message'), error.message, true));
+                    }
                 });
             });
 
@@ -3680,6 +4061,92 @@ def _render_dashboard_html(auth_enabled=False, bootstrap_payload=None):
                     setMessage(msgEl, error.message, true);
                 }
             });
+
+            byId('mem-run-action').addEventListener('click', async () => {
+                const action = byId('mem-action').value;
+                const snapshotName = byId('mem-snapshot-name').value.trim() || null;
+                const otherSnapshotName = byId('mem-other-snapshot-name').value.trim() || null;
+                const keyType = byId('mem-key-type').value;
+                const limit = parseInt(byId('mem-limit').value || '20', 10);
+                const nFrames = parseInt(byId('mem-frames').value || '10', 10);
+                const messageEl = byId('mem-message');
+                const outputPre = byId('mem-output-pre');
+
+                setMessage(messageEl, 'Executing memory profiler action...');
+                try {
+                    const result = await fetchJson('/api/profile-memory', {
+                        method: 'POST',
+                        body: JSON.stringify({
+                            action,
+                            snapshot_name: snapshotName,
+                            other_snapshot_name: otherSnapshotName,
+                            key_type: keyType,
+                            limit,
+                            n_frames: nFrames
+                        })
+                    });
+                    
+                    if (result.error) {
+                        setMessage(messageEl, result.error, true);
+                        outputPre.textContent = `Error: ${result.error}`;
+                    } else {
+                        setMessage(messageEl, result.message || 'Profiler action executed successfully.');
+                        outputPre.textContent = JSON.stringify(result, null, 2);
+                    }
+                    await updateMemoryProfilerStatus();
+                } catch (error) {
+                    setMessage(messageEl, error.message, true);
+                    outputPre.textContent = `Error: ${error.message}`;
+                }
+            });
+        }
+
+        state.memSnapshotShortcut = (name, role) => {
+            if (role === 'load') {
+                byId('mem-snapshot-name').value = name;
+                byId('mem-action').value = 'get_stats';
+            } else if (role === 'other') {
+                byId('mem-other-snapshot-name').value = name;
+                byId('mem-action').value = 'compare';
+            }
+        };
+
+        async function updateMemoryProfilerStatus() {
+            const container = byId('mem-status-container');
+            try {
+                const result = await fetchJson('/api/profile-memory', {
+                    method: 'POST',
+                    body: JSON.stringify({ action: 'status' })
+                });
+                
+                let snapshotsListHtml = '<p class="muted">No snapshots saved.</p>';
+                if (result.saved_snapshots && result.saved_snapshots.length > 0) {
+                    snapshotsListHtml = `
+                        <ul class="list" style="margin-top: 8px;">
+                            ${result.saved_snapshots.map(name => `
+                                <li style="padding: 4px 0; border: none; display: flex; justify-content: space-between; align-items: center;">
+                                    <span style="font-family: monospace;">📸 ${escapeHtml(name)}</span>
+                                    <div style="display: flex; gap: 6px;">
+                                        <button type="button" onclick="state.memSnapshotShortcut('${escapeHtml(name)}', 'load')" style="font-size: 0.8rem; padding: 2px 6px;">stats</button>
+                                        <button type="button" onclick="state.memSnapshotShortcut('${escapeHtml(name)}', 'other')" style="font-size: 0.8rem; padding: 2px 6px;">compare</button>
+                                    </div>
+                                </li>
+                            `).join('')}
+                        </ul>
+                    `;
+                }
+                
+                container.innerHTML = `
+                    <div style="border: 1px solid var(--panel-border); border-radius: 12px; padding: 12px; background: rgba(16, 32, 42, 0.3);">
+                        <p style="margin: 4px 0;"><strong>Active Tracing:</strong> ${result.active ? '<span style="color: var(--accent-strong); font-weight: bold;">ON</span>' : '<span style="color: var(--text-muted);">OFF</span>'}</p>
+                        <p style="margin: 4px 0;"><strong>Saved Snapshots count:</strong> ${result.saved_snapshots_count || 0}</p>
+                        <h3 style="margin: 12px 0 6px; font-size: 0.95rem;">Saved Snapshots:</h3>
+                        ${snapshotsListHtml}
+                    </div>
+                `;
+            } catch (error) {
+                container.innerHTML = `<p class="error">Failed to load profiler status: ${escapeHtml(error.message)}</p>`;
+            }
         }
 
         async function loadTasks(selectedPath = null) {
@@ -4090,6 +4557,34 @@ def _load_excel_library_config(output_dir):
 
 def _save_excel_library_config(output_dir, config):
     config_path = Path(output_dir) / EXCEL_LIBRARY_CONFIG_NAME
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(json.dumps(config, indent=2), encoding="utf-8")
+
+
+def _load_anti_pattern_config(output_dir):
+    config_path = Path(output_dir) / ANTI_PATTERN_CONFIG_NAME
+    if config_path.exists():
+        try:
+            loaded = json.loads(config_path.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict) and "presets" in loaded:
+                presets = []
+                for p in loaded["presets"]:
+                    if isinstance(p, dict) and "name" in p and "regex" in p:
+                        presets.append({
+                            "name": str(p["name"]),
+                            "regex": str(p["regex"]),
+                            "description": str(p.get("description", "")),
+                            "severity": str(p.get("severity", "warning")),
+                            "enabled": bool(p.get("enabled", True))
+                        })
+                return {"presets": presets}
+        except Exception:
+            pass
+    return {"presets": list(DEFAULT_ANTI_PATTERNS)}
+
+
+def _save_anti_pattern_config(output_dir, config):
+    config_path = Path(output_dir) / ANTI_PATTERN_CONFIG_NAME
     config_path.parent.mkdir(parents=True, exist_ok=True)
     config_path.write_text(json.dumps(config, indent=2), encoding="utf-8")
 
@@ -4843,6 +5338,58 @@ def create_librarian_mcp_server(
         except Exception as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
 
+    @server.custom_route("/api/profile-memory", methods=["POST"], include_in_schema=False)
+    async def _profile_memory_route(request):
+        try:
+            payload = await _request_json_payload(request)
+            action = payload.get("action", "status")
+            snapshot_name = payload.get("snapshot_name")
+            other_snapshot_name = payload.get("other_snapshot_name")
+            key_type = payload.get("key_type", "lineno")
+            limit = _coerce_int(payload.get("limit"), 20, minimum=1, maximum=100)
+            n_frames = _coerce_int(payload.get("n_frames"), 10, minimum=1, maximum=100)
+            
+            result = service.profile_memory_payload(
+                action=action,
+                snapshot_name=snapshot_name,
+                other_snapshot_name=other_snapshot_name,
+                key_type=key_type,
+                limit=limit,
+                n_frames=n_frames
+            )
+            return JSONResponse(result)
+        except Exception as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+
+    @server.custom_route("/api/test-navigation-leaks", methods=["POST"], include_in_schema=False)
+    async def _test_navigation_leaks_route(request):
+        try:
+            payload = await _request_json_payload(request)
+            cycles = _coerce_int(payload.get("cycles"), 5, minimum=1, maximum=50)
+            result = service.test_navigation_leaks_payload(cycles=cycles)
+            return JSONResponse(result)
+        except Exception as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+
+    @server.custom_route("/api/anti-pattern", methods=["GET"], include_in_schema=False)
+    async def _anti_pattern_get_route(request):
+        return JSONResponse(service.anti_pattern_config_payload(action="get"))
+
+    @server.custom_route("/api/anti-pattern", methods=["POST"], include_in_schema=False)
+    async def _anti_pattern_save_route(request):
+        try:
+            payload = await _request_json_payload(request)
+            presets = payload.get("presets")
+            return JSONResponse(service.anti_pattern_config_payload(action="save", presets=presets))
+        except Exception as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+
+    @server.custom_route("/api/anti-pattern/search", methods=["GET"], include_in_schema=False)
+    async def _anti_pattern_search_route(request):
+        scope = request.query_params.get("scope", "all")
+        path_filter = request.query_params.get("path_filter") or None
+        return JSONResponse(service.anti_pattern_config_payload(action="search", scope=scope, path_filter=path_filter))
+
     @server.custom_route("/api/excel-config", methods=["GET"], include_in_schema=False)
     async def _excel_config_get_route(request):
         config = _load_excel_library_config(service.output_dir)
@@ -5149,6 +5696,58 @@ def create_librarian_mcp_server(
             ollama_host=ollama_host,
         )
 
+    @server.tool(name="profile_memory", description="Live memory profiling of the Librarian service process using Python's native tracemalloc.", structured_output=True)
+    def _profile_memory_tool(
+        action: str,
+        snapshot_name: str | None = None,
+        other_snapshot_name: str | None = None,
+        key_type: str = "lineno",
+        limit: int = 20,
+        n_frames: int = 10,
+    ) -> dict[str, object]:
+        """
+        Control Python's native tracemalloc memory profiling and compare snapshots.
+        - action: 'start' to begin tracing, 'stop' to end and clear, 'status' for active status,
+                  'take_snapshot' to record snapshot, 'get_stats' for top lines, 'compare' for diff.
+        - key_type: 'lineno', 'filename', or 'traceback'
+        - limit: number of lines/results to output
+        """
+        try:
+            return service.profile_memory_payload(
+                action=action,
+                snapshot_name=snapshot_name,
+                other_snapshot_name=other_snapshot_name,
+                key_type=key_type,
+                limit=limit,
+                n_frames=n_frames
+            )
+        except Exception as exc:
+            return {"error": str(exc)}
+
+    @server.tool(name="anti_pattern_search", description="Manage presets and search the workspace for code anti-patterns.", structured_output=True)
+    def _anti_pattern_search_tool(
+        action: str,
+        presets: list[dict[str, object]] | None = None,
+        scope: str = "all",
+        path_filter: str | None = None,
+    ) -> dict[str, object]:
+        """
+        Configure and run Anti-Pattern searches.
+        - action: 'get' to return current configuration, 'save' to update presets, 'search' to run scan.
+        - presets: a list of preset objects (only used when action='save')
+        - scope: 'all' or 'changed' to filter searched files
+        - path_filter: search only files matching this substring
+        """
+        try:
+            return service.anti_pattern_config_payload(
+                action=action,
+                presets=presets,
+                scope=scope,
+                path_filter=path_filter
+            )
+        except Exception as exc:
+            return {"error": str(exc)}
+
     return server
 
 
@@ -5221,7 +5820,6 @@ def run_librarian_mcp_server(
                 app = server.sse_app()
             else:
                 raise ProjectLibrarianError(f"Unsupported MCP transport: {transport}")
-            app = _wrap_http_app_with_token_auth(app, resolved_auth_token)
             uvicorn.run(app, host=host, port=port, log_level=log_level.lower())
     finally:
         service.stop()

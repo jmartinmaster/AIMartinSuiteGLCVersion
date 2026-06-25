@@ -1294,6 +1294,10 @@ class LayoutManagerQtView(QMainWindow):
         self.font_profile_combo.currentIndexChanged.connect(self._on_font_profile_changed)
         summary_layout.addRow("Font Profile", self.font_profile_combo)
 
+        self.option_sources_tab = QWidget()
+        self._build_option_sources_tab()
+        self.tabs.addTab(self.option_sources_tab, "Option Sources")
+
         self.tabs.addTab(summary_tab, "Summary")
         self.tabs.currentChanged.connect(self._handle_main_tab_changed)
         self._last_tab_index = 0
@@ -1408,7 +1412,8 @@ class LayoutManagerQtView(QMainWindow):
             if column_index == 12:
                 return {"options": STATE_OPTIONS, "editable": False}
             if column_index == 13:
-                return {"options": OPTIONS_SOURCE_OPTIONS, "editable": True}
+                from app.downtime_codes import get_available_options_sources
+                return {"options": get_available_options_sources(), "editable": True}
         if table_widget is self.row_fields_table:
             if column_index == 2:
                 return {"options": ["entry", "display", "checkbutton", "combobox"], "editable": False}
@@ -1421,7 +1426,8 @@ class LayoutManagerQtView(QMainWindow):
             if column_index == 14:
                 return {"options": STATE_OPTIONS, "editable": False}
             if column_index == 15:
-                return {"options": OPTIONS_SOURCE_OPTIONS, "editable": True}
+                from app.downtime_codes import get_available_options_sources
+                return {"options": get_available_options_sources(), "editable": True}
             if column_index == 16:
                 return {"options": BOOTSTYLE_OPTIONS, "editable": True}
         if table_widget is self.mapping_table:
@@ -1786,8 +1792,248 @@ class LayoutManagerQtView(QMainWindow):
         if current_widget is self.json_editor_tab:
             self.finalize_block_table_edits()
             self.controller.sync_block_view_to_editor()
+        elif current_widget is self.option_sources_tab:
+            self._refresh_option_sources_dropdown()
 
         self._last_tab_index = index
+
+    def _build_option_sources_tab(self):
+        layout = QVBoxLayout(self.option_sources_tab)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(8)
+
+        select_group = QGroupBox("Option Source Selection")
+        select_layout = QHBoxLayout(select_group)
+        select_layout.setContentsMargins(8, 8, 8, 8)
+        select_layout.setSpacing(8)
+
+        select_layout.addWidget(QLabel("Select Option Source:"))
+        self.option_source_combo = QComboBox()
+        self.option_source_combo.setMinimumWidth(200)
+        self.option_source_combo.currentIndexChanged.connect(self._on_option_source_changed)
+        select_layout.addWidget(self.option_source_combo)
+
+        self.new_option_source_btn = QPushButton("New Source...")
+        self.new_option_source_btn.clicked.connect(self._on_new_option_source_clicked)
+        select_layout.addWidget(self.new_option_source_btn)
+
+        self.delete_option_source_btn = QPushButton("Delete Source")
+        self.delete_option_source_btn.clicked.connect(self._on_delete_option_source_clicked)
+        select_layout.addWidget(self.delete_option_source_btn)
+
+        select_layout.addStretch(1)
+        layout.addWidget(select_group)
+
+        table_group = QGroupBox("Option Entries")
+        table_layout = QVBoxLayout(table_group)
+        table_layout.setContentsMargins(8, 8, 8, 8)
+        table_layout.setSpacing(8)
+
+        self.option_source_table = QTableWidget()
+        self.option_source_table.setColumnCount(2)
+        self.option_source_table.setHorizontalHeaderLabels(["Code", "Description"])
+        self.option_source_table.horizontalHeader().setStretchLastSection(True)
+        self._configure_authoring_table(self.option_source_table)
+        
+        table_layout.addWidget(self.option_source_table)
+
+        actions_layout = QHBoxLayout()
+        
+        self.option_source_add_btn = QPushButton("Add Entry")
+        self.option_source_add_btn.clicked.connect(self._on_option_source_add_entry_clicked)
+        actions_layout.addWidget(self.option_source_add_btn)
+
+        self.option_source_remove_btn = QPushButton("Remove Selected")
+        self.option_source_remove_btn.clicked.connect(self._on_option_source_remove_entry_clicked)
+        actions_layout.addWidget(self.option_source_remove_btn)
+
+        self.option_source_up_btn = QPushButton("Move Up")
+        self.option_source_up_btn.clicked.connect(self._on_option_source_move_up_clicked)
+        actions_layout.addWidget(self.option_source_up_btn)
+
+        self.option_source_down_btn = QPushButton("Move Down")
+        self.option_source_down_btn.clicked.connect(self._on_option_source_move_down_clicked)
+        actions_layout.addWidget(self.option_source_down_btn)
+
+        actions_layout.addStretch(1)
+
+        self.option_source_save_btn = QPushButton("Save Options")
+        self.option_source_save_btn.setStyleSheet("font-weight: bold;")
+        self.option_source_save_btn.clicked.connect(self._on_option_source_save_clicked)
+        actions_layout.addWidget(self.option_source_save_btn)
+
+        table_layout.addLayout(actions_layout)
+        layout.addWidget(table_group)
+
+    def _refresh_option_sources_dropdown(self, select_name=None):
+        from app.downtime_codes import get_available_options_sources
+        blocker = QSignalBlocker(self.option_source_combo)
+        current = self.option_source_combo.currentText()
+        self.option_source_combo.clear()
+        
+        sources = [s for s in get_available_options_sources() if s]
+        self.option_source_combo.addItems(sources)
+        
+        target = select_name or current
+        if target in sources:
+            self.option_source_combo.setCurrentText(target)
+        elif sources:
+            self.option_source_combo.setCurrentIndex(0)
+            
+        self._load_selected_option_source()
+
+    def _load_selected_option_source(self):
+        source_name = self.option_source_combo.currentText()
+        self.option_source_table.setRowCount(0)
+        if not source_name:
+            return
+            
+        from app.downtime_codes import load_generic_options_source
+        try:
+            data = load_generic_options_source(source_name)
+            ordered = sorted(data.items(), key=lambda item: (int(item[0]) if str(item[0]).isdigit() else float("inf"), str(item[0])))
+            
+            for code, desc in ordered:
+                row_idx = self.option_source_table.rowCount()
+                self.option_source_table.insertRow(row_idx)
+                
+                code_item = QTableWidgetItem(str(code))
+                desc_item = QTableWidgetItem(str(desc))
+                
+                self.option_source_table.setItem(row_idx, 0, code_item)
+                self.option_source_table.setItem(row_idx, 1, desc_item)
+        except Exception as exc:
+            self.set_status(f"Error loading option source: {exc}", error=True)
+
+    def _on_option_source_changed(self):
+        self._load_selected_option_source()
+
+    def _on_new_option_source_clicked(self):
+        name, ok = QInputDialog.getText(self, "New Option Source", "Enter new option source name (alphanumeric and underscores only):")
+        if not ok or not name:
+            return
+            
+        cleaned_name = "".join(c for c in name if c.isalnum() or c == "_").strip().lower()
+        if not cleaned_name:
+            QMessageBox.warning(self, "Invalid Name", "The name must contain at least one alphanumeric character or underscore.")
+            return
+            
+        from app.downtime_codes import get_available_options_sources, save_generic_options_source
+        if cleaned_name in get_available_options_sources():
+            QMessageBox.warning(self, "Duplicate Name", "An option source with this name already exists.")
+            return
+            
+        try:
+            save_generic_options_source(cleaned_name, {})
+            self._refresh_option_sources_dropdown(select_name=cleaned_name)
+            self.set_status(f"Created new option source '{cleaned_name}'")
+        except Exception as exc:
+            QMessageBox.critical(self, "Error", f"Failed to create option source: {exc}")
+
+    def _on_delete_option_source_clicked(self):
+        source_name = self.option_source_combo.currentText()
+        if not source_name:
+            return
+            
+        if source_name == "downtime_codes":
+            QMessageBox.warning(self, "Protected Source", "The 'downtime_codes' source is built-in/required and cannot be deleted.")
+            return
+            
+        confirm = QMessageBox.question(
+            self,
+            "Confirm Delete",
+            f"Are you sure you want to permanently delete the option source '{source_name}'?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+        if confirm != QMessageBox.StandardButton.Yes:
+            return
+            
+        import os
+        from app.utils import external_data_path
+        path = os.path.join(external_data_path("forms/op_source"), f"{source_name}.json")
+        try:
+            if os.path.exists(path):
+                os.remove(path)
+            self._refresh_option_sources_dropdown()
+            self.set_status(f"Deleted option source '{source_name}'")
+        except Exception as exc:
+            QMessageBox.critical(self, "Error", f"Failed to delete option source: {exc}")
+
+    def _on_option_source_add_entry_clicked(self):
+        row_idx = self.option_source_table.rowCount()
+        self.option_source_table.insertRow(row_idx)
+        
+        code_item = QTableWidgetItem("")
+        desc_item = QTableWidgetItem("")
+        
+        self.option_source_table.setItem(row_idx, 0, code_item)
+        self.option_source_table.setItem(row_idx, 1, desc_item)
+        
+        self.option_source_table.setCurrentCell(row_idx, 0)
+        self.option_source_table.editItem(code_item)
+
+    def _on_option_source_remove_entry_clicked(self):
+        selected_ranges = self.option_source_table.selectedRanges()
+        if not selected_ranges:
+            self.set_status("Select rows to remove.", error=True)
+            return
+            
+        rows_to_delete = set()
+        for r in selected_ranges:
+            for row in range(r.topRow(), r.bottomRow() + 1):
+                rows_to_delete.add(row)
+                
+        for row in sorted(rows_to_delete, reverse=True):
+            self.option_source_table.removeRow(row)
+            
+        self.set_status("Removed selected entries.")
+
+    def _on_option_source_move_up_clicked(self):
+        row = self.option_source_table.currentRow()
+        if row <= 0:
+            return
+        self._swap_table_rows(self.option_source_table, row, row - 1)
+        self.option_source_table.setCurrentCell(row - 1, self.option_source_table.currentColumn())
+
+    def _on_option_source_move_down_clicked(self):
+        row = self.option_source_table.currentRow()
+        if row < 0 or row >= self.option_source_table.rowCount() - 1:
+            return
+        self._swap_table_rows(self.option_source_table, row, row + 1)
+        self.option_source_table.setCurrentCell(row + 1, self.option_source_table.currentColumn())
+
+    def _swap_table_rows(self, table, row_a, row_b):
+        table.blockSignals(True)
+        for col in range(table.columnCount()):
+            item_a = table.takeItem(row_a, col) or QTableWidgetItem("")
+            item_b = table.takeItem(row_b, col) or QTableWidgetItem("")
+            table.setItem(row_a, col, item_b)
+            table.setItem(row_b, col, item_a)
+        table.blockSignals(False)
+
+    def _on_option_source_save_clicked(self):
+        source_name = self.option_source_combo.currentText()
+        if not source_name:
+            return
+            
+        data = {}
+        for row in range(self.option_source_table.rowCount()):
+            code_item = self.option_source_table.item(row, 0)
+            desc_item = self.option_source_table.item(row, 1)
+            
+            code = str(code_item.text() if code_item else "").strip()
+            desc = str(desc_item.text() if desc_item else "").strip()
+            
+            if code:
+                data[code] = desc
+                
+        from app.downtime_codes import save_generic_options_source
+        try:
+            save_generic_options_source(source_name, data)
+            self.set_status(f"Saved option source '{source_name}' successfully.")
+        except Exception as exc:
+            QMessageBox.critical(self, "Error", f"Failed to save option source: {exc}")
 
     def finalize_block_table_edits(self):
         for table_widget in (self.header_fields_table, self.row_fields_table, self.mapping_table):

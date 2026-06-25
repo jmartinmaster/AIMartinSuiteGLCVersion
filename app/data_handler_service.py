@@ -1179,6 +1179,17 @@ class DataHandlerService:
     def resolve_row_export_value(self, section_name, field_id, row_data, column_config, calculation_settings=None):
         value = row_data.get(field_id)
         transform = column_config.get("export_transform", "value")
+        field_role = self.get_section_field_role(section_name, field_id)
+
+        if transform == "code_number" or (section_name == "downtime" and field_role == "downtime_code"):
+            mode = "both"
+            if calculation_settings and isinstance(calculation_settings, dict):
+                mode = calculation_settings.get("downtime_code_export_mode", "both")
+            field_config = self.get_section_field_config(section_name, field_id)
+            source_name = field_config.get("options_source", "downtime_codes")
+            from app.downtime_codes import format_generic_code_for_export
+            return format_generic_code_for_export(value, source_name, mode)
+
         if transform == "duration_minutes":
             return self.calculate_runtime_downtime_minutes(
                 self.get_row_value_by_role(section_name, row_data, "start_clock", fallback_id="start"),
@@ -1186,8 +1197,6 @@ class DataHandlerService:
                 calculation_settings=calculation_settings,
                 fallback_label=self.get_row_value_by_role(section_name, row_data, "duration_minutes", fallback_id="time_calc"),
             )
-        if transform == "code_number":
-            return get_code_number(value)
         if transform == "bool_int":
             return 1 if bool(value) else 0
         if transform == "minutes_label":
@@ -1197,7 +1206,10 @@ class DataHandlerService:
     def resolve_row_import_value(self, section_name, field_id, raw_value, partial_row, column_config, calculation_settings=None):
         transform = column_config.get("import_transform", "value")
         if transform == "code_lookup":
-            return normalize_code_value(raw_value)
+            field_config = self.get_section_field_config(section_name, field_id)
+            source_name = field_config.get("options_source", "downtime_codes")
+            from app.downtime_codes import normalize_generic_code_value
+            return normalize_generic_code_value(raw_value, source_name)
         if transform == "stop_from_duration":
             return self.calculate_stop_time(
                 self.get_row_value_by_role(section_name, partial_row, "start_clock", fallback_id="start"),

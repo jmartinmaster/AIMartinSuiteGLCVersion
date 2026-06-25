@@ -36,23 +36,112 @@ DEFAULT_DT_CODE_MAP = {
 
 @lru_cache(maxsize=1)
 def load_code_map():
+    import json
+    import os
+    from app.utils import external_data_path, ensure_external_data_directory
+
+    # Try loading from options source directory first
+    dir_path = external_data_path("forms/op_source")
+    path = os.path.join(dir_path, "downtime_codes.json")
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, dict):
+                    cleaned = {}
+                    for k, v in data.items():
+                        cleaned[str(k).strip()] = str(v).strip()
+                    return cleaned
+        except Exception:
+            pass
+
+    # Legacy settings load or default fallback
     code_map = dict(DEFAULT_DT_CODE_MAP)
-    loaded = ExternalDataRegistry().load_json("settings", default_factory=dict)
-    overrides = loaded.get("downtime_codes", {}) if isinstance(loaded, dict) else {}
-    if isinstance(overrides, dict):
-        for raw_code, raw_label in overrides.items():
-            code = str(raw_code).strip()
-            if not code:
-                continue
-            label = str(raw_label or "").strip()
-            if not label:
-                continue
-            code_map[code] = label
+    try:
+        loaded = ExternalDataRegistry().load_json("settings", default_factory=dict)
+        overrides = loaded.get("downtime_codes", {}) if isinstance(loaded, dict) else {}
+        if isinstance(overrides, dict):
+            for raw_code, raw_label in overrides.items():
+                code = str(raw_code).strip()
+                if not code:
+                    continue
+                label = str(raw_label or "").strip()
+                if not label:
+                    continue
+                code_map[code] = label
+    except Exception:
+        pass
+
+    # Auto-initialize the file so it can be edited
+    try:
+        ensure_external_data_directory("forms/op_source")
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(code_map, f, indent=4)
+    except Exception:
+        pass
+
     return code_map
 
 
 def clear_downtime_code_cache():
     load_code_map.cache_clear()
+
+
+def get_available_options_sources():
+    import os
+    from app.utils import external_data_path
+    sources = ["", "downtime_codes"]
+    dir_path = external_data_path("forms/op_source")
+    if os.path.exists(dir_path):
+        try:
+            for f in os.listdir(dir_path):
+                if f.endswith(".json"):
+                    name = f[:-5]
+                    if name not in sources:
+                        sources.append(name)
+        except Exception:
+            pass
+    return sorted(list(set(sources)))
+
+
+def load_generic_options_source(source_name):
+    import json
+    import os
+    from app.utils import external_data_path
+
+    if not source_name:
+        return {}
+    if source_name == "downtime_codes":
+        return load_code_map()
+
+    path = os.path.join(external_data_path("forms/op_source"), f"{source_name}.json")
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, dict):
+                    cleaned = {}
+                    for k, v in data.items():
+                        cleaned[str(k).strip()] = str(v).strip()
+                    return cleaned
+        except Exception:
+            pass
+    return {}
+
+
+def save_generic_options_source(source_name, data):
+    import json
+    import os
+    from app.utils import ensure_external_data_directory
+
+    if not source_name:
+        return
+    dir_path = ensure_external_data_directory("forms/op_source")
+    path = os.path.join(dir_path, f"{source_name}.json")
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=4)
+    if source_name == "downtime_codes":
+        clear_downtime_code_cache()
 
 
 def get_code_lookup():
@@ -64,13 +153,25 @@ def get_code_options():
     return list(get_code_lookup().values())
 
 
+def get_generic_options(source_name):
+    if not source_name:
+        return []
+    source_map = load_generic_options_source(source_name)
+    ordered = sorted(source_map.items(), key=lambda item: (int(item[0]) if str(item[0]).isdigit() else float("inf"), str(item[0])))
+    return [f"{code} {label}".strip() for code, label in ordered]
+
+
 def normalize_code_value(value):
+    return normalize_generic_code_value(value, "downtime_codes")
+
+
+def normalize_generic_code_value(value, source_name):
     text = str(value or "").strip()
     if not text:
         return ""
 
-    code_lookup = get_code_lookup()
-    code_map = load_code_map()
+    code_map = load_generic_options_source(source_name)
+    code_lookup = {code: f"{code} {label}" for code, label in code_map.items()}
 
     def iter_code_candidates(raw_text):
         candidates = []
@@ -121,3 +222,34 @@ def get_code_number(value):
     if not normalized:
         return ""
     return normalized.split(" ", 1)[0]
+
+
+def format_generic_code_for_export(value, source_name, mode):
+    if not value:
+        return ""
+    code_map = load_generic_options_source(source_name)
+    text = str(value).strip()
+    parts = text.split(" ", 1)
+    code = parts[0]
+    description = parts[1] if len(parts) > 1 else ""
+
+    if code in code_map:
+        description = code_map[code]
+    else:
+        found = False
+        for c, d in code_map.items():
+            if text == d:
+                code = c
+                description = d
+                found = True
+                break
+        if not found:
+            pass
+
+    if mode == "code":
+        return code
+    elif mode == "description":
+        return description
+    elif mode == "both":
+        return f"{code} {description}".strip() if code or description else text
+    return code

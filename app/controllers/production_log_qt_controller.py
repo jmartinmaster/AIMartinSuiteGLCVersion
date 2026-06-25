@@ -376,6 +376,11 @@ class ProductionLogQtController:
         if self.view.has_unsaved_changes:
             self.save_draft(is_auto=True)
 
+    def clear_form(self):
+        if self.view.ask_yes_no("Clear Current Form", "Are you sure you want to clear the current form? Any unsaved edits will be lost."):
+            self._initialize_form()
+            self.show_toast("Form Cleared", "The form has been reset to default values.")
+
     def _apply_loaded_payload(self, payload, draft_path=None, mark_dirty_after_load=False):
         payload = dict(payload or {})
         self.balance_state = self.model.normalize_balance_state(payload.get("balance_state"))
@@ -1220,3 +1225,9 @@ class ProductionLogQtController:
             self.view.close()
         except Exception:
             pass
+        if hasattr(self, "view") and self.view is not None:
+            if hasattr(self.view, "controller"):
+                self.view.controller = None
+            self.view = None
+        self.dispatcher = None
+        self.parent = None

@@ -83,6 +83,11 @@ class InternalCodeEditorQtController:
             view.deleteLater()
         except Exception:
             pass
+        if hasattr(view, "controller"):
+            view.controller = None
+        self.view = None
+        self.dispatcher = None
+        self.parent = None
 
     def show(self):
         self.view.show()

@@ -43,7 +43,7 @@ from app.controllers.app_controller import Dispatcher
 from app.app_platform import SPLASH_LOGO_RELATIVE_PATH, apply_app_icon, apply_windows_app_id
 
 __module_name__ = "Dispatcher Core"
-__version__ = "2.4.2"
+__version__ = "2.4.3"
 LAYOUT_MANAGER_QT_SESSION_ENV = "AIMARTIN_LAYOUT_MANAGER_QT_SESSION"
 
 
@@ -139,6 +139,28 @@ def _run_layout_manager_qt_session(session_path, session_payload):
 
 
 def run_application(main_module=None, initial_module_name=None):
+    if os.environ.get("AIMARTIN_START_LIBRARIAN") == "1":
+        import threading
+        from pathlib import Path
+        from project_librarian import run_librarian_mcp_server
+        def _bg_mcp():
+            try:
+                run_librarian_mcp_server(
+                    repo_root=Path(__file__).resolve().parent,
+                    transport="streamable-http",
+                    host="127.0.0.1",
+                    port=8765,
+                    refresh_first=False,
+                    refresh_interval_seconds=0
+                )
+            except Exception as e:
+                import sys
+                print(f"Error starting background librarian server: {e}", file=sys.stderr)
+        
+        t = threading.Thread(target=_bg_mcp, name="bg-librarian-mcp", daemon=True)
+        t.start()
+        print("Project Librarian background MCP server thread started on http://127.0.0.1:8765/ (profiling main app process)")
+
     data_registry = ExternalDataRegistry()
     settings_path = data_registry.resolve_read_path("settings")
     theme_name = DEFAULT_THEME

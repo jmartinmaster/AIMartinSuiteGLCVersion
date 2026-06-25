@@ -81,7 +81,6 @@ HIDDENIMPORTS = [
 ]
 COLLECT_SUBMODULE_PACKAGES = [
     "app",
-    "PyQt6",
     "openpyxl",
 ]
 EXCLUDED_MODULES = [
@@ -91,6 +90,41 @@ EXCLUDED_MODULES = [
     "PIL.ImageTk",
     "PIL._tkinter_finder",
     "PyInstaller",
+    # Exclude unused PyQt6 submodules to keep build size under 100MB
+    "PyQt6.QtWebEngine",
+    "PyQt6.QtWebEngineWidgets",
+    "PyQt6.QtWebEngineCore",
+    "PyQt6.QtMultimedia",
+    "PyQt6.QtQuick",
+    "PyQt6.QtQml",
+    "PyQt6.QtSql",
+    "PyQt6.QtSvg",
+    "PyQt6.QtSvgWidgets",
+    "PyQt6.QtTest",
+    "PyQt6.QtTextToSpeech",
+    "PyQt6.QtWebChannel",
+    "PyQt6.QtWebSockets",
+    "PyQt6.QtXml",
+    "PyQt6.QtNetwork",
+    "PyQt6.QtQmlModels",
+    "PyQt6.QtQuickWidgets",
+    "PyQt6.QtDesigner",
+    "PyQt6.QtHelp",
+    "PyQt6.QtOpenGL",
+    "PyQt6.QtOpenGLWidgets",
+    "PyQt6.QtPdf",
+    "PyQt6.QtPdfWidgets",
+    "PyQt6.QtSensors",
+    "PyQt6.QtSerialPort",
+    "PyQt6.QtPositioning",
+    "PyQt6.QtBluetooth",
+    "PyQt6.QtNfc",
+    "PyQt6.QtRemoteObjects",
+    "PyQt6.QtSpatialAudio",
+    "PyQt6.QtCharts",
+    "PyQt6.QtDataVisualization",
+    "PyQt6.lupdate",
+    "PyQt6.uic",
 ]
 WINDOWS_TARGET = "windows"
 UBUNTU_TARGET = "ubuntu"

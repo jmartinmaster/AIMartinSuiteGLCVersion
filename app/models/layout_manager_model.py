@@ -620,7 +620,8 @@ class LayoutManagerModel:
 
         options_source_name = str(normalized_field.get("options_source", "") or "").strip().lower()
         if widget_name == "combobox":
-            if options_source_name == "downtime_codes":
+            from app.downtime_codes import get_available_options_sources
+            if options_source_name in get_available_options_sources():
                 normalized_field["options_source"] = options_source_name
             else:
                 normalized_field.pop("options_source", None)
@@ -1521,7 +1522,8 @@ class LayoutManagerModel:
                 raise ValueError(f"{field_group_name} field '{field_id}' has unsupported state '{state_name}'.")
 
             options_source_name = str(field.get("options_source", "") or "").strip().lower()
-            if options_source_name not in allowed_options_sources:
+            from app.downtime_codes import get_available_options_sources
+            if options_source_name not in get_available_options_sources():
                 raise ValueError(
                     f"{field_group_name} field '{field_id}' has unsupported options_source '{options_source_name}'."
                 )
@@ -2009,7 +2011,8 @@ class LayoutManagerModel:
             raise ValueError(f"Unsupported state '{state_name}'.")
 
         options_source_name = str(options_source_value or target_field.get("options_source", "") or "").strip().lower()
-        if options_source_name not in {"", "downtime_codes"}:
+        from app.downtime_codes import get_available_options_sources
+        if options_source_name not in get_available_options_sources():
             raise ValueError(f"Unsupported options_source '{options_source_name}'.")
 
         row = int(str(row_value).strip())

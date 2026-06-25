@@ -13,7 +13,7 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-from app.downtime_codes import get_code_options
+from app.downtime_codes import get_code_options, get_generic_options
 from app.theme_manager import get_qt_palette, get_qt_stylesheet
 
 __module_name__ = "Form Loader Qt View"
@@ -393,10 +393,21 @@ class ProductionLogQtView(QMainWindow):
         action_panel_layout.setHorizontalSpacing(12)
         action_panel_layout.setVerticalSpacing(12)
 
+        save_draft_btn = QPushButton("Save Draft")
+        save_draft_btn.setMinimumHeight(40)
+        self.action_buttons.append(save_draft_btn)
+        
+        save_menu = QMenu(save_draft_btn)
+        save_action = save_menu.addAction("Save Draft")
+        save_action.triggered.connect(self.controller.save_draft)
+        clear_action = save_menu.addAction("Clear Current Form")
+        clear_action.triggered.connect(self.controller.clear_form)
+        save_draft_btn.setMenu(save_menu)
+
         draft_group = self._build_action_group(
             "Draft Workflow",
             [
-                self._create_action_button("Save Draft", self.controller.save_draft),
+                save_draft_btn,
                 self._create_action_button("Refresh Draft Lists", self.controller.refresh_draft_lists),
                 self._create_action_button("Pending Drafts", self.controller.open_pending_dialog),
                 self._create_action_button("Open Pending Folder", self.controller.open_pending_folder),
@@ -528,8 +539,8 @@ class ProductionLogQtView(QMainWindow):
                     options.append(value_text)
 
         options_source = str(field.get("options_source") or "").strip().lower()
-        if options_source == "downtime_codes":
-            for raw_value in get_code_options():
+        if options_source:
+            for raw_value in get_generic_options(options_source):
                 value_text = str(raw_value or "").strip()
                 if value_text and value_text not in options:
                     options.append(value_text)
@@ -913,8 +924,8 @@ class ProductionLogQtView(QMainWindow):
                 if value_text and value_text not in options:
                     options.append(value_text)
         options_source = str(field.get("options_source") or "").strip().lower()
-        if options_source == "downtime_codes":
-            for raw_value in get_code_options():
+        if options_source:
+            for raw_value in get_generic_options(options_source):
                 value_text = str(raw_value or "").strip()
                 if value_text and value_text not in options:
                     options.append(value_text)

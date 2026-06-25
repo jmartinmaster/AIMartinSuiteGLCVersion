@@ -4,6 +4,40 @@ This changelog tracks the main branch release line for Production Logging Center
 
 Version headings below are aligned to the current `2.x` release line used by Dispatcher Core. Earlier work has been grouped into practical release milestones so the shipped feature history is easier to follow without rewriting older module version markers.
 
+## [2.4.3] - 2026-06-24
+
+### Added
+
+- **Generic Options Sources**:
+  - Added dynamic options source registration, loading, and saving to `app/downtime_codes.py` (storing custom dropdown code lists under `data/forms/op_source/`).
+  - Added a dedicated "Options Sources" management layout in Layout Manager UI to create, edit, reorder, and delete custom options lists.
+  - Integrated custom options sources lookups into Form Loader comboboxes and checkboxes.
+  - Configured Excel import/export value transformations to format codes and descriptions dynamically based on options source configurations in `data_handler_service.py`.
+- **Librarian MCP Memory Profiling & Anti-Pattern Presets**:
+  - Implemented live Python memory profiling (`profile_memory` tool using `tracemalloc`) in the Project Librarian MCP server for heap statistics and comparisons.
+  - Implemented anti-pattern presets configuration (`anti_pattern_search` tool) to define and run workspace searches.
+  - Added background thread startup of the Librarian MCP server in `launcher.py` under the `AIMARTIN_START_LIBRARIAN` flag.
+- **Form Loader UI Polish**:
+  - Replaced the simple "Save Draft" button with a dropdown action menu, adding a "Clear Current Form" utility.
+
+## [2.4.2] - 2026-06-22
+
+### Added
+
+- **Crash Monitoring & Recovery Integration**:
+  - Created `app/crash_handler.py` supporting parent-child supervision of the main application process.
+  - Implemented crash logging, diagnostic reports (saved to `latest_crash.txt`), and interactive PyQt6 relaunch options.
+  - Added crash history viewing and deletion to Settings Manager Developer Tools.
+- **Notification Center**:
+  - Added a permanent clickable status bar badge indicating notification counts and displaying a historical log modal on click.
+- **Layout Manager Comparison & Scanning Tools**:
+  - Integrated JSON unified diff layouts, compare reference tabs, and Excel-based keyword scanning in Layout Manager to analyze missing semantic fields.
+
+### Changed
+
+- **Launcher Version Bump**: Bumped Dispatcher Core version to `2.4.2`.
+- **Disabled Auto Missing Field Injection**: Bypassed automatic field injection prompts upon form activation to prevent intrusive modal alerts.
+
 ## [2.4.1] - 2026-06-22
 
 ### Added
