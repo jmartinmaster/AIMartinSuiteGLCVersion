@@ -173,12 +173,16 @@ class SettingsManagerQtView(QMainWindow):
         self.theme_combo = QComboBox()
         self.theme_combo.currentIndexChanged.connect(self._on_form_changed)
         self.theme_combo.currentIndexChanged.connect(self.controller.preview_selected_theme)
+        self.theme_combo.setAccessibleName("Application Theme")
+        self.theme_combo.setAccessibleDescription("Select a visual theme preset for the application.")
         theme_row = QWidget()
         theme_row_layout = QHBoxLayout(theme_row)
         theme_row_layout.setContentsMargins(0, 0, 0, 0)
         theme_row_layout.addWidget(self.theme_combo, 1)
         revert_theme_button = QPushButton("Revert Preview")
         revert_theme_button.clicked.connect(self.controller.revert_theme_preview)
+        revert_theme_button.setAccessibleName("Revert Theme Preview")
+        revert_theme_button.setAccessibleDescription("Restores the theme preview to the active theme.")
         theme_row_layout.addWidget(revert_theme_button)
         editable_layout.addRow(QLabel("Theme"), theme_row)
 
@@ -188,31 +192,43 @@ class SettingsManagerQtView(QMainWindow):
 
         self.export_directory_input = QLineEdit()
         self.export_directory_input.textChanged.connect(self._on_form_changed)
+        self.export_directory_input.setAccessibleName("Export Directory Path")
+        self.export_directory_input.setAccessibleDescription("Path where exported logs and summaries are stored.")
         export_row = QWidget()
         export_row_layout = QHBoxLayout(export_row)
         export_row_layout.setContentsMargins(0, 0, 0, 0)
         export_row_layout.addWidget(self.export_directory_input, 1)
         browse_export_button = QPushButton("Browse")
         browse_export_button.clicked.connect(self.controller.browse_export_dir)
+        browse_export_button.setAccessibleName("Browse export directory")
+        browse_export_button.setAccessibleDescription("Opens a system directory picker to select the export directory.")
         export_row_layout.addWidget(browse_export_button)
         editable_layout.addRow(QLabel("Export Directory"), export_row)
 
         self.organize_exports_checkbox = QCheckBox("Organize exports by date")
         self.organize_exports_checkbox.stateChanged.connect(self._on_form_changed)
+        self.organize_exports_checkbox.setAccessibleName("Organize exports by date")
+        self.organize_exports_checkbox.setAccessibleDescription("If checked, saves exports into YYYY/MM subfolders.")
         editable_layout.addRow(QLabel("Export Organization"), self.organize_exports_checkbox)
 
         self.toast_duration_spin = QSpinBox()
         self.toast_duration_spin.setRange(1, 120)
         self.toast_duration_spin.valueChanged.connect(self._on_form_changed)
+        self.toast_duration_spin.setAccessibleName("Toast Notification Duration")
+        self.toast_duration_spin.setAccessibleDescription("Seconds that temporary screen alerts remain visible.")
         editable_layout.addRow(QLabel("Toast Duration (sec)"), self.toast_duration_spin)
 
         self.auto_save_spin = QSpinBox()
         self.auto_save_spin.setRange(1, 240)
         self.auto_save_spin.valueChanged.connect(self._on_form_changed)
+        self.auto_save_spin.setAccessibleName("Draft Auto Save Interval")
+        self.auto_save_spin.setAccessibleDescription("Minutes between automatic log draft saves.")
         editable_layout.addRow(QLabel("Auto Save Interval (min)"), self.auto_save_spin)
 
         self.transition_enabled_checkbox = QCheckBox("Enable screen transitions")
         self.transition_enabled_checkbox.stateChanged.connect(self._on_form_changed)
+        self.transition_enabled_checkbox.setAccessibleName("Enable screen transitions")
+        self.transition_enabled_checkbox.setAccessibleDescription("Toggle smooth transitions when changing application views.")
         editable_layout.addRow(QLabel("Transitions"), self.transition_enabled_checkbox)
 
         self.transition_duration_spin = QSpinBox()
@@ -311,19 +327,27 @@ class SettingsManagerQtView(QMainWindow):
 
         self.security_vault_name_input = QLineEdit()
         self.security_vault_name_input.textChanged.connect(self._on_form_changed)
+        self.security_vault_name_input.setAccessibleName("Security Vault Name")
+        self.security_vault_name_input.setAccessibleDescription("Identifies the vault database name.")
         security_form.addRow(QLabel("Vault Name"), self.security_vault_name_input)
 
         self.security_role_combo = QComboBox()
         self.security_role_combo.addItems(["general", "admin", "developer"])
         self.security_role_combo.currentTextChanged.connect(self.controller.on_security_role_selected)
+        self.security_role_combo.setAccessibleName("Security Role")
+        self.security_role_combo.setAccessibleDescription("Select which role policies to configure.")
         security_form.addRow(QLabel("Role"), self.security_role_combo)
 
         self.security_enabled_checkbox = QCheckBox("Enabled")
         self.security_enabled_checkbox.stateChanged.connect(self._on_form_changed)
+        self.security_enabled_checkbox.setAccessibleName("Security Vault Enabled")
+        self.security_enabled_checkbox.setAccessibleDescription("Toggles active security vault policies.")
         security_form.addRow(QLabel("Vault Status"), self.security_enabled_checkbox)
 
         self.security_password_required_checkbox = QCheckBox("Require Password")
         self.security_password_required_checkbox.stateChanged.connect(self._on_form_changed)
+        self.security_password_required_checkbox.setAccessibleName("Password Required Toggle")
+        self.security_password_required_checkbox.setAccessibleDescription("If checked, users must enter a password for this vault.")
         security_form.addRow(QLabel("Password Requirement"), self.security_password_required_checkbox)
 
         self.security_password_rule_label = QLabel("Password rule: not set")
@@ -340,11 +364,15 @@ class SettingsManagerQtView(QMainWindow):
 
         self.security_non_secure_checkbox = QCheckBox("Enable persisted non-secure mode (for selected modules)")
         self.security_non_secure_checkbox.stateChanged.connect(self._on_form_changed)
+        self.security_non_secure_checkbox.setAccessibleName("Enable persisted non-secure mode")
+        self.security_non_secure_checkbox.setAccessibleDescription("Allows selected whitelisted modules to bypass password logins.")
         security_form.addRow(QLabel("Security Mode"), self.security_non_secure_checkbox)
 
         self.security_non_secure_modules_list = QListWidget()
         self.security_non_secure_modules_list.setSelectionMode(QListWidget.SelectionMode.MultiSelection)
         self.security_non_secure_modules_list.itemSelectionChanged.connect(self._on_form_changed)
+        self.security_non_secure_modules_list.setAccessibleName("Non-secure bypass modules list")
+        self.security_non_secure_modules_list.setAccessibleDescription("Select modules that bypass security authentication.")
         security_form.addRow(QLabel("Non-Secure Bypass Modules"), self.security_non_secure_modules_list)
 
         security_actions_row_1 = QHBoxLayout()
@@ -409,14 +437,20 @@ class SettingsManagerQtView(QMainWindow):
 
         self.developer_repository_input = QLineEdit()
         self.developer_repository_input.textChanged.connect(self._on_form_changed)
+        self.developer_repository_input.setAccessibleName("Update Repository URL")
+        self.developer_repository_input.setAccessibleDescription("GitHub repository URL used for application updates.")
         developer_layout.addRow(QLabel("Update Repository URL"), self.developer_repository_input)
 
         self.developer_advanced_checkbox = QCheckBox("Enable advanced dev update actions")
         self.developer_advanced_checkbox.stateChanged.connect(self._on_form_changed)
+        self.developer_advanced_checkbox.setAccessibleName("Enable advanced dev updates")
+        self.developer_advanced_checkbox.setAccessibleDescription("Enables options to run local repository builds and staging flows.")
         developer_layout.addRow(QLabel("Advanced Dev Updates"), self.developer_advanced_checkbox)
 
         self.developer_trust_checkbox = QCheckBox("Enable external module override trust")
         self.developer_trust_checkbox.stateChanged.connect(self._on_form_changed)
+        self.developer_trust_checkbox.setAccessibleName("Enable external module override trust")
+        self.developer_trust_checkbox.setAccessibleDescription("Enables execution of local override Python files placed beside the application.")
         developer_layout.addRow(QLabel("Override Trust"), self.developer_trust_checkbox)
 
         self.developer_trust_note_label = QLabel(
@@ -464,10 +498,14 @@ class SettingsManagerQtView(QMainWindow):
             path_input = QLineEdit()
             path_input.setPlaceholderText("Default (blank)")
             path_input.textChanged.connect(self._on_form_changed)
+            path_input.setAccessibleName(f"{override_label} override path input")
+            path_input.setAccessibleDescription(f"Specify a custom directory root for {override_label}. Leave blank for default.")
             input_row_layout.addWidget(path_input, 1)
 
             browse_button = QPushButton("Browse…")
             browse_button.setFixedWidth(72)
+            browse_button.setAccessibleName(f"Browse {override_label}")
+            browse_button.setAccessibleDescription(f"Browse directory for {override_label}.")
             _key = override_key
             browse_button.clicked.connect(lambda _checked=False, k=_key: self.controller.browse_runtime_path(k))
             input_row_layout.addWidget(browse_button)

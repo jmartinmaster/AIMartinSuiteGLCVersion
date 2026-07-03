@@ -88,9 +88,13 @@ class HelpViewerQtView(QMainWindow):
         action_row = QHBoxLayout()
         open_button = QPushButton("Open Current File")
         open_button.clicked.connect(self.controller.open_active_document)
+        open_button.setAccessibleName("Open current help file")
+        open_button.setAccessibleDescription("Opens the active markdown file in the system default text editor.")
         action_row.addWidget(open_button)
         license_button = QPushButton("Open License File")
         license_button.clicked.connect(self.controller.open_license_document)
+        license_button.setAccessibleName("Open license file")
+        license_button.setAccessibleDescription("Opens the GPL license text document.")
         action_row.addWidget(license_button)
         action_row.addStretch(1)
         root_layout.addLayout(action_row)
@@ -106,11 +110,15 @@ class HelpViewerQtView(QMainWindow):
         left_layout.addWidget(QLabel("References"))
         self.doc_list = QListWidget()
         self.doc_list.currentItemChanged.connect(self._handle_doc_selection_changed)
+        self.doc_list.setAccessibleName("Help reference documents list")
+        self.doc_list.setAccessibleDescription("Lists available help manuals and reference documents.")
         left_layout.addWidget(self.doc_list, 3)
 
         left_layout.addWidget(QLabel("Sections"))
         self.section_list = QListWidget()
         self.section_list.currentItemChanged.connect(self._handle_section_selection_changed)
+        self.section_list.setAccessibleName("Help document sections list")
+        self.section_list.setAccessibleDescription("Lists subsections and headers in the active help document.")
         left_layout.addWidget(self.section_list, 2)
 
         for doc_name, doc_path in self.doc_index:
@@ -139,6 +147,8 @@ class HelpViewerQtView(QMainWindow):
 
         self.doc_browser = QTextBrowser()
         self.doc_browser.setReadOnly(True)
+        self.doc_browser.setAccessibleName("Help document viewer panel")
+        self.doc_browser.setAccessibleDescription("Scrollable area showing rendering of help content in rich formatted text.")
         right_layout.addWidget(self.doc_browser, 1)
 
         content_row.addWidget(right_panel, 3)

@@ -178,7 +178,8 @@ def _build_snapshot_github_url(owner, repo, branch_name):
 
 
 def _normalize_update_repository_url(raw_value):
-    return str(raw_value or "").strip()
+    val = str(raw_value or "").strip()
+    return val.strip("'\"")
 
 
 def _load_external_settings_payload(settings_path=None, data_registry=None):

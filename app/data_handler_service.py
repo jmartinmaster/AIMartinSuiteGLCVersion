@@ -216,6 +216,7 @@ class DataHandlerService:
         if "export_prefix" in normalized:
             normalized["export_prefix"] = str(normalized["export_prefix"] if normalized["export_prefix"] is not None else "").strip()
         else:
+            form_name = (self.form_info.get("name") or self.form_info.get("id") or "Form") if isinstance(self.form_info, dict) else "Form"
             normalized["export_prefix"] = str(form_name).strip()
 
         if "production_row_fields" not in normalized or not normalized["production_row_fields"]:

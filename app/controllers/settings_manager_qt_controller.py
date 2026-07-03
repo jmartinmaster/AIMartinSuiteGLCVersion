@@ -699,7 +699,7 @@ class SettingsManagerQtController:
 
     def save_developer_admin_settings(self, update_repository_url, enable_advanced_dev_updates, enable_external_override_trust, runtime_path_overrides=None):
         trust_changed = gatekeeper.is_external_module_override_trust_enabled() != bool(enable_external_override_trust)
-        self.model.settings["update_repository_url"] = str(update_repository_url or "").strip()
+        self.model.settings["update_repository_url"] = str(update_repository_url or "").strip().strip("'\"")
         self.model.settings["enable_advanced_dev_updates"] = bool(enable_advanced_dev_updates)
         try:
             current_overrides = dict(self.model.settings.get("path_overrides", {}))

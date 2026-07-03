@@ -215,10 +215,14 @@ class ProductionLogQtView(QMainWindow):
 
         self.form_selector_combo = QComboBox(selector_group)
         self.form_selector_combo.setMinimumWidth(280)
+        self.form_selector_combo.setAccessibleName("Active Form Template Selector")
+        self.form_selector_combo.setAccessibleDescription("Select which custom or built-in form template is active.")
         selector_layout.addWidget(self.form_selector_combo, 1)
 
         activate_form_button = QPushButton("Switch Form", selector_group)
         activate_form_button.clicked.connect(self.controller.activate_selected_form)
+        activate_form_button.setAccessibleName("Switch to Selected Form")
+        activate_form_button.setAccessibleDescription("Applies and activates the form template selected in the dropdown.")
         selector_layout.addWidget(activate_form_button)
         content_layout.addWidget(selector_group)
 
@@ -367,6 +371,27 @@ class ProductionLogQtView(QMainWindow):
         button.clicked.connect(callback)
         button.setEnabled(bool(enabled))
         self.action_buttons.append(button)
+
+        accessibility_map = {
+            "Refresh Draft Lists": ("Refresh Draft lists", "Refreshes the local pending drafts and recovery snapshot lists."),
+            "Pending Drafts": ("Open Pending Drafts Dialog", "Opens a dialog to browse and load saved drafts."),
+            "Open Pending Folder": ("Open drafts directory", "Opens the system file explorer at the pending drafts folder."),
+            "Recovery Snapshots": ("Open Recovery Snapshots Dialog", "Opens a dialog to browse and restore recovery snapshots."),
+            "Open Recovery Folder": ("Open recovery directory", "Opens the system file explorer at the recovery backups folder."),
+            "Open Last Export": ("Open last exported workbook", "Opens the last exported Excel or text file in the default viewer."),
+            "Print Last Export": ("Print last exported workbook", "Sends the last exported workbook to the default printer."),
+            "Import Document": ("Import document workbook", "Imports data from an Excel workbook, text dump, or Word file."),
+            "Calculate": ("Calculate formulas", "Re-evaluates all formulas and updates calculations such as shift efficiency."),
+            "Balance Downtime": ("Balance shift downtime", "Redistributes any missing shift hours across downtime entries."),
+            "Add Row": ("Add new row", "Appends a new blank row to the active table section."),
+            "Remove Selected": ("Remove selected row", "Deletes the currently selected row from the active table section.")
+        }
+        if title in accessibility_map:
+            button.setAccessibleName(accessibility_map[title][0])
+            button.setAccessibleDescription(accessibility_map[title][1])
+        else:
+            button.setAccessibleName(title)
+
         return button
 
     def _build_action_group(self, title, buttons, parent):
@@ -395,6 +420,8 @@ class ProductionLogQtView(QMainWindow):
 
         save_draft_btn = QPushButton("Save Draft")
         save_draft_btn.setMinimumHeight(40)
+        save_draft_btn.setAccessibleName("Save Draft Actions")
+        save_draft_btn.setAccessibleDescription("Saves the current form entry as a draft or clears the active form.")
         self.action_buttons.append(save_draft_btn)
         
         save_menu = QMenu(save_draft_btn)
@@ -435,6 +462,8 @@ class ProductionLogQtView(QMainWindow):
         self.save_excel_btn.setMinimumHeight(40)
         self.save_excel_btn.setPopupMode(QToolButton.ToolButtonPopupMode.MenuButtonPopup)
         self.save_excel_btn.clicked.connect(self.on_save_clicked)
+        self.save_excel_btn.setAccessibleName("Save and Export Document")
+        self.save_excel_btn.setAccessibleDescription("Writes the current data into the template workbook. Select export format in the dropdown.")
         
         self.export_mode = "excel"
         menu = QMenu(self.save_excel_btn)
@@ -508,6 +537,9 @@ class ProductionLogQtView(QMainWindow):
             max_grid_col = max(max_grid_col, grid_col + 1)
 
             field_widget = self._create_header_field_widget(field, header_group)
+            field_widget.setAccessibleName(label_text)
+            field_desc = str(field.get("description") or f"Header field for {label_text}").strip()
+            field_widget.setAccessibleDescription(field_desc)
 
             label_widget = QLabel(label_text + ":", header_group)
             self.header_widgets[field_id] = field_widget
@@ -609,13 +641,19 @@ class ProductionLogQtView(QMainWindow):
         field_configs = self._get_section_field_configs(section_id)
         self._add_section_heading(content_layout, section_name, description)
         table = self._create_repeating_table(field_configs, section_info=section_info)
+        table.setAccessibleName(f"{section_name} table")
+        table.setAccessibleDescription(description or f"Data table for {section_name}")
         table.setMinimumHeight(self.REPEATING_SECTION_MIN_HEIGHTS.get(section_id, 240))
         self._register_repeating_section(section_id, table, field_configs, section_name)
         content_layout.addWidget(table)
 
         actions_layout = QHBoxLayout()
         add_button = QPushButton("Add Row")
+        add_button.setAccessibleName(f"Add row to {section_name}")
+        add_button.setAccessibleDescription(f"Adds a new blank row at the end of the {section_name} table.")
         remove_button = QPushButton("Remove Selected")
+        remove_button.setAccessibleName(f"Remove selected row from {section_name}")
+        remove_button.setAccessibleDescription(f"Deletes the highlighted row in the {section_name} table.")
         add_button.clicked.connect(lambda _checked=False, current_section_id=section_id: self._focus_open_section(current_section_id))
         remove_button.clicked.connect(
             lambda _checked=False, current_section_id=section_id: self._remove_selected_section_row(current_section_id)

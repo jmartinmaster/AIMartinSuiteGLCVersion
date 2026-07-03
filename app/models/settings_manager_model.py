@@ -332,7 +332,7 @@ class SettingsManagerModel:
         except Exception:
             settings["default_goal_mph"] = 240.0
 
-        settings["update_repository_url"] = str(settings.get("update_repository_url", DEFAULT_UPDATE_REPOSITORY_URL) or "").strip()
+        settings["update_repository_url"] = str(settings.get("update_repository_url", DEFAULT_UPDATE_REPOSITORY_URL) or "").strip().strip("'\"")
         default_export_directory = self._default_export_directory_setting()
         export_override = settings.get("path_overrides", {}).get("exports_root")
         settings["export_directory"] = str(export_override or default_export_directory).strip() or default_export_directory

@@ -4,6 +4,23 @@ This changelog tracks the main branch release line for Production Logging Center
 
 Version headings below are aligned to the current `2.x` release line used by Dispatcher Core. Earlier work has been grouped into practical release milestones so the shipped feature history is easier to follow without rewriting older module version markers.
 
+## [2.4.4] - 2026-07-03
+
+### Added
+
+- **Programmatic Accessibility Sweep**:
+  - Programmatically set `setAccessibleName` and `setAccessibleDescription` on all interactive buttons, inputs, checklists, table widgets, tab views, and trees across all 8 PyQt6 views.
+  - Implemented dynamic header field accessibility labels mapped directly from active JSON form layouts.
+
+### Changed
+
+- **Update Manager URL Quote Stripping**:
+  - Stripped single (`'`) and double (`"`) quotes from repository URLs, preventing invalid address errors and restoring update functionality.
+- **Form Loader Resilient Fallback**:
+  - Configured Form Loader to gracefully fall back to the default shipped form layout (`layout_config.json`) if the selected custom layout is missing or corrupted, preventing application crashes.
+- **Documentation Restructuring**:
+  - Moved stale/finished documentation files to `docs/Completed Plans/` and updated timelines and version markers in active runbooks.
+
 ## [2.4.3] - 2026-06-24
 
 ### Added

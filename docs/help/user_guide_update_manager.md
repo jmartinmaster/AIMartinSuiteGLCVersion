@@ -9,6 +9,7 @@ Use the **Update Manager** to check for new releases and update application file
 - Click **Check Repository** to compare your local version with the online repository.
 - Settings like the Repository URL and Developer toggles can be changed by an
   administrator in the **Settings Manager**.
+  - **Note:** The system robustly handles repository URLs, even if they contain quotes from manual edits.
 
 ---
 

@@ -42,7 +42,7 @@ The application shell is built around a dispatcher core (`launcher.py`) that hos
 | **Layout Manager** | Configure UI field mappings dynamically via `layout_config.json`. |
 | **Recovery Viewer** | Browse and restore draft snapshots and configuration backups without using the file explorer. |
 | **Settings Manager** | Manage themes, export paths, production defaults, downtime-code labels, and per-module persistence. Separates general settings from admin-only Developer & Admin tools. |
-| **Update Manager** | Check for new releases, download versioned EXEs, and install selected module payload updates without rebuilding the full executable. |
+| **Update Manager** | Check for new releases, download versioned EXEs, robustly handles quoted repository addresses, and installs selected module payload updates without rebuilding the full executable. |
 | **Help Viewer** | In-app Help Center with top-level guide chips, Hidden Modules reference, and module-specific User Guide sections. |
 | **About** | Application version information and bundled GPL license access. |
 
@@ -55,6 +55,10 @@ The application shell is built around a dispatcher core (`launcher.py`) that hos
 - **Theme Support** — includes the Martin Modern Light industrial preset with readability overrides.
 - **Module Preloader** — background warm-up in source mode so page navigation avoids repeated import work; disk changes invalidate the cache automatically.
 - **External Module Overrides** — per-file `.py` overrides beside the EXE activate automatically when admin-controlled override trust is enabled.
+- **Form Loader Robustness** — securely falls back to the default shipped form if a custom active form layout is unavailable.
+- **Crash Monitoring & Recovery** — parent-child supervision tracks main process crashes, captures diagnostic reports (`latest_crash.txt`), and offers interactive relaunches.
+- **Notification Center** — permanent status bar badge providing a clickable, scrollable history modal of session alerts and updates.
+- **Project Librarian** — built-in MCP server for background repository indexing, codebase chat, and memory profiling.
 
 ---
 
@@ -92,7 +96,7 @@ Runs from a Debian package installed on Ubuntu (or via WSL). Intended for Linux 
 
 ### For Operators — Windows (Packaged EXE)
 
-1. Download the latest versioned `.exe` from the `dist/` folder in the repository (e.g., `Production Logging Center_GLC_v2.4.3.exe`).
+1. Download the latest versioned `.exe` from the `dist/` folder in the repository (e.g., `Production Logging Center_GLC_v2.4.4.exe`).
 2. Place it in a dedicated folder alongside any existing `settings.json`, `layout_config.json`, and `rates.json` files if you have them.
 3. Double-click the `.exe` to launch. The application will create `settings.json` on first run if it does not exist.
 4. Use **Settings Manager → Export Path** to configure where workbooks are saved.
@@ -100,10 +104,10 @@ Runs from a Debian package installed on Ubuntu (or via WSL). Intended for Linux 
 
 ### For Operators — Ubuntu (Debian Package)
 
-1. Obtain the `.deb` package (e.g., `production-logging-center-glc_2.4.3_amd64.deb`) from `dist/ubuntu/`.
+1. Obtain the `.deb` package (e.g., `production-logging-center-glc_2.4.4_amd64.deb`) from `dist/ubuntu/`.
 2. Install it:
    ```bash
-   sudo dpkg -i production-logging-center-glc_2.4.3_amd64.deb
+   sudo dpkg -i production-logging-center-glc_2.4.4_amd64.deb
    sudo apt-get install -f   # resolve any missing dependencies
    ```
 3. Launch from the application menu or run:
@@ -147,7 +151,7 @@ The project uses `build.py` for all packaging. Running `build.py` in an interact
 python build.py --target windows
 ```
 
-Produces a versioned `.exe` in `dist/` (e.g., `Production Logging Center_GLC_v2.4.3.exe`). The current EXE is kept in `dist/` and older copies are archived to `dist/Old_exe/` (up to 10 kept).
+Produces a versioned `.exe` in `dist/` (e.g., `Production Logging Center_GLC_v2.4.4.exe`). The current EXE is kept in `dist/` and older copies are archived to `dist/Old_exe/` (up to 10 kept).
 
 ### Ubuntu — Debian Package
 
@@ -242,7 +246,7 @@ For the installed `.deb` package, user-writable runtime files (JSON configs, dra
 
 ## Update Manager and Versioning
 
-The Update Manager checks the Dispatcher Core version exported from `launcher.py` (`__version__ = "2.4.3"`). `main.py` remains the runtime entry boundary.
+The Update Manager checks the Dispatcher Core version exported from `launcher.py` (`__version__ = "2.4.4"`). `main.py` remains the runtime entry boundary.
 
 ### Versioning Rules
 

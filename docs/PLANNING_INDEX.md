@@ -2,7 +2,7 @@
 
 > **Purpose**: Centralized reference for all active and completed project plans.
 >
-> **Last Updated**: June 10, 2026
+> **Last Updated**: July 3, 2026
 
 ---
 
@@ -14,8 +14,8 @@
 | Architecture | Layout Manager PyQt6 Migration Plan | **Historical Reference** | — | `docs/Completed Plans/` |
 | Migration & Cleanup | Post-Migration Tk Cleanup and Parity Sweep | **Completed** | 1-6 | `docs/Completed Plans/` |
 | Module Enhancements | Layout Manager Future Enhancements | **Completed** | 1-8 | `docs/Completed Plans/` |
-| Module Enhancements | Form Loader (production_log) Upgrade, Layout-System Support, and Preferred Alias Rollout | **In progress** | 1-5 planned | `docs/Plans in Progress or not started/` |
-| Accessibility | Application-Wide NVDA Accessibility Verification | **Deferred (Low Priority)** | 0-5 planned | `docs/Plans in Progress or not started/` |
+| Module Enhancements | Form Loader (production_log) Upgrade, Layout-System Support, and Preferred Alias Rollout | **Completed** | 1-7 | `docs/Completed Plans/` |
+| Accessibility | Application-Wide NVDA Accessibility Verification | **Active** | 0-5 planned | `docs/Plans in Progress or not started/` |
 
 ---
 
@@ -58,6 +58,16 @@
 - **Validation**: Focused compile checks, `validate_module_loads.py layout_manager`, and full `validate_pyqt6_phase_gate.py` pass.
 - **Governance Note**: Final NVDA verification was re-scoped into a dedicated application-wide plan because the remaining accessibility gate depends on broader Form Loader modernization rather than Layout Manager-only scope.
 
+### [Form Loader (production_log) Upgrade, Layout-System Support, and Preferred Alias Rollout](docs/Completed%20Plans/Production%20Log%20Upgrade,%20Layout-System%20Support,%20and%20Rename.md)
+- **Status**: ✅ Completed (Phases 1-7)
+- **Scope**: Execute the permanent internal `production_log` upgrade in sequenced tranches, keep layout-system support aligned with the live runtime contract, and finish the preferred `Form Loader` alias rollout without renaming compatibility-sensitive internal identifiers.
+- **Key Deliverables**:
+  * Fixed selector shell and section-driven body rendering for supported profiles.
+  * External active-form guardrail alignment and default-form migration.
+  * Integration of custom options sources and Excel import/export value transformations.
+  * Preferred alias rollout in PyQt6 runtime text and help guides.
+- **Validation**: Compile checks, `scripts/run_production_log_smoke.py` passes, and MVC file coverage.
+
 ### [Layout Manager PyQt6 Migration Plan](docs/Completed Plans/layout_manager_pyqt6_migration_plan.md)
 - **Status**: Historical Reference Only
 - **Note**: Superseded by the PyQt6 Host Migration Master Plan and the live dedicated-window contract in `app/layout_manager_dispatcher.py`.
@@ -67,19 +77,12 @@
 
 ## Active Plans (In Progress or Backlog)
 
-### [Form Loader (production_log) Upgrade, Layout-System Support, and Preferred Alias Rollout](docs/Plans%20in%20Progress%20or%20not%20started/Production%20Log%20Upgrade,%20Layout-System%20Support,%20and%20Rename.md)
-- **Status**: In progress — dynamic-renderer and first alias rollout are validated; highest-priority active slice is custom section/header runtime completion so Layout Manager JSON can produce complete forms without profile hardcoding.
-- **Scope**: Execute the permanent internal `production_log` upgrade in sequenced tranches, keep layout-system support aligned with the live runtime contract, and finish the preferred `Form Loader` alias rollout without renaming compatibility-sensitive internal identifiers.
-- **Baseline**: Form Loader now has validated selector-driven switching, section-driven rendering, guarded external active-form handling, recorded smoke coverage, and the first live preferred-alias rollout in the PyQt6 runtime.
-- **Key Constraints**: Internal `production_log` family names stay permanent; user-facing wording should prefer `Form Loader` / `Form Calculations`; draft and form compatibility cannot be treated as an afterthought.
-- **Completion Criteria**: Upgraded Form Loader is stable enough to serve as the baseline for the application-wide NVDA verification plan.
-
 ### [Application-Wide NVDA Accessibility Verification](docs/Plans%20in%20Progress%20or%20not%20started/Application-Wide%20NVDA%20Accessibility%20Verification.md)
-- **Status**: Deferred (low priority) pending Form Loader prerequisite closure.
+- **Status**: Active (Ready for execution)
 - **Scope**: Verify NVDA accessibility across the full program after the upgraded Form Loader flows and related labels/workflows have stabilized.
-- **Baseline**: Layout Manager component-level accessibility work is already delivered, but final NVDA evidence must reflect the post-upgrade full application state.
-- **Key Constraints**: Do not run the final NVDA evidence pass against the pre-upgrade or pre-alias-cleanup Form Loader state.
-- **Start Criteria**: The internal `production_log` upgrade plan, layout-system support, and preferred alias documentation work are complete and validated.
+- **Baseline**: Layout Manager component-level accessibility work is already delivered. Form Loader prerequisite upgrade has been completed and validated.
+- **Key Constraints**: Review accessibility against the modern Form Loader state with proper role resolution.
+- **Start Criteria**: The Form Loader upgrade plan is completed and archived.
 
 ---
 
@@ -90,7 +93,7 @@
 2. **Canonical References**: 
   - PyQt6 host architecture → `docs/Completed Plans/pyqt6_host_migration_master_plan.md`
   - Post-migration cleanup → `docs/Completed Plans/Post-Migration Tk Cleanup and Parity Sweep.md`
-  - Form Loader / `production_log` upgrade planning → `docs/Plans in Progress or not started/Production Log Upgrade, Layout-System Support, and Rename.md`
+  - Form Loader / `production_log` upgrade planning → `docs/Completed Plans/Production Log Upgrade, Layout-System Support, and Rename.md`
   - Application-wide NVDA verification → `docs/Plans in Progress or not started/Application-Wide NVDA Accessibility Verification.md`
 3. **Governance Documents**: `.github/copilot-instructions.md` is the active runtime/architecture reference. Keep it aligned with completed phase closure summaries.
 
@@ -107,15 +110,13 @@
 
 ## Next Steps
 
-### Immediate (June 2026)
-1. Execute custom section/header runtime completion across Form Loader and Layout Manager.
-2. Finish Form Loader markdown/runbook cleanup and preferred-alias compatibility checklist closure after the custom-section tranche stabilizes.
-3. Keep planning and delegation docs tidy by archiving transient smoke and review artifacts out of active roots.
+### Immediate (July 2026)
+1. Initiate the Application-Wide NVDA Accessibility Verification plan since the Form Loader prerequisites are complete.
+2. Keep planning and delegation docs tidy by archiving transient smoke and review artifacts out of active roots.
 
 ### Medium Term (1-2 months)
-1. Execute the remaining Form Loader / `production_log` upgrade, layout-system support, and preferred-alias documentation work.
-2. Open the application-wide NVDA plan only after the Form Loader prerequisite work is stable.
-3. Maintain validator alignment with any new architecture changes.
+1. Execute the remaining phases of the NVDA Accessibility Verification plan.
+2. Maintain validator alignment with any new architecture changes.
 
 ### Long Term (Post-Enhancement Work)
 1. Complete and archive the Form Loader / `production_log` upgrade plan.
@@ -128,7 +129,7 @@
 
 **Completed Work**: All 12 phases of PyQt6 migration + 6 phases of Tk cleanup are done. Branch is production-ready for release with packaging split (private real data, public dummy data).
 
-**Current Active Plans**: Form Loader / `production_log` upgrade planning is the active prerequisite, and application-wide NVDA verification is explicitly blocked behind it.
+**Current Active Plans**: Application-wide NVDA verification is the active plan now that the Form Loader upgrade prerequisite has been completed.
 
 **Governance**: Use `.github/copilot-instructions.md` for architecture questions; use this index to find the right plan for your current task.
 

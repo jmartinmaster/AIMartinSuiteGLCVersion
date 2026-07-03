@@ -1,12 +1,12 @@
 # Plan: Form Loader (production_log) Upgrade, Layout-System Support, and Preferred Alias Rollout
 
-> **Status**: In progress. The dynamic-renderer tranche is complete, the first rename follow-up slice is now landed in the live PyQt6 runtime, and focused module-load validation plus repeated scripted smoke coverage are green after the compatibility-sensitive default-form migration.
+> **Status**: Completed. All tranches, including the dynamic-renderer, custom section/header runtime implementation, options sources, and preferred-alias rollout, are fully executed and validated.
 >
 > **Scope**: Carefully plan and execute the next internal `production_log` upgrade in sequenced tranches so the module can support the newer layout-system direction, absorb the upcoming feature changes, and complete the preferred `Form Loader` alias rollout without breaking runtime behavior, draft compatibility, or downstream verification work.
 >
-> **Relationship To Accessibility Planning**: NVDA verification remains downstream of this work and is currently a lower-priority deferred track.
+> **Relationship To Accessibility Planning**: NVDA verification is now unblocked and ready for execution.
 >
-> **Planning Note**: This document now records both the completed dynamic-renderer tranche and the settled rename decisions for the first live rollout. The runtime now exposes `Form Loader` and `Form Calculations` across the active PyQt6 surfaces while intentionally keeping compatibility-sensitive internal `production_log` identifiers and the workbook fallback sheet title stable.
+> **Planning Note**: This document serves as the final report for the completed dynamic-renderer tranche, custom section completion, and rename decisions. The runtime and all documentation now consistently use the `Form Loader` and `Form Calculations` aliases while maintaining stable compatibility-sensitive internal identifiers.
 
 ---
 
@@ -227,11 +227,11 @@ Current progress within Phase 3:
 - Completed: section-driven body rendering for supported profiles
 - Completed: external active-form guardrail alignment and supported-profile compatibility cleanup
 - Completed: scripted smoke coverage plus defect-driven cleanup from the smoke pass
-- Next: documentation and runbook follow-up for the rename surfaces that intentionally remain outside the first live rollout
+- Completed: documentation and runbook follow-up for the rename surfaces
 
 ### Phase 4: Documentation Alignment And Rename Follow-Up Planning
-- Update architecture and schema docs to match the implemented dynamic renderer contract
-- Finish the remaining documentation and runbook rename surfaces that were left out of the first runtime rollout
+- Completed: Update architecture and schema docs to match the implemented dynamic renderer contract
+- Completed: Finish the remaining documentation and runbook rename surfaces that were left out of the first runtime rollout
 
 ### Rename Decisions And Initial Rollout
 
@@ -268,19 +268,17 @@ Validation completed for the first runtime rename rollout:
 
 ### Phase 6: Custom Section/Header Runtime Completion (New Priority)
 
-- Replace profile-specific Form Loader section rendering branches with section-key driven builders for:
-	- single sections (`fields_key`-bound)
-	- repeating sections (`fields_key` + `mapping_key` + section-level row policy)
-- Update Layout Manager row-field and mapping selectors to enumerate repeating sections dynamically from `sections[]`.
-- Expand validation/guardrails to permit broader custom profile usage while preserving strict safety checks.
-- Define and implement import/export behavior for custom repeating sections.
-- Preserve compatibility for legacy/default forms and existing draft payloads.
+- Completed: Replace profile-specific Form Loader section rendering branches with section-key driven builders
+- Completed: Update Layout Manager row-field and mapping selectors to enumerate repeating sections dynamically
+- Completed: Expand validation/guardrails to permit broader custom profile usage
+- Completed: Define and implement import/export behavior for custom repeating sections
+- Completed: Preserve compatibility for legacy/default forms and existing draft payloads
 
 ### Phase 7: Documentation And Operational Closure
 
-- Update maintainer and help docs to reflect complete custom section/header capabilities.
-- Record explicit compatibility and migration notes for existing forms.
-- Keep NVDA verification deferred until this tranche is validated and stabilized.
+- Completed: Update maintainer and help docs to reflect complete custom section/header capabilities
+- Completed: Record explicit compatibility and migration notes for existing forms
+- Completed: Stabilize custom sections and transition to NVDA verification unblocking
 
 ---
 

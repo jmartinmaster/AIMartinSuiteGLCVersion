@@ -272,7 +272,26 @@ class FormDefinitionRegistry:
         raise ValueError(f"Form definition '{requested_form_id}' was not found.")
 
     def get_active_form(self):
-        return self.get_form(None)
+        try:
+            form_info = self.get_form(None)
+            load_path = form_info.get("load_path")
+            if not load_path:
+                load_path = self.resolve_load_path(form_info)
+            if os.path.exists(load_path):
+                with open(load_path, "r", encoding="utf-8") as handle:
+                    json.load(handle)
+                return form_info
+        except Exception:
+            pass
+
+        try:
+            registry = self.get_registry()
+            if registry.get("active_form_id") != DEFAULT_FORM_ID:
+                registry["active_form_id"] = DEFAULT_FORM_ID
+                self._write_registry_payload(registry)
+        except Exception:
+            pass
+        return self.get_form(DEFAULT_FORM_ID)
 
     def load_form_config(self, form_id=None):
         form_info = self.get_form(form_id)

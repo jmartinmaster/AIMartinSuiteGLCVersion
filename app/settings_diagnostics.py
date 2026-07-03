@@ -297,7 +297,10 @@ def diagnose_and_repair_settings(
         "export_directory": defaults.get("export_directory", "data/exports"),
     }.items():
         original_value = effective.get(key, fallback_value)
-        normalized_value = str(original_value or "").strip() or str(fallback_value)
+        normalized_value = str(original_value or "").strip()
+        if key == "update_repository_url":
+            normalized_value = normalized_value.strip("'\"")
+        normalized_value = normalized_value or str(fallback_value)
         if normalized_value != original_value:
             _record_repair(
                 "text",

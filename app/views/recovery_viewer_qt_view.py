@@ -106,40 +106,58 @@ class RecoveryViewerQtView(QMainWindow):
         controls_layout = QHBoxLayout()
         refresh_button = QPushButton("Refresh")
         refresh_button.clicked.connect(self.controller.refresh_records)
+        refresh_button.setAccessibleName("Refresh recovery lists")
+        refresh_button.setAccessibleDescription("Refreshes recovery drafts, snapshots, and configuration backups.")
         controls_layout.addWidget(refresh_button)
 
         restore_button = QPushButton("Restore Selected")
         restore_button.clicked.connect(self.controller.restore_selected)
+        restore_button.setAccessibleName("Restore selected backup")
+        restore_button.setAccessibleDescription("Restores the highlighted backup item to its target path.")
         controls_layout.addWidget(restore_button)
 
         resume_button = QPushButton("Resume Selected Draft")
         resume_button.clicked.connect(self.controller.resume_selected)
+        resume_button.setAccessibleName("Resume selected draft")
+        resume_button.setAccessibleDescription("Resumes editing the highlighted draft record in Form Loader.")
         controls_layout.addWidget(resume_button)
 
         clean_drafts_button = QPushButton("Clean Drafts")
         clean_drafts_button.clicked.connect(self.controller.clean_drafts)
+        clean_drafts_button.setAccessibleName("Delete all drafts")
+        clean_drafts_button.setAccessibleDescription("Deletes all draft documents permanently.")
         controls_layout.addWidget(clean_drafts_button)
 
         clean_snapshots_button = QPushButton("Clean Snapshots")
         clean_snapshots_button.clicked.connect(self.controller.clean_snapshots)
+        clean_snapshots_button.setAccessibleName("Delete all recovery snapshots")
+        clean_snapshots_button.setAccessibleDescription("Deletes all historical recovery snapshots permanently.")
         controls_layout.addWidget(clean_snapshots_button)
 
         clean_config_backups_button = QPushButton("Clean Config Backups")
         clean_config_backups_button.clicked.connect(self.controller.clean_backups)
+        clean_config_backups_button.setAccessibleName("Delete all config backups")
+        clean_config_backups_button.setAccessibleDescription("Deletes all configuration backup files permanently.")
         controls_layout.addWidget(clean_config_backups_button)
 
         open_file_button = QPushButton("Open Selected File")
         open_file_button.clicked.connect(self.controller.open_selected_file)
+        open_file_button.setAccessibleName("Open selected backup file")
+        open_file_button.setAccessibleDescription("Opens the raw JSON/text content of the selected backup.")
         controls_layout.addWidget(open_file_button)
 
         open_folder_button = QPushButton("Open Containing Folder")
         open_folder_button.clicked.connect(self.controller.open_selected_folder)
+        open_folder_button.setAccessibleName("Open backup containing directory")
+        open_folder_button.setAccessibleDescription("Opens the system file explorer at the selected backup's location.")
         controls_layout.addWidget(open_folder_button)
 
         controls_layout.addStretch(1)
         root_layout.addLayout(controls_layout)
 
         self.tabs = QTabWidget()
+        self.tabs.setAccessibleName("Recovery viewer tabs")
+        self.tabs.setAccessibleDescription("Switch between drafts, snapshots, configs, and backup policies.")
         for record_type, tab_label in self._tab_definitions:
             if record_type == "config_backup":
                 self.config_backup_tabs = QTabWidget()
@@ -180,6 +198,8 @@ class RecoveryViewerQtView(QMainWindow):
         table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        table.setAccessibleName("Recovery items table")
+        table.setAccessibleDescription("Table containing recovery records, metadata, and backup targets.")
         return table
 
     def _build_backup_policy_tab(self):

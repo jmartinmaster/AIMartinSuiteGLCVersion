@@ -2,8 +2,8 @@
 
 Use the **Form Loader** to enter data for the current shift. 
 
-The layout, fields, and Excel mapping of the Form Loader are determined by the
-active form you select in the **Layout Manager**.
+The layout, fields, and mapping of the Form Loader are determined by the
+active form you select in the **Layout Manager**. If the selected custom form is missing or fails to load, the Form Loader will safely fall back to the default shipped form.
 
 ---
 
@@ -71,12 +71,11 @@ a new row for the adjustment.
 > **Note:** If you have logged more time than your shift hours, you must remove
 > or adjust downtime manually.
 
-### Calculations and Saving
 - Click **Calculate All** to update your efficiency numbers.
-- Click **Save Draft** to save your progress. The app stores drafts safely in
+- Click the **Save Draft** dropdown to save your progress or select **Clear Current Form** to start over. The app stores drafts safely in
   `data/pending`.
-- Click **Save and Open** to write your current data into the Excel template and
-  open it for review.
+- Click the **Save and Open** dropdown to write your current data into the template and
+  open it for review. You can export as Excel (`.xlsx`), Plain Text (`.txt`), or Word Document (`.doc`).
 - Click **Print Last Export** to print the workbook.
 
 ---

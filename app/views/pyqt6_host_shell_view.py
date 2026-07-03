@@ -361,6 +361,8 @@ class PyQt6HostShellView(QMainWindow):
         self.sidebar_toggle_button.setObjectName("sidebarToggleButton")
         self.sidebar_toggle_button.setFixedWidth(32)
         self.sidebar_toggle_button.clicked.connect(self.toggle_sidebar)
+        self.sidebar_toggle_button.setAccessibleName("Toggle sidebar navigation panel")
+        self.sidebar_toggle_button.setAccessibleDescription("Collapses or expands the sidebar navigation panel.")
         header_layout.addWidget(self.sidebar_toggle_button)
         sidebar_layout.addWidget(header_frame)
 
@@ -466,6 +468,8 @@ class PyQt6HostShellView(QMainWindow):
         self.notifications_btn = QPushButton("Notifications (0)", self)
         self.notifications_btn.setObjectName("notificationsButton")
         self.notifications_btn.setFlat(True)
+        self.notifications_btn.setAccessibleName("Notification Center")
+        self.notifications_btn.setAccessibleDescription("Click to open notification center history dialog.")
         accent_color = self.theme_tokens.get("accent", "#0f7c8f")
         self.notifications_btn.setStyleSheet(
             f"QPushButton {{ color: {accent_color}; font-weight: bold; border: none; padding: 2px 8px; }}"
@@ -539,6 +543,8 @@ class PyQt6HostShellView(QMainWindow):
                 button = QPushButton(str(display_name), self.sidebar)
                 button.setObjectName("navButton")
                 button.setProperty("active", False)
+                button.setAccessibleName(f"Navigate to {display_name}")
+                button.setAccessibleDescription(f"Opens the {display_name} module in the main view.")
                 if callable(load_callback):
                     button.clicked.connect(lambda _checked=False, name=module_name: load_callback(name))
                 else:

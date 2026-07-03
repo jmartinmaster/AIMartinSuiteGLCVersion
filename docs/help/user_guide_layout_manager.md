@@ -86,6 +86,15 @@ Protect your layout edits in the **Summary** tab:
 
 ---
 
+## Options Sources
+
+The Layout Manager includes a dedicated **Options Sources** management layout. You can:
+- Create, edit, reorder, and delete custom dropdown code lists.
+- Supply custom dropdown options for Form Loader comboboxes and checkboxes.
+- Provide custom data formatting for the Excel import and export process.
+
+---
+
 ## Keyboard Shortcuts
 
 - `Ctrl + S`: Quick Save
