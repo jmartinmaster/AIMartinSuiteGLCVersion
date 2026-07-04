@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 __module_name__ = "Settings Manager Qt View"
-__version__ = "1.8.2"
+__version__ = "1.8.3"
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
@@ -267,38 +267,7 @@ class SettingsManagerQtView(QMainWindow):
 
         content_layout.addWidget(self.editable_group)
 
-        self.downtime_group = QGroupBox("Downtime Codes")
-        downtime_layout = QVBoxLayout(self.downtime_group)
-        downtime_hint = QLabel(
-            "Edit downtime codes inline. Codes may be numeric or alphanumeric. Imports and exports use these code identifiers."
-        )
-        downtime_hint.setWordWrap(True)
-        downtime_layout.addWidget(downtime_hint)
 
-        self.downtime_codes_table = QTableWidget(0, 2)
-        self.downtime_codes_table.setHorizontalHeaderLabels(["Code", "Label"])
-        self.downtime_codes_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.downtime_codes_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        self.downtime_codes_table.verticalHeader().setVisible(False)
-        self.downtime_codes_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        self.downtime_codes_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        self.downtime_codes_table.itemChanged.connect(self._on_form_changed)
-        downtime_layout.addWidget(self.downtime_codes_table)
-
-        downtime_actions = QHBoxLayout()
-        add_code_button = QPushButton("Add Code")
-        add_code_button.clicked.connect(self.controller.add_next_downtime_code_row)
-        downtime_actions.addWidget(add_code_button)
-        reset_codes_button = QPushButton("Reset Defaults")
-        reset_codes_button.clicked.connect(self.controller.reset_downtime_codes_to_defaults)
-        downtime_actions.addWidget(reset_codes_button)
-        apply_codes_button = QPushButton("Apply Codes")
-        apply_codes_button.clicked.connect(self.controller.apply_downtime_codes)
-        downtime_actions.addWidget(apply_codes_button)
-        downtime_actions.addStretch(1)
-        downtime_layout.addLayout(downtime_actions)
-
-        content_layout.addWidget(self.downtime_group)
 
         self.security_admin_group = QGroupBox("Security Administration")
         security_layout = QVBoxLayout(self.security_admin_group)
@@ -753,41 +722,13 @@ class SettingsManagerQtView(QMainWindow):
             path_input.setText(str(directory_path or ""))
 
     def set_downtime_code_rows(self, code_map):
-        code_map = code_map if isinstance(code_map, dict) else {}
-
-        def _code_sort_key(item):
-            code_text = str(item[0])
-            if code_text.isdigit():
-                return (0, int(code_text))
-            return (1, code_text)
-
-        ordered_items = sorted(code_map.items(), key=_code_sort_key)
-        self.downtime_codes_table.setRowCount(0)
-        for code, label in ordered_items:
-            self.add_downtime_code_row(str(code), str(label))
+        pass
 
     def add_downtime_code_row(self, code, label):
-        self.downtime_codes_table.blockSignals(True)
-        try:
-            row_index = self.downtime_codes_table.rowCount()
-            self.downtime_codes_table.insertRow(row_index)
-            self.downtime_codes_table.setItem(row_index, 0, QTableWidgetItem(str(code or "")))
-            self.downtime_codes_table.setItem(row_index, 1, QTableWidgetItem(str(label or "")))
-        finally:
-            self.downtime_codes_table.blockSignals(False)
+        pass
 
     def get_downtime_code_rows(self):
-        rows = []
-        for row_index in range(self.downtime_codes_table.rowCount()):
-            code_item = self.downtime_codes_table.item(row_index, 0)
-            label_item = self.downtime_codes_table.item(row_index, 1)
-            rows.append(
-                {
-                    "code": str(code_item.text()).strip() if code_item else "",
-                    "label": str(label_item.text()).strip() if label_item else "",
-                }
-            )
-        return rows
+        return []
 
     def _get_selected_vault_record(self):
         selected_items = self.security_vault_list.selectedItems() if self.security_vault_list is not None else []
@@ -1155,4 +1096,3 @@ class SettingsManagerQtView(QMainWindow):
             return
         if self.ask_yes_no("Delete Crash Report", f"Are you sure you want to delete {filename}?"):
             self.controller.delete_crash_report(filename)
-

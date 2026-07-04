@@ -22,7 +22,7 @@ from app.host_ui_adapter import PyQt6HostUiAdapter
 from app.app_logging import log_exception
 
 __module_name__ = "PyQt6 Host Shell"
-__version__ = "0.1.4"
+__version__ = "0.1.5"
 
 try:
     from PyQt6.QtCore import QTimer

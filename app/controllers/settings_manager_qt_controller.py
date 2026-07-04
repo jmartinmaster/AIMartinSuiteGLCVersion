@@ -21,7 +21,7 @@ from app.models.settings_manager_model import PATH_OVERRIDE_DEFINITIONS, Setting
 from app.views.settings_manager_qt_view import SettingsManagerQtView
 
 __module_name__ = "Settings Manager Qt Controller"
-__version__ = "1.9.2"
+__version__ = "1.9.3"
 
 
 class SettingsManagerQtController:
@@ -265,10 +265,15 @@ class SettingsManagerQtController:
             for definition in PATH_OVERRIDE_DEFINITIONS
         }
 
+        if "export_directory" in settings:
+            requested_lookup["exports_root"] = str(settings["export_directory"]).strip()
+
         for definition in PATH_OVERRIDE_DEFINITIONS:
             required_right = str(definition.get("required_right") or "").strip()
             override_key = str(definition.get("key") or "").strip()
             if not required_right or not override_key:
+                continue
+            if override_key == "exports_root":
                 continue
             if gatekeeper.has_right(required_right):
                 continue
@@ -279,9 +284,12 @@ class SettingsManagerQtController:
                     f"Insufficient rights to change {definition.get('label', override_key)}. Required right: {required_right}."
                 )
 
-        settings["path_overrides"] = self.model.validate_path_override_values(requested_lookup)
+        settings["path_overrides"] = self.model.validate_path_override_values(
+            requested_lookup,
+            export_directory=settings.get("export_directory"),
+        )
         settings["export_directory"] = str(
-            settings["path_overrides"].get("exports_root") or self.model._default_export_directory_setting()
+            settings["path_overrides"].get("exports_root") or settings.get("export_directory") or self.model._default_export_directory_setting()
         )
         return settings
 
@@ -731,7 +739,7 @@ class SettingsManagerQtController:
                         f"Insufficient rights to change {definition.get('label', override_key)}. Required right: {required_right}."
                     )
 
-            self.model.apply_path_overrides(requested_lookup)
+            self.model.apply_path_overrides(requested_lookup, export_directory=self.model.settings.get("export_directory"))
         except ValueError as exc:
             self.view.show_error("Developer Settings", str(exc))
             return

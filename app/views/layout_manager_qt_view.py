@@ -1103,7 +1103,7 @@ class LayoutManagerQtView(QMainWindow):
         row_sections_layout.setContentsMargins(8, 8, 8, 8)
         row_sections_layout.setSpacing(8)
         self.row_sections_tree = QTreeWidget()
-        self.row_sections_tree.setHeaderLabels(["Section / Field", "Details"])
+        self.row_sections_tree.setHeaderLabels(["Section / Field", "Preview", "Details"])
         self.row_sections_tree.header().setStretchLastSection(True)
         row_sections_layout.addWidget(self.row_sections_tree, 1)
         preview_views_tabs.addTab(row_sections_tab, "Row Sections")
@@ -2316,9 +2316,10 @@ class LayoutManagerQtView(QMainWindow):
             for section in preview.get("row_sections", []):
                 section_title = str(section.get("title") or section.get("section_name") or "Section")
                 description = str(section.get("description") or "")
-                section_item = QTreeWidgetItem([section_title, description])
+                section_item = QTreeWidgetItem([section_title, "Row template", description])
                 self.row_sections_tree.addTopLevelItem(section_item)
                 for field in section.get("fields", []):
+                    preview_text = self._preview_text_for_row_field(field)
                     details = [f"widget={field.get('widget', 'entry')}"]
                     if field.get("protected"):
                         details.append("protected")
@@ -2328,6 +2329,7 @@ class LayoutManagerQtView(QMainWindow):
                         QTreeWidgetItem(
                             [
                                 str(field.get("label") or field.get("id") or "Field"),
+                                preview_text,
                                 ", ".join(details),
                             ]
                         )
@@ -2354,6 +2356,22 @@ class LayoutManagerQtView(QMainWindow):
                 ]
             )
         )
+
+    def _preview_text_for_row_field(self, field):
+        widget_name = str(field.get("widget", "entry") or "entry").strip().lower()
+        if widget_name == "checkbutton":
+            return "Toggle control"
+        if widget_name == "combobox":
+            values = field.get("values")
+            if isinstance(values, list):
+                values = [str(value).strip() for value in values if str(value).strip()]
+                if values:
+                    return " / ".join(values[:4]) + (" ..." if len(values) > 4 else "")
+            return "Dropdown selection"
+        if widget_name == "display":
+            return "Derived display"
+        default_text = str(field.get("default", "")).strip()
+        return default_text or "Text input"
 
     def render_validation_summary(self, summary):
         payload = dict(summary or {})

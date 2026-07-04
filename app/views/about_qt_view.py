@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 __module_name__ = "About Qt View"
-__version__ = "1.0.2"
+__version__ = "1.0.3"
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (

@@ -31,7 +31,7 @@ from app.production_log_roles import PROTECTED_ROW_ROLES, REQUIRED_MAPPING_ROLES
 from app.utils import external_path, local_or_resource_path
 
 __module_name__ = "Layout Manager"
-__version__ = "1.0.2"
+__version__ = "1.0.3"
 
 VALID_IMPORT_TRANSFORMS = ("value", "code_lookup", "stop_from_duration")
 VALID_EXPORT_TRANSFORMS = ("value", "code_number", "duration_minutes", "bool_int", "minutes_label")

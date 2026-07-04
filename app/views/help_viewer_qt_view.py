@@ -16,7 +16,7 @@
 import os
 
 __module_name__ = "Help Viewer Qt View"
-__version__ = "1.1.1"
+__version__ = "1.1.2"
 
 from PyQt6.QtCore import QSignalBlocker, Qt
 from PyQt6.QtWidgets import (

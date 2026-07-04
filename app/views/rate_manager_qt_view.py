@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 __module_name__ = "Rate Manager Qt View"
-__version__ = "1.1.1"
+__version__ = "1.1.2"
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (

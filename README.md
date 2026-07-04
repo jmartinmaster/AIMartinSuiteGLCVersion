@@ -96,7 +96,7 @@ Runs from a Debian package installed on Ubuntu (or via WSL). Intended for Linux 
 
 ### For Operators — Windows (Packaged EXE)
 
-1. Download the latest versioned `.exe` from the `dist/` folder in the repository (e.g., `Production Logging Center_GLC_v2.4.4.exe`).
+1. Download the latest versioned `.exe` from the `dist/` folder in the repository (e.g., `Production Logging Center_GLC_v2.4.5.exe`).
 2. Place it in a dedicated folder alongside any existing `settings.json`, `layout_config.json`, and `rates.json` files if you have them.
 3. Double-click the `.exe` to launch. The application will create `settings.json` on first run if it does not exist.
 4. Use **Settings Manager → Export Path** to configure where workbooks are saved.
@@ -104,10 +104,10 @@ Runs from a Debian package installed on Ubuntu (or via WSL). Intended for Linux 
 
 ### For Operators — Ubuntu (Debian Package)
 
-1. Obtain the `.deb` package (e.g., `production-logging-center-glc_2.4.4_amd64.deb`) from `dist/ubuntu/`.
+1. Obtain the `.deb` package (e.g., `production-logging-center-glc_2.4.5_amd64.deb`) from `dist/ubuntu/`.
 2. Install it:
    ```bash
-   sudo dpkg -i production-logging-center-glc_2.4.4_amd64.deb
+   sudo dpkg -i production-logging-center-glc_2.4.5_amd64.deb
    sudo apt-get install -f   # resolve any missing dependencies
    ```
 3. Launch from the application menu or run:
@@ -151,7 +151,7 @@ The project uses `build.py` for all packaging. Running `build.py` in an interact
 python build.py --target windows
 ```
 
-Produces a versioned `.exe` in `dist/` (e.g., `Production Logging Center_GLC_v2.4.4.exe`). The current EXE is kept in `dist/` and older copies are archived to `dist/Old_exe/` (up to 10 kept).
+Produces a versioned `.exe` in `dist/` (e.g., `Production Logging Center_GLC_v2.4.5.exe`). The current EXE is kept in `dist/` and older copies are archived to `dist/Old_exe/` (up to 10 kept).
 
 ### Ubuntu — Debian Package
 
@@ -246,7 +246,7 @@ For the installed `.deb` package, user-writable runtime files (JSON configs, dra
 
 ## Update Manager and Versioning
 
-The Update Manager checks the Dispatcher Core version exported from `launcher.py` (`__version__ = "2.4.4"`). `main.py` remains the runtime entry boundary.
+The Update Manager checks the Dispatcher Core version exported from `launcher.py` (`__version__ = "2.4.5"`). `main.py` remains the runtime entry boundary.
 
 ### Versioning Rules
 

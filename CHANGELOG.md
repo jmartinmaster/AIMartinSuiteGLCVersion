@@ -4,6 +4,17 @@ This changelog tracks the main branch release line for Production Logging Center
 
 Version headings below are aligned to the current `2.x` release line used by Dispatcher Core. Earlier work has been grouped into practical release milestones so the shipped feature history is easier to follow without rewriting older module version markers.
 
+## [2.4.5] - 2026-07-04
+
+### Changed
+
+- **About manifest completeness**:
+  - Improved module-version manifest assembly in About so the runtime list remains stable and complete when loading module metadata.
+- **Update Manager URL handling hardening**:
+  - Kept repository artifact URL resolution tolerant of encoded/quoted path edge cases to prevent malformed remote EXE lookup paths.
+- **Version alignment**:
+  - Bumped Dispatcher Core to `2.4.5` and incremented affected app module versions for the post-`2.4.4` merge set.
+
 ## [2.4.4] - 2026-07-03
 
 ### Added

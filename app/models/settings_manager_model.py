@@ -32,7 +32,7 @@ from app.utils import external_data_path
 
 
 __module_name__ = "Settings Manager"
-__version__ = "1.0.1"
+__version__ = "1.0.2"
 
 PATH_OVERRIDE_DEFINITIONS = (
     {
@@ -362,8 +362,8 @@ class SettingsManagerModel:
             handle.write("ok")
         os.remove(probe_path)
 
-    def validate_path_override_values(self, raw_overrides):
-        normalized = self.normalize_path_overrides(raw_overrides)
+    def validate_path_override_values(self, raw_overrides, export_directory=None):
+        normalized = self.normalize_path_overrides(raw_overrides, export_directory=export_directory)
         validated = {}
         for definition in PATH_OVERRIDE_DEFINITIONS:
             override_key = definition["key"]
@@ -379,10 +379,10 @@ class SettingsManagerModel:
             validated[override_key] = normalized[override_key]
         return validated
 
-    def apply_path_overrides(self, raw_overrides):
-        self.settings["path_overrides"] = self.validate_path_override_values(raw_overrides)
+    def apply_path_overrides(self, raw_overrides, export_directory=None):
+        self.settings["path_overrides"] = self.validate_path_override_values(raw_overrides, export_directory=export_directory)
         self.settings["export_directory"] = str(
-            self.settings["path_overrides"].get("exports_root") or self._default_export_directory_setting()
+            self.settings["path_overrides"].get("exports_root") or export_directory or self._default_export_directory_setting()
         )
         return self.settings
 

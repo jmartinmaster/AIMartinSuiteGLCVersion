@@ -47,7 +47,7 @@ except ImportError:
     DEFAULT_THEME = "martin_modern_light"
 
 __module_name__ = "Crash Handler"
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 
 
 def get_latest_crash_path():
