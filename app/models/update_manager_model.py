@@ -167,8 +167,11 @@ def _read_text_payload_metadata_from_path(file_path, fallback_name):
 
 
 def _build_raw_github_url(owner, repo, branch_name, relative_path, cache_bust=None):
-    branch_str = "" if branch_name is None else str(branch_name)
-    path_str = "" if relative_path is None else str(relative_path)
+    if branch_name is None or relative_path is None:
+        raise ValueError("branch_name and relative_path are required.")
+
+    branch_str = str(branch_name)
+    path_str = str(relative_path)
     normalized_branch = branch_str.replace("\\", "/").strip("/")
     normalized_path = path_str.replace("\\", "/").lstrip("/")
     quoted_branch = urllib.parse.quote(normalized_branch, safe="/")
