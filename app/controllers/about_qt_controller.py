@@ -223,7 +223,8 @@ class AboutQtController:
             return False
         if dispatcher.is_module_loaded_from_external(module_name, module_obj):
             return True
-        if not bool(getattr(dispatcher, "are_external_module_overrides_enabled", lambda: False)()):
+        overrides_enabled = getattr(dispatcher, "are_external_module_overrides_enabled", None)
+        if not callable(overrides_enabled) or not overrides_enabled():
             return False
         external_root = getattr(dispatcher, "external_modules_path", "")
         module_file = self._resolve_module_file_path(module_path)

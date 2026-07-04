@@ -8,7 +8,15 @@ from pathlib import Path
 from unittest import mock
 
 
-REPO_ROOT = Path(__file__).resolve().parent
+def _find_repo_root():
+    current_path = Path(__file__).resolve().parent
+    for candidate in (current_path, *current_path.parents):
+        if (candidate / ".git").exists():
+            return candidate
+    return current_path
+
+
+REPO_ROOT = _find_repo_root()
 
 
 class _FakeAboutQtView:
