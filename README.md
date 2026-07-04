@@ -246,7 +246,7 @@ For the installed `.deb` package, user-writable runtime files (JSON configs, dra
 
 ## Update Manager and Versioning
 
-The Update Manager checks the Dispatcher Core version exported from `launcher.py` (`__version__ = "2.4.5"`). `main.py` remains the runtime entry boundary.
+The Update Manager checks the Dispatcher Core version exported from `launcher.py` (`__version__ = "2.4.7"`). `main.py` remains the runtime entry boundary.
 
 ### Versioning Rules
 

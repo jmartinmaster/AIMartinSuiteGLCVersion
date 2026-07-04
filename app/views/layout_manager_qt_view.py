@@ -26,7 +26,7 @@ from app.theme_manager import get_qt_palette, get_qt_stylesheet
 from PyQt6.QtGui import QDesktopServices, QFont, QFontDatabase, QKeySequence, QShortcut, QColor, QPainter, QTextFormat
 
 __module_name__ = "Layout Manager Qt View"
-__version__ = "0.6.14"
+__version__ = "0.6.15"
 LAYOUT_MANAGER_QT_SESSION_ENV = "AIMARTIN_LAYOUT_MANAGER_QT_SESSION"
 REPO_ROOT = Path(__file__).resolve().parents[2]
 HEADER_ROLE_OPTIONS = [""] + sorted(set(HEADER_FIELD_ROLE_DEFAULTS.values()))
@@ -46,6 +46,7 @@ from PyQt6.QtWidgets import (
     QAbstractItemView,
     QApplication,
     QComboBox,
+    QHeaderView,
     QFileDialog,
     QFormLayout,
     QGridLayout,
@@ -1104,7 +1105,10 @@ class LayoutManagerQtView(QMainWindow):
         row_sections_layout.setSpacing(8)
         self.row_sections_tree = QTreeWidget()
         self.row_sections_tree.setHeaderLabels(["Section / Field", "Preview", "Details"])
-        self.row_sections_tree.header().setStretchLastSection(True)
+        row_sections_header = self.row_sections_tree.header()
+        row_sections_header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        row_sections_header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        row_sections_header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
         row_sections_layout.addWidget(self.row_sections_tree, 1)
         preview_views_tabs.addTab(row_sections_tab, "Row Sections")
 
@@ -2318,22 +2322,26 @@ class LayoutManagerQtView(QMainWindow):
                 description = str(section.get("description") or "")
                 section_item = QTreeWidgetItem([section_title, "Row template", description])
                 self.row_sections_tree.addTopLevelItem(section_item)
+                section_preview_widget = self._build_row_section_preview_widget(section.get("fields", []))
+                if section_preview_widget is not None:
+                    self.row_sections_tree.setItemWidget(section_item, 1, section_preview_widget)
                 for field in section.get("fields", []):
-                    preview_text = self._preview_text_for_row_field(field)
                     details = [f"widget={field.get('widget', 'entry')}"]
                     if field.get("protected"):
                         details.append("protected")
                     if field.get("role"):
                         details.append(f"role={field.get('role')}")
-                    section_item.addChild(
-                        QTreeWidgetItem(
-                            [
-                                str(field.get("label") or field.get("id") or "Field"),
-                                preview_text,
-                                ", ".join(details),
-                            ]
-                        )
+                    field_item = QTreeWidgetItem(
+                        [
+                            str(field.get("label") or field.get("id") or "Field"),
+                            "",
+                            ", ".join(details),
+                        ]
                     )
+                    section_item.addChild(field_item)
+                    field_preview_widget = self._build_row_field_preview_widget(field)
+                    if field_preview_widget is not None:
+                        self.row_sections_tree.setItemWidget(field_item, 1, field_preview_widget)
                 section_item.setExpanded(False)
         finally:
             self.header_preview_table.setUpdatesEnabled(True)
@@ -2357,21 +2365,80 @@ class LayoutManagerQtView(QMainWindow):
             )
         )
 
-    def _preview_text_for_row_field(self, field):
+    def _build_row_field_preview_widget(self, field):
         widget_name = str(field.get("widget", "entry") or "entry").strip().lower()
+        container = QWidget()
+        layout = QHBoxLayout(container)
+        layout.setContentsMargins(4, 1, 4, 1)
+        layout.setSpacing(6)
+
         if widget_name == "checkbutton":
-            return "Toggle control"
+            check_box = QCheckBox("Toggle")
+            check_box.setEnabled(False)
+            check_box.setChecked(self._coerce_preview_bool(field.get("default")))
+            layout.addWidget(check_box)
+            layout.addStretch(1)
+            return container
         if widget_name == "combobox":
+            combo_box = QComboBox()
             values = field.get("values")
             if isinstance(values, list):
                 values = [str(value).strip() for value in values if str(value).strip()]
-                if values:
-                    return " / ".join(values[:4]) + (" ..." if len(values) > 4 else "")
-            return "Dropdown selection"
+            else:
+                values = []
+            combo_box.addItems(values[:8] or ["Dropdown"])
+            combo_box.setEnabled(False)
+            combo_box.setMinimumWidth(200)
+            layout.addWidget(combo_box)
+            layout.addStretch(1)
+            return container
         if widget_name == "display":
-            return "Derived display"
+            display_text = str(field.get("default", "")).strip() or "Derived value"
+            label = QLabel(display_text)
+            label.setObjectName("mutedLabel")
+            layout.addWidget(label)
+            layout.addStretch(1)
+            return container
         default_text = str(field.get("default", "")).strip()
-        return default_text or "Text input"
+        line_edit = QLineEdit(default_text or "")
+        line_edit.setReadOnly(True)
+        line_edit.setPlaceholderText("Text input")
+        line_edit.setMinimumWidth(200)
+        layout.addWidget(line_edit)
+        layout.addStretch(1)
+        return container
+
+    def _build_row_section_preview_widget(self, fields):
+        field_list = fields if isinstance(fields, list) else []
+        if not field_list:
+            label = QLabel("No fields configured")
+            label.setObjectName("mutedLabel")
+            return label
+
+        container = QWidget()
+        layout = QHBoxLayout(container)
+        layout.setContentsMargins(4, 1, 4, 1)
+        layout.setSpacing(6)
+
+        max_controls = 6
+        for field in field_list[:max_controls]:
+            preview_widget = self._build_row_field_preview_widget(field)
+            if preview_widget is not None:
+                layout.addWidget(preview_widget, 1)
+
+        overflow = len(field_list) - max_controls
+        if overflow > 0:
+            overflow_label = QLabel(f"+{overflow} more")
+            overflow_label.setObjectName("mutedLabel")
+            layout.addWidget(overflow_label)
+        return container
+
+    @staticmethod
+    def _coerce_preview_bool(value):
+        if isinstance(value, bool):
+            return value
+        text_value = str(value or "").strip().lower()
+        return text_value in {"1", "true", "yes", "on", "y"}
 
     def render_validation_summary(self, summary):
         payload = dict(summary or {})
