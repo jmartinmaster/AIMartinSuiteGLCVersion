@@ -806,6 +806,7 @@ def remote_executable_candidates(row, stable_artifact_kind, stable_artifact_name
 
     if versioned_name:
         candidates.append((f"dist/{versioned_name}", versioned_name))
+        candidates.append((f"dist/variants/public/{versioned_name}", versioned_name))
     candidates.append((LEGACY_REMOTE_EXE_PATH, versioned_name or LEGACY_EXE_NAME))
     return candidates
 
