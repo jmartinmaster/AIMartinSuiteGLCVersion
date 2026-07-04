@@ -18,6 +18,7 @@ import importlib.util
 import os
 import subprocess
 import sys
+from pathlib import Path
 
 from app.views.about_qt_view import AboutQtView
 
@@ -180,6 +181,10 @@ class AboutQtController:
             return {}
 
         metadata = {}
+        metadata_field_map = {
+            "__module_name__": "display_name",
+            "__version__": "version",
+        }
         for node in module_tree.body:
             if not isinstance(node, ast.Assign):
                 continue
@@ -187,11 +192,14 @@ class AboutQtController:
             if string_value is None:
                 continue
             for target in node.targets:
-                if isinstance(target, ast.Name) and target.id in {"__module_name__", "__version__"}:
-                    metadata[target.id] = string_value.strip()
+                if not isinstance(target, ast.Name):
+                    continue
+                metadata_key = metadata_field_map.get(target.id)
+                if metadata_key:
+                    metadata[metadata_key] = string_value.strip()
         return {
-            "display_name": metadata.get("__module_name__", ""),
-            "version": metadata.get("__version__", ""),
+            "display_name": metadata.get("display_name", ""),
+            "version": metadata.get("version", ""),
         }
 
     def _resolve_module_file_path(self, module_path):
@@ -222,7 +230,9 @@ class AboutQtController:
         if not external_root or not module_file:
             return False
         try:
-            return os.path.commonpath([os.path.abspath(module_file), os.path.abspath(external_root)]) == os.path.abspath(external_root)
+            module_location = Path(module_file).resolve()
+            external_location = Path(external_root).resolve()
+            return module_location.is_relative_to(external_location)
         except Exception:
             return False
 

@@ -1,6 +1,7 @@
 import importlib
 import json
 import sys
+import tempfile
 import types
 import unittest
 from pathlib import Path
@@ -38,7 +39,7 @@ class _DispatcherStub:
     def __init__(self, modules, loaded_modules=None):
         self.module_registry = _RegistryStub(modules)
         self.loaded_modules = dict(loaded_modules or {})
-        self.external_modules_path = "/tmp/external_modules"
+        self.external_modules_path = str(Path(tempfile.gettempdir()) / "external_modules")
 
     def is_module_loaded_from_external(self, _module_name, _module_obj=None):
         return False
