@@ -650,8 +650,10 @@ class SettingsManagerQtController:
                 }
             )
 
-        from app.crash_handler import list_crash_reports
-        crash_reports = list_crash_reports()
+        crash_reports = []
+        if can_manage_developer:
+            from app.crash_handler import list_crash_reports
+            crash_reports = list_crash_reports()
 
         return {
             "can_manage_developer": can_manage_developer,
@@ -668,6 +670,8 @@ class SettingsManagerQtController:
 
     def load_crash_report(self, filename):
         if not filename:
+            return ""
+        if not self._has_developer_access():
             return ""
         from app.crash_handler import read_crash_report_by_name
         return read_crash_report_by_name(filename)

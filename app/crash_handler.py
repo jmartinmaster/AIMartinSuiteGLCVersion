@@ -497,16 +497,7 @@ def delete_crash_report_by_name(filename):
         if os.path.isfile(path):
             os.remove(path)
 
-            # If this was the latest crash, delete the latest_crash.txt too
-            try:
-                latest_path = get_latest_crash_path()
-                if os.path.isfile(latest_path):
-                    os.remove(latest_path)
-            except Exception:
-                pass
-
             return True
     except Exception:
         pass
     return False
-

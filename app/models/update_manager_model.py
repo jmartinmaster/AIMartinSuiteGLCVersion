@@ -23,6 +23,7 @@ import sys
 import tempfile
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import zipfile
 
@@ -166,7 +167,8 @@ def _read_text_payload_metadata_from_path(file_path, fallback_name):
 
 
 def _build_raw_github_url(owner, repo, branch_name, relative_path, cache_bust=None):
-    base_url = f"https://raw.githubusercontent.com/{owner}/{repo}/{branch_name}/{relative_path}"
+    quoted_path = urllib.parse.quote(relative_path, safe="/")
+    base_url = f"https://raw.githubusercontent.com/{owner}/{repo}/{branch_name}/{quoted_path}"
     if cache_bust is None:
         return base_url
     separator = "&" if "?" in base_url else "?"
@@ -471,15 +473,24 @@ def evaluate_module_payload_option(modules_path, loaded_modules, option, branch_
         local_compare = parse_version(local_version)
         remote_compare = parse_version(remote_version)
 
-        if remote_compare and local_compare and normalize_version(remote_compare) > normalize_version(local_compare):
-            status = "Module update available"
-            note = f"A newer {module_name} payload is available and can be installed without rebuilding the EXE."
-            update_available = True
+        if remote_compare and local_compare:
+            remote_normalized = normalize_version(remote_compare)
+            local_normalized = normalize_version(local_compare)
+            if remote_normalized > local_normalized:
+                status = "Module update available"
+                note = f"A newer {module_name} payload is available and can be installed without rebuilding the EXE."
+                update_available = True
+            elif remote_normalized == local_normalized:
+                status = "Up to date"
+                note = f"The selected {module_name} payload already matches the repository version."
+            else:
+                status = "Local module is newer"
+                note = f"The local {module_name} payload is newer than the repository version."
         elif remote_version == local_version and remote_version != "Unknown":
             status = "Up to date"
             note = f"The selected {module_name} payload already matches the repository version."
-        else:
-            # Fallback to source code comparison if version is Unknown
+        elif remote_version == "Unknown" or local_version == "Unknown":
+            # Fallback to source code comparison only when semantic versions are unavailable.
             local_token = local_metadata.get("compare_token")
             remote_token = remote_metadata.get("compare_token")
             if local_token and remote_token:
@@ -493,6 +504,9 @@ def evaluate_module_payload_option(modules_path, loaded_modules, option, branch_
             else:
                 status = "Module version unreadable"
                 note = f"The selected {module_name} payload could not be compared cleanly."
+        else:
+            status = "Module version unreadable"
+            note = f"The selected {module_name} payload could not be compared cleanly."
 
     return {
         "option": current_option,
