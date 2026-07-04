@@ -601,27 +601,36 @@ class SettingsManagerQtView(QMainWindow):
         section_mode = str(snapshot.get("section_mode") or self.section_mode or "full")
         self.section_mode = section_mode
 
-        self.summary_group.setVisible(True)
-        self.editable_group.setVisible(section_mode == "full")
-        self.downtime_group.setVisible(section_mode == "full")
+        if self.summary_group is not None:
+            self.summary_group.setVisible(True)
+        if self.editable_group is not None:
+            self.editable_group.setVisible(section_mode == "full")
+        if self.downtime_group is not None:
+            self.downtime_group.setVisible(section_mode == "full")
 
         security_visible = bool(snapshot.get("security_admin_visible", False))
         developer_visible = bool(snapshot.get("developer_admin_visible", False))
 
         if section_mode == "security_admin":
-            self.security_admin_group.setVisible(True)
-            self.developer_admin_group.setVisible(False)
+            if self.security_admin_group is not None:
+                self.security_admin_group.setVisible(True)
+            if self.developer_admin_group is not None:
+                self.developer_admin_group.setVisible(False)
             self.setWindowTitle(str(self.payload.get("window_title") or "Security Admin - Production Logging Center"))
             return
 
         if section_mode == "developer_admin":
-            self.security_admin_group.setVisible(False)
-            self.developer_admin_group.setVisible(True)
+            if self.security_admin_group is not None:
+                self.security_admin_group.setVisible(False)
+            if self.developer_admin_group is not None:
+                self.developer_admin_group.setVisible(True)
             self.setWindowTitle(str(self.payload.get("window_title") or "Developer Tools - Production Logging Center"))
             return
 
-        self.security_admin_group.setVisible(True)
-        self.developer_admin_group.setVisible(developer_visible)
+        if self.security_admin_group is not None:
+            self.security_admin_group.setVisible(True)
+        if self.developer_admin_group is not None:
+            self.developer_admin_group.setVisible(developer_visible)
         self.setWindowTitle(str(self.payload.get("window_title") or "Settings Manager - Production Logging Center"))
 
     def _populate_module_list(self, widget, options, selected_names):

@@ -246,7 +246,7 @@ For the installed `.deb` package, user-writable runtime files (JSON configs, dra
 
 ## Update Manager and Versioning
 
-The Update Manager checks the Dispatcher Core version exported from `launcher.py` (`__version__ = "2.4.7"`). `main.py` remains the runtime entry boundary.
+The Update Manager checks the Dispatcher Core version exported from `launcher.py` (`__version__ = "2.4.5"`). `main.py` remains the runtime entry boundary.
 
 ### Versioning Rules
 
@@ -254,9 +254,9 @@ The Update Manager checks the Dispatcher Core version exported from `launcher.py
 |---|---|
 | Two-part (e.g., `1.07`) | Remote version is greater than the local version. |
 | Three-part, even patch (e.g., `1.07.2`) | Remote version is greater and the patch number is even. |
-| Three-part, odd patch (e.g., `1.07.1`) | **Never** — odd patch versions are ignored by the auto-updater. |
+| Three-part, odd patch (e.g., `1.07.1`) | Ignored by default; allowed when developer update settings are enabled (advanced dev updates or a custom update repository URL). |
 
-Even patch releases are stable and eligible for the auto-update gate. Odd patch releases are development builds.
+Even patch releases are stable and eligible for the default auto-update gate. Odd patch releases are treated as development builds unless developer update settings explicitly enable them.
 
 ### Update Behavior by Mode
 

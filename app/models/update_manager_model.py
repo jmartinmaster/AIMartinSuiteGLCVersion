@@ -260,12 +260,16 @@ def _update_configuration_note(remote_info=None):
     return "No Update Repository URL is configured yet. Open Security Admin and sign in with the developer vault to enable update checks and payload restores."
 
 
-def _is_supported_update_version(version_parts):
+def _is_supported_update_version(version_parts, allow_odd_patch=False):
     if version_parts is None:
         return False
     if len(version_parts) == 2:
         return True
-    return len(version_parts) == 3 and version_parts[2] % 2 == 0
+    if len(version_parts) != 3:
+        return False
+    if allow_odd_patch:
+        return True
+    return version_parts[2] % 2 == 0
 
 
 def _detect_branch_name():
@@ -726,7 +730,13 @@ def build_local_manifest(dispatcher_module):
     }]
 
 
-def evaluate_stable_update_entry(entry, remote_text, stable_artifact_status_label, stable_artifact_name_for_version):
+def evaluate_stable_update_entry(
+    entry,
+    remote_text,
+    stable_artifact_status_label,
+    stable_artifact_name_for_version,
+    allow_odd_patch=False,
+):
     remote_metadata = _parse_module_metadata(remote_text, entry["module_name"])
     remote_version = remote_metadata["version"]
     remote_compare = parse_version(remote_version)
@@ -735,10 +745,10 @@ def evaluate_stable_update_entry(entry, remote_text, stable_artifact_status_labe
     if remote_compare is None:
         status = "Remote version unreadable"
         update_available = False
-    elif len(remote_compare) == 3 and remote_compare[2] % 2 != 0:
+    elif len(remote_compare) == 3 and remote_compare[2] % 2 != 0 and not allow_odd_patch:
         status = "Remote odd patch ignored"
         update_available = False
-    elif not _is_supported_update_version(remote_compare):
+    elif not _is_supported_update_version(remote_compare, allow_odd_patch=allow_odd_patch):
         status = "Remote version ignored"
         update_available = False
     elif local_compare is None:
@@ -1305,12 +1315,20 @@ class UpdateManagerModel:
     def build_local_manifest(self, dispatcher_module):
         return build_local_manifest(dispatcher_module)
 
-    def evaluate_stable_update_entry(self, entry, remote_text, stable_artifact_status_label, stable_artifact_name_for_version):
+    def evaluate_stable_update_entry(
+        self,
+        entry,
+        remote_text,
+        stable_artifact_status_label,
+        stable_artifact_name_for_version,
+        allow_odd_patch=False,
+    ):
         return evaluate_stable_update_entry(
             entry,
             remote_text,
             stable_artifact_status_label,
             stable_artifact_name_for_version,
+            allow_odd_patch=allow_odd_patch,
         )
 
     def fetch_remote_file(self, remote_info, branch_name, relative_path, timeout=15):
@@ -1368,7 +1386,16 @@ class UpdateManagerModel:
             current_executable=current_executable,
         )
 
-    def build_stable_update_rows(self, local_manifest, remote_info, branch_name, stable_artifact_kind, stable_artifact_name_for_version, stable_artifact_status_label):
+    def build_stable_update_rows(
+        self,
+        local_manifest,
+        remote_info,
+        branch_name,
+        stable_artifact_kind,
+        stable_artifact_name_for_version,
+        stable_artifact_status_label,
+        allow_odd_patch=False,
+    ):
         comparison_rows = []
         for entry in local_manifest or []:
             try:
@@ -1391,6 +1418,7 @@ class UpdateManagerModel:
                 remote_text,
                 stable_artifact_status_label,
                 stable_artifact_name_for_version,
+                allow_odd_patch=allow_odd_patch,
             )
             if current_row["update_available"]:
                 remote_path, resolved_name = self.probe_remote_executable(

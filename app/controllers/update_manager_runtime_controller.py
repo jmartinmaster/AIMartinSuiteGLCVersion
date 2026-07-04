@@ -18,7 +18,7 @@ import os
 import sys
 import threading
 
-from app.app_identity import format_versioned_deb_name, format_versioned_exe_name
+from app.app_identity import DEFAULT_UPDATE_REPOSITORY_URL, format_versioned_deb_name, format_versioned_exe_name
 from app.app_platform import get_platform_update_artifact_kind, get_platform_update_artifact_label, is_windows_runtime
 from app.models.update_manager_model import UpdateManagerModel
 from app.update_bindings import ObservableValue
@@ -176,6 +176,12 @@ class UpdateManagerRuntimeController:
 
     def _update_configuration_note(self):
         return self.model.update_configuration_note(self.remote_info)
+
+    def _allow_odd_patch_updates(self):
+        if bool(self.dispatcher.get_setting("enable_advanced_dev_updates", False)):
+            return True
+        configured_repo_url = str(self.dispatcher.get_setting("update_repository_url", "") or "").strip().strip("'\"")
+        return bool(configured_repo_url and configured_repo_url != DEFAULT_UPDATE_REPOSITORY_URL)
 
     def _discover_payload_options(self):
         return self.model.discover_module_payload_options(getattr(self.dispatcher, "modules_path", None))
@@ -736,6 +742,7 @@ class UpdateManagerRuntimeController:
     def check_for_updates(self):
         self.coordinator.set_job_phase("checking", f"Checking the repository for newer stable {self._stable_artifact_noun(plural=True)}.", mode="stable")
         self.refresh_local_manifest()
+        allow_odd_patch = self._allow_odd_patch_updates()
         comparison_rows = self.model.build_stable_update_rows(
             self.local_manifest,
             self.remote_info,
@@ -743,6 +750,7 @@ class UpdateManagerRuntimeController:
             self.stable_artifact_kind,
             self._stable_artifact_name_for_version,
             self._stable_artifact_status_label(),
+            allow_odd_patch=allow_odd_patch,
         )
 
         self.comparison_rows[:] = comparison_rows

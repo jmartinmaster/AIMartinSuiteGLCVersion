@@ -295,6 +295,11 @@ class SettingsManagerQtController:
 
     def save_settings(self):
         form_values = self.view.get_form_values()
+        developer_values = None
+        if self._has_developer_access():
+            developer_values = self.view.get_developer_admin_settings_values()
+            form_values["update_repository_url"] = str(developer_values.get("update_repository_url") or "").strip().strip("'\"")
+            form_values["enable_advanced_dev_updates"] = bool(developer_values.get("enable_advanced_dev_updates", False))
         try:
             settings = self.model.build_settings_from_form(form_values)
             settings["module_whitelist"] = self.model.normalize_module_names(
@@ -305,7 +310,11 @@ class SettingsManagerQtController:
                 form_values.get("persistent_modules", []),
                 self.model.valid_persistent_modules or None,
             )
-            runtime_path_overrides = self.view.get_runtime_path_overrides()
+            runtime_path_overrides = (
+                developer_values.get("runtime_path_overrides", {})
+                if isinstance(developer_values, dict)
+                else self.view.get_runtime_path_overrides()
+            )
             settings = self._apply_runtime_path_overrides(settings, runtime_path_overrides)
             self.model.update_settings(settings)
             backup_info = self.model.save_settings_with_backup()
@@ -313,12 +322,31 @@ class SettingsManagerQtController:
             self.view.show_error("Settings Manager", f"Could not save settings:\n{exc}")
             return
 
+        trust_changed = False
+        if isinstance(developer_values, dict):
+            desired_trust_state = bool(developer_values.get("enable_external_override_trust", False))
+            trust_changed = gatekeeper.is_external_module_override_trust_enabled() != desired_trust_state
+            try:
+                gatekeeper.set_external_module_override_trust(desired_trust_state)
+            except Exception as exc:
+                self.view.show_error(
+                    "Settings Manager",
+                    f"Settings were saved, but external override trust could not be updated:\n{exc}",
+                )
+                trust_changed = False
+
         self.refresh_snapshot(initial=False)
         backup_note = ""
         if isinstance(backup_info, dict) and backup_info.get("versioned_backup_path"):
             backup_note = " A backup copy was stored in data/backups/settings."
         self.view.show_info("Settings Manager", f"Saved settings successfully.{backup_note}")
-        self._write_saved_runtime_state("Saved settings successfully.")
+        metadata = {
+            "applied_theme": str(self.model.saved_theme or ""),
+            "refresh_runtime_settings": True,
+            "refresh_downtime_codes": True,
+            "apply_external_override_policy_change": bool(trust_changed),
+        }
+        self._write_saved_runtime_state("Saved settings successfully.", metadata=metadata)
 
     def add_next_downtime_code_row(self):
         rows = self.view.get_downtime_code_rows()
@@ -710,7 +738,8 @@ class SettingsManagerQtController:
         )
 
     def save_developer_admin_settings(self, update_repository_url, enable_advanced_dev_updates, enable_external_override_trust, runtime_path_overrides=None):
-        trust_changed = gatekeeper.is_external_module_override_trust_enabled() != bool(enable_external_override_trust)
+        desired_trust_state = bool(enable_external_override_trust)
+        trust_changed = gatekeeper.is_external_module_override_trust_enabled() != desired_trust_state
         self.model.settings["update_repository_url"] = str(update_repository_url or "").strip().strip("'\"")
         self.model.settings["enable_advanced_dev_updates"] = bool(enable_advanced_dev_updates)
         try:
@@ -744,8 +773,20 @@ class SettingsManagerQtController:
             self.view.show_error("Developer Settings", str(exc))
             return
         self.model.settings = self.model.normalize_settings(self.model.settings)
-        gatekeeper.set_external_module_override_trust(bool(enable_external_override_trust))
-        backup_info = self.model.save_settings_with_backup()
+        try:
+            backup_info = self.model.save_settings_with_backup()
+        except Exception as exc:
+            self.view.show_error("Developer Settings", f"Could not save developer settings:\n{exc}")
+            return
+
+        try:
+            gatekeeper.set_external_module_override_trust(desired_trust_state)
+        except Exception as exc:
+            self.view.show_error(
+                "Developer Settings",
+                f"Developer settings were saved, but external override trust could not be updated:\n{exc}",
+            )
+            trust_changed = False
 
         backup_note = ""
         if isinstance(backup_info, dict) and backup_info.get("versioned_backup_path"):
