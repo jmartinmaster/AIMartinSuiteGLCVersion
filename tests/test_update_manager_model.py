@@ -7,6 +7,8 @@ from unittest.mock import patch
 
 def _load_update_manager_model():
     # update_manager_model imports app_platform, which imports PIL at module load time.
+    # These URL-construction tests never touch PIL APIs, so a minimal stub keeps the
+    # import isolated without requiring the full imaging dependency in test envs.
     pil_module = types.ModuleType("PIL")
     image_module = types.ModuleType("PIL.Image")
     pil_module.Image = image_module

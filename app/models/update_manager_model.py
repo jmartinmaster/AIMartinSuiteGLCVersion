@@ -168,8 +168,10 @@ def _read_text_payload_metadata_from_path(file_path, fallback_name):
 
 def _build_raw_github_url(owner, repo, branch_name, relative_path, cache_bust=None):
     if branch_name is None or relative_path is None:
-        raise ValueError("branch_name and relative_path are required.")
+        raise ValueError("branch_name and relative_path must not be None.")
 
+    # Accept string-like inputs such as Path objects while normalizing
+    # separators before percent-encoding the GitHub URL path segments.
     branch_str = str(branch_name)
     path_str = str(relative_path)
     normalized_branch = branch_str.replace("\\", "/").strip("/")
