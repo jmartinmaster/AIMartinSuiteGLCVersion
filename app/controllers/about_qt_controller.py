@@ -13,6 +13,8 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
+import ast
+import importlib.util
 import os
 import subprocess
 import sys
@@ -62,31 +64,35 @@ class AboutQtController:
         main_module = loaded_modules.get("main")
         if main_module is not None:
             yielded_keys.add("main")
-            yield "main", main_module
+            yield {
+                "module_name": "main",
+                "module_path": "launcher",
+                "fallback_display_name": "Dispatcher Core",
+                "module_obj": main_module,
+            }
 
-        preloaded_module_names = getattr(getattr(dispatcher, "model", None), "preloaded_module_names", set()) or set()
-        ordered_module_names = []
-        try:
-            ordered_module_names.extend(dispatcher.get_user_facing_modules(apply_whitelist=False))
-        except Exception:
-            ordered_module_names.extend(sorted(preloaded_module_names))
-
-        for module_name in ordered_module_names:
-            if module_name in yielded_keys:
-                continue
-            module_obj = loaded_modules.get(module_name)
-            if module_obj is None and module_name in preloaded_module_names:
-                module_obj = sys.modules.get(f"app.{module_name}")
-            if module_obj is None:
+        for module_entry in self._list_registered_modules():
+            module_name = str(module_entry.get("name") or "").strip()
+            if not module_name or module_name in yielded_keys:
                 continue
             yielded_keys.add(module_name)
-            yield module_name, module_obj
+            yield {
+                "module_name": module_name,
+                "module_path": str(module_entry.get("module_path") or f"app.{module_name}").strip(),
+                "fallback_display_name": str(module_entry.get("display_name") or module_name.replace("_", " ").title()).strip(),
+                "module_obj": loaded_modules.get(module_name),
+            }
 
         for module_name, module_obj in loaded_modules.items():
             if module_name in yielded_keys:
                 continue
             yielded_keys.add(module_name)
-            yield module_name, module_obj
+            yield {
+                "module_name": module_name,
+                "module_path": f"app.{module_name}",
+                "fallback_display_name": module_name.replace("_", " ").title(),
+                "module_obj": module_obj,
+            }
 
     def get_manifest_rows(self):
         dispatcher = self.dispatcher
@@ -94,18 +100,131 @@ class AboutQtController:
             return []
 
         manifest_rows = []
-        for mod_key, mod_obj in self._iter_manifest_modules():
-            display_name = getattr(mod_obj, "__module_name__", mod_key)
-            version = getattr(mod_obj, "__version__", "Unknown")
-            source_suffix = "external" if dispatcher.is_module_loaded_from_external(mod_key, mod_obj) else "built-in"
+        for module_entry in self._iter_manifest_modules():
+            module_name = module_entry.get("module_name") or "unknown"
+            module_path = module_entry.get("module_path") or f"app.{module_name}"
+            module_obj = module_entry.get("module_obj")
+            metadata = self._resolve_manifest_metadata(
+                module_name=module_name,
+                module_path=module_path,
+                fallback_display_name=module_entry.get("fallback_display_name") or module_name,
+                module_obj=module_obj,
+            )
+            source_suffix = "external" if self._is_external_manifest_module(module_name, module_path, module_obj) else "built-in"
             manifest_rows.append(
                 {
-                    "display_name": display_name,
-                    "version": version,
+                    "module_name": module_name,
+                    "display_name": metadata["display_name"],
+                    "version": metadata["version"],
                     "source_suffix": source_suffix,
                 }
             )
         return manifest_rows
+
+    def _list_registered_modules(self):
+        dispatcher = self.dispatcher
+        module_registry = getattr(dispatcher, "module_registry", None)
+        if module_registry is None:
+            return []
+        try:
+            return module_registry.list_modules()
+        except Exception:
+            return []
+
+    def _resolve_manifest_metadata(self, module_name, module_path, fallback_display_name, module_obj=None):
+        display_name = getattr(module_obj, "__module_name__", "") if module_obj is not None else ""
+        version = getattr(module_obj, "__version__", "") if module_obj is not None else ""
+
+        access_point_metadata = self._read_module_metadata(module_path)
+        if not display_name:
+            display_name = access_point_metadata.get("display_name") or ""
+        if not version:
+            version = access_point_metadata.get("version") or ""
+
+        if not version:
+            for controller_module_path in self._get_controller_module_paths(module_name):
+                controller_metadata = self._read_module_metadata(controller_module_path)
+                if not display_name:
+                    display_name = controller_metadata.get("display_name") or ""
+                version = controller_metadata.get("version") or ""
+                if version:
+                    break
+
+        return {
+            "display_name": display_name or fallback_display_name or module_name,
+            "version": version or "Unknown",
+        }
+
+    def _get_controller_module_paths(self, module_name):
+        if not module_name or module_name == "main":
+            return ()
+        return (
+            f"app.controllers.{module_name}_qt_controller",
+            f"app.controllers.{module_name}_controller",
+        )
+
+    def _read_module_metadata(self, module_path):
+        module_file = self._resolve_module_file_path(module_path)
+        if not module_file or not module_file.endswith(".py"):
+            return {}
+
+        try:
+            with open(module_file, "r", encoding="utf-8") as handle:
+                module_source = handle.read()
+        except OSError:
+            return {}
+
+        try:
+            module_tree = ast.parse(module_source, filename=module_file)
+        except SyntaxError:
+            return {}
+
+        metadata = {}
+        for node in module_tree.body:
+            if not isinstance(node, ast.Assign):
+                continue
+            string_value = self._get_string_constant(node.value)
+            if string_value is None:
+                continue
+            for target in node.targets:
+                if isinstance(target, ast.Name) and target.id in {"__module_name__", "__version__"}:
+                    metadata[target.id] = string_value.strip()
+        return {
+            "display_name": metadata.get("__module_name__", ""),
+            "version": metadata.get("__version__", ""),
+        }
+
+    def _resolve_module_file_path(self, module_path):
+        try:
+            module_spec = importlib.util.find_spec(module_path)
+        except (ImportError, ModuleNotFoundError, ValueError):
+            return ""
+        if module_spec is None:
+            return ""
+        return getattr(module_spec, "origin", "") or ""
+
+    @staticmethod
+    def _get_string_constant(node):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            return node.value
+        return None
+
+    def _is_external_manifest_module(self, module_name, module_path, module_obj=None):
+        dispatcher = self.dispatcher
+        if dispatcher is None:
+            return False
+        if dispatcher.is_module_loaded_from_external(module_name, module_obj):
+            return True
+        if not bool(getattr(dispatcher, "are_external_module_overrides_enabled", lambda: False)()):
+            return False
+        external_root = getattr(dispatcher, "external_modules_path", "")
+        module_file = self._resolve_module_file_path(module_path)
+        if not external_root or not module_file:
+            return False
+        try:
+            return os.path.commonpath([os.path.abspath(module_file), os.path.abspath(external_root)]) == os.path.abspath(external_root)
+        except Exception:
+            return False
 
     def _build_view_payload(self):
         dispatcher = self.dispatcher
