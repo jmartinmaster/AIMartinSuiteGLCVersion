@@ -14,304 +14,13 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 import importlib
-import json
-import os
-import shutil
-import subprocess
 import sys
-import tempfile
-import threading
 import time
-from pathlib import Path
-
-from PyQt6.QtCore import QTimer
-from PyQt6.QtWidgets import QGroupBox, QHBoxLayout, QLabel, QMessageBox, QPushButton, QVBoxLayout, QWidget
 
 from app.app_logging import log_exception
 
 __module_name__ = "Layout Manager Mini Dispatcher"
-__version__ = "1.2.1"
-LAYOUT_MANAGER_QT_SESSION_ENV = "AIMARTIN_LAYOUT_MANAGER_QT_SESSION"
-
-REPO_ROOT = Path(__file__).resolve().parent.parent
-
-
-def _to_json_compatible(value):
-    if isinstance(value, dict):
-        return {str(key): _to_json_compatible(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_to_json_compatible(item) for item in value]
-    if isinstance(value, set):
-        return [_to_json_compatible(item) for item in sorted(value, key=lambda item: repr(item))]
-    if isinstance(value, Path):
-        return str(value)
-    if isinstance(value, (str, int, float, bool)) or value is None:
-        return value
-    return str(value)
-
-
-class LayoutManagerQtRuntimeManager:
-    def __init__(self, mini_dispatcher):
-        self.mini_dispatcher = mini_dispatcher
-        self.process = None
-        self.launch_thread = None
-        self.process_lock = threading.Lock()
-        self.session_dir = None
-        self.session_path = None
-        self.state_path = None
-        self.command_path = None
-
-    def is_running(self):
-        with self.process_lock:
-            return self.process is not None and self.process.poll() is None
-
-    def ensure_running(self, force_restart=False):
-        if force_restart:
-            self.stop_runtime(force=True)
-        if self.is_running():
-            self.send_command("raise_window")
-            return
-        if self.launch_thread is not None and self.launch_thread.is_alive():
-            return
-        self.launch_thread = threading.Thread(
-            target=self._launch_runtime,
-            name="LayoutManagerQtRuntime",
-            daemon=True,
-        )
-        self.launch_thread.start()
-
-    def _launch_runtime(self):
-        payload = self.mini_dispatcher.consume_preload() or self.mini_dispatcher._build_preload_payload()
-        self._prepare_session(payload)
-        command = self._build_command()
-        env = os.environ.copy()
-        env[LAYOUT_MANAGER_QT_SESSION_ENV] = str(self.session_path)
-        process = subprocess.Popen(command, cwd=str(REPO_ROOT), env=env, close_fds=True)
-        with self.process_lock:
-            self.process = process
-
-    def _prepare_session(self, payload):
-        self._cleanup_session_dir()
-        session_dir = Path(tempfile.mkdtemp(prefix="aimartin_layout_manager_qt_"))
-        session_path = session_dir / "session.json"
-        state_path = session_dir / "state.json"
-        command_path = session_dir / "command.json"
-        state_path.write_text(
-            json.dumps(
-                {
-                    "status": "launching",
-                    "dirty": False,
-                    "change_token": 0,
-                    "message": "Launching Layout Manager Qt window.",
-                    "updated_at": time.time(),
-                },
-                indent=2,
-            ),
-            encoding="utf-8",
-        )
-        session_payload = _to_json_compatible(dict(payload or {}))
-        session_payload["state_path"] = str(state_path)
-        session_payload["command_path"] = str(command_path)
-        session_path.write_text(json.dumps(session_payload, indent=2), encoding="utf-8")
-        self.session_dir = session_dir
-        self.session_path = session_path
-        self.state_path = state_path
-        self.command_path = command_path
-
-    def _build_command(self):
-        if getattr(sys, "frozen", False):
-            return [sys.executable]
-        return [sys.executable, str(REPO_ROOT / "main.py")]
-
-    def read_state(self):
-        state_path = self.state_path
-        if state_path is None or not state_path.exists():
-            return {}
-        try:
-            return json.loads(state_path.read_text(encoding="utf-8"))
-        except Exception:
-            return {}
-
-    def send_command(self, action, payload=None):
-        command_path = self.command_path
-        if command_path is None:
-            return
-        try:
-            command_path.write_text(
-                json.dumps(
-                    {
-                        "action": action,
-                        "requested_at": time.time(),
-                        "payload": _to_json_compatible(payload or {}),
-                    },
-                    indent=2,
-                ),
-                encoding="utf-8",
-            )
-        except Exception as exc:
-            log_exception("layout_manager_qt_runtime.send_command", exc)
-
-    def stop_runtime(self, force=False):
-        process = self.process
-        if process is None:
-            self._cleanup_session_dir()
-            return
-        if process.poll() is not None:
-            with self.process_lock:
-                self.process = None
-            self._cleanup_session_dir()
-            return
-        if not force:
-            self.send_command("close_window")
-            try:
-                process.wait(timeout=2.0)
-            except subprocess.TimeoutExpired:
-                pass
-        if process.poll() is None:
-            process.terminate()
-            try:
-                process.wait(timeout=2.0)
-            except subprocess.TimeoutExpired:
-                process.kill()
-        with self.process_lock:
-            self.process = None
-        self._cleanup_session_dir()
-
-    def _cleanup_session_dir(self):
-        session_dir = self.session_dir
-        self.session_dir = None
-        self.session_path = None
-        self.state_path = None
-        self.command_path = None
-        if session_dir is None:
-            return
-        try:
-            shutil.rmtree(session_dir, ignore_errors=True)
-        except Exception:
-            pass
-
-
-class LayoutManagerQtBridge(QWidget):
-    def __init__(self, parent, mini_dispatcher):
-        super().__init__(parent)
-        self.mini_dispatcher = mini_dispatcher
-        self.runtime_manager = mini_dispatcher.runtime_manager
-        self._last_toast_token = None
-        self._last_module_open_token = None
-        self._poll_timer = QTimer(self)
-        self._build_ui()
-        self._poll_timer.setInterval(900)
-        self._poll_timer.timeout.connect(self._poll_state)
-        self._poll_timer.start()
-        self._poll_state()
-
-    def _build_ui(self):
-        root_layout = QVBoxLayout(self)
-        root_layout.setContentsMargins(20, 20, 20, 20)
-        root_layout.setSpacing(12)
-
-        header = QLabel("Layout Manager Qt Runtime", self)
-        header.setObjectName("pageTitle")
-        root_layout.addWidget(header)
-
-        subtitle = QLabel(
-            "Layout Manager now runs in a dedicated Qt window. Use the controls below to open, raise, or resync the dedicated runtime.",
-            self,
-        )
-        subtitle.setObjectName("subtitleLabel")
-        subtitle.setWordWrap(True)
-        root_layout.addWidget(subtitle)
-
-        controls_layout = QHBoxLayout()
-        open_button = QPushButton("Open / Raise Qt Window", self)
-        open_button.clicked.connect(self.open_or_raise)
-        controls_layout.addWidget(open_button)
-
-        reload_button = QPushButton("Reload From Disk", self)
-        reload_button.clicked.connect(self.reload_from_disk)
-        controls_layout.addWidget(reload_button)
-
-        restart_button = QPushButton("Restart Qt Runtime", self)
-        restart_button.clicked.connect(self.restart_runtime)
-        controls_layout.addWidget(restart_button)
-        controls_layout.addStretch(1)
-        root_layout.addLayout(controls_layout)
-
-        status_group = QGroupBox("Qt Runtime Status", self)
-        status_layout = QVBoxLayout(status_group)
-        self.status_label = QLabel("Launching Qt runtime...", status_group)
-        self.form_label = QLabel("Form: --", status_group)
-        self.form_label.setObjectName("mutedLabel")
-        self.path_label = QLabel("Source: --", status_group)
-        self.path_label.setObjectName("mutedLabel")
-        self.path_label.setWordWrap(True)
-        self.message_label = QLabel("Waiting for state...", status_group)
-        self.message_label.setObjectName("mutedLabel")
-        self.message_label.setWordWrap(True)
-        status_layout.addWidget(self.status_label)
-        status_layout.addWidget(self.form_label)
-        status_layout.addWidget(self.path_label)
-        status_layout.addWidget(self.message_label)
-        root_layout.addWidget(status_group)
-        root_layout.addStretch(1)
-
-    def _poll_state(self):
-        state = self.runtime_manager.read_state()
-        status = str(state.get("status") or "launching").title()
-        dirty = bool(state.get("dirty"))
-        dirty_suffix = " (Unsaved changes)" if dirty else ""
-        self.status_label.setText(f"Status: {status}{dirty_suffix}")
-        form_name = state.get("form_name") or state.get("form_id") or "--"
-        self.form_label.setText(f"Form: {form_name}")
-        self.path_label.setText(f"Source: {state.get('source_path') or '--'}")
-        self.message_label.setText(str(state.get("message") or "Waiting for state..."))
-        toast_event = state.get("toast_event") if isinstance(state.get("toast_event"), dict) else None
-        toast_token = toast_event.get("token") if isinstance(toast_event, dict) else None
-        if toast_token is not None and toast_token != self._last_toast_token:
-            self._last_toast_token = toast_token
-            self.mini_dispatcher.forward_runtime_toast(toast_event)
-        module_open_event = state.get("module_open_event") if isinstance(state.get("module_open_event"), dict) else None
-        module_open_token = module_open_event.get("token") if isinstance(module_open_event, dict) else None
-        if module_open_token is not None and module_open_token != self._last_module_open_token:
-            self._last_module_open_token = module_open_token
-            self.mini_dispatcher.forward_runtime_module_open(module_open_event)
-        if status.lower() == "closed":
-            self.mini_dispatcher.schedule_preload(force=True)
-
-    def open_or_raise(self):
-        self.mini_dispatcher.open_or_raise_window(restart=False)
-
-    def reload_from_disk(self):
-        self.mini_dispatcher.request_reload_from_disk()
-
-    def restart_runtime(self):
-        self.mini_dispatcher.open_or_raise_window(restart=True)
-
-    def can_navigate_away(self):
-        state = self.runtime_manager.read_state()
-        if not isinstance(state, dict):
-            return True
-        if not bool(state.get("dirty")):
-            return True
-        decision = QMessageBox.question(
-            self,
-            "Unsaved Layout Changes",
-            "Layout Manager reports unsaved changes in the dedicated window. Navigate away and keep those changes pending there?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-        return decision == QMessageBox.StandardButton.Yes
-
-    def on_hide(self):
-        return None
-
-    def on_unload(self):
-        self._poll_timer.stop()
-        return None
-
-    def apply_theme(self):
-        self.mini_dispatcher.apply_theme()
-        return None
+__version__ = "1.3.1"
 
 
 class LayoutManagerMiniDispatcher:
@@ -327,10 +36,9 @@ class LayoutManagerMiniDispatcher:
 
     def __init__(self, host_dispatcher):
         self.host_dispatcher = host_dispatcher
-        self.runtime_manager = LayoutManagerQtRuntimeManager(self)
 
     def is_runtime_running(self):
-        return self.runtime_manager.is_running()
+        return False
 
     def _current_theme_tokens(self):
         view = getattr(self.host_dispatcher, "view", None)
@@ -344,14 +52,10 @@ class LayoutManagerMiniDispatcher:
         return {}
 
     def open_or_raise_window(self, restart=False):
-        self.schedule_preload(force=bool(restart))
-        self.runtime_manager.ensure_running(force_restart=bool(restart))
+        pass
 
     def request_reload_from_disk(self):
-        if self.runtime_manager.is_running():
-            self.runtime_manager.send_command("reload_from_disk")
-            return
-        self.open_or_raise_window(restart=False)
+        pass
 
     def apply_theme(self):
         theme_tokens = self._current_theme_tokens()
@@ -360,83 +64,30 @@ class LayoutManagerMiniDispatcher:
             cached_payload = host.shared_data.get(self.PRELOAD_KEY)
             if isinstance(cached_payload, dict):
                 cached_payload["theme_tokens"] = dict(theme_tokens)
-        if self.runtime_manager.is_running():
-            self.runtime_manager.send_command("apply_theme", {"theme_tokens": theme_tokens})
-            return
-        self.schedule_preload(force=True)
 
     def forward_runtime_toast(self, toast_event):
-        if not isinstance(toast_event, dict):
-            return
-        title = str(toast_event.get("title") or "Layout Manager")
-        message = str(toast_event.get("message") or "")
-        if not message:
-            return
-        bootstyle = str(toast_event.get("bootstyle") or "info")
-        duration_ms = toast_event.get("duration_ms")
-        try:
-            if duration_ms is not None:
-                duration_ms = int(duration_ms)
-        except Exception:
-            duration_ms = None
-        self.host_dispatcher.show_toast(title, message, bootstyle=bootstyle, duration_ms=duration_ms)
+        pass
 
     def forward_runtime_module_open(self, module_open_event):
-        if not isinstance(module_open_event, dict):
-            return
-        module_name = str(module_open_event.get("module") or "").strip()
-        if not module_name:
-            return
-        reason = str(module_open_event.get("reason") or "").strip()
-        try:
-            self.host_dispatcher.load_module(module_name, use_transition=True, ensure_authorized=True)
-            if reason:
-                self.host_dispatcher.show_toast(
-                    "Layout Manager",
-                    f"Opened {module_name}: {reason}",
-                    bootstyle="info",
-                )
-        except Exception as exc:
-            log_exception("layout_manager_dispatcher.forward_runtime_module_open", exc)
-            self.host_dispatcher.show_toast(
-                "Layout Manager",
-                f"Could not open requested module '{module_name}': {exc}",
-                bootstyle="danger",
-            )
+        pass
 
     def stop_window(self):
-        self.runtime_manager.stop_runtime(force=False)
+        pass
 
     def read_runtime_state(self):
-        return dict(self.runtime_manager.read_state() or {})
+        return {"status": "idle"}
 
     def handle_runtime_state(self, state):
-        if not isinstance(state, dict):
-            return
-        status = str(state.get("status") or "").strip().lower()
-        if status == "closed":
-            self.schedule_preload(force=True)
+        pass
 
     def build_host_runtime_state(self):
-        state = self.read_runtime_state()
-        self.handle_runtime_state(state)
-        status = str(state.get("status") or ("running" if self.is_runtime_running() else "idle")).strip().lower() or "idle"
-        message = str(state.get("message") or "").strip()
-        if not message:
-            if status == "running":
-                message = "Layout Manager dedicated window is running."
-            elif status == "launching":
-                message = "Launching Layout Manager dedicated window."
-            elif status == "closed":
-                message = "Layout Manager dedicated window is closed."
-            else:
-                message = "Layout Manager dedicated window is idle."
-        state["module"] = "layout_manager"
-        state["window_mode"] = "dedicated_window"
-        state["host_contract"] = "layout_manager_dispatcher"
-        state["status"] = status
-        state["message"] = message
-        return state
+        return {
+            "module": "layout_manager",
+            "window_mode": "embedded",
+            "host_contract": "layout_manager_dispatcher",
+            "status": "idle",
+            "message": "Layout Manager runs in-process.",
+        }
 
     def preload_module_bundle(self, force_fresh=False):
         host = self.host_dispatcher
@@ -524,11 +175,9 @@ class LayoutManagerMiniDispatcher:
             return payload
 
     def launch(self, parent):
-        # Layout Manager intentionally keeps its heavy editor in a dedicated Qt
-        # window while the shell surface exposes status and lifecycle controls.
-        self.schedule_preload(force=False)
-        self.open_or_raise_window(restart=False)
-        return LayoutManagerQtBridge(parent, self)
+        from app.controllers.layout_manager_qt_controller import LayoutManagerQtController
+
+        return LayoutManagerQtController(parent=parent, dispatcher=self.host_dispatcher)
 
     def shutdown(self):
-        self.stop_window()
+        pass

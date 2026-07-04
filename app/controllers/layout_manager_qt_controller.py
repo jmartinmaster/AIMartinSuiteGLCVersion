@@ -24,16 +24,33 @@ from app.models.layout_manager_model import LayoutManagerModel
 from app.views.layout_manager_qt_view import LayoutManagerQtView
 
 __module_name__ = "Layout Manager Qt Controller"
-__version__ = "0.7.4"
+__version__ = "0.7.5"
 
 
 class LayoutManagerQtController:
-    def __init__(self, session_payload):
-        payload = dict(session_payload or {})
-        self.payload = payload
+    def __init__(self, session_payload=None, parent=None, dispatcher=None):
+        self.parent = parent
+        self.dispatcher = dispatcher
+        self.embedded = dispatcher is not None
         self.model = LayoutManagerModel()
-        self.state_path = Path(payload["state_path"])
-        self.command_path = Path(payload["command_path"])
+
+        if self.embedded:
+            theme_tokens = dict(getattr(getattr(dispatcher, "view", None), "theme_tokens", {}) or {})
+            config, source_path, form_info = self.model.load_current_config()
+            payload = {
+                "form_info": dict(form_info),
+                "config": config,
+                "source_path": source_path,
+                "guardrails": self.model.build_editor_guardrails(config),
+                "protected_row_field_lookup": self.model.get_protected_row_field_lookup(config),
+                "theme_tokens": theme_tokens,
+            }
+        else:
+            payload = dict(session_payload or {})
+            self.state_path = Path(payload["state_path"])
+            self.command_path = Path(payload["command_path"])
+
+        self.payload = payload
         self.change_token = 0
         self.toast_token = 0
         self.module_open_token = 0
@@ -47,7 +64,7 @@ class LayoutManagerQtController:
         self.protected_row_field_lookup = payload.get("protected_row_field_lookup") or {}
         self.last_refresh_ms = 0.0
         self.compare_reference_form_id = ""
-        self.view = LayoutManagerQtView(controller=self, theme_tokens=payload.get("theme_tokens") or {})
+        self.view = LayoutManagerQtView(controller=self, theme_tokens=payload.get("theme_tokens") or {}, parent_widget=self.parent)
         self._initial_view_rendered = False
         self._undo_stack = []
         self._redo_stack = []
@@ -65,11 +82,7 @@ class LayoutManagerQtController:
 
         self.forms = []
         self.refresh_forms()
-        self.view.update_header(
-            form_info=self.current_form_info,
-            source_path=self.current_source_path,
-            reason="Loaded layout manager session",
-        )
+        self.refresh_view(reason="Loaded layout manager session", editor_text_override=self.current_editor_text)
         self.view.set_dirty(self.dirty)
         self.write_state(status="running", message="Layout Manager Qt window is ready.")
 
@@ -161,7 +174,13 @@ class LayoutManagerQtController:
         finally:
             self.view.set_busy_state(False)
 
-    def apply_theme(self, theme_tokens):
+    def apply_theme(self, theme_tokens=None):
+        if theme_tokens is None:
+            if self.dispatcher is not None:
+                view = getattr(self.dispatcher, "view", None)
+                theme_tokens = getattr(view, "theme_tokens", {}) if view is not None else {}
+            else:
+                theme_tokens = self.payload.get("theme_tokens") or {}
         self.payload["theme_tokens"] = dict(theme_tokens or {})
         self.view.set_theme_tokens(self.payload["theme_tokens"])
         self.write_state(message="Applied updated theme tokens.")
@@ -263,6 +282,23 @@ class LayoutManagerQtController:
         self.last_refresh_ms = round((time.perf_counter() - started_at) * 1000.0, 2)
 
     def write_state(self, status="running", message="", toast_event=None, module_open_event=None):
+        if self.embedded:
+            if isinstance(toast_event, dict):
+                title = str(toast_event.get("title") or "Layout Manager")
+                msg = str(toast_event.get("message") or "")
+                bootstyle = str(toast_event.get("bootstyle") or "info")
+                duration_ms = toast_event.get("duration_ms")
+                if self.dispatcher is not None:
+                    self.dispatcher.show_toast(title, msg, bootstyle=bootstyle, duration_ms=duration_ms)
+            if isinstance(module_open_event, dict):
+                module_name = str(module_open_event.get("module") or "").strip()
+                reason = str(module_open_event.get("reason") or "").strip()
+                if module_name and self.dispatcher is not None:
+                    self.dispatcher.load_module(module_name, use_transition=True, ensure_authorized=True)
+                    if reason:
+                        self.dispatcher.show_toast("Layout Manager", f"Opened {module_name}: {reason}", bootstyle="info")
+            return
+
         state = {
             "status": status,
             "dirty": self.dirty,
@@ -1319,6 +1355,9 @@ class LayoutManagerQtController:
                 self.refresh_view(reason="Saved current layout configuration", editor_text_override=save_text)
                 self._emit_host_toast(message, bootstyle="success")
                 self._handle_new_calculation_requirements(previous_config, composed_config)
+                if self.embedded and self.dispatcher is not None:
+                    if self.loaded_form_id() == self.selected_form_id:
+                        self.dispatcher.notify_active_form_changed(source_instance=self, active_form_info=self.current_form_info)
             except Exception as exc:
                 self.set_status_message(f"Save failed: {exc}", error=True)
 
@@ -1352,6 +1391,8 @@ class LayoutManagerQtController:
             self.mark_clean(action_message)
             self.refresh_view(reason="Activated selected form", editor_text_override=editor_text)
             self._emit_host_toast(action_message, bootstyle="success")
+            if self.embedded and self.dispatcher is not None:
+                self.dispatcher.notify_active_form_changed(source_instance=self, active_form_info=self.current_form_info)
             self.check_and_prompt_active_form()
 
         self._run_busy_action(f"Activating form '{form_id}'...", _execute)
@@ -1569,6 +1610,8 @@ class LayoutManagerQtController:
             action_message = f"Deleted form '{form_name}'."
             if deleted_form_id == self.loaded_form_id() or active_changed:
                 self.mark_clean(action_message)
+                if self.embedded and self.dispatcher is not None:
+                    self.dispatcher.notify_active_form_changed(source_instance=self, active_form_info=self.current_form_info)
             else:
                 self.refresh_view(reason="Deleted selected stored form", editor_text_override=editor_text)
                 self.set_status_message(action_message)

@@ -43,7 +43,7 @@ from app.controllers.app_controller import Dispatcher
 from app.app_platform import SPLASH_LOGO_RELATIVE_PATH, apply_app_icon, apply_windows_app_id
 
 __module_name__ = "Dispatcher Core"
-__version__ = "2.4.7"
+__version__ = "2.4.8"
 LAYOUT_MANAGER_QT_SESSION_ENV = "AIMARTIN_LAYOUT_MANAGER_QT_SESSION"
 
 
@@ -123,19 +123,6 @@ def create_qt_application(theme_name=None, theme_tokens=None):
     return application
 
 
-def _load_layout_manager_qt_session_payload(session_path):
-    with open(session_path, "r", encoding="utf-8") as session_file:
-        payload = json.load(session_file)
-    if not isinstance(payload, dict):
-        raise ValueError("Layout Manager Qt session payload must be a JSON object.")
-    return payload
-
-
-def _run_layout_manager_qt_session(session_path, session_payload):
-    _ = session_payload
-    from app.views.layout_manager_qt_view import run_layout_manager_qt_session
-
-    return run_layout_manager_qt_session(session_path)
 
 
 def run_application(main_module=None, initial_module_name=None):
@@ -279,11 +266,14 @@ def run_special_mode_from_environment():
     if not session_path:
         return None
 
-    session_payload = _load_layout_manager_qt_session_payload(session_path)
-    if not session_payload.get("module"):
-        session_payload["module"] = "layout_manager"
+    try:
+        from app.sidecar import run_generic_qt_session
+    except ImportError:
+        import sys
+        print("Standalone session support (sidecar) is not bundled in this build.", file=sys.stderr)
+        return 2
 
-    return _run_layout_manager_qt_session(session_path, session_payload)
+    return run_generic_qt_session(session_path)
 
 
 def build_argument_parser():

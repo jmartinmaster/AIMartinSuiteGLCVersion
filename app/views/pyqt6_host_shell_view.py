@@ -22,7 +22,7 @@ from app.host_ui_adapter import PyQt6HostUiAdapter
 from app.app_logging import log_exception
 
 __module_name__ = "PyQt6 Host Shell"
-__version__ = "0.1.5"
+__version__ = "0.1.6"
 
 try:
     from PyQt6.QtCore import QTimer
@@ -93,6 +93,9 @@ class PyQt6HostShellView(QMainWindow):
         self.nav_layouts = {}
         self.nav_button_labels = {}
         self.sidebar_collapsed = False
+        self.sidebar_manually_expanded_narrow = False
+        self.sidebar_auto_collapsed = False
+        self.root_layout = None
         self.sidebar_expanded_width = 184
         self.sidebar_collapsed_width = 60
         self.sidebar_title_expanded_text = "Logging\nCenter"
@@ -336,6 +339,8 @@ class PyQt6HostShellView(QMainWindow):
         root_layout = QHBoxLayout(self.main_container)
         root_layout.setContentsMargins(0, 0, 0, 0)
         root_layout.setSpacing(0)
+        self.root_layout = root_layout
+        self.setMinimumWidth(428)
 
         self.sidebar = QFrame(self.main_container)
         self.sidebar.setObjectName("sidebar")
@@ -538,9 +543,24 @@ class PyQt6HostShellView(QMainWindow):
 
         self.module_buttons = {}
         self.nav_button_labels = {}
+        MODULE_ICONS = {
+            "about": "ℹ️",
+            "developer_admin": "🛠️",
+            "help_viewer": "📖",
+            "internal_code_editor": "💻",
+            "layout_manager": "📐",
+            "production_log": "📋",
+            "production_log_calculations": "🧮",
+            "rate_manager": "📊",
+            "recovery_viewer": "🔄",
+            "security_admin": "🔒",
+            "settings_manager": "⚙️",
+            "update_manager": "📥",
+        }
         for group_name in ("top", "middle", "bottom"):
             for display_name, module_name in grouped_items.get(group_name, []):
-                button = QPushButton(str(display_name), self.sidebar)
+                icon = MODULE_ICONS.get(module_name, "📄")
+                button = QPushButton(f"{icon}  {display_name}", self.sidebar)
                 button.setObjectName("navButton")
                 button.setProperty("active", False)
                 button.setAccessibleName(f"Navigate to {display_name}")
@@ -552,7 +572,7 @@ class PyQt6HostShellView(QMainWindow):
                 target_layout = self.nav_layouts.get(group_name, self.nav_layouts["middle"])
                 target_layout.addWidget(button)
                 self.module_buttons[module_name] = button
-                self.nav_button_labels[module_name] = (str(display_name), self._collapse_label(display_name))
+                self.nav_button_labels[module_name] = (f"{icon}  {display_name}", icon)
 
         self.nav_layouts["middle"].addStretch(1)
         self.set_sidebar_collapsed(self.sidebar_collapsed)
@@ -723,6 +743,9 @@ class PyQt6HostShellView(QMainWindow):
         self.viewport_placeholder.setVisible(False)
         self.viewport_container.setVisible(True)
         self._refresh_nav_button_states()
+        if self.width() < 552:
+            self.sidebar_manually_expanded_narrow = False
+            self.update_sidebar_layout_state()
         self._queue_viewport_resize_notification()
 
     def show_viewport_placeholder(self, title=None, message=None, hint=None):
@@ -838,14 +861,63 @@ class PyQt6HostShellView(QMainWindow):
         self.refresh_update_status_visibility()
 
     def toggle_sidebar(self):
-        self.set_sidebar_collapsed(not self.sidebar_collapsed)
+        if self.width() < 552:
+            self.sidebar_manually_expanded_narrow = not self.sidebar_manually_expanded_narrow
+            self.sidebar_collapsed = not self.sidebar_manually_expanded_narrow
+            self.sidebar_auto_collapsed = False
+            self.update_sidebar_layout_state()
+        else:
+            self.set_sidebar_collapsed(not self.sidebar_collapsed)
 
     def set_sidebar_collapsed(self, collapsed):
         self.sidebar_collapsed = bool(collapsed)
-        sidebar_width = self.sidebar_collapsed_width if self.sidebar_collapsed else self.sidebar_expanded_width
-        if self.sidebar is not None:
+        self.sidebar_auto_collapsed = False
+        self.sidebar_manually_expanded_narrow = False
+        self.update_sidebar_layout_state()
+
+    def update_sidebar_layout_state(self):
+        if self.sidebar is None or self.root_layout is None:
+            return
+
+        current_width = self.width()
+        is_narrow = current_width < 552
+
+        if is_narrow:
+            if self.sidebar_manually_expanded_narrow:
+                # 1. Overlay expanded mode: float on top of right container
+                self._set_sidebar_collapsed_visuals(False)
+                if self.root_layout.indexOf(self.sidebar) != -1:
+                    self.root_layout.removeWidget(self.sidebar)
+                self.sidebar.setParent(self.main_container)
+                self.sidebar.show()
+                self.sidebar.raise_()
+                self.sidebar.setGeometry(0, 0, self.sidebar_expanded_width, self.main_container.height())
+            else:
+                # 2. Collapsed mode: inside root horizontal layout
+                if not self.sidebar_collapsed:
+                    self.sidebar_auto_collapsed = True
+                self._set_sidebar_collapsed_visuals(True)
+                if self.root_layout.indexOf(self.sidebar) == -1:
+                    self.root_layout.insertWidget(0, self.sidebar)
+                self.sidebar.setMinimumWidth(self.sidebar_collapsed_width)
+                self.sidebar.setMaximumWidth(self.sidebar_collapsed_width)
+        else:
+            # 3. Wide mode (>= 552px)
+            if self.sidebar_auto_collapsed:
+                self.sidebar_collapsed = False
+                self.sidebar_auto_collapsed = False
+                self.sidebar_manually_expanded_narrow = False
+
+            self._set_sidebar_collapsed_visuals(self.sidebar_collapsed)
+            if self.root_layout.indexOf(self.sidebar) == -1:
+                self.root_layout.insertWidget(0, self.sidebar)
+            
+            sidebar_width = self.sidebar_collapsed_width if self.sidebar_collapsed else self.sidebar_expanded_width
             self.sidebar.setMinimumWidth(sidebar_width)
             self.sidebar.setMaximumWidth(sidebar_width)
+
+    def _set_sidebar_collapsed_visuals(self, collapsed):
+        self.sidebar_collapsed = bool(collapsed)
         if self.sidebar_title is not None:
             self.sidebar_title.setText(
                 self.sidebar_title_collapsed_text if self.sidebar_collapsed else self.sidebar_title_expanded_text
@@ -857,6 +929,10 @@ class PyQt6HostShellView(QMainWindow):
         for module_name, button in self.module_buttons.items():
             expanded_label, collapsed_label = self.nav_button_labels.get(module_name, (button.text(), button.text()))
             button.setText(collapsed_label if self.sidebar_collapsed else expanded_label)
+            if self.sidebar_collapsed:
+                button.setStyleSheet("text-align: center; padding-left: 0; padding-right: 0;")
+            else:
+                button.setStyleSheet("")
         self._queue_viewport_resize_notification()
 
     def _collapse_label(self, display_name):
@@ -1263,4 +1339,5 @@ class PyQt6HostShellView(QMainWindow):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
+        self.update_sidebar_layout_state()
         self._queue_viewport_resize_notification()

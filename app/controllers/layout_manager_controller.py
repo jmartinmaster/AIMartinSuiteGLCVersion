@@ -16,14 +16,29 @@
 
 from app.models.layout_manager_model import LayoutManagerModel
 from app.theme_manager import get_theme_tokens
-from app.views.layout_manager_qt_view import launch_layout_manager_qt_probe
+from app.views.layout_manager_qt_view import (
+    LayoutManagerQtView,
+    is_layout_manager_qt_runtime_available,
+    launch_layout_manager_qt_probe,
+)
 from app.views.layout_manager_view_contract import LayoutManagerViewContract
-from app.views.layout_manager_view_factory import create_layout_manager_view
 
 DANGER = "danger"
 INFO = "info"
 SECONDARY = "secondary"
 SUCCESS = "success"
+
+
+def create_layout_manager_view(parent, dispatcher, controller):
+    controller.requested_view_backend = "qt"
+    controller.resolved_view_backend = "qt"
+    controller.view_backend_fallback_reason = None
+
+    if not is_layout_manager_qt_runtime_available():
+        controller.view_backend_fallback_reason = "PyQt6 is not installed; the Layout Manager viewport cannot be loaded."
+        raise RuntimeError(controller.view_backend_fallback_reason)
+
+    return LayoutManagerQtView(controller=controller, theme_tokens=controller._get_theme_tokens(), parent_widget=parent)
 
 
 class LayoutManagerController:

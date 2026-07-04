@@ -84,6 +84,7 @@ COLLECT_SUBMODULE_PACKAGES = [
     "openpyxl",
 ]
 EXCLUDED_MODULES = [
+    "app.sidecar",
     "tkinter",
     "_tkinter",
     "ttkbootstrap",

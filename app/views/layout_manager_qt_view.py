@@ -26,7 +26,7 @@ from app.theme_manager import get_qt_palette, get_qt_stylesheet
 from PyQt6.QtGui import QDesktopServices, QFont, QFontDatabase, QKeySequence, QShortcut, QColor, QPainter, QTextFormat
 
 __module_name__ = "Layout Manager Qt View"
-__version__ = "0.6.15"
+__version__ = "0.6.16"
 LAYOUT_MANAGER_QT_SESSION_ENV = "AIMARTIN_LAYOUT_MANAGER_QT_SESSION"
 REPO_ROOT = Path(__file__).resolve().parents[2]
 HEADER_ROLE_OPTIONS = [""] + sorted(set(HEADER_FIELD_ROLE_DEFAULTS.values()))
@@ -487,12 +487,13 @@ class InjectMissingFieldsDialog(QDialog):
 
 
 class LayoutManagerQtView(QMainWindow):
-    def __init__(self, controller, theme_tokens=None):
+    def __init__(self, controller, theme_tokens=None, parent_widget=None):
         if not PYQT6_AVAILABLE:
             raise RuntimeError("PyQt6 is not installed in the active Python environment.")
-        super().__init__()
+        super().__init__(parent_widget)
         self.controller = controller
         self.theme_tokens = dict(theme_tokens or {})
+        self.embedded = parent_widget is not None
         self._updating_editor = False
         self._busy_cursor_active = False
         self.high_contrast_enabled = False
@@ -516,10 +517,24 @@ class LayoutManagerQtView(QMainWindow):
         self._build_ui()
         self._apply_theme()
 
-        self.command_timer = QTimer(self)
-        self.command_timer.setInterval(700)
-        self.command_timer.timeout.connect(self.controller.poll_commands)
-        self.command_timer.start()
+        if self.embedded:
+            self._attach_to_parent_container(parent_widget)
+        else:
+            self.command_timer = QTimer(self)
+            self.command_timer.setInterval(700)
+            self.command_timer.timeout.connect(self.controller.poll_commands)
+            self.command_timer.start()
+
+    def _attach_to_parent_container(self, parent_widget):
+        if parent_widget is None:
+            return
+        self.setWindowFlag(Qt.WindowType.Window, False)
+        layout = parent_widget.layout()
+        if layout is None:
+            layout = QVBoxLayout(parent_widget)
+            layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self)
+        self.show()
 
     def _available_screen_geometry(self):
         window_handle = self.windowHandle()
@@ -579,8 +594,8 @@ class LayoutManagerQtView(QMainWindow):
         header_layout.addWidget(self.reason_label, 1, 0, 1, 2)
         content_layout.addLayout(header_layout)
 
-        ribbon_row = QHBoxLayout()
-        ribbon_row.setSpacing(10)
+        self.ribbon_layout = QGridLayout()
+        self.ribbon_layout.setSpacing(10)
 
         form_group = QGroupBox("Forms")
         form_row = QHBoxLayout(form_group)
@@ -595,7 +610,6 @@ class LayoutManagerQtView(QMainWindow):
         activate_button.clicked.connect(self.controller.activate_selected_form)
         activate_button.setMinimumHeight(26)
         form_row.addWidget(activate_button)
-        ribbon_row.addWidget(form_group, 2)
 
         form_manage_group = QGroupBox("Manage")
         form_manage_row = QHBoxLayout(form_manage_group)
@@ -638,8 +652,6 @@ class LayoutManagerQtView(QMainWindow):
         
         form_actions_btn.setMenu(form_actions_menu)
         form_manage_row.addWidget(form_actions_btn)
-
-        ribbon_row.addWidget(form_manage_group, 2)
 
         editor_group = QGroupBox("Editor")
         action_row = QHBoxLayout(editor_group)
@@ -692,9 +704,18 @@ class LayoutManagerQtView(QMainWindow):
         redo_button.setMinimumHeight(26)
         action_row.addWidget(redo_button)
 
-        ribbon_row.addWidget(editor_group, 3)
-        ribbon_row.addStretch(1)
-        content_layout.addLayout(ribbon_row)
+        self.form_group = form_group
+        self.form_manage_group = form_manage_group
+        self.editor_group = editor_group
+        self._ribbon_layout_vertical = None
+
+        self.ribbon_layout.addWidget(self.form_group, 0, 0)
+        self.ribbon_layout.addWidget(self.form_manage_group, 0, 1)
+        self.ribbon_layout.addWidget(self.editor_group, 0, 2)
+        self.ribbon_layout.setColumnStretch(0, 2)
+        self.ribbon_layout.setColumnStretch(1, 2)
+        self.ribbon_layout.setColumnStretch(2, 3)
+        content_layout.addLayout(self.ribbon_layout)
 
         self.tabs = QTabWidget()
         self.tabs.setMinimumHeight(760)
@@ -1343,15 +1364,34 @@ class LayoutManagerQtView(QMainWindow):
         )
 
     def _apply_responsive_layout(self):
-        geometry = self._available_screen_geometry()
         viewport_width = int(self.content_scroll_area.viewport().width() or 0)
-        if geometry is not None:
-            target_width = int(geometry.width() * 0.94)
-        else:
-            target_width = int(self.width() * 0.94)
         if viewport_width > 0:
-            target_width = max(target_width, viewport_width)
-        self.scroll_content.setMinimumWidth(max(1080, target_width))
+            self.scroll_content.setMinimumWidth(viewport_width)
+        else:
+            self.scroll_content.setMinimumWidth(0)
+
+        if viewport_width > 0:
+            use_vertical = viewport_width < 800
+            if use_vertical != getattr(self, "_ribbon_layout_vertical", None):
+                self._ribbon_layout_vertical = use_vertical
+                self.ribbon_layout.removeWidget(self.form_group)
+                self.ribbon_layout.removeWidget(self.form_manage_group)
+                self.ribbon_layout.removeWidget(self.editor_group)
+                
+                if use_vertical:
+                    self.ribbon_layout.addWidget(self.form_group, 0, 0)
+                    self.ribbon_layout.addWidget(self.form_manage_group, 1, 0)
+                    self.ribbon_layout.addWidget(self.editor_group, 2, 0)
+                    self.ribbon_layout.setColumnStretch(0, 1)
+                    self.ribbon_layout.setColumnStretch(1, 0)
+                    self.ribbon_layout.setColumnStretch(2, 0)
+                else:
+                    self.ribbon_layout.addWidget(self.form_group, 0, 0)
+                    self.ribbon_layout.addWidget(self.form_manage_group, 0, 1)
+                    self.ribbon_layout.addWidget(self.editor_group, 0, 2)
+                    self.ribbon_layout.setColumnStretch(0, 2)
+                    self.ribbon_layout.setColumnStretch(1, 2)
+                    self.ribbon_layout.setColumnStretch(2, 3)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -3242,16 +3282,8 @@ def launch_layout_manager_qt_probe(payload):
 
 
 def run_layout_manager_qt_session(session_path):
-    if not PYQT6_AVAILABLE:
-        print("PyQt6 is not installed in the active Python environment.", file=sys.stderr)
-        return 2
-    from app.controllers.layout_manager_qt_controller import LayoutManagerQtController
-
-    session_payload = load_layout_manager_qt_session(session_path)
-    application = create_qt_application(theme_tokens=session_payload.get("theme_tokens") or {})
-    controller = LayoutManagerQtController(session_payload)
-    controller.show()
-    return application.exec()
+    from app.sidecar import run_generic_qt_session
+    return run_generic_qt_session(session_path)
 
 
 def main(argv=None):

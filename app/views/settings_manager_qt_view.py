@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 __module_name__ = "Settings Manager Qt View"
-__version__ = "1.8.3"
+__version__ = "1.8.4"
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
@@ -23,6 +23,7 @@ from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QFormLayout,
+    QGridLayout,
     QGroupBox,
     QHeaderView,
     QHBoxLayout,
@@ -237,9 +238,9 @@ class SettingsManagerQtView(QMainWindow):
         editable_layout.addRow(QLabel("Transition Duration (ms)"), self.transition_duration_spin)
 
         module_lists_row = QWidget()
-        module_lists_layout = QHBoxLayout(module_lists_row)
-        module_lists_layout.setContentsMargins(0, 0, 0, 0)
-        module_lists_layout.setSpacing(10)
+        self.module_lists_layout = QGridLayout(module_lists_row)
+        self.module_lists_layout.setContentsMargins(0, 0, 0, 0)
+        self.module_lists_layout.setSpacing(10)
 
         whitelist_column = QWidget()
         whitelist_layout = QVBoxLayout(whitelist_column)
@@ -261,8 +262,14 @@ class SettingsManagerQtView(QMainWindow):
         self.persistent_modules_list.itemSelectionChanged.connect(self._on_form_changed)
         persistent_layout.addWidget(self.persistent_modules_list)
 
-        module_lists_layout.addWidget(whitelist_column)
-        module_lists_layout.addWidget(persistent_column)
+        self.whitelist_column = whitelist_column
+        self.persistent_column = persistent_column
+        self._module_lists_vertical = None
+
+        self.module_lists_layout.addWidget(whitelist_column, 0, 0)
+        self.module_lists_layout.addWidget(persistent_column, 0, 1)
+        self.module_lists_layout.setColumnStretch(0, 1)
+        self.module_lists_layout.setColumnStretch(1, 1)
         editable_layout.addRow(QLabel("Module Lists"), module_lists_row)
 
         content_layout.addWidget(self.editable_group)
@@ -1105,3 +1112,27 @@ class SettingsManagerQtView(QMainWindow):
             return
         if self.ask_yes_no("Delete Crash Report", f"Are you sure you want to delete {filename}?"):
             self.controller.delete_crash_report(filename)
+
+    def _apply_responsive_layout(self):
+        viewport_width = int(self.content_scroll_area.viewport().width() or 0)
+        if viewport_width > 0:
+            use_vertical = viewport_width < 700
+            if use_vertical != getattr(self, "_module_lists_vertical", None):
+                self._module_lists_vertical = use_vertical
+                self.module_lists_layout.removeWidget(self.whitelist_column)
+                self.module_lists_layout.removeWidget(self.persistent_column)
+                
+                if use_vertical:
+                    self.module_lists_layout.addWidget(self.whitelist_column, 0, 0)
+                    self.module_lists_layout.addWidget(self.persistent_column, 1, 0)
+                    self.module_lists_layout.setColumnStretch(0, 1)
+                    self.module_lists_layout.setColumnStretch(1, 0)
+                else:
+                    self.module_lists_layout.addWidget(self.whitelist_column, 0, 0)
+                    self.module_lists_layout.addWidget(self.persistent_column, 0, 1)
+                    self.module_lists_layout.setColumnStretch(0, 1)
+                    self.module_lists_layout.setColumnStretch(1, 1)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._apply_responsive_layout()

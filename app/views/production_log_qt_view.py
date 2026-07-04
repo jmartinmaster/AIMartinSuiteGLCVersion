@@ -17,7 +17,7 @@ from app.downtime_codes import get_code_options, get_generic_options
 from app.theme_manager import get_qt_palette, get_qt_stylesheet
 
 __module_name__ = "Form Loader Qt View"
-__version__ = "1.4.1"
+__version__ = "1.4.2"
 
 from PyQt6.QtCore import QTimer, Qt
 from PyQt6.QtWidgets import (
@@ -190,7 +190,8 @@ class ProductionLogQtView(QMainWindow):
         root_layout.addWidget(scroll_area, 1)
 
         scroll_content = QWidget(scroll_area)
-        scroll_content.setMinimumWidth(1120)
+        self.scroll_content = scroll_content
+        scroll_content.setMinimumWidth(0)
         content_layout = QVBoxLayout(scroll_content)
         content_layout.setContentsMargins(18, 18, 18, 18)
         content_layout.setSpacing(12)
@@ -495,6 +496,13 @@ class ProductionLogQtView(QMainWindow):
             ],
             action_panel,
         )
+
+        self.draft_group = draft_group
+        self.recovery_group = recovery_group
+        self.tools_group = tools_group
+        self.workbook_group = workbook_group
+        self.action_panel_layout = action_panel_layout
+        self._action_panel_vertical = None
 
         action_panel_layout.addWidget(draft_group, 0, 0)
         action_panel_layout.addWidget(recovery_group, 0, 1)
@@ -1439,3 +1447,43 @@ class ProductionLogQtView(QMainWindow):
     def closeEvent(self, event):
         self.controller.handle_close()
         super().closeEvent(event)
+
+    def _apply_responsive_layout(self):
+        viewport_width = int(self.content_scroll_area.viewport().width() or 0)
+        if viewport_width > 0:
+            self.scroll_content.setMinimumWidth(viewport_width)
+        else:
+            self.scroll_content.setMinimumWidth(0)
+
+        # Responsive stacking of action panel based on viewport width
+        if viewport_width > 0:
+            use_vertical = viewport_width < 800
+            if use_vertical != getattr(self, "_action_panel_vertical", None):
+                self._action_panel_vertical = use_vertical
+                self.action_panel_layout.removeWidget(self.draft_group)
+                self.action_panel_layout.removeWidget(self.recovery_group)
+                self.action_panel_layout.removeWidget(self.tools_group)
+                self.action_panel_layout.removeWidget(self.workbook_group)
+                
+                if use_vertical:
+                    self.action_panel_layout.addWidget(self.draft_group, 0, 0)
+                    self.action_panel_layout.addWidget(self.recovery_group, 1, 0)
+                    self.action_panel_layout.addWidget(self.tools_group, 2, 0)
+                    self.action_panel_layout.addWidget(self.workbook_group, 3, 0)
+                    self.action_panel_layout.setColumnStretch(0, 1)
+                    self.action_panel_layout.setColumnStretch(1, 0)
+                    self.action_panel_layout.setColumnStretch(2, 0)
+                    self.action_panel_layout.setColumnStretch(3, 0)
+                else:
+                    self.action_panel_layout.addWidget(self.draft_group, 0, 0)
+                    self.action_panel_layout.addWidget(self.recovery_group, 0, 1)
+                    self.action_panel_layout.addWidget(self.tools_group, 0, 2)
+                    self.action_panel_layout.addWidget(self.workbook_group, 0, 3)
+                    self.action_panel_layout.setColumnStretch(0, 1)
+                    self.action_panel_layout.setColumnStretch(1, 1)
+                    self.action_panel_layout.setColumnStretch(2, 1)
+                    self.action_panel_layout.setColumnStretch(3, 1)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._apply_responsive_layout()

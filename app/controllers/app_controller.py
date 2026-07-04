@@ -33,14 +33,12 @@ from app.security_service import SecurityService
 from app.update_state import UpdateCoordinator
 
 __module_name__ = "Dispatcher Core"
-__version__ = "2.1.7"
+__version__ = "2.1.8"
 
 ISSUE_REPORT_URL = "https://github.com/jmartinmaster/AIMartinSuiteGLCVersion/issues/new/choose"
 MODULE_PRELOAD_POLL_SECONDS = 1.0
-# Layout Manager is intentionally excluded from the in-viewport Qt pilot set.
-# Keep it on the dedicated LayoutManagerMiniDispatcher runtime unless the
-# product architecture decision changes and the validation/docs are updated.
-QT_IN_VIEWPORT_PILOT_MODULES = {"about", "help_viewer", "recovery_viewer", "rate_manager", "production_log", "production_log_calculations", "developer_admin", "security_admin", "settings_manager", "update_manager", "internal_code_editor"}
+# # Layout Manager is now loaded in-process in the shared host viewport.
+QT_IN_VIEWPORT_PILOT_MODULES = {"about", "help_viewer", "recovery_viewer", "rate_manager", "production_log", "production_log_calculations", "developer_admin", "security_admin", "settings_manager", "update_manager", "internal_code_editor", "layout_manager"}
 SEVERITY_TO_BOOTSTYLE = {
     "info": "info",
     "success": "success",
@@ -1227,11 +1225,6 @@ class Dispatcher:
         return self.active_shell_backend == "pyqt6" and str(module_name or "").strip() in QT_IN_VIEWPORT_PILOT_MODULES
 
     def _instantiate_module_in_container(self, module_name, module_container):
-        if module_name == "layout_manager" and self.layout_manager_dispatcher is not None:
-            # Layout Manager keeps its own Qt runtime to isolate the heavy editor,
-            # preview, and form-management workload from the shared host viewport.
-            return self.layout_manager_dispatcher.launch(module_container)
-
         module = self.import_managed_module(module_name, force_fresh=False)
         if hasattr(module, "get_ui"):
             return module.get_ui(module_container, self)
