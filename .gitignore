@@ -52,3 +52,4 @@ dist/variants/*
 !dist/variants/public/
 !dist/variants/public/**
 dist/variants/public/**/*.deb
+dist/variants/public/data/

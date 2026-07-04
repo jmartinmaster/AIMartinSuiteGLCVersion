@@ -1397,12 +1397,12 @@ class LayoutManagerModel:
         if not isinstance(config.get("export_prefix"), str):
             raise ValueError("export_prefix must be a string.")
 
-        if "sections" in config and not isinstance(config.get("sections"), list):
-            raise ValueError("sections must be a list.")
+        if "sections" not in config or not isinstance(config.get("sections"), list) or not config.get("sections"):
+            raise ValueError("At least one section must be defined in layout config.")
 
         seen_section_ids = set()
         seen_supported_profiles = {}
-        for index, section in enumerate(config.get("sections", []), start=1):
+        for index, section in enumerate(config.get("sections"), start=1):
             if not isinstance(section, dict):
                 raise ValueError(f"sections item {index} must be an object.")
             missing_section_keys = [key for key in ("id", "name", "fields_key", "section_type", "behavior_profile") if key not in section]
@@ -1427,6 +1427,15 @@ class LayoutManagerModel:
                         f"sections contains duplicate supported behavior_profile '{behavior_profile}' in '{existing_section}' and '{section_id}'."
                     )
                 seen_supported_profiles[behavior_profile] = section_id
+
+            fields_key = section.get("fields_key")
+            if fields_key not in config:
+                raise ValueError(f"Section '{section_id}' references fields_key '{fields_key}' which is missing from layout config.")
+            fields_list = config.get(fields_key)
+            if not isinstance(fields_list, list):
+                raise ValueError(f"Fields key '{fields_key}' referenced by section '{section_id}' must be a list.")
+            if len(fields_list) < 2:
+                raise ValueError(f"Section '{section_id}' must contain at least two fields.")
 
         if "header_fields" in config:
             self.validate_header_fields(config["header_fields"])
@@ -1494,6 +1503,8 @@ class LayoutManagerModel:
     def validate_header_fields(self, header_fields, field_group_name="header_fields"):
         if not isinstance(header_fields, list):
             raise ValueError(f"{field_group_name} must be a list.")
+        if len(header_fields) < 2:
+            raise ValueError(f"{field_group_name} must contain at least two fields.")
 
         allowed_widgets = {"entry", "combobox"}
         allowed_states = {"", "normal", "disabled", "readonly"}
@@ -1590,6 +1601,8 @@ class LayoutManagerModel:
     def validate_row_fields(self, row_fields, section_name):
         if not isinstance(row_fields, list):
             raise ValueError(f"{section_name} must be a list.")
+        if len(row_fields) < 2:
+            raise ValueError(f"{section_name} must contain at least two fields.")
 
         allowed_widgets = {"entry", "display", "checkbutton", "combobox"}
         seen_ids = set()

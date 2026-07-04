@@ -514,7 +514,20 @@ def seed_public_windows_runtime_files(target_root, sanitized_rates_path):
         copied_paths.append(rates_destination_path)
 
     copied_paths.append(_write_seed_json(target_root, Path("data") / "config" / "settings.json", {}))
-    copied_paths.append(_write_seed_json(target_root, Path("data") / "config" / "form_definitions.json", {}))
+
+    form_definitions_source = REPO_ROOT / "data" / "config" / "form_definitions.json"
+    if form_definitions_source.exists():
+        form_definitions_dest = target_root / "data" / "config" / "form_definitions.json"
+        form_definitions_dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(form_definitions_source, form_definitions_dest)
+        copied_paths.append(form_definitions_dest)
+    else:
+        copied_paths.append(_write_seed_json(target_root, Path("data") / "config" / "form_definitions.json", {}))
+
+    forms_source_root = REPO_ROOT / "data" / "forms"
+    if forms_source_root.exists():
+        shutil.copytree(forms_source_root, target_root / "data" / "forms", dirs_exist_ok=True)
+        copied_paths.append(target_root / "data" / "forms")
 
     return copied_paths
 

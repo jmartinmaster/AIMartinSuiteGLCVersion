@@ -503,23 +503,27 @@ class ProductionLogModel:
         field_configs = config_data.get(config_key, [])
         return [dict(field) for field in field_configs if isinstance(field, dict) and field.get("id")]
 
-    def _resolve_field_role(self, section_name, field_config):
+    def _resolve_field_role(self, section_name, field_config, config=None):
         field_id = str(field_config.get("id", "")).strip()
-        if section_name == "header":
+        header_sec = self.get_routed_section_by_profile("header", config=config)
+        header_id = header_sec.get("id") or "header"
+        if section_name == header_id:
             return resolve_header_field_role(field_id, field_config.get("role"))
         return resolve_row_field_role(section_name, field_id, field_config.get("role"))
 
     def get_header_field_id_by_role(self, role_name, config=None, fallback_id=None):
         normalized_role = normalize_role_name(role_name)
-        for field in self.get_section_field_configs("header", config=config):
-            if self._resolve_field_role("header", field) == normalized_role:
+        header_sec = self.get_routed_section_by_profile("header", config=config)
+        header_id = header_sec.get("id") or "header"
+        for field in self.get_section_field_configs(header_id, config=config):
+            if self._resolve_field_role(header_id, field, config=config) == normalized_role:
                 return field["id"]
         return fallback_id
 
     def get_section_field_id_by_role(self, section_name, role_name, config=None, fallback_id=None):
         normalized_role = normalize_role_name(role_name)
         for field in self.get_section_field_configs(section_name, config=config):
-            if self._resolve_field_role(section_name, field) == normalized_role:
+            if self._resolve_field_role(section_name, field, config=config) == normalized_role:
                 return field["id"]
         return fallback_id
 
@@ -565,13 +569,17 @@ class ProductionLogModel:
     def get_rate_value_role(self, config=None):
         field_config = self.get_rate_value_field_config(config=config)
         if field_config:
-            return self._resolve_field_role("production", field_config)
+            production_sec = self.get_routed_section_by_profile("production", config=config)
+            production_id = production_sec.get("id") or "production"
+            return self._resolve_field_role(production_id, field_config, config=config)
         return "rate_value"
 
     def get_rate_override_role(self, config=None):
         field_config = self.get_rate_override_field_config(config=config)
         if field_config:
-            return self._resolve_field_role("production", field_config)
+            production_sec = self.get_routed_section_by_profile("production", config=config)
+            production_id = production_sec.get("id") or "production"
+            return self._resolve_field_role(production_id, field_config, config=config)
         return "rate_override_toggle"
 
     def get_rate_lookup_key_role(self, config=None):
@@ -580,15 +588,17 @@ class ProductionLogModel:
         return lookup_key_role or "part_number"
 
     def get_header_field_role(self, field_id, config=None):
-        for field in self.get_section_field_configs("header", config=config):
+        header_sec = self.get_routed_section_by_profile("header", config=config)
+        header_id = header_sec.get("id") or "header"
+        for field in self.get_section_field_configs(header_id, config=config):
             if field.get("id") == field_id:
-                return self._resolve_field_role("header", field)
+                return self._resolve_field_role(header_id, field, config=config)
         return resolve_header_field_role(field_id)
 
     def get_section_field_role(self, section_name, field_id, config=None):
         for field in self.get_section_field_configs(section_name, config=config):
             if field.get("id") == field_id:
-                return self._resolve_field_role(section_name, field)
+                return self._resolve_field_role(section_name, field, config=config)
         return resolve_row_field_role(section_name, field_id)
 
     def get_header_value_by_role(self, header_data, role_name, config=None, fallback_id=None, default=""):
@@ -842,8 +852,10 @@ class ProductionLogModel:
         return json.dumps(data, sort_keys=True, default=str)
 
     def is_form_blank(self, data):
-        header = data.get("header", {})
         layout_config = self.load_layout_config()
+        header_sec = self.get_routed_section_by_profile("header", config=layout_config)
+        header_id = header_sec.get("id") or "header"
+        header = data.get(header_id, data.get("header", {}))
         significant_header_values = [
             value for key, value in header.items()
             if self.get_header_field_role(key, config=layout_config) not in HEADER_BLANK_IGNORE_ROLES and str(value).strip()
@@ -971,7 +983,9 @@ class ProductionLogModel:
         }
 
     def save_draft_data(self, data, version, is_auto=False):
-        draft_path = self.build_draft_path(data.get("header", {}))
+        header_sec = self.get_routed_section_by_profile("header")
+        header_id = header_sec.get("id") or "header"
+        draft_path = self.build_draft_path(data.get(header_id, data.get("header", {})))
         payload = self.build_draft_payload(data, version, draft_path, is_auto=is_auto)
         backup_policy = self.settings.get("backup_policy", {}) if isinstance(self.settings, dict) else {}
         backup_info = write_json_with_backup(
@@ -1032,7 +1046,9 @@ class ProductionLogModel:
                 form_id = self.resolve_draft_form_id(meta)
                 layout_config = self.load_layout_config_for_form(form_id)
                 saved_at = meta.get("saved_at") or datetime.fromtimestamp(os.path.getmtime(path)).isoformat(timespec="seconds")
-                header = data.get("header", {})
+                header_sec = self.get_routed_section_by_profile("header", config=layout_config)
+                header_id = header_sec.get("id") or "header"
+                header = data.get(header_id, data.get("header", {}))
                 drafts.append({
                     "path": path,
                     "filename": filename,
@@ -1069,7 +1085,9 @@ class ProductionLogModel:
                 form_id = self.resolve_draft_form_id(meta)
                 layout_config = self.load_layout_config_for_form(form_id)
                 saved_at = meta.get("saved_at") or datetime.fromtimestamp(os.path.getmtime(path)).isoformat(timespec="seconds")
-                header = data.get("header", {})
+                header_sec = self.get_routed_section_by_profile("header", config=layout_config)
+                header_id = header_sec.get("id") or "header"
+                header = data.get(header_id, data.get("header", {}))
                 snapshots.append({
                     "path": path,
                     "filename": filename,

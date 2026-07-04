@@ -205,9 +205,25 @@ class DataHandlerService:
         self.config_path = self.form_info["load_path"]
         with open(self.config_path, "r", encoding="utf-8") as handle:
             self.config = self._normalize_layout_config(json.load(handle))
+        self.header_section_id = self._resolve_section_id_by_profile("header", fallback="header")
+        self.production_section_id = self._resolve_section_id_by_profile("production", fallback="production")
+        self.downtime_section_id = self._resolve_section_id_by_profile("downtime", fallback="downtime")
         self.settings = self.load_settings()
         self.pending_dir = ensure_external_data_directory("pending")
         self._operation_warnings = []
+
+    def _resolve_section_id_by_profile(self, behavior_profile, fallback=""):
+        declared_sections = self.config.get("sections", [])
+        for section in declared_sections:
+            if not isinstance(section, dict):
+                continue
+            if str(section.get("behavior_profile") or section.get("id") or "").strip().lower() == behavior_profile.strip().lower():
+                return str(section.get("id") or "").strip().lower()
+        return str(fallback or behavior_profile).strip().lower()
+
+    def _is_routed_section_name(self, section_name, routed_section_id, legacy_section_name):
+        normalized = str(section_name or "").strip().lower()
+        return bool(normalized and (normalized == str(routed_section_id or "").strip().lower() or normalized == str(legacy_section_name or "").strip().lower()))
 
     def _normalize_layout_config(self, config):
         normalized = dict(config) if isinstance(config, dict) else {}
@@ -425,7 +441,7 @@ class DataHandlerService:
         return formatted
 
     def get_header_fields(self):
-        return self.get_section_field_configs("header")
+        return self.get_section_field_configs(self.header_section_id)
 
     def get_sections(self, config=None):
         config_data = config if isinstance(config, dict) else self.config
@@ -547,7 +563,7 @@ class DataHandlerService:
     def get_section_field_configs(self, section_name):
         normalized_section_name = str(section_name or "").strip().lower()
         expected_type = None
-        if normalized_section_name == "header":
+        if normalized_section_name == self.header_section_id:
             expected_type = "single"
         section_config = self.get_routed_section(normalized_section_name, expected_type=expected_type)
         field_key = section_config.get("fields_key")
@@ -1159,9 +1175,10 @@ class DataHandlerService:
 
     def get_default_row_mapping_transform(self, section_name, field_id, direction):
         field_role = self.get_section_field_role(section_name, field_id)
-        if section_name == "downtime" and field_role == "downtime_code":
+        is_downtime_section = self._is_routed_section_name(section_name, self.downtime_section_id, "downtime")
+        if is_downtime_section and field_role == "downtime_code":
             return "code_number" if direction == "export" else "code_lookup"
-        if section_name == "downtime" and field_role == "stop_clock":
+        if is_downtime_section and field_role == "stop_clock":
             return "duration_minutes" if direction == "export" else "stop_from_duration"
         return "value"
 
@@ -1181,8 +1198,9 @@ class DataHandlerService:
         value = row_data.get(field_id)
         transform = column_config.get("export_transform", "value")
         field_role = self.get_section_field_role(section_name, field_id)
+        is_downtime_section = self._is_routed_section_name(section_name, self.downtime_section_id, "downtime")
 
-        if transform == "code_number" or (section_name == "downtime" and field_role == "downtime_code"):
+        if transform == "code_number" or (is_downtime_section and field_role == "downtime_code"):
             mode = "both"
             if calculation_settings and isinstance(calculation_settings, dict):
                 mode = calculation_settings.get("downtime_code_export_mode", "both")
@@ -1279,7 +1297,8 @@ class DataHandlerService:
         ws = wb.active
         for field in self.get_header_fields():
             cell_coord = field.get("cell")
-            val = ui_data["header"].get(field["id"])
+            header_payload = ui_data.get(self.header_section_id, ui_data.get("header", {}))
+            val = header_payload.get(field["id"])
             if field.get("export_enabled", True) and not cell_coord:
                 self._operation_warnings.append(
                     {
@@ -1340,7 +1359,7 @@ class DataHandlerService:
         worksheet = workbook.active
         formula_worksheet = formula_workbook.active
         formula_cache = {}
-        data = {"header": {}}
+        data = {self.header_section_id: {}}
         for section_name in self.get_routed_repeating_section_profiles():
             data[section_name] = []
         for field in self.get_header_fields():
@@ -1350,13 +1369,13 @@ class DataHandlerService:
                 if value is None:
                     value = self.resolve_import_cell_value(formula_workbook, formula_worksheet, cell_coord, formula_cache)
                 number_format = formula_worksheet[cell_coord].number_format if cell_coord else None
-                data["header"][field["id"]] = self.format_header_value(field["id"], value, number_format)
+                data[self.header_section_id][field["id"]] = self.format_header_value(field["id"], value, number_format)
         cast_date_field_id = self.get_header_field_id_by_role("cast_date", fallback_id="cast_date")
         date_field_id = self.get_header_field_id_by_role("log_date", fallback_id="date")
-        if cast_date_field_id and not data["header"].get(cast_date_field_id):
-            data["header"][cast_date_field_id] = self.compute_cast_date(data["header"].get(date_field_id))
+        if cast_date_field_id and not data[self.header_section_id].get(cast_date_field_id):
+            data[self.header_section_id][cast_date_field_id] = self.compute_cast_date(data[self.header_section_id].get(date_field_id))
 
-        production_mapping = self.get_row_mapping_config("production")
+        production_mapping = self.get_row_mapping_config(self.production_section_id)
         if production_mapping["columns"]:
             detected_columns = self.detect_production_columns(
                 formula_worksheet,
@@ -1368,7 +1387,7 @@ class DataHandlerService:
                     column_config["column"] = detected_columns[field_id]
 
         for section_name in self.get_routed_repeating_section_profiles():
-            mapping = production_mapping if section_name == "production" else self.get_row_mapping_config(section_name)
+            mapping = production_mapping if section_name == self.production_section_id else self.get_row_mapping_config(section_name)
             for index in range(mapping["max_rows"]):
                 row_idx = mapping["start_row"] + index
                 row_data = {}
@@ -1415,7 +1434,7 @@ class DataHandlerService:
             content = f.read()
         lines = content.splitlines()
         
-        data = {"header": {}}
+        data = {self.header_section_id: {}}
         for s_name in self.get_routed_repeating_section_profiles():
             data[s_name] = []
             
@@ -1437,13 +1456,13 @@ class DataHandlerService:
                     lbl = parts[0].strip().lower()
                     val = parts[1].strip()
                     if lbl in label_to_id:
-                        data["header"][label_to_id[lbl]] = val
+                        data[self.header_section_id][label_to_id[lbl]] = val
                         
-        production_fields = self.get_section_field_configs("production")
-        data["production"] = self._parse_text_repeating_section(lines, "PRODUCTION JOBS:", production_fields)
+        production_fields = self.get_section_field_configs(self.production_section_id)
+        data[self.production_section_id] = self._parse_text_repeating_section(lines, "PRODUCTION JOBS:", production_fields)
         
-        downtime_fields = self.get_section_field_configs("downtime")
-        data["downtime"] = self._parse_text_repeating_section(lines, "DOWNTIME ISSUES:", downtime_fields)
+        downtime_fields = self.get_section_field_configs(self.downtime_section_id)
+        data[self.downtime_section_id] = self._parse_text_repeating_section(lines, "DOWNTIME ISSUES:", downtime_fields)
         
         return data
 
@@ -1506,7 +1525,7 @@ class DataHandlerService:
         parser = WordDumpParser()
         parser.feed(html_content)
         
-        data = {"header": {}}
+        data = {self.header_section_id: {}}
         for s_name in self.get_routed_repeating_section_profiles():
             data[s_name] = []
             
@@ -1524,9 +1543,9 @@ class DataHandlerService:
                     else:
                         lbl_text = lbl_cell.strip().lower()
                     if lbl_text in label_to_id:
-                        data["header"][label_to_id[lbl_text]] = val_cell
+                        data[self.header_section_id][label_to_id[lbl_text]] = val_cell
                         
-        production_fields = self.get_section_field_configs("production")
+        production_fields = self.get_section_field_configs(self.production_section_id)
         prod_rows = parser.sections.get("production jobs") or parser.sections.get("header information")
         if not prod_rows:
             for k, v in parser.sections.items():
@@ -1534,9 +1553,9 @@ class DataHandlerService:
                     prod_rows = v
                     break
         if prod_rows:
-            data["production"] = self._parse_html_repeating_section(prod_rows, production_fields)
+            data[self.production_section_id] = self._parse_html_repeating_section(prod_rows, production_fields)
             
-        downtime_fields = self.get_section_field_configs("downtime")
+        downtime_fields = self.get_section_field_configs(self.downtime_section_id)
         dt_rows = parser.sections.get("downtime issues")
         if not dt_rows:
             for k, v in parser.sections.items():
@@ -1544,7 +1563,7 @@ class DataHandlerService:
                     dt_rows = v
                     break
         if dt_rows:
-            data["downtime"] = self._parse_html_repeating_section(dt_rows, downtime_fields)
+            data[self.downtime_section_id] = self._parse_html_repeating_section(dt_rows, downtime_fields)
             
         return data
 

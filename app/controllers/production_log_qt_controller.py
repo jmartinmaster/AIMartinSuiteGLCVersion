@@ -314,7 +314,7 @@ class ProductionLogQtController:
         return normalized_header
 
     def on_header_field_focus_out(self, _event=None):
-        header_payload = self.collect_ui_data().get("header") or {}
+        header_payload = self.collect_ui_data().get(self.header_section_id) or self.collect_ui_data().get("header") or {}
         self.apply_header_data(header_payload, mark_dirty=False)
 
     def write_state(self, status="ready", message="", dirty=False, runtime_event=None, metadata=None):
@@ -620,7 +620,7 @@ class ProductionLogQtController:
 
     def _is_balance_downtime_row(self, row_payload):
         return self.model.is_balance_downtime_cause(
-            self._row_value_by_role(row_payload, "downtime", "cause_text", fallback_id="cause")
+            self._row_value_by_role(row_payload, self.downtime_section_id, "cause_text", fallback_id="cause")
         )
 
     def _find_balance_downtime_index(self, downtime_rows):
@@ -679,9 +679,9 @@ class ProductionLogQtController:
     def balance_downtime_to_shift(self):
         self.calculate_metrics(silent=True)
         data = self.collect_ui_data()
-        header_payload = dict(data.get("header") or {})
-        production_rows = list(data.get("production") or [])
-        downtime_rows = list(data.get("downtime") or [])
+        header_payload = dict(data.get(self.header_section_id) or data.get("header") or {})
+        production_rows = list(data.get(self.production_section_id) or data.get("production") or [])
+        downtime_rows = list(data.get(self.downtime_section_id) or data.get("downtime") or [])
 
         shift_total_minutes = self.model.calculate_shift_total_minutes(
             self._header_value_by_role(header_payload, "shift_hours", fallback_id="hours", default="8")
@@ -693,7 +693,7 @@ class ProductionLogQtController:
         production_total_minutes = 0
         for row_payload in production_rows:
             production_total_minutes += self.model.parse_minutes_label(
-                self._row_value_by_role(row_payload, "production", "duration_minutes", fallback_id="time_calc")
+                self._row_value_by_role(row_payload, self.production_section_id, "duration_minutes", fallback_id="time_calc")
             )
 
         target_downtime_total = shift_total_minutes - production_total_minutes
@@ -711,9 +711,9 @@ class ProductionLogQtController:
             if balance_index is not None and row_index == balance_index:
                 continue
             non_balance_total += self.model.calculate_downtime_minutes(
-                self._row_value_by_role(row_payload, "downtime", "start_clock", fallback_id="start"),
-                self._row_value_by_role(row_payload, "downtime", "stop_clock", fallback_id="stop"),
-                fallback_label=self._row_value_by_role(row_payload, "downtime", "duration_minutes", fallback_id="time_calc"),
+                self._row_value_by_role(row_payload, self.downtime_section_id, "start_clock", fallback_id="start"),
+                self._row_value_by_role(row_payload, self.downtime_section_id, "stop_clock", fallback_id="stop"),
+                fallback_label=self._row_value_by_role(row_payload, self.downtime_section_id, "duration_minutes", fallback_id="time_calc"),
             )
 
         balance_minutes = max(0, target_downtime_total - non_balance_total)
@@ -722,7 +722,7 @@ class ProductionLogQtController:
             if balance_index is not None:
                 downtime_rows.pop(balance_index)
                 self._apply_loaded_payload(
-                    {"header": header_payload, "production": production_rows, "downtime": downtime_rows},
+                    {self.header_section_id: header_payload, self.production_section_id: production_rows, self.downtime_section_id: downtime_rows},
                     draft_path=self.current_draft_path,
                     mark_dirty_after_load=True,
                 )
@@ -741,11 +741,11 @@ class ProductionLogQtController:
             balance_index = len(downtime_rows) - 1
 
         balance_row = downtime_rows[balance_index]
-        self._set_row_value_by_role(balance_row, "downtime", "cause_text", BALANCE_DOWNTIME_CAUSE, fallback_id="cause")
-        self._set_row_value_by_role(balance_row, "downtime", "duration_minutes", f"{balance_minutes} min", fallback_id="time_calc")
+        self._set_row_value_by_role(balance_row, self.downtime_section_id, "cause_text", BALANCE_DOWNTIME_CAUSE, fallback_id="cause")
+        self._set_row_value_by_role(balance_row, self.downtime_section_id, "duration_minutes", f"{balance_minutes} min", fallback_id="time_calc")
 
         self._apply_loaded_payload(
-            {"header": header_payload, "production": production_rows, "downtime": downtime_rows},
+            {self.header_section_id: header_payload, self.production_section_id: production_rows, self.downtime_section_id: downtime_rows},
             draft_path=self.current_draft_path,
             mark_dirty_after_load=True,
         )
@@ -758,9 +758,9 @@ class ProductionLogQtController:
 
     def calculate_metrics(self, silent=False):
         data = self.collect_ui_data()
-        header_payload = dict(data.get("header") or {})
-        production_rows = list(data.get("production") or [])
-        downtime_rows = list(data.get("downtime") or [])
+        header_payload = dict(data.get(self.header_section_id) or data.get("header") or {})
+        production_rows = list(data.get(self.production_section_id) or data.get("production") or [])
+        downtime_rows = list(data.get(self.downtime_section_id) or data.get("downtime") or [])
 
         rates_data = self.model.load_rates_data()
         goal_value = self.model.get_global_goal_rate(
@@ -776,14 +776,14 @@ class ProductionLogQtController:
         total_molds = 0
         production_total_minutes = 0
         for row_index, row_payload in enumerate(production_rows):
-            part_number = self._row_value_by_role(row_payload, "production", "part_number", fallback_id="part_number")
-            molds_value = self._row_value_by_role(row_payload, "production", "mold_count", fallback_id="molds")
+            part_number = self._row_value_by_role(row_payload, self.production_section_id, "part_number", fallback_id="part_number")
+            molds_value = self._row_value_by_role(row_payload, self.production_section_id, "mold_count", fallback_id="molds")
 
             # Determine if rate override checkbox is enabled/checked
-            override_val = self._row_value_by_role(row_payload, "production", "rate_override_toggle", fallback_id="rate_override_enabled")
+            override_val = self._row_value_by_role(row_payload, self.production_section_id, "rate_override_toggle", fallback_id="rate_override_enabled")
             override_enabled = str(override_val).strip().lower() in ("true", "1", "yes", "on")
 
-            rate_value = self._row_value_by_role(row_payload, "production", "rate_value", fallback_id="rate_lookup")
+            rate_value = self._row_value_by_role(row_payload, self.production_section_id, "rate_value", fallback_id="rate_lookup")
             try:
                 rate = float(str(rate_value).strip()) if str(rate_value).strip() else None
             except Exception:
@@ -801,7 +801,7 @@ class ProductionLogQtController:
                         rate = lookup_rate
 
                 rate_field_id = self.model.get_section_field_id_by_role(
-                    "production",
+                    self.production_section_id,
                     "rate_value",
                     config=self.layout_config,
                     fallback_id="rate_lookup",
@@ -809,7 +809,7 @@ class ProductionLogQtController:
                 formatted_lookup = self.model.format_rate_value(rate) if rate is not None else ""
                 if str(rate_value).strip() != formatted_lookup:
                     self.view.set_table_field_value(
-                        "production",
+                        self.production_section_id,
                         row_index,
                         rate_field_id,
                         formatted_lookup,
@@ -818,29 +818,29 @@ class ProductionLogQtController:
             minutes = self.model.calculate_production_minutes(molds_value, rate)
             production_total_minutes += minutes
             duration_field_id = self.model.get_section_field_id_by_role(
-                "production",
+                self.production_section_id,
                 production_duration_role,
                 config=self.layout_config,
                 fallback_id="time_calc",
             )
-            self.view.set_table_field_value("production", row_index, duration_field_id, f"{minutes} min")
+            self.view.set_table_field_value(self.production_section_id, row_index, duration_field_id, f"{minutes} min")
             total_molds += self.model.calculate_total_molds([molds_value])
 
         downtime_total_minutes = 0
         for row_index, row_payload in enumerate(downtime_rows):
-            start_value = self._row_value_by_role(row_payload, "downtime", "start_clock", fallback_id="start")
-            stop_value = self._row_value_by_role(row_payload, "downtime", "stop_clock", fallback_id="stop")
+            start_value = self._row_value_by_role(row_payload, self.downtime_section_id, "start_clock", fallback_id="start")
+            stop_value = self._row_value_by_role(row_payload, self.downtime_section_id, "stop_clock", fallback_id="stop")
             duration_minutes = self.model.calculate_clock_duration_minutes(start_value, stop_value)
             duration_text = "--" if duration_minutes is None else f"{duration_minutes} min"
             if duration_minutes is not None:
                 downtime_total_minutes += duration_minutes
             duration_field_id = self.model.get_section_field_id_by_role(
-                "downtime",
+                self.downtime_section_id,
                 downtime_duration_role,
                 config=self.layout_config,
                 fallback_id="time_calc",
             )
-            self.view.set_table_field_value("downtime", row_index, duration_field_id, duration_text)
+            self.view.set_table_field_value(self.downtime_section_id, row_index, duration_field_id, duration_text)
 
         total_molds_field_id = self.model.get_header_field_id_by_role(
             "total_molds",
@@ -884,13 +884,14 @@ class ProductionLogQtController:
         if self.model.is_form_blank(ui_data):
             self.view.show_info("Form Loader", "Enter data before exporting.")
             return
-        shift = str(self._header_value_by_role(ui_data.get("header", {}), "shift_number", fallback_id="shift", default="0"))
-        date_text = str(self._header_value_by_role(ui_data.get("header", {}), "log_date", fallback_id="date", default="00-00-00")).replace("/", "")
+        header_payload = ui_data.get(self.header_section_id, ui_data.get("header", {}))
+        shift = str(self._header_value_by_role(header_payload, "shift_number", fallback_id="shift", default="0"))
+        date_text = str(self._header_value_by_role(header_payload, "log_date", fallback_id="date", default="00-00-00")).replace("/", "")
         
         export_prefix = str(self.layout_config.get("export_prefix") or "").strip()
         target_path_override = None
         if not export_prefix:
-            log_date = str(self._header_value_by_role(ui_data.get("header", {}), "log_date", fallback_id="date", default="00-00-00"))
+            log_date = str(self._header_value_by_role(header_payload, "log_date", fallback_id="date", default="00-00-00"))
             start_dir = self.model.data_handler.get_export_directory(log_date)
             form_name = self.model.get_active_form_name()
             default_filename = f"{form_name} {shift}{date_text}.xlsx"
@@ -927,7 +928,7 @@ class ProductionLogQtController:
         lines.append("=" * 80)
         
         # Header Info
-        header = ui_data.get("header") or {}
+        header = ui_data.get(self.header_section_id) or ui_data.get("header") or {}
         lines.append("HEADER INFO:")
         for field in self.header_fields:
             field_id = field.get("id")
@@ -937,7 +938,7 @@ class ProductionLogQtController:
         lines.append("-" * 80)
         
         # Production Jobs
-        production = ui_data.get("production") or []
+        production = ui_data.get(self.production_section_id) or ui_data.get("production") or []
         lines.append("PRODUCTION JOBS:")
         if not production:
             lines.append("  (No production rows)")
@@ -961,7 +962,7 @@ class ProductionLogQtController:
         lines.append("-" * 80)
         
         # Downtime Issues
-        downtime = ui_data.get("downtime") or []
+        downtime = ui_data.get(self.downtime_section_id) or ui_data.get("downtime") or []
         lines.append("DOWNTIME ISSUES:")
         if not downtime:
             lines.append("  (No downtime rows)")
@@ -1005,7 +1006,7 @@ class ProductionLogQtController:
         html.append(f"<h1 style='color: #157f94; font-size: 15pt; border-bottom: 2px solid #157f94; padding-bottom: 3px; margin-top: 4px; margin-bottom: 6px; mso-margin-top-alt: 4pt; mso-margin-bottom-alt: 6pt;'>Production Log Summary - {form_name}</h1>")
         
         # Header Info
-        header = ui_data.get("header") or {}
+        header = ui_data.get(self.header_section_id) or ui_data.get("header") or {}
         html.append("<h2 style='color: #36505b; font-size: 11pt; border-bottom: 1px solid #bfd1d8; padding-bottom: 2px; margin-top: 6px; margin-bottom: 3px; mso-margin-top-alt: 6pt; mso-margin-bottom-alt: 3pt;'>Header Information</h2>")
         
         max_row = 0
@@ -1043,7 +1044,7 @@ class ProductionLogQtController:
         html.append("</table>")
         
         # Production Jobs
-        production = ui_data.get("production") or []
+        production = ui_data.get(self.production_section_id) or ui_data.get("production") or []
         html.append("<h2 style='color: #36505b; font-size: 11pt; border-bottom: 1px solid #bfd1d8; padding-bottom: 2px; margin-top: 6px; margin-bottom: 3px; mso-margin-top-alt: 6pt; mso-margin-bottom-alt: 3pt;'>Production Jobs</h2>")
         if not production:
             html.append("<p style='margin: 4px 0; font-size: 10pt; mso-margin-top-alt: 2pt; mso-margin-bottom-alt: 2pt;'>No production rows recorded.</p>")
@@ -1063,7 +1064,7 @@ class ProductionLogQtController:
             html.append("</table>")
             
         # Downtime Issues
-        downtime = ui_data.get("downtime") or []
+        downtime = ui_data.get(self.downtime_section_id) or ui_data.get("downtime") or []
         html.append("<h2 style='color: #36505b; font-size: 11pt; border-bottom: 1px solid #bfd1d8; padding-bottom: 2px; margin-top: 6px; margin-bottom: 3px; mso-margin-top-alt: 6pt; mso-margin-bottom-alt: 3pt;'>Downtime Issues</h2>")
         if not downtime:
             html.append("<p style='margin: 4px 0; font-size: 10pt; mso-margin-top-alt: 2pt; mso-margin-bottom-alt: 2pt;'>No downtime issues recorded.</p>")
@@ -1092,11 +1093,12 @@ class ProductionLogQtController:
         if self.model.is_form_blank(ui_data):
             self.view.show_info("Form Loader", "Enter data before saving.")
             return
-        shift = str(self._header_value_by_role(ui_data.get("header", {}), "shift_number", fallback_id="shift", default="0"))
-        date_text = str(self._header_value_by_role(ui_data.get("header", {}), "log_date", fallback_id="date", default="00-00-00")).replace("/", "")
+        header_payload = ui_data.get(self.header_section_id, ui_data.get("header", {}))
+        shift = str(self._header_value_by_role(header_payload, "shift_number", fallback_id="shift", default="0"))
+        date_text = str(self._header_value_by_role(header_payload, "log_date", fallback_id="date", default="00-00-00")).replace("/", "")
         
         if not target_path_override:
-            log_date = str(self._header_value_by_role(ui_data.get("header", {}), "log_date", fallback_id="date", default="00-00-00"))
+            log_date = str(self._header_value_by_role(header_payload, "log_date", fallback_id="date", default="00-00-00"))
             start_dir = self.model.data_handler.get_export_directory(log_date)
             form_name = self.model.get_active_form_name()
             default_filename = f"{form_name} {shift}{date_text}.txt"
@@ -1130,11 +1132,12 @@ class ProductionLogQtController:
         if self.model.is_form_blank(ui_data):
             self.view.show_info("Form Loader", "Enter data before saving.")
             return
-        shift = str(self._header_value_by_role(ui_data.get("header", {}), "shift_number", fallback_id="shift", default="0"))
-        date_text = str(self._header_value_by_role(ui_data.get("header", {}), "log_date", fallback_id="date", default="00-00-00")).replace("/", "")
+        header_payload = ui_data.get(self.header_section_id, ui_data.get("header", {}))
+        shift = str(self._header_value_by_role(header_payload, "shift_number", fallback_id="shift", default="0"))
+        date_text = str(self._header_value_by_role(header_payload, "log_date", fallback_id="date", default="00-00-00")).replace("/", "")
         
         if not target_path_override:
-            log_date = str(self._header_value_by_role(ui_data.get("header", {}), "log_date", fallback_id="date", default="00-00-00"))
+            log_date = str(self._header_value_by_role(header_payload, "log_date", fallback_id="date", default="00-00-00"))
             start_dir = self.model.data_handler.get_export_directory(log_date)
             form_name = self.model.get_active_form_name()
             default_filename = f"{form_name} {shift}{date_text}.doc"
