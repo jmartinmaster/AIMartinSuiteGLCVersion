@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 
 if "PIL" not in sys.modules:
+    # update_manager_model imports app_platform, which imports PIL at module load time.
     pil_module = types.ModuleType("PIL")
     image_module = types.ModuleType("PIL.Image")
     pil_module.Image = image_module
@@ -23,7 +24,7 @@ class _DummyResponse:
         return False
 
 
-class UpdateManagerModelTests(unittest.TestCase):
+class TestUpdateManagerModel(unittest.TestCase):
     def test_build_raw_github_url_percent_encodes_spaced_artifact(self):
         url = _build_raw_github_url(
             "jmartinmaster",
