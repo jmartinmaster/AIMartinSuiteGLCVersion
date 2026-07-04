@@ -16,7 +16,7 @@ if "PIL" not in sys.modules:
 from app.models.update_manager_model import _build_raw_github_url, probe_remote_executable
 
 
-class _DummyResponse:
+class _MockContextManagerResponse:
     def __enter__(self):
         return self
 
@@ -36,7 +36,7 @@ class TestUpdateManagerModel(unittest.TestCase):
         self.assertIn("dist/Production%20Logging%20Center_GLC_v2.4.4.exe", url)
         self.assertNotIn("dist/Production Logging Center_GLC_v2.4.4.exe", url)
 
-    @patch("app.models.update_manager_model.urllib.request.urlopen", return_value=_DummyResponse())
+    @patch("app.models.update_manager_model.urllib.request.urlopen", return_value=_MockContextManagerResponse())
     def test_probe_remote_executable_uses_encoded_head_url(self, mock_urlopen):
         row = {
             "remote_version": "2.4.4",
@@ -54,6 +54,7 @@ class TestUpdateManagerModel(unittest.TestCase):
         self.assertEqual(remote_path, "dist/Production Logging Center_GLC_v2.4.4.exe")
         self.assertEqual(resolved_name, "Production Logging Center_GLC_v2.4.4.exe")
 
+        mock_urlopen.assert_called_once()
         request = mock_urlopen.call_args.args[0]
         self.assertEqual(request.get_method(), "HEAD")
         self.assertIn(
