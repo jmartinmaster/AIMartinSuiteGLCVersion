@@ -13,9 +13,11 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
+import hashlib
 import json
 import os
 import threading
+from datetime import datetime
 from dataclasses import dataclass, field
 
 from app.app_platform import get_obsolete_local_executables
@@ -66,6 +68,221 @@ class AppModel:
     module_preload_poll_seconds: float = 1.0
     preload_data_lock: object = field(default_factory=threading.RLock)
     last_settings_diagnostics: object = None
+
+    def _integrity_policy_path(self):
+        return external_path(os.path.join("data", "security", "external_module_integrity.json"))
+
+    def _utc_timestamp(self):
+        return datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+
+    def _load_integrity_policy(self):
+        defaults = {"module_records": {}}
+        policy_path = self._integrity_policy_path()
+        if not os.path.exists(policy_path):
+            return defaults
+        try:
+            with open(policy_path, "r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+            if isinstance(payload, dict):
+                module_records = payload.get("module_records")
+                if isinstance(module_records, dict):
+                    defaults["module_records"] = module_records
+        except Exception:
+            pass
+        return defaults
+
+    def _save_integrity_policy(self, policy_payload):
+        policy_path = self._integrity_policy_path()
+        policy_dir = os.path.dirname(policy_path)
+        if policy_dir:
+            os.makedirs(policy_dir, exist_ok=True)
+        temp_path = f"{policy_path}.tmp"
+        with open(temp_path, "w", encoding="utf-8") as handle:
+            json.dump(policy_payload, handle, indent=4)
+        os.replace(temp_path, policy_path)
+        return policy_path
+
+    def _hash_file_sha256(self, file_path):
+        digest = hashlib.sha256()
+        with open(file_path, "rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                if not chunk:
+                    break
+                digest.update(chunk)
+        return digest.hexdigest()
+
+    def build_override_hashes_for_module(self, module_name):
+        module_key = str(module_name or "").strip()
+        if not module_key:
+            return {}
+        hashes = {}
+        for relative_path in self._iter_module_override_relative_paths(module_key):
+            normalized_relative_path = str(relative_path).replace("\\", "/").lstrip("/")
+            absolute_path = os.path.join(self.external_modules_path, normalized_relative_path.replace("/", os.sep))
+            if not os.path.isfile(absolute_path):
+                continue
+            hashes[normalized_relative_path] = self._hash_file_sha256(absolute_path)
+        return hashes
+
+    def register_override_hashes(
+        self,
+        module_name,
+        file_hashes,
+        source,
+        repository_url=None,
+        branch_name=None,
+        approved=False,
+    ):
+        module_key = str(module_name or "").strip()
+        if not module_key:
+            raise ValueError("module_name is required to register override hashes.")
+        normalized_hashes = {}
+        for relative_path, hash_value in dict(file_hashes or {}).items():
+            normalized_relative_path = str(relative_path or "").replace("\\", "/").lstrip("/")
+            normalized_hash = str(hash_value or "").strip().lower()
+            if not normalized_relative_path or not normalized_hash:
+                continue
+            normalized_hashes[normalized_relative_path] = normalized_hash
+        if not normalized_hashes:
+            raise ValueError("At least one override hash is required.")
+
+        policy = self._load_integrity_policy()
+        module_records = policy.setdefault("module_records", {})
+        module_records[module_key] = {
+            "hashes": normalized_hashes,
+            "source": str(source or "unknown"),
+            "repository_url": str(repository_url or "").strip(),
+            "branch_name": str(branch_name or "").strip(),
+            "approved": bool(approved),
+            "updated_at": self._utc_timestamp(),
+            "approved_at": self._utc_timestamp() if approved else "",
+        }
+        self._save_integrity_policy(policy)
+        return dict(module_records[module_key])
+
+    def get_override_verification_state(self, module_name):
+        module_key = str(module_name or "").strip()
+        current_hashes = self.build_override_hashes_for_module(module_key)
+        if not current_hashes:
+            return {
+                "has_override": False,
+                "verified": False,
+                "approved": False,
+                "current_hashes": {},
+                "record": None,
+                "reason": "No external override files are present for this module.",
+            }
+
+        policy = self._load_integrity_policy()
+        module_record = dict((policy.get("module_records") or {}).get(module_key) or {})
+        stored_hashes = dict(module_record.get("hashes") or {})
+
+        hashes_match = bool(stored_hashes) and current_hashes == stored_hashes
+        verified = hashes_match
+        approved = bool(module_record.get("approved", False)) and verified
+        if not hashes_match:
+            reason = (
+                "External override files changed and no longer match the recorded integrity hashes. "
+                "Developer approval is required before loading."
+            )
+        elif not approved:
+            reason = "External override integrity is recorded, but developer approval is still required for loading."
+        else:
+            reason = "External override hashes are verified and approved."
+        return {
+            "has_override": True,
+            "verified": verified,
+            "approved": approved,
+            "current_hashes": current_hashes,
+            "record": module_record,
+            "reason": reason,
+        }
+
+    def approve_override_hashes(self, module_name, file_hashes):
+        module_key = str(module_name or "").strip()
+        if not module_key:
+            raise ValueError("module_name is required to approve override hashes.")
+
+        normalized_hashes = {}
+        for relative_path, hash_value in dict(file_hashes or {}).items():
+            normalized_relative_path = str(relative_path or "").replace("\\", "/").lstrip("/")
+            normalized_hash = str(hash_value or "").strip().lower()
+            if not normalized_relative_path or not normalized_hash:
+                continue
+            normalized_hashes[normalized_relative_path] = normalized_hash
+        if not normalized_hashes:
+            raise ValueError("At least one override hash is required for approval.")
+
+        policy = self._load_integrity_policy()
+        module_records = policy.setdefault("module_records", {})
+        existing_record = dict(module_records.get(module_key) or {})
+        module_records[module_key] = {
+            "hashes": normalized_hashes,
+            "source": str(existing_record.get("source") or "manual_approval"),
+            "repository_url": str(existing_record.get("repository_url") or "").strip(),
+            "branch_name": str(existing_record.get("branch_name") or "").strip(),
+            "approved": True,
+            "updated_at": self._utc_timestamp(),
+            "approved_at": self._utc_timestamp(),
+        }
+        self._save_integrity_policy(policy)
+        return dict(module_records[module_key])
+
+    def record_internal_editor_override_hash(self, file_path):
+        candidate_path = os.path.abspath(str(file_path or ""))
+        if not candidate_path or not os.path.isfile(candidate_path):
+            return None
+        external_root = os.path.abspath(self.external_modules_path)
+        try:
+            if os.path.commonpath([candidate_path, external_root]) != external_root:
+                return None
+        except Exception:
+            return None
+
+        relative_path = os.path.relpath(candidate_path, external_root).replace("\\", "/")
+        normalized_relative_path = relative_path.lstrip("/")
+        if not normalized_relative_path.endswith(".py"):
+            return None
+
+        if "/" not in normalized_relative_path:
+            module_name = os.path.splitext(os.path.basename(normalized_relative_path))[0]
+        else:
+            base_name = os.path.splitext(os.path.basename(normalized_relative_path))[0]
+            module_name = (
+                base_name.removesuffix("_qt_controller")
+                .removesuffix("_controller")
+                .removesuffix("_qt_view")
+                .removesuffix("_view")
+                .removesuffix("_model")
+            )
+        module_name = str(module_name or "").strip()
+        if not module_name:
+            return None
+
+        current_hashes = self.build_override_hashes_for_module(module_name)
+        if not current_hashes:
+            return None
+        return self.register_override_hashes(
+            module_name,
+            current_hashes,
+            source="internal_code_editor",
+            approved=False,
+        )
+
+    def _sanitize_override_relative_path(self, relative_path):
+        normalized_relative_path = str(relative_path or "").replace("\\", "/").lstrip("/")
+        if normalized_relative_path.startswith("app/"):
+            normalized_relative_path = normalized_relative_path[4:]
+        if not normalized_relative_path:
+            raise ValueError("Override file path cannot be empty.")
+        normalized_relative_path = os.path.normpath(normalized_relative_path.replace("/", os.sep)).replace("\\", "/")
+        if normalized_relative_path.startswith("../") or normalized_relative_path == "..":
+            raise ValueError("Override file path escapes the external module directory.")
+        if os.path.isabs(normalized_relative_path):
+            raise ValueError("Override file path must be relative.")
+        if not normalized_relative_path.endswith(".py"):
+            raise ValueError("Only Python module overrides are supported.")
+        return normalized_relative_path
 
     def _get_legacy_external_modules_path(self):
         return external_path("app")
@@ -154,7 +371,10 @@ class AppModel:
 
     def write_module_override(self, module_name, module_text):
         self.ensure_external_modules_directory()
-        target_path = os.path.join(self.external_modules_path, f"{module_name}.py")
+        normalized_module_name = str(module_name or "").strip()
+        if not normalized_module_name or any(token in normalized_module_name for token in ("/", "\\", "..", ":")):
+            raise ValueError("Invalid module name for external override.")
+        target_path = os.path.join(self.external_modules_path, f"{normalized_module_name}.py")
         self._write_text_file(target_path, module_text)
         return target_path
 
@@ -162,16 +382,21 @@ class AppModel:
         self.ensure_external_modules_directory()
         written_paths = []
         primary_path = None
-        resolved_primary_relative_path = str(primary_relative_path or "").replace("\\", "/").lstrip("/")
+        resolved_primary_relative_path = self._sanitize_override_relative_path(primary_relative_path) if primary_relative_path else ""
+        external_root = os.path.abspath(self.external_modules_path)
 
         for relative_path, file_text in file_payloads.items():
-            normalized_relative_path = str(relative_path).replace("\\", "/").lstrip("/")
-            if normalized_relative_path.startswith("app/"):
-                normalized_relative_path = normalized_relative_path[4:]
+            normalized_relative_path = self._sanitize_override_relative_path(relative_path)
             target_path = os.path.join(self.external_modules_path, normalized_relative_path.replace("/", os.sep))
+            resolved_target_path = os.path.abspath(target_path)
+            try:
+                if os.path.commonpath([resolved_target_path, external_root]) != external_root:
+                    raise ValueError("Override file path escapes the external module directory.")
+            except ValueError:
+                raise ValueError("Override file path escapes the external module directory.")
             self._write_text_file(target_path, file_text)
             written_paths.append(target_path)
-            if normalized_relative_path == resolved_primary_relative_path.removeprefix("app/"):
+            if normalized_relative_path == resolved_primary_relative_path:
                 primary_path = target_path
 
         if primary_path is None and written_paths:

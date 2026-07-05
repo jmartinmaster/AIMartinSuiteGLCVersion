@@ -635,7 +635,7 @@ class SettingsManagerQtView(QMainWindow):
             return
 
         if self.security_admin_group is not None:
-            self.security_admin_group.setVisible(True)
+            self.security_admin_group.setVisible(security_visible)
         if self.developer_admin_group is not None:
             self.developer_admin_group.setVisible(developer_visible)
         self.setWindowTitle(str(self.payload.get("window_title") or "Settings Manager - Production Logging Center"))

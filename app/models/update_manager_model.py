@@ -15,6 +15,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import json
+import hashlib
 import os
 import re
 import shutil
@@ -187,6 +188,73 @@ def _build_raw_github_url(owner, repo, branch_name, relative_path, cache_bust=No
 
 def _build_snapshot_github_url(owner, repo, branch_name):
     return f"https://codeload.github.com/{owner}/{repo}/zip/refs/heads/{branch_name}"
+
+
+def _compute_sha256_hex(payload_bytes):
+    return hashlib.sha256(payload_bytes).hexdigest()
+
+
+def _parse_sha256_text(payload_text, relative_path):
+    raw_text = str(payload_text or "").strip()
+    if not raw_text:
+        raise RuntimeError(f"Repository checksum file is empty for {relative_path}.sha256.")
+    first_line = raw_text.splitlines()[0].strip()
+    if not first_line:
+        raise RuntimeError(f"Repository checksum file is empty for {relative_path}.sha256.")
+    candidate_hash = first_line.split()[0].strip().lower()
+    if len(candidate_hash) != 64 or any(character not in "0123456789abcdef" for character in candidate_hash):
+        raise RuntimeError(f"Repository checksum file is invalid for {relative_path}.sha256.")
+    return candidate_hash
+
+
+def _fetch_remote_sha256_hex(remote_info, branch_name, relative_path, timeout=15):
+    checksum_path = f"{relative_path}.sha256"
+    try:
+        payload_text = fetch_remote_payload_text(remote_info, branch_name, checksum_path, timeout=timeout)
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            raise RuntimeError(
+                f"Missing repository checksum: {checksum_path}. "
+                "Create the .sha256 file in the selected update repository before distributing this artifact."
+            ) from exc
+        raise
+    return _parse_sha256_text(payload_text, relative_path)
+
+
+def _verify_remote_payload_integrity(remote_info, branch_name, relative_path, payload_bytes, timeout=15):
+    expected_hash = _fetch_remote_sha256_hex(
+        remote_info,
+        branch_name,
+        relative_path,
+        timeout=timeout,
+    )
+    actual_hash = _compute_sha256_hex(payload_bytes)
+    if actual_hash != expected_hash:
+        raise RuntimeError(
+            f"Integrity check failed for {relative_path}. Expected {expected_hash}, got {actual_hash}."
+        )
+    return actual_hash
+
+
+def _safe_extract_zip(archive_handle, extract_dir):
+    extract_root = os.path.abspath(extract_dir)
+    for member in archive_handle.infolist():
+        member_name = str(member.filename or "")
+        normalized_member_name = member_name.replace("\\", "/")
+        if not normalized_member_name:
+            continue
+        if normalized_member_name.startswith("/") or normalized_member_name.startswith("../"):
+            raise RuntimeError(f"Unsafe archive member path detected: {member_name}")
+        destination_path = os.path.abspath(os.path.join(extract_root, normalized_member_name))
+        try:
+            if os.path.commonpath([destination_path, extract_root]) != extract_root:
+                raise RuntimeError(f"Unsafe archive member path detected: {member_name}")
+        except ValueError as exc:
+            raise RuntimeError(f"Unsafe archive member path detected: {member_name}") from exc
+        unix_mode = (member.external_attr >> 16) & 0o170000
+        if unix_mode == 0o120000:
+            raise RuntimeError(f"Symlink entries are not allowed in update archives: {member_name}")
+        archive_handle.extract(member, extract_root)
 
 
 def _normalize_update_repository_url(raw_value):
@@ -837,17 +905,31 @@ def probe_remote_executable(remote_info, branch_name, row, stable_artifact_kind,
 
 def download_remote_executable(remote_info, branch_name, row, stable_artifact_kind, stable_artifact_name_for_version):
     last_not_found = None
+    last_integrity_error = None
     for remote_path, target_name in remote_executable_candidates(row, stable_artifact_kind, stable_artifact_name_for_version):
         try:
-            return fetch_remote_bytes(remote_info, branch_name, remote_path), target_name
+            payload_bytes = fetch_remote_bytes(remote_info, branch_name, remote_path)
+            _verify_remote_payload_integrity(remote_info, branch_name, remote_path, payload_bytes, timeout=15)
+            return payload_bytes, target_name
         except urllib.error.HTTPError as exc:
             if exc.code == 404:
                 last_not_found = exc
                 continue
             raise
+        except RuntimeError as exc:
+            last_integrity_error = exc
+            continue
 
     if last_not_found is not None:
+        if last_integrity_error is not None:
+            raise RuntimeError(
+                f"{last_integrity_error} No checksum-verified packaged artifact was available for this update."
+            ) from last_integrity_error
         raise last_not_found
+    if last_integrity_error is not None:
+        raise RuntimeError(
+            f"{last_integrity_error} No checksum-verified packaged artifact was available for this update."
+        ) from last_integrity_error
     raise RuntimeError("No packaged artifact was found for the remote version.")
 
 
@@ -1302,13 +1384,12 @@ class UpdateManagerModel:
 
     def install_module_payload(self, option, remote_info, branch_name, install_module_override, remote_text=None):
         payload_paths = option.get("payload_paths") or [option["relative_path"]]
-        if option.get("kind") == "module" and len(payload_paths) > 1:
+        if option.get("kind") == "module":
             payload_text = {}
             for relative_path in payload_paths:
-                if relative_path == option["relative_path"] and remote_text is not None:
-                    payload_text[relative_path] = remote_text
-                else:
-                    payload_text[relative_path] = fetch_remote_payload_text(remote_info, branch_name, relative_path, timeout=15)
+                payload_bytes = fetch_remote_bytes(remote_info, branch_name, relative_path, timeout=15)
+                _verify_remote_payload_integrity(remote_info, branch_name, relative_path, payload_bytes, timeout=15)
+                payload_text[relative_path] = payload_bytes.decode("utf-8")
         else:
             payload_text = remote_text if remote_text is not None else fetch_remote_payload_text(remote_info, branch_name, option["relative_path"], timeout=15)
         return install_module_payload_option(option, payload_text, install_module_override)
@@ -1476,7 +1557,7 @@ class UpdateManagerModel:
         extract_dir = os.path.join(stage_dir, "snapshot")
         os.makedirs(extract_dir, exist_ok=True)
         with zipfile.ZipFile(archive_path) as archive_handle:
-            archive_handle.extractall(extract_dir)
+            _safe_extract_zip(archive_handle, extract_dir)
 
         source_root = self.locate_extracted_source_root(extract_dir)
         self.validate_source_snapshot(source_root)

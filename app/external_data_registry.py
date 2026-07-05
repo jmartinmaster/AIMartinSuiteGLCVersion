@@ -16,6 +16,8 @@
 import json
 import os
 import shutil
+import threading
+from copy import deepcopy
 from dataclasses import dataclass
 
 from app.persistence import write_json_with_backup
@@ -122,6 +124,8 @@ class ExternalDataRegistry:
     def __init__(self, specs=None):
         self._specs = tuple(specs or DEFAULT_EXTERNAL_DATA_SPECS)
         self._spec_map = {spec.key: spec for spec in self._specs}
+        self._json_cache = {}
+        self._json_cache_lock = threading.RLock()
 
     def get_spec(self, key):
         if key not in self._spec_map:
@@ -251,22 +255,41 @@ class ExternalDataRegistry:
     def load_json(self, key, default_factory=None):
         read_path = self.resolve_read_path(key)
         if not read_path or not os.path.exists(read_path):
+            self._invalidate_json_cache(key)
             return default_factory() if callable(default_factory) else {}
         try:
+            stat_result = os.stat(read_path)
+            cached_payload = self._get_cached_json_payload(key, read_path, stat_result)
+            if cached_payload is not None:
+                return cached_payload
             with open(read_path, "r", encoding="utf-8") as handle:
                 payload = json.load(handle)
-            return payload if isinstance(payload, dict) else (default_factory() if callable(default_factory) else {})
+            if isinstance(payload, dict):
+                self._set_cached_json_payload(key, read_path, stat_result, payload)
+                return deepcopy(payload)
+            self._invalidate_json_cache(key)
+            return default_factory() if callable(default_factory) else {}
         except (OSError, json.JSONDecodeError):
+            self._invalidate_json_cache(key)
             return default_factory() if callable(default_factory) else {}
 
     def save_json(self, key, payload, keep_count=12):
+        self._invalidate_json_cache(key)
         self.migrate_legacy_file(key)
-        return write_json_with_backup(
+        write_result = write_json_with_backup(
             self.resolve_write_path(key),
             payload,
             backup_dir=self.resolve_backup_dir(key),
             keep_count=keep_count,
         )
+        write_path = self.resolve_write_path(key)
+        if isinstance(payload, dict) and os.path.exists(write_path):
+            try:
+                stat_result = os.stat(write_path)
+                self._set_cached_json_payload(key, write_path, stat_result, payload)
+            except OSError:
+                self._invalidate_json_cache(key)
+        return write_result
 
     def get_recovery_specs(self):
         return [spec for spec in self._specs if spec.include_in_recovery]
@@ -291,3 +314,37 @@ class ExternalDataRegistry:
 
     def warm_cache(self):
         return {spec.key: self.resolve_read_path(spec.key) for spec in self._specs}
+
+    def _get_cached_json_payload(self, key, read_path, stat_result):
+        normalized_path = os.path.abspath(read_path)
+        with self._json_cache_lock:
+            cache_entry = self._json_cache.get(str(key))
+            if not isinstance(cache_entry, dict):
+                return None
+            if (
+                cache_entry.get("path") != normalized_path
+                or cache_entry.get("mtime_ns") != int(getattr(stat_result, "st_mtime_ns", 0))
+                or cache_entry.get("size") != int(getattr(stat_result, "st_size", -1))
+            ):
+                return None
+            payload = cache_entry.get("payload")
+            if not isinstance(payload, dict):
+                return None
+            return deepcopy(payload)
+
+    def _set_cached_json_payload(self, key, read_path, stat_result, payload):
+        if not isinstance(payload, dict):
+            self._invalidate_json_cache(key)
+            return
+        cache_entry = {
+            "path": os.path.abspath(read_path),
+            "mtime_ns": int(getattr(stat_result, "st_mtime_ns", 0)),
+            "size": int(getattr(stat_result, "st_size", -1)),
+            "payload": deepcopy(payload),
+        }
+        with self._json_cache_lock:
+            self._json_cache[str(key)] = cache_entry
+
+    def _invalidate_json_cache(self, key):
+        with self._json_cache_lock:
+            self._json_cache.pop(str(key), None)

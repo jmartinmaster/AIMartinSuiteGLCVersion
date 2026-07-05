@@ -41,6 +41,11 @@ class RateManagerModel:
     def save_data(self):
         backup_info = self.data_registry.save_json("rates", self.rates, keep_count=12)
         self.data_file = self.save_path
+        try:
+            from app.models.production_log_model import ProductionLogModel
+            ProductionLogModel.invalidate_global_rates_cache()
+        except ImportError:
+            pass
         return backup_info
 
     def get_filtered_rates(self, search_text):

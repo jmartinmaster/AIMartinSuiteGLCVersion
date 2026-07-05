@@ -79,6 +79,7 @@ MODULE_API_SURFACE = {
         "open_help_document",
         "open_production_log_draft",
         "import_managed_module",
+        "record_external_override_hash_from_editor",
         "get_active_form_info",
         "register_active_form_listener",
         "unregister_active_form_listener",
@@ -513,7 +514,29 @@ class Dispatcher:
         with self.model.module_import_lock:
             self._invalidate_managed_module_cache_locked(signature)
 
+    def _get_managed_directories_mtimes(self):
+        source_roots = [self.modules_path]
+        if self.has_external_modules_directory():
+            source_roots.append(self.external_modules_path)
+
+        mtimes = {}
+        for root in source_roots:
+            if not os.path.isdir(root):
+                continue
+            for current_root, dir_names, _ in os.walk(root):
+                dir_names[:] = [d for d in dir_names if d != "__pycache__"]
+                try:
+                    mtimes[current_root] = os.path.getmtime(current_root)
+                except OSError:
+                    pass
+        return mtimes
+
     def _sync_managed_source_signature(self, force=False):
+        current_dir_mtimes = self._get_managed_directories_mtimes()
+        if not force and hasattr(self, "_last_managed_dir_mtimes") and self._last_managed_dir_mtimes == current_dir_mtimes:
+            return False
+
+        self._last_managed_dir_mtimes = current_dir_mtimes
         current_signature = self._build_managed_source_signature()
         with self.model.module_import_lock:
             if force or current_signature != self.model.managed_source_signature:
@@ -531,10 +554,10 @@ class Dispatcher:
         return targets
 
     def _run_module_preload_cycle(self):
-        self._sync_managed_source_signature(force=False)
+        changed = self._sync_managed_source_signature(force=False)
         for module_name in self._get_module_preload_targets():
             if self.model.module_preload_stop_event.is_set():
-                return
+                return changed
             module_path = self._resolve_managed_module_path(module_name)
             with self.model.module_import_lock:
                 if module_path in sys.modules:
@@ -545,14 +568,21 @@ class Dispatcher:
                 self.model.preloaded_module_names.add(module_name)
             except Exception as exc:
                 log_exception(f"module_preload.{module_name}", exc)
+        return changed
 
     def _module_preloader_worker(self):
+        poll_seconds = self.model.module_preload_poll_seconds
         while not self.model.module_preload_stop_event.is_set():
             try:
-                self._run_module_preload_cycle()
+                changed = self._run_module_preload_cycle()
+                if changed:
+                    poll_seconds = self.model.module_preload_poll_seconds
+                else:
+                    poll_seconds = min(10.0, poll_seconds * 1.5)
             except Exception as exc:
                 log_exception("module_preloader.worker", exc)
-            if self.model.module_preload_stop_event.wait(self.model.module_preload_poll_seconds):
+                poll_seconds = self.model.module_preload_poll_seconds
+            if self.model.module_preload_stop_event.wait(poll_seconds):
                 break
 
     def start_module_preloader(self):
@@ -627,6 +657,77 @@ class Dispatcher:
         except Exception:
             return False
 
+    def record_external_override_hash_from_editor(self, file_path):
+        return self.model.record_internal_editor_override_hash(file_path)
+
+    def _ensure_external_override_load_allowed(self, module_name):
+        module_key = str(module_name or "").strip()
+        if not module_key or not self.are_external_module_overrides_enabled():
+            return True
+        if self.get_external_module_override_path(module_key) is None:
+            return True
+
+        verification_state = self.model.get_override_verification_state(module_key)
+        if not verification_state.get("has_override"):
+            return True
+        if verification_state.get("approved"):
+            return True
+        record = verification_state.get("record") or {}
+        if not (record.get("hashes") and isinstance(record.get("hashes"), dict)):
+            self.host_ui_adapter.show_warning(
+                "External Override Blocked",
+                (
+                    f"Loading {self.get_module_display_name(module_key)} was blocked because no integrity hash record exists.\n\n"
+                    "Record a trusted hash through Update Manager payload restore (repository checksum verified) "
+                    "or by saving the override through Internal Code Editor before attempting to load."
+                ),
+            )
+            return False
+
+        if not gatekeeper.authenticate(
+            required_right="developer:update_configuration",
+            parent=self.root,
+            reason=(
+                f"Developer approval is required to load external override files for "
+                f"{self.get_module_display_name(module_key)}."
+            ),
+            force_reauth=True,
+            allowed_roles={"admin", "developer"},
+        ):
+            self.host_ui_adapter.show_warning(
+                "External Override Blocked",
+                (
+                    f"Loading {self.get_module_display_name(module_key)} from external override files was blocked "
+                    "because developer approval was not granted."
+                ),
+            )
+            return False
+
+        source_label = str(record.get("source") or "unknown")
+        source_note = ""
+        if source_label == "update_repository":
+            repository_url = str(record.get("repository_url") or "").strip()
+            branch_name = str(record.get("branch_name") or "").strip()
+            source_note = f"\nSource: update repository ({repository_url or 'unknown'}) {branch_name}".rstrip()
+        elif source_label == "internal_code_editor":
+            source_note = "\nSource: internal code editor hash record"
+
+        prompt_message = (
+            f"{self.get_module_display_name(module_key)} has external override files that are not yet approved.\n\n"
+            f"{verification_state.get('reason', 'Developer approval is required before loading this module.')}"
+            f"{source_note}\n\n"
+            "Approve and allow this override hash set to load now?"
+        )
+        if not self.host_ui_adapter.ask_yes_no("Approve External Override Load", prompt_message):
+            self.host_ui_adapter.show_warning(
+                "External Override Blocked",
+                f"Loading {self.get_module_display_name(module_key)} was cancelled.",
+            )
+            return False
+
+        self.model.approve_override_hashes(module_key, verification_state.get("current_hashes") or {})
+        return True
+
     def reset_module_import_state(self, keep_active=True):
         active_name = self.active_module_name if keep_active else None
         for module_name, session in list(self.persistent_module_instances.items()):
@@ -645,19 +746,31 @@ class Dispatcher:
         if not keep_active:
             self.invalidate_managed_module_cache()
 
-    def install_module_override(self, module_name, module_text):
+    def install_module_override(self, module_name, module_text, verification_context=None):
         self.ensure_external_modules_package()
+        written_paths = []
         if isinstance(module_text, dict):
-            target_path, _written_paths = self.model.write_module_override_files(
+            target_path, written_paths = self.model.write_module_override_files(
                 module_text,
                 primary_relative_path=f"app/{module_name}.py",
             )
             self._evict_imported_module_paths(module_text.keys())
         else:
             target_path = self.model.write_module_override(module_name, module_text)
+            written_paths = [target_path]
             self._evict_imported_module_paths([f"app/{module_name}.py"])
+        current_hashes = self.model.build_override_hashes_for_module(module_name)
+        verification_context = dict(verification_context or {})
+        self.model.register_override_hashes(
+            module_name,
+            current_hashes,
+            source=str(verification_context.get("source") or "manual_override"),
+            repository_url=verification_context.get("repository_url"),
+            branch_name=verification_context.get("branch_name"),
+            approved=bool(verification_context.get("approved", False)),
+        )
         module = self.import_managed_module(module_name, force_fresh=True) if self.is_external_module_override_trust_enabled() else None
-        return target_path, module
+        return target_path, module, written_paths
 
     def apply_external_override_policy_change(self):
         current_module_name = self.active_module_name or "settings_manager"
@@ -1190,6 +1303,8 @@ class Dispatcher:
     def _load_module_in_shared_viewport(self, module_name):
         if not self._prepare_module_viewport_load():
             return None
+        if not self._ensure_external_override_load_allowed(module_name):
+            return None
 
         restored_instance = self._try_restore_persistent_module(module_name)
         if restored_instance is not None:
@@ -1300,6 +1415,8 @@ class Dispatcher:
 #            tb.Label(self.content_area, text=f"Error loading {module_name}: {exc}", bootstyle=DANGER).pack(pady=20)
 
     def open_module_window(self, module_name, title=None, geometry=None, minsize=None):
+        if not self._ensure_external_override_load_allowed(module_name):
+            return None
         top_window = self.host_ui_adapter.create_module_window(title=title, geometry=geometry, minsize=minsize)
         if top_window is None:
             self.host_ui_adapter.show_warning(

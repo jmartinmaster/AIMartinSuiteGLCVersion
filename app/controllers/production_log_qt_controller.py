@@ -67,8 +67,8 @@ class ProductionLogQtController:
     def _build_view_payload(self):
         dispatcher = self.dispatcher
         theme_tokens = dict(getattr(getattr(dispatcher, "view", None), "theme_tokens", {}) or {})
-        pending_drafts = self.model.list_pending_drafts()
-        recovery_snapshots = self.model.list_recovery_snapshots()
+        pending_drafts = self.model.list_pending_drafts(lightweight=True)
+        recovery_snapshots = self.model.list_recovery_snapshots(lightweight=True)
         latest_draft_name = str(pending_drafts[0].get("filename") or "None") if pending_drafts else "None"
         return {
             "window_title": "Form Loader - Production Logging Center",
@@ -325,9 +325,11 @@ class ProductionLogQtController:
         _ = metadata
         return None
 
-    def refresh_draft_lists(self, initial=False):
-        self.pending_drafts = self.model.list_pending_drafts()
-        self.recovery_snapshots = self.model.list_recovery_snapshots()
+    def refresh_draft_lists(self, initial=False, refresh_pending=True, refresh_recovery=True, lightweight=True):
+        if refresh_pending:
+            self.pending_drafts = self.model.list_pending_drafts(lightweight=lightweight)
+        if refresh_recovery:
+            self.recovery_snapshots = self.model.list_recovery_snapshots(lightweight=lightweight)
         latest_name = self.pending_drafts[0].get("filename") if self.pending_drafts else "None"
         self.view.set_draft_status(len(self.pending_drafts), len(self.recovery_snapshots), latest_name)
         if initial:
@@ -445,7 +447,7 @@ class ProductionLogQtController:
         if not draft_path:
             return False
         if not os.path.exists(draft_path):
-            self.refresh_draft_lists(initial=False)
+            self.refresh_draft_lists(initial=False, refresh_pending=True, refresh_recovery=False, lightweight=True)
             if self.current_draft_path == draft_path:
                 self.current_draft_path = None
             return False
@@ -457,7 +459,7 @@ class ProductionLogQtController:
 
         if self.current_draft_path == draft_path:
             self.current_draft_path = None
-        self.refresh_draft_lists(initial=False)
+        self.refresh_draft_lists(initial=False, refresh_pending=True, refresh_recovery=False, lightweight=True)
         self.view.set_status(f"Deleted draft {os.path.basename(draft_path)}")
         self.write_state(status="ready", message=f"Deleted draft {os.path.basename(draft_path)}.")
         return True
@@ -477,14 +479,14 @@ class ProductionLogQtController:
         self.load_draft_path(str(latest.get("path") or ""))
 
     def open_pending_dialog(self):
-        self.refresh_draft_lists(initial=False)
+        self.pending_drafts = self.model.list_pending_drafts(lightweight=False)
         self.view.show_pending_dialog(self.pending_drafts)
 
     def show_pending(self):
         self.open_pending_dialog()
 
     def open_recovery_dialog(self):
-        self.refresh_draft_lists(initial=False)
+        self.recovery_snapshots = self.model.list_recovery_snapshots(lightweight=False)
         self.view.show_recovery_dialog(self.recovery_snapshots)
 
     def open_recovery_viewer(self, snapshot_path=None):
@@ -530,7 +532,7 @@ class ProductionLogQtController:
             return
         if not os.path.exists(draft_path):
             self.current_draft_path = None
-            self.refresh_draft_lists(initial=False)
+            self.refresh_draft_lists(initial=False, refresh_pending=True, refresh_recovery=False, lightweight=True)
             self.show_toast("Delete Draft", "There is no saved draft attached to the current session.", "info")
             return
         if not self.view.ask_yes_no("Delete Current Draft", f"Delete {os.path.basename(draft_path)}?"):

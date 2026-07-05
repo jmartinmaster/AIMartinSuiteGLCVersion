@@ -33,35 +33,16 @@ class InternalCodeEditorModel:
         self.is_dirty = False
 
     def refresh_file_entries(self):
+        if not hasattr(self, 'dir_cache'):
+            self.dir_cache = {}
+
         entries = []
         seen_paths = set()
 
         for source_name, browse_path in self._iter_sources():
             if not os.path.isdir(browse_path):
                 continue
-            for root_path, dir_names, file_names in os.walk(browse_path):
-                dir_names[:] = [name for name in dir_names if name != "__pycache__"]
-                for file_name in sorted(file_names):
-                    if not file_name.endswith(".py"):
-                        continue
-                    absolute_path = os.path.abspath(os.path.join(root_path, file_name))
-                    normalized_path = os.path.normcase(absolute_path)
-                    if normalized_path in seen_paths:
-                        continue
-                    seen_paths.add(normalized_path)
-                    relative_path = os.path.relpath(absolute_path, browse_path).replace(os.sep, "/")
-                    label_prefix = "Workspace" if source_name == "workspace" else source_name.title()
-                    entry_key = f"{source_name}:{relative_path}"
-                    entries.append(
-                        {
-                            "key": entry_key,
-                            "label": f"{label_prefix} | {relative_path}",
-                            "relative_path": relative_path,
-                            "path": absolute_path,
-                            "save_path": absolute_path,
-                            "source_name": source_name,
-                        }
-                    )
+            self._scan_dir_recursive(source_name, browse_path, browse_path, seen_paths, entries)
 
         entries.sort(
             key=lambda item: (
@@ -74,6 +55,68 @@ class InternalCodeEditorModel:
         if self.current_file_key not in {entry["key"] for entry in entries}:
             self.current_file_key = entries[0]["key"] if entries else None
         return list(self.file_entries)
+
+    def _scan_dir_recursive(self, source_name, browse_path, current_path, seen_paths, entries):
+        try:
+            mtime = os.path.getmtime(current_path)
+        except OSError:
+            return
+
+        cached = self.dir_cache.get(current_path)
+        if cached and cached["mtime"] == mtime:
+            for file_entry in cached["files"]:
+                abs_path = file_entry["path"]
+                norm_path = os.path.normcase(abs_path)
+                if norm_path not in seen_paths:
+                    seen_paths.add(norm_path)
+                    entries.append(file_entry)
+            for subdir in cached["subdirs"]:
+                self._scan_dir_recursive(source_name, browse_path, subdir, seen_paths, entries)
+            return
+
+        try:
+            items = os.listdir(current_path)
+        except OSError:
+            items = []
+
+        files = []
+        subdirs = []
+
+        for item in sorted(items):
+            if item == "__pycache__":
+                continue
+            item_path = os.path.join(current_path, item)
+            if os.path.isdir(item_path):
+                subdirs.append(item_path)
+            elif item.endswith(".py"):
+                absolute_path = os.path.abspath(item_path)
+                relative_path = os.path.relpath(absolute_path, browse_path).replace(os.sep, "/")
+                label_prefix = "Workspace" if source_name == "workspace" else source_name.title()
+                entry_key = f"{source_name}:{relative_path}"
+                file_entry = {
+                    "key": entry_key,
+                    "label": f"{label_prefix} | {relative_path}",
+                    "relative_path": relative_path,
+                    "path": absolute_path,
+                    "save_path": absolute_path,
+                    "source_name": source_name,
+                }
+                files.append(file_entry)
+
+        self.dir_cache[current_path] = {
+            "mtime": mtime,
+            "files": files,
+            "subdirs": subdirs
+        }
+
+        for file_entry in files:
+            norm_path = os.path.normcase(file_entry["path"])
+            if norm_path not in seen_paths:
+                seen_paths.add(norm_path)
+                entries.append(file_entry)
+
+        for subdir in subdirs:
+            self._scan_dir_recursive(source_name, browse_path, subdir, seen_paths, entries)
 
     def get_file_entry(self, file_key):
         for entry in self.file_entries:
@@ -131,6 +174,17 @@ class InternalCodeEditorModel:
                 os.remove(temporary_path)
             raise
         self.is_dirty = False
+
+        parent_dir = os.path.abspath(os.path.dirname(target_path))
+        if hasattr(self, 'dir_cache') and parent_dir in self.dir_cache:
+            del self.dir_cache[parent_dir]
+
+        if hasattr(self, '_file_contents_cache') and target_path in self._file_contents_cache:
+            del self._file_contents_cache[target_path]
+
+        if hasattr(self, '_file_symbols_cache') and target_path in self._file_symbols_cache:
+            del self._file_symbols_cache[target_path]
+
         return target_path
 
     def build_editor_analysis(self, source_text):
@@ -149,30 +203,47 @@ class InternalCodeEditorModel:
         max_results = max(1, int(limit or self.DEFAULT_SEARCH_LIMIT))
         results = []
         truncated = False
+
+        if not hasattr(self, '_file_contents_cache'):
+            self._file_contents_cache = {}
+
         for entry in self.file_entries:
+            path = entry["path"]
             try:
-                with open(entry["path"], "r", encoding="utf-8", errors="replace") as handle:
-                    for line_number, line_text in enumerate(handle, start=1):
-                        match_index = line_text.lower().find(normalized_search)
-                        if match_index < 0:
-                            continue
-                        results.append(
-                            {
-                                "key": f"text:{entry['key']}:{line_number}:{match_index + 1}",
-                                "result_type": "text",
-                                "file_key": entry["key"],
-                                "relative_path": entry["relative_path"],
-                                "source_name": entry["source_name"],
-                                "line": line_number,
-                                "column": match_index + 1,
-                                "summary": line_text.strip(),
-                            }
-                        )
-                        if len(results) >= max_results:
-                            truncated = True
-                            return {"results": results, "truncated": truncated}
+                mtime = os.path.getmtime(path)
             except OSError:
                 continue
+
+            cached = self._file_contents_cache.get(path)
+            if cached and cached["mtime"] == mtime:
+                lines = cached["lines"]
+            else:
+                try:
+                    with open(path, "r", encoding="utf-8", errors="replace") as handle:
+                        lines = handle.readlines()
+                    self._file_contents_cache[path] = {"mtime": mtime, "lines": lines}
+                except OSError:
+                    continue
+
+            for line_number, line_text in enumerate(lines, start=1):
+                match_index = line_text.lower().find(normalized_search)
+                if match_index < 0:
+                    continue
+                results.append(
+                    {
+                        "key": f"text:{entry['key']}:{line_number}:{match_index + 1}",
+                        "result_type": "text",
+                        "file_key": entry["key"],
+                        "relative_path": entry["relative_path"],
+                        "source_name": entry["source_name"],
+                        "line": line_number,
+                        "column": match_index + 1,
+                        "summary": line_text.strip(),
+                    }
+                )
+                if len(results) >= max_results:
+                    truncated = True
+                    return {"results": results, "truncated": truncated}
         return {"results": results, "truncated": truncated}
 
     def search_symbol_matches(self, search_text, limit=None):
@@ -183,14 +254,31 @@ class InternalCodeEditorModel:
         max_results = max(1, int(limit or self.DEFAULT_SEARCH_LIMIT))
         results = []
         truncated = False
+
+        if not hasattr(self, '_file_symbols_cache'):
+            self._file_symbols_cache = {}
+
         for entry in self.file_entries:
+            path = entry["path"]
             try:
-                source_text = self.load_file_text(entry["key"])
-            except (OSError, ValueError):
+                mtime = os.path.getmtime(path)
+            except OSError:
                 continue
-            definition_entries, parse_error = self.build_definition_index(source_text)
-            if parse_error:
-                continue
+
+            cached = self._file_symbols_cache.get(path)
+            if cached and cached["mtime"] == mtime:
+                definition_entries = cached["definitions"]
+            else:
+                try:
+                    with open(path, "r", encoding="utf-8", errors="replace") as handle:
+                        source_text = handle.read()
+                    definition_entries, _, parse_error = self.build_definition_index(source_text)
+                    if parse_error:
+                        definition_entries = []
+                    self._file_symbols_cache[path] = {"mtime": mtime, "definitions": definition_entries}
+                except OSError:
+                    continue
+
             for definition_entry in definition_entries:
                 haystack = " ".join(
                     [

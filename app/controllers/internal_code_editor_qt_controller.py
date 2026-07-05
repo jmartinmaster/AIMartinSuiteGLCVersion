@@ -15,6 +15,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 import os
 
+from app.app_logging import log_exception
 from app.models.internal_code_editor_model import InternalCodeEditorModel
 from app.views.internal_code_editor_qt_view import InternalCodeEditorQtView
 
@@ -184,6 +185,19 @@ class InternalCodeEditorQtController:
             self.view.update_status(f"Save failed: {exc}")
             self.write_state(status="ready", message=f"Save failed: {exc}", dirty=True)
             return
+        record_override_hash = getattr(self.dispatcher, "record_external_override_hash_from_editor", None)
+        if callable(record_override_hash):
+            try:
+                record_override_hash(saved_path)
+            except Exception as exc:
+                log_exception("internal_code_editor.record_override_hash", exc)
+                self.view.show_error(
+                    "Integrity Record Error",
+                    (
+                        "The file was saved, but the external override integrity hash could not be recorded.\n\n"
+                        f"{exc}"
+                    ),
+                )
 
         selected_entry = self.model.get_file_entry_by_path(saved_path) or self.model.get_file_entry_by_save_path(saved_path)
         self.refresh_file_list(selected_key=selected_entry["key"] if selected_entry else None, preferred_path=saved_path)

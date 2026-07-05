@@ -13,6 +13,8 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
+from copy import deepcopy
+
 from app.downtime_codes import get_code_options, get_generic_options
 from app.theme_manager import get_qt_palette, get_qt_stylesheet
 
@@ -117,6 +119,7 @@ class ProductionLogQtView(QMainWindow):
         self.last_export_path = None
         self.export_mode = "excel"
         self._suspend_dirty_tracking = False
+        self._form_data_cache = {}
         self._build_ui()
         self.apply_theme(theme_tokens=self.theme_tokens)
         if self.embedded:
@@ -688,10 +691,16 @@ class ProductionLogQtView(QMainWindow):
             application.setPalette(get_qt_palette(theme_tokens=self.theme_tokens))
 
     def _wire_live_edit_handlers(self):
-        for widget in self.header_widgets.values():
+        for field_id, widget in self.header_widgets.items():
             if isinstance(widget, QComboBox):
                 try:
                     widget.currentTextChanged.connect(self._queue_live_recalculate)
+                except Exception:
+                    pass
+                try:
+                    widget.currentTextChanged.connect(
+                        lambda _text, current_field_id=field_id: self._cache_single_section_payload_by_field(current_field_id)
+                    )
                 except Exception:
                     pass
                 try:
@@ -703,6 +712,12 @@ class ProductionLogQtView(QMainWindow):
                 widget.textChanged.connect(self._queue_live_recalculate)
             except Exception:
                 continue
+            try:
+                widget.textChanged.connect(
+                    lambda _text, current_field_id=field_id: self._cache_single_section_payload_by_field(current_field_id)
+                )
+            except Exception:
+                pass
             try:
                 widget.editingFinished.connect(self.controller.on_header_field_focus_out)
             except Exception:
@@ -767,7 +782,9 @@ class ProductionLogQtView(QMainWindow):
                     override_col = col_idx
 
             if rate_col is not None and override_col is not None:
-                for r in range(table.rowCount()):
+                # If item is specified, we only need to update the row of that item!
+                rows_to_update = [item.row()] if item is not None else range(table.rowCount())
+                for r in rows_to_update:
                     override_item = table.item(r, override_col)
                     rate_item = table.item(r, rate_col)
                     if override_item is not None and rate_item is not None:
@@ -788,7 +805,64 @@ class ProductionLogQtView(QMainWindow):
             self._refresh_row_action_buttons(table, field_configs)
         finally:
             table.blockSignals(False)
+        self._cache_repeating_section_payload(table, field_configs)
         self._queue_live_recalculate()
+
+    def _cache_single_section_payload_by_field(self, field_id):
+        field_key = str(field_id or "").strip()
+        if not field_key:
+            return
+        for section_id, section_widgets in self.single_section_widgets.items():
+            if field_key in section_widgets:
+                self._cache_single_section_payload(section_id)
+                return
+
+    def _cache_single_section_payload(self, section_id):
+        section_key = str(section_id or "").strip().lower()
+        section_widgets = self.single_section_widgets.get(section_key)
+        if not isinstance(section_widgets, dict):
+            return
+        section_payload = {}
+        for field_id, widget in section_widgets.items():
+            if isinstance(widget, QComboBox):
+                section_payload[field_id] = str(widget.currentText())
+            else:
+                section_payload[field_id] = str(widget.text())
+        self._form_data_cache[section_key] = section_payload
+
+    def _cache_repeating_section_payload(self, table, field_configs):
+        section_id = self._table_section_id(table)
+        if not section_id:
+            return
+        self._form_data_cache[section_id] = self._collect_rows(table, field_configs)
+
+    def _refresh_form_data_cache(self):
+        payload = {}
+        for section_id in self.single_section_widgets.keys():
+            section_key = str(section_id or "").strip().lower()
+            self._cache_single_section_payload(section_key)
+            payload[section_key] = dict(self._form_data_cache.get(section_key) or {})
+        for section_id, runtime_info in self.repeating_sections.items():
+            section_key = str(section_id or "").strip().lower()
+            table = runtime_info.get("table") if isinstance(runtime_info, dict) else None
+            field_configs = list(runtime_info.get("field_configs") or []) if isinstance(runtime_info, dict) else []
+            payload[section_key] = self._collect_rows(table, field_configs)
+        self._form_data_cache = payload
+
+    def _update_cached_table_field(self, section_name, row_index, field_id, value):
+        section_key = str(section_name or "").strip().lower()
+        field_key = str(field_id or "").strip()
+        if not section_key or not field_key:
+            return
+        section_rows = self._form_data_cache.get(section_key)
+        if not isinstance(section_rows, list):
+            return
+        if row_index < 0 or row_index >= len(section_rows):
+            return
+        row_payload = section_rows[row_index]
+        if not isinstance(row_payload, dict):
+            return
+        row_payload[field_key] = str(value or "")
 
     def _queue_live_recalculate(self, *_args):
         if not self._suspend_dirty_tracking:
@@ -892,6 +966,12 @@ class ProductionLogQtView(QMainWindow):
             if table is not None:
                 self._refresh_row_action_buttons(table, field_configs)
 
+    def _remove_row_by_button(self, table, button, require_confirmation=False):
+        for row in range(table.rowCount()):
+            if table.cellWidget(row, self.ROW_ACTION_COLUMN) is button:
+                self._remove_table_row(table, row, require_confirmation=require_confirmation)
+                return
+
     def _refresh_row_action_buttons(self, table, field_configs):
         if table is None:
             return
@@ -902,15 +982,22 @@ class ProductionLogQtView(QMainWindow):
         require_delete_confirmation = bool(policy.get("require_delete_confirmation", False))
         for row_index in range(table.rowCount()):
             if not show_delete_button:
-                table.setCellWidget(row_index, self.ROW_ACTION_COLUMN, None)
+                if table.cellWidget(row_index, self.ROW_ACTION_COLUMN) is not None:
+                    table.setCellWidget(row_index, self.ROW_ACTION_COLUMN, None)
                 continue
+            
+            existing_widget = table.cellWidget(row_index, self.ROW_ACTION_COLUMN)
+            if isinstance(existing_widget, QPushButton):
+                # Button already exists, no need to recreate
+                continue
+                
             delete_button = QPushButton(delete_button_label)
             delete_button.setMaximumWidth(26)
             delete_button.setToolTip(delete_button_tooltip)
             delete_button.clicked.connect(
-                lambda _checked=False, current_table=table, current_row=row_index, requires_confirm=require_delete_confirmation: self._remove_table_row(
+                lambda _checked=False, current_table=table, btn=delete_button, requires_confirm=require_delete_confirmation: self._remove_row_by_button(
                     current_table,
-                    current_row,
+                    btn,
                     require_confirmation=requires_confirm,
                 )
             )
@@ -955,6 +1042,7 @@ class ProductionLogQtView(QMainWindow):
         self._ensure_open_row(table, field_configs)
         self._refresh_row_action_buttons(table, field_configs)
         table.blockSignals(False)
+        self._cache_repeating_section_payload(table, field_configs)
 
     def _row_field_options(self, field):
         options = []
@@ -1026,11 +1114,18 @@ class ProductionLogQtView(QMainWindow):
             table.setItem(row_index, column_index, table_item)
 
     def _field_index_map(self, field_configs):
+        cache_key = tuple(str(f.get("id") or "").strip() for f in field_configs)
+        if not hasattr(self, '_field_index_maps_cache'):
+            self._field_index_maps_cache = {}
+        if cache_key in self._field_index_maps_cache:
+            return self._field_index_maps_cache[cache_key]
+
         mapping = {}
         for column_index, field in enumerate(field_configs, start=self._field_column_offset()):
             field_id = str(field.get("id") or "").strip()
             if field_id:
                 mapping[field_id] = column_index
+        self._field_index_maps_cache[cache_key] = mapping
         return mapping
 
     def set_table_field_value(self, section_name, row_index, field_id, value):
@@ -1054,13 +1149,21 @@ class ProductionLogQtView(QMainWindow):
         is_checkbutton = field is not None and str(field.get("widget") or "").strip().lower() == "checkbutton"
 
         table.blockSignals(True)
-        if is_checkbutton:
-            is_checked = self._parse_bool(value)
-            item.setCheckState(Qt.CheckState.Checked if is_checked else Qt.CheckState.Unchecked)
-            item.setText("")
-        else:
-            item.setText(str(value or ""))
-        table.blockSignals(False)
+        try:
+            if is_checkbutton:
+                is_checked = self._parse_bool(value)
+                new_state = Qt.CheckState.Checked if is_checked else Qt.CheckState.Unchecked
+                if item.checkState() != new_state:
+                    item.setCheckState(new_state)
+                if item.text() != "":
+                    item.setText("")
+            else:
+                new_text = str(value or "")
+                if item.text() != new_text:
+                    item.setText(new_text)
+        finally:
+            table.blockSignals(False)
+        self._update_cached_table_field(normalized_section_name, row_index, field_id, value)
 
     def set_header_field_value(self, field_id, value):
         field_key = str(field_id or "").strip()
@@ -1072,6 +1175,7 @@ class ProductionLogQtView(QMainWindow):
         widget.blockSignals(True)
         self._set_header_widget_value(widget, value)
         widget.blockSignals(False)
+        self._cache_single_section_payload_by_field(field_key)
 
     def ask_import_file_path(self):
         file_path, _selected = QFileDialog.getOpenFileName(
@@ -1149,22 +1253,9 @@ class ProductionLogQtView(QMainWindow):
         return rows
 
     def collect_form_data(self):
-        payload = {}
-        for section_id, section_widgets in self.single_section_widgets.items():
-            section_payload = {}
-            for field_id, widget in section_widgets.items():
-                if isinstance(widget, QComboBox):
-                    section_payload[field_id] = str(widget.currentText())
-                else:
-                    section_payload[field_id] = str(widget.text())
-            payload[section_id] = section_payload
-
-        for section_id, runtime_info in self.repeating_sections.items():
-            table = runtime_info.get("table") if isinstance(runtime_info, dict) else None
-            field_configs = list(runtime_info.get("field_configs") or []) if isinstance(runtime_info, dict) else []
-            payload[section_id] = self._collect_rows(table, field_configs)
-
-        return payload
+        if not isinstance(self._form_data_cache, dict) or not self._form_data_cache:
+            self._refresh_form_data_cache()
+        return deepcopy(self._form_data_cache)
 
     def set_form_data(self, payload):
         payload = dict(payload or {})
@@ -1186,6 +1277,7 @@ class ProductionLogQtView(QMainWindow):
             )
             
         self._suspend_dirty_tracking = False
+        self._refresh_form_data_cache()
 
     def set_form_name(self, form_name):
         self.form_name_label.setText(f"Active Form: {str(form_name or '--')}")
@@ -1263,6 +1355,7 @@ class ProductionLogQtView(QMainWindow):
         table.blockSignals(False)
         self._ensure_open_row(table, field_configs)
         self._refresh_row_action_buttons(table, field_configs)
+        self._cache_repeating_section_payload(table, field_configs)
         self.mark_dirty()
         self._queue_live_recalculate()
 

@@ -749,22 +749,26 @@ class PyQt6HostShellView(QMainWindow):
         self._queue_viewport_resize_notification()
 
     def show_viewport_placeholder(self, title=None, message=None, hint=None):
+        title_str = str(title or "Workspace")
+        msg_str = str(message or "Select a module from the navigation to start work.")
+        hint_str = str(hint or "Layout Manager keeps its own window. Other modules load here in the workspace.")
+
+        if (hasattr(self, "_last_placeholder_title") and self._last_placeholder_title == title_str and
+            hasattr(self, "_last_placeholder_msg") and self._last_placeholder_msg == msg_str and
+            hasattr(self, "_last_placeholder_hint") and self._last_placeholder_hint == hint_str and
+            self.viewport_placeholder.isVisible()):
+            return
+
+        self._last_placeholder_title = title_str
+        self._last_placeholder_msg = msg_str
+        self._last_placeholder_hint = hint_str
+
         if not self._viewport_has_content():
             self.viewport_container.setVisible(False)
         self.viewport_placeholder.setVisible(True)
-        self.viewport_title_label.setText(str(title or "Workspace"))
-        self.viewport_subtitle_label.setText(
-            str(
-                message
-                or "Select a module from the navigation to start work."
-            )
-        )
-        self.viewport_hint_label.setText(
-            str(
-                hint
-                or "Layout Manager keeps its own window. Other modules load here in the workspace."
-            )
-        )
+        self.viewport_title_label.setText(title_str)
+        self.viewport_subtitle_label.setText(msg_str)
+        self.viewport_hint_label.setText(hint_str)
         self._queue_viewport_resize_notification()
 
     def _display_name_for_module(self, module_name):
@@ -942,6 +946,12 @@ class PyQt6HostShellView(QMainWindow):
         return "".join(word[0].upper() for word in words[:3]) or str(display_name)[:2].upper()
 
     def _set_workspace_status(self, module_name=None, message=None):
+        if (hasattr(self, "_last_status_module") and self._last_status_module == module_name and
+            hasattr(self, "_last_status_message") and self._last_status_message == message):
+            return
+        self._last_status_module = module_name
+        self._last_status_message = message
+
         self._set_shell_window_title(module_name)
         if self.status_bar is not None and message:
             self.status_bar.showMessage(str(message), 4000)

@@ -16,6 +16,7 @@
 
 import importlib
 import importlib.util
+import hashlib
 import json
 import os
 import shlex
@@ -408,6 +409,30 @@ def copy_artifact_to_public_variant_dist(artifact_path):
     destination_path = PUBLIC_VARIANT_DIST_ROOT / source_path.name
     shutil.copy2(source_path, destination_path)
     return destination_path
+
+
+def write_sha256_checksum_file(artifact_path):
+    artifact_path = Path(artifact_path)
+    if not artifact_path.exists() or not artifact_path.is_file():
+        raise BuildError(f"Cannot write checksum for missing artifact: {artifact_path}")
+
+    digest = hashlib.sha256()
+    with artifact_path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            if not chunk:
+                break
+            digest.update(chunk)
+
+    checksum_path = artifact_path.with_name(f"{artifact_path.name}.sha256")
+    checksum_path.write_text(f"{digest.hexdigest()}  {artifact_path.name}\n", encoding="utf-8")
+    return checksum_path
+
+
+def write_sha256_checksum_if_exists(artifact_path):
+    artifact_path = Path(artifact_path)
+    if not artifact_path.exists() or not artifact_path.is_file():
+        return None
+    return write_sha256_checksum_file(artifact_path)
 
 
 def _reset_windows_runtime_seed_targets(target_root):
@@ -837,11 +862,15 @@ def run_windows_build():
 
     public_variant_executable_path = copy_artifact_to_public_variant_dist(built_executable_path)
     seed_public_windows_runtime_files(PUBLIC_VARIANT_DIST_ROOT, sanitized_rates_path)
+    private_checksum_path = write_sha256_checksum_file(built_executable_path)
+    public_checksum_path = write_sha256_checksum_file(public_variant_executable_path)
 
     archive_previous_builds()
 
     print(f"\n--- Windows build complete with real runtime data seeded at {WINDOWS_DIST_ROOT / 'data' / 'config'} ---")
     print(f"--- Public variant copy with dummy runtime data: {public_variant_executable_path} ---")
+    print(f"--- Private artifact checksum: {private_checksum_path} ---")
+    print(f"--- Public artifact checksum: {public_checksum_path} ---")
 
 
 def run_ubuntu_build_direct():
@@ -880,9 +909,17 @@ def run_ubuntu_build_direct():
         raise BuildError(str(exc)) from exc
 
     public_variant_deb_path = copy_artifact_to_public_variant_dist(output_path)
+    legacy_deb_path = UBUNTU_DIST_ROOT / LEGACY_DEB_NAME
+    private_checksum_path = write_sha256_checksum_file(output_path)
+    public_checksum_path = write_sha256_checksum_file(public_variant_deb_path)
+    legacy_checksum_path = write_sha256_checksum_if_exists(legacy_deb_path)
 
     print(f"\n--- Ubuntu package complete. Check {output_path} ---")
     print(f"--- Public variant copy: {public_variant_deb_path} ---")
+    print(f"--- Private artifact checksum: {private_checksum_path} ---")
+    print(f"--- Public artifact checksum: {public_checksum_path} ---")
+    if legacy_checksum_path is not None:
+        print(f"--- Legacy alias checksum: {legacy_checksum_path} ---")
 
 
 def run_target_build(target, host_platform, args):

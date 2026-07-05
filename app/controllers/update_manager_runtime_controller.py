@@ -518,7 +518,16 @@ class UpdateManagerRuntimeController:
             option,
             self.remote_info,
             self.branch_name,
-            self.dispatcher.install_module_override,
+            lambda module_name, module_text: self.dispatcher.install_module_override(
+                module_name,
+                module_text,
+                verification_context={
+                    "source": "update_repository",
+                    "repository_url": self.remote_info.get("url"),
+                    "branch_name": self.branch_name,
+                    "approved": False,
+                },
+            ),
             remote_text=remote_text,
         )
 

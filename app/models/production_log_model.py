@@ -107,6 +107,16 @@ SUPPORTED_BEHAVIOR_PROFILES = ("header", "production", "downtime")
 
 
 class ProductionLogModel:
+    _global_rates_cache = None
+    _global_rates_cache_mtime = None
+    _global_rates_cache_size = None
+
+    @classmethod
+    def invalidate_global_rates_cache(cls):
+        cls._global_rates_cache = None
+        cls._global_rates_cache_mtime = None
+        cls._global_rates_cache_size = None
+
     def __init__(self, data_registry=None):
         self.data_registry = data_registry or ExternalDataRegistry()
         self.form_registry = FormDefinitionRegistry()
@@ -963,7 +973,7 @@ class ProductionLogModel:
         return history_dir
 
     def build_draft_path(self, header_data):
-        layout_config = self.load_layout_config()
+        layout_config = self.layout_config if isinstance(getattr(self, "layout_config", None), dict) else self.load_layout_config()
         raw_date = str(self.get_header_value_by_role(header_data, "log_date", config=layout_config, fallback_id="date", default="unsaved") or "unsaved").replace("/", "-")
         shift_str = str(self.get_header_value_by_role(header_data, "shift_number", config=layout_config, fallback_id="shift", default="0") or "0")
         filename = f"draft_{self.form_id}_{raw_date}_shift{shift_str}.json"
@@ -994,6 +1004,8 @@ class ProductionLogModel:
             backup_dir=self.get_pending_history_dir(),
             keep_count=self._coerce_positive_int(backup_policy.get("draft_history_keep_count", 20), 20),
         )
+        self.invalidate_pending_drafts()
+        self.invalidate_recovery_snapshots()
         return draft_path, payload, backup_info
 
     def load_json(self, path):
@@ -1031,84 +1043,183 @@ class ProductionLogModel:
     def delete_file(self, path):
         if os.path.exists(path):
             os.remove(path)
+        self.invalidate_pending_drafts()
+        self.invalidate_recovery_snapshots()
 
-    def list_pending_drafts(self):
-        drafts = []
+    def invalidate_pending_drafts(self):
+        if hasattr(self, '_pending_drafts_cache'):
+            self._pending_drafts_cache.clear()
+
+    def invalidate_recovery_snapshots(self):
+        if hasattr(self, '_recovery_snapshots_cache'):
+            self._recovery_snapshots_cache.clear()
+
+    def list_pending_drafts(self, lightweight=False):
         pending_dir = self.get_pending_dir()
-        for filename in os.listdir(pending_dir):
+        if not os.path.exists(pending_dir):
+            return []
+
+        if not hasattr(self, '_pending_drafts_cache'):
+            self._pending_drafts_cache = {}
+
+        try:
+            filenames = os.listdir(pending_dir)
+        except OSError:
+            filenames = []
+
+        current_files = {}
+        for filename in filenames:
             if not filename.endswith(".json"):
                 continue
             path = os.path.join(pending_dir, filename)
             try:
-                with open(path, "r", encoding="utf-8") as handle:
-                    data = json.load(handle)
-                meta = data.get("meta", {})
-                form_id = self.resolve_draft_form_id(meta)
-                layout_config = self.load_layout_config_for_form(form_id)
-                saved_at = meta.get("saved_at") or datetime.fromtimestamp(os.path.getmtime(path)).isoformat(timespec="seconds")
-                header_sec = self.get_routed_section_by_profile("header", config=layout_config)
-                header_id = header_sec.get("id") or "header"
-                header = data.get(header_id, data.get("header", {}))
-                drafts.append({
+                mtime = os.path.getmtime(path)
+                current_files[path] = (filename, mtime)
+            except OSError:
+                continue
+
+        # Evict deleted files from cache
+        self._pending_drafts_cache = {
+            p: v for p, v in self._pending_drafts_cache.items() if p in current_files
+        }
+
+        drafts = []
+        for path, (filename, mtime) in current_files.items():
+            cached_entry = self._pending_drafts_cache.get(path)
+            if cached_entry and cached_entry["mtime"] == mtime and (lightweight or not cached_entry["data"].get("is_lightweight")):
+                drafts.append(cached_entry["data"])
+                continue
+
+            if lightweight:
+                entry_data = {
                     "path": path,
                     "filename": filename,
-                    "saved_at": saved_at,
-                    "form_id": form_id,
-                    "form_name": meta.get("form_name") or self.get_form_name_for_id(form_id),
-                    "date": self.get_header_value_by_role(header, "log_date", config=layout_config, fallback_id="date", default=""),
-                    "shift": self.get_header_value_by_role(header, "shift_number", config=layout_config, fallback_id="shift", default=""),
-                })
-            except Exception:
-                drafts.append({
-                    "path": path,
-                    "filename": filename,
-                    "saved_at": datetime.fromtimestamp(os.path.getmtime(path)).isoformat(timespec="seconds"),
+                    "saved_at": datetime.fromtimestamp(mtime).isoformat(timespec="seconds"),
                     "form_id": DEFAULT_FORM_ID,
                     "form_name": self.get_form_name_for_id(DEFAULT_FORM_ID),
                     "date": "",
                     "shift": "",
-                })
+                    "is_lightweight": True,
+                }
+            else:
+                try:
+                    with open(path, "r", encoding="utf-8") as handle:
+                        data = json.load(handle)
+                    meta = data.get("meta", {})
+                    form_id = self.resolve_draft_form_id(meta)
+                    layout_config = self.load_layout_config_for_form(form_id)
+                    saved_at = meta.get("saved_at") or datetime.fromtimestamp(mtime).isoformat(timespec="seconds")
+                    header_sec = self.get_routed_section_by_profile("header", config=layout_config)
+                    header_id = header_sec.get("id") or "header"
+                    header = data.get(header_id, data.get("header", {}))
+                    entry_data = {
+                        "path": path,
+                        "filename": filename,
+                        "saved_at": saved_at,
+                        "form_id": form_id,
+                        "form_name": meta.get("form_name") or self.get_form_name_for_id(form_id),
+                        "date": self.get_header_value_by_role(header, "log_date", config=layout_config, fallback_id="date", default=""),
+                        "shift": self.get_header_value_by_role(header, "shift_number", config=layout_config, fallback_id="shift", default=""),
+                    }
+                except Exception:
+                    entry_data = {
+                        "path": path,
+                        "filename": filename,
+                        "saved_at": datetime.fromtimestamp(mtime).isoformat(timespec="seconds"),
+                        "form_id": DEFAULT_FORM_ID,
+                        "form_name": self.get_form_name_for_id(DEFAULT_FORM_ID),
+                        "date": "",
+                        "shift": "",
+                    }
+            self._pending_drafts_cache[path] = {"mtime": mtime, "data": entry_data}
+            drafts.append(entry_data)
+
         drafts.sort(key=lambda item: item["saved_at"], reverse=True)
         return drafts
 
-    def list_recovery_snapshots(self):
-        snapshots = []
+    def list_recovery_snapshots(self, lightweight=False):
         history_dir = self.get_pending_history_dir()
-        for filename in os.listdir(history_dir):
+        if not os.path.exists(history_dir):
+            return []
+
+        if not hasattr(self, '_recovery_snapshots_cache'):
+            self._recovery_snapshots_cache = {}
+
+        try:
+            filenames = os.listdir(history_dir)
+        except OSError:
+            filenames = []
+
+        current_files = {}
+        for filename in filenames:
             if not filename.endswith(".json"):
                 continue
             path = os.path.join(history_dir, filename)
             try:
-                with open(path, "r", encoding="utf-8") as handle:
-                    data = json.load(handle)
-                meta = data.get("meta", {})
-                form_id = self.resolve_draft_form_id(meta)
-                layout_config = self.load_layout_config_for_form(form_id)
-                saved_at = meta.get("saved_at") or datetime.fromtimestamp(os.path.getmtime(path)).isoformat(timespec="seconds")
-                header_sec = self.get_routed_section_by_profile("header", config=layout_config)
-                header_id = header_sec.get("id") or "header"
-                header = data.get(header_id, data.get("header", {}))
-                snapshots.append({
+                mtime = os.path.getmtime(path)
+                current_files[path] = (filename, mtime)
+            except OSError:
+                continue
+
+        # Evict deleted files from cache
+        self._recovery_snapshots_cache = {
+            p: v for p, v in self._recovery_snapshots_cache.items() if p in current_files
+        }
+
+        snapshots = []
+        for path, (filename, mtime) in current_files.items():
+            cached_entry = self._recovery_snapshots_cache.get(path)
+            if cached_entry and cached_entry["mtime"] == mtime and (lightweight or not cached_entry["data"].get("is_lightweight")):
+                snapshots.append(cached_entry["data"])
+                continue
+
+            if lightweight:
+                entry_data = {
                     "path": path,
                     "filename": filename,
-                    "saved_at": saved_at,
-                    "form_id": form_id,
-                    "form_name": meta.get("form_name") or self.get_form_name_for_id(form_id),
-                    "date": self.get_header_value_by_role(header, "log_date", config=layout_config, fallback_id="date", default=""),
-                    "shift": self.get_header_value_by_role(header, "shift_number", config=layout_config, fallback_id="shift", default=""),
-                    "source": "Recovery Snapshot",
-                })
-            except Exception:
-                snapshots.append({
-                    "path": path,
-                    "filename": filename,
-                    "saved_at": datetime.fromtimestamp(os.path.getmtime(path)).isoformat(timespec="seconds"),
+                    "saved_at": datetime.fromtimestamp(mtime).isoformat(timespec="seconds"),
                     "form_id": DEFAULT_FORM_ID,
                     "form_name": self.get_form_name_for_id(DEFAULT_FORM_ID),
                     "date": "",
                     "shift": "",
                     "source": "Recovery Snapshot",
-                })
+                    "is_lightweight": True,
+                }
+            else:
+                try:
+                    with open(path, "r", encoding="utf-8") as handle:
+                        data = json.load(handle)
+                    meta = data.get("meta", {})
+                    form_id = self.resolve_draft_form_id(meta)
+                    layout_config = self.load_layout_config_for_form(form_id)
+                    saved_at = meta.get("saved_at") or datetime.fromtimestamp(mtime).isoformat(timespec="seconds")
+                    header_sec = self.get_routed_section_by_profile("header", config=layout_config)
+                    header_id = header_sec.get("id") or "header"
+                    header = data.get(header_id, data.get("header", {}))
+                    entry_data = {
+                        "path": path,
+                        "filename": filename,
+                        "saved_at": saved_at,
+                        "form_id": form_id,
+                        "form_name": meta.get("form_name") or self.get_form_name_for_id(form_id),
+                        "date": self.get_header_value_by_role(header, "log_date", config=layout_config, fallback_id="date", default=""),
+                        "shift": self.get_header_value_by_role(header, "shift_number", config=layout_config, fallback_id="shift", default=""),
+                        "source": "Recovery Snapshot",
+                    }
+                except Exception:
+                    entry_data = {
+                        "path": path,
+                        "filename": filename,
+                        "saved_at": datetime.fromtimestamp(mtime).isoformat(timespec="seconds"),
+                        "form_id": DEFAULT_FORM_ID,
+                        "form_name": self.get_form_name_for_id(DEFAULT_FORM_ID),
+                        "date": "",
+                        "shift": "",
+                        "source": "Recovery Snapshot",
+                    }
+            self._recovery_snapshots_cache[path] = {"mtime": mtime, "data": entry_data}
+            snapshots.append(entry_data)
+
         snapshots.sort(key=lambda item: item["saved_at"], reverse=True)
         return snapshots
 
@@ -1120,6 +1231,20 @@ class ProductionLogModel:
         return None
 
     def load_rates_data(self):
+        read_path = self.data_registry.resolve_read_path("rates")
+        mtime = None
+        size = None
+        if read_path and os.path.exists(read_path):
+            try:
+                mtime = os.path.getmtime(read_path)
+                size = os.path.getsize(read_path)
+            except OSError:
+                pass
+
+        cls = self.__class__
+        if cls._global_rates_cache is not None and cls._global_rates_cache_mtime == mtime and cls._global_rates_cache_size == size:
+            return cls._global_rates_cache
+
         rates_data = {}
         loaded_rates = self.data_registry.load_json("rates", default_factory=dict)
         if isinstance(loaded_rates, dict):
@@ -1127,6 +1252,10 @@ class ProductionLogModel:
                 for lookup_key in self.build_part_lookup_keys(part_number):
                     if lookup_key not in rates_data:
                         rates_data[lookup_key] = rate
+
+        cls._global_rates_cache = rates_data
+        cls._global_rates_cache_mtime = mtime
+        cls._global_rates_cache_size = size
         return rates_data
 
     def coerce_minutes_value(self, value, default=0):
