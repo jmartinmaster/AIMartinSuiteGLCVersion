@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 __module_name__ = "Layout Manager"
-__version__ = "1.0.5"
+__version__ = "1.0.7"
 
 
 def get_ui(parent, dispatcher):
