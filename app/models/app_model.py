@@ -14,12 +14,12 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 import hashlib
-import json
 import os
 import threading
 from datetime import datetime
 from dataclasses import dataclass, field
 
+from app.security_storage import load_encrypted_json_file, write_encrypted_json_file
 from app.app_platform import get_obsolete_local_executables
 from app.settings_diagnostics import (
     build_default_settings_payload,
@@ -29,7 +29,7 @@ from app.settings_diagnostics import (
     write_settings_diagnostics_report,
 )
 from app.theme_manager import DEFAULT_THEME, normalize_theme
-from app.utils import external_path
+from app.utils import external_path, legacy_external_path_candidates
 
 __module_name__ = "Application Shell"
 __version__ = "2.5.0"
@@ -82,8 +82,13 @@ class AppModel:
         if not os.path.exists(policy_path):
             return defaults
         try:
-            with open(policy_path, "r", encoding="utf-8") as handle:
-                payload = json.load(handle)
+            backup_dir = external_path(os.path.join("data", "security", "backups", "integrity"))
+            payload, _ = load_encrypted_json_file(
+                policy_path,
+                default=defaults,
+                description="External module integrity policy",
+                backup_dir=backup_dir,
+            )
             if isinstance(payload, dict):
                 module_records = payload.get("module_records")
                 if isinstance(module_records, dict):
@@ -94,13 +99,8 @@ class AppModel:
 
     def _save_integrity_policy(self, policy_payload):
         policy_path = self._integrity_policy_path()
-        policy_dir = os.path.dirname(policy_path)
-        if policy_dir:
-            os.makedirs(policy_dir, exist_ok=True)
-        temp_path = f"{policy_path}.tmp"
-        with open(temp_path, "w", encoding="utf-8") as handle:
-            json.dump(policy_payload, handle, indent=4)
-        os.replace(temp_path, policy_path)
+        backup_dir = external_path(os.path.join("data", "security", "backups", "integrity"))
+        write_encrypted_json_file(policy_path, policy_payload, backup_dir=backup_dir)
         return policy_path
 
     def _hash_file_sha256(self, file_path):
@@ -328,6 +328,9 @@ class AppModel:
         return normalized_relative_path
 
     def _get_legacy_external_modules_path(self):
+        legacy_candidates = legacy_external_path_candidates("app")
+        if legacy_candidates:
+            return legacy_candidates[0]
         return external_path("app")
 
     def migrate_legacy_external_module_overrides(self):

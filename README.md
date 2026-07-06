@@ -92,9 +92,59 @@ python build.py --target windows
 
 # Ubuntu DEB
 python build.py --target ubuntu
+
+# Windows + Ubuntu in one run (Windows host + WSL)
+python build.py --target all
 ```
 
 Artifacts are written to `dist/` (Windows) and `dist/ubuntu/` (Ubuntu).
+
+## Ubuntu self-build
+
+### Native Ubuntu / Linux
+
+Install the required system packages first:
+
+```bash
+sudo apt update
+sudo apt install -y python3 python3-venv python3-pip dpkg-dev libgl1 libegl1
+```
+
+Create a local build environment and install the Python build dependencies:
+
+```bash
+python3 -m venv .venv-linux
+source .venv-linux/bin/activate
+python -m pip install --upgrade pip setuptools wheel
+python -m pip install Pillow PyQt6 PyInstaller openpyxl
+```
+
+Build the Ubuntu package:
+
+```bash
+python build.py --target ubuntu --non-interactive
+```
+
+The finished package is written to `dist/ubuntu/`. Install it with:
+
+```bash
+sudo apt install ./dist/ubuntu/<package-name>.deb
+```
+
+### Windows host with WSL
+
+If you are building Ubuntu packages from Windows, install a WSL Ubuntu distro first:
+
+```powershell
+wsl --install -d Ubuntu
+```
+
+Then open the distro once, clone or open this repository under a WSL-accessible path, and either:
+
+1. Let `python build.py --target ubuntu` bootstrap `.venv-linux` for you when `python3`, `python3-venv`, and `dpkg-deb` are already available in WSL, or
+2. Run the native Ubuntu steps above inside WSL yourself if you prefer to manage the environment manually.
+
+If the automatic WSL bootstrap cannot continue, `build.py` will stop with a message that points back to this **Ubuntu self-build** section.
 
 ## Data safety and persistence
 

@@ -20,7 +20,6 @@ import platform
 import secrets
 import shutil
 from datetime import datetime
-from cryptography.fernet import Fernet, InvalidToken
 
 from PyQt6.QtWidgets import (
     QApplication,
@@ -55,7 +54,16 @@ from app.models.security_model import (
     normalize_role,
     role_requires_password,
 )
-from app.utils import ensure_external_data_directory, external_data_path
+from app.security_storage import (
+    decrypt_security_payload,
+    encrypt_security_payload,
+    ensure_security_directory,
+    get_or_create_security_key,
+    load_encrypted_json_file,
+    security_data_path,
+    security_key_path,
+    write_encrypted_json_file,
+)
 
 __module_name__ = "Security Blanket"
 __version__ = "2.5.0"
@@ -69,7 +77,7 @@ DEFAULT_NON_SECURE_GENERAL_VAULT_NAME = "general_default"
 class Gatekeeper:
     _instance = None
     _legacy_vault_path = os.path.join(os.getcwd(), ".vault")
-    _security_settings_path = external_data_path(os.path.join("security", "security_settings.json"))
+    _security_settings_path = security_data_path("security_settings.json")
 
     def __new__(cls, *args, **kwargs):
         if not cls._instance:
@@ -81,64 +89,29 @@ class Gatekeeper:
         return cls._instance
 
     def _vault_directory(self):
-        return ensure_external_data_directory(os.path.join("security", "vaults"))
+        return ensure_security_directory(os.path.join("vaults"))
 
     def _vault_backup_directory(self):
-        return ensure_external_data_directory(os.path.join("security", "backups", "vaults"))
+        return ensure_security_directory(os.path.join("backups", "vaults"))
+
+    def _security_settings_backup_directory(self):
+        return ensure_security_directory(os.path.join("backups", "settings"))
 
     def _vault_key_path(self):
-        ensure_external_data_directory("security")
-        return external_data_path(os.path.join("security", "vaults.key"))
+        return security_key_path()
 
     def _get_or_create_vault_key(self):
-        key_path = self._vault_key_path()
-        if os.path.exists(key_path):
-            with open(key_path, "rb") as handle:
-                key_bytes = handle.read().strip()
-            if not key_bytes:
-                raise ValueError("Vault encryption key file is empty.")
-            Fernet(key_bytes)
-            return key_bytes
-
-        generated_key = Fernet.generate_key()
-        temp_path = f"{key_path}.tmp"
-        with open(temp_path, "wb") as handle:
-            handle.write(generated_key)
-        os.replace(temp_path, key_path)
-        try:
-            os.chmod(key_path, 0o600)
-        except OSError:
-            pass
-        return generated_key
+        return get_or_create_security_key(key_path=self._vault_key_path())
 
     def _encrypt_vault_payload(self, payload):
         if not isinstance(payload, dict):
             raise ValueError("Vault payload must be a dictionary.")
-        key_bytes = self._get_or_create_vault_key()
-        fernet = Fernet(key_bytes)
-        plaintext = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
-        ciphertext = fernet.encrypt(plaintext).decode("utf-8")
-        return {
-            "encoding": "fernet-json-v1",
-            "ciphertext": ciphertext,
-            "issued_at": self._utc_timestamp(),
-        }
+        encrypted_payload = encrypt_security_payload(payload, key_path=self._vault_key_path())
+        encrypted_payload["issued_at"] = self._utc_timestamp()
+        return encrypted_payload
 
     def _decrypt_vault_payload(self, envelope):
-        if not isinstance(envelope, dict):
-            raise ValueError("Vault payload envelope must be a dictionary.")
-        if str(envelope.get("encoding") or "").strip().lower() != "fernet-json-v1":
-            raise ValueError("Unsupported vault payload encoding.")
-        ciphertext = str(envelope.get("ciphertext") or "").strip()
-        if not ciphertext:
-            raise ValueError("Encrypted vault payload is missing ciphertext.")
-        key_bytes = self._get_or_create_vault_key()
-        fernet = Fernet(key_bytes)
-        try:
-            plaintext = fernet.decrypt(ciphertext.encode("utf-8"))
-        except InvalidToken as exc:
-            raise ValueError("Vault payload decryption failed: invalid token.") from exc
-        payload = json.loads(plaintext.decode("utf-8"))
+        payload = decrypt_security_payload(envelope, description="Vault payload", key_path=self._vault_key_path())
         if not isinstance(payload, dict):
             raise ValueError("Vault payload decrypted to an invalid format.")
         return payload
@@ -256,7 +229,7 @@ class Gatekeeper:
         raise RuntimeError("PyQt6 dialogs are unavailable and the Tk security fallback was removed in Phase 9.")
 
     def _ensure_security_settings_directory(self):
-        ensure_external_data_directory("security")
+        ensure_security_directory()
 
     def _load_security_settings(self):
         settings = {
@@ -268,8 +241,13 @@ class Gatekeeper:
         if not os.path.exists(self._security_settings_path):
             return settings
         try:
-            with open(self._security_settings_path, "r", encoding="utf-8") as handle:
-                payload = json.load(handle)
+            payload, _ = load_encrypted_json_file(
+                self._security_settings_path,
+                default=settings,
+                description="Security settings",
+                backup_dir=self._security_settings_backup_directory(),
+                key_path=self._vault_key_path(),
+            )
             if isinstance(payload, dict):
                 settings["non_secure_mode"] = bool(payload.get("non_secure_mode", True))
                 settings["external_module_override_trust"] = bool(payload.get("external_module_override_trust", False))
@@ -315,10 +293,12 @@ class Gatekeeper:
             "non_secure_bypass_modules": normalized_bypass_modules,
             "role_default_rights": normalized_role_defaults,
         }
-        temp_path = f"{self._security_settings_path}.tmp"
-        with open(temp_path, "w", encoding="utf-8") as handle:
-            json.dump(payload, handle, indent=4)
-        os.replace(temp_path, self._security_settings_path)
+        write_encrypted_json_file(
+            self._security_settings_path,
+            payload,
+            backup_dir=self._security_settings_backup_directory(),
+            key_path=self._vault_key_path(),
+        )
 
     def _validate_password_strength(self, password):
         password_text = str(password or "")
@@ -976,7 +956,10 @@ class Gatekeeper:
 
     def set_external_module_override_trust(self, enabled):
         settings = self._load_security_settings()
-        settings["external_module_override_trust"] = bool(enabled)
+        desired = bool(enabled)
+        if bool(settings.get("external_module_override_trust", False)) == desired:
+            return settings.get("external_module_override_trust", False)
+        settings["external_module_override_trust"] = desired
         self._save_security_settings(settings)
         self._notify_session_listeners("session-changed")
         return settings["external_module_override_trust"]

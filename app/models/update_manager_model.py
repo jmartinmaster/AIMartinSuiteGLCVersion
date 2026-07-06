@@ -28,11 +28,12 @@ import urllib.parse
 import urllib.request
 import zipfile
 
-from app.app_identity import DEFAULT_UPDATE_REPOSITORY_URL, DEB_PACKAGE_NAME, LEGACY_EXE_NAME, format_versioned_deb_name, format_versioned_exe_name, load_version_from_main, normalize_version, parse_version
+from app.app_identity import DEFAULT_DEV_UPDATE_BRANCH, DEFAULT_STABLE_UPDATE_BRANCH, DEFAULT_UPDATE_REPOSITORY_URL, DEB_PACKAGE_NAME, LEGACY_EXE_NAME, format_versioned_deb_name, format_versioned_exe_name, load_version_from_main, normalize_version, parse_version
 from app.app_platform import is_ubuntu_runtime, open_with_system_default
 from app.external_data_registry import ExternalDataRegistry
 from app.form_definition_registry import DEFAULT_FORM_ID, DEFAULT_FORM_NAME, FormDefinitionRegistry
 from app.persistence import write_json_with_backup, write_text_with_backup
+from app.update_integrity import compute_integrity_hashes, compute_sha256_hex, verify_expected_hash
 from app.utils import ensure_external_directory, external_path, local_or_resource_path, resolve_local_venv_python
 
 __module_name__ = "Update Manager"
@@ -190,8 +191,10 @@ def _build_snapshot_github_url(owner, repo, branch_name):
     return f"https://codeload.github.com/{owner}/{repo}/zip/refs/heads/{branch_name}"
 
 
-def _compute_sha256_hex(payload_bytes):
-    return hashlib.sha256(payload_bytes).hexdigest()
+def _verify_payload_hash(expected_hash, payload_bytes, relative_path):
+    # Build-time hash generation and runtime verification must stay aligned.
+    # Use the shared helper so manifest/.sha256 changes cannot silently drift.
+    return verify_expected_hash(expected_hash, payload_bytes, relative_path)
 
 
 def _parse_sha256_text(payload_text, relative_path):
@@ -228,12 +231,7 @@ def _verify_remote_payload_integrity(remote_info, branch_name, relative_path, pa
         relative_path,
         timeout=timeout,
     )
-    actual_hash = _compute_sha256_hex(payload_bytes)
-    if actual_hash != expected_hash:
-        raise RuntimeError(
-            f"Integrity check failed for {relative_path}. Expected {expected_hash}, got {actual_hash}."
-        )
-    return actual_hash
+    return _verify_payload_hash(expected_hash, payload_bytes, relative_path)
 
 
 def _resolve_checksum_governance(remote_info, branch_name, relative_path, payload_bytes, timeout=15):
@@ -256,8 +254,9 @@ def _resolve_checksum_governance(remote_info, branch_name, relative_path, payloa
     except Exception as exc:
         return ("Checksum unavailable", f"Could not read {checksum_path}: {exc}")
 
-    actual_hash = _compute_sha256_hex(payload_bytes)
-    if actual_hash != expected_hash:
+    expected_hash = str(expected_hash or "").strip().lower()
+    actual_hash = compute_sha256_hex(payload_bytes)
+    if expected_hash not in compute_integrity_hashes(payload_bytes, relative_path):
         return (
             "Checksum mismatch",
             (
@@ -328,6 +327,25 @@ def _get_configured_update_repository_url(settings_lookup=None, data_registry=No
     return _normalize_update_repository_url(settings_payload.get("update_repository_url", DEFAULT_UPDATE_REPOSITORY_URL))
 
 
+def _resolve_release_channel(settings_lookup=None, data_registry=None):
+    configured_value = None
+    if callable(settings_lookup):
+        try:
+            configured_value = settings_lookup("release_channel", None)
+        except TypeError:
+            try:
+                configured_value = settings_lookup("release_channel")
+            except Exception:
+                configured_value = None
+        except Exception:
+            configured_value = None
+    if configured_value is None:
+        settings_payload = _load_external_settings_payload(data_registry=data_registry)
+        configured_value = settings_payload.get("release_channel", "stable")
+    normalized_channel = str(configured_value or "stable").strip().lower()
+    return normalized_channel if normalized_channel in {"stable", "dev"} else "stable"
+
+
 def _build_remote_info_from_url(remote_url):
     normalized_url = _normalize_update_repository_url(remote_url)
     if not normalized_url:
@@ -372,8 +390,11 @@ def _is_supported_update_version(version_parts, allow_odd_patch=False):
     return version_parts[2] % 2 == 0
 
 
-def _detect_branch_name():
-    return "main"
+def _detect_branch_name(settings_lookup=None, data_registry=None):
+    channel = _resolve_release_channel(settings_lookup=settings_lookup, data_registry=data_registry)
+    if channel == "dev":
+        return DEFAULT_DEV_UPDATE_BRANCH
+    return DEFAULT_STABLE_UPDATE_BRANCH
 
 
 def _detect_remote_info(preferred_url=None):
@@ -774,7 +795,7 @@ def scan_available_module_payload_updates(dispatcher, branch_name=None, remote_i
         if hasattr(dispatcher, "get_setting"):
             configured_url = _get_configured_update_repository_url(dispatcher.get_setting, data_registry=data_registry)
 
-    resolved_branch_name = branch_name or _detect_branch_name()
+    resolved_branch_name = branch_name or _detect_branch_name(data_registry=data_registry)
     resolved_remote_info = remote_info or _detect_remote_info(preferred_url=configured_url)
     options = discover_module_payload_options(modules_path, data_registry=data_registry)
     if not _remote_updates_available(resolved_remote_info, resolved_branch_name):
@@ -813,8 +834,8 @@ def scan_available_module_payload_updates(dispatcher, branch_name=None, remote_i
     }
 
 
-def scan_available_documentation_payload_updates(branch_name=None, remote_info=None, configured_url=None):
-    resolved_branch_name = branch_name or _detect_branch_name()
+def scan_available_documentation_payload_updates(branch_name=None, remote_info=None, configured_url=None, data_registry=None):
+    resolved_branch_name = branch_name or _detect_branch_name(data_registry=data_registry)
     resolved_remote_info = remote_info or _detect_remote_info(preferred_url=configured_url)
     options = discover_documentation_payload_options()
     if not _remote_updates_available(resolved_remote_info, resolved_branch_name):
@@ -1415,7 +1436,7 @@ class UpdateManagerModel:
         return _read_module_metadata_from_path(file_path, fallback_name)
 
     def detect_branch_name(self):
-        return _detect_branch_name()
+        return _detect_branch_name(data_registry=self.data_registry)
 
     def detect_remote_info(self, preferred_url=None):
         return _detect_remote_info(preferred_url=preferred_url)
@@ -1458,6 +1479,7 @@ class UpdateManagerModel:
             branch_name=branch_name,
             remote_info=remote_info,
             configured_url=configured_url,
+            data_registry=self.data_registry,
         )
 
     def install_documentation_payload(self, option, remote_info, branch_name, remote_text=None):
@@ -1648,13 +1670,15 @@ class UpdateManagerModel:
                     norm_path = relative_path.replace("\\", "/").lstrip("/")
                     artifact_meta = manifest["artifacts"].get(norm_path)
                     if artifact_meta and "sha256" in artifact_meta:
+                        # NOTE: build.py refreshes these manifest hashes through
+                        # app.update_integrity before packaging/module-key updates.
                         expected_hash = artifact_meta["sha256"]
-                        import hashlib
-                        actual_hash = hashlib.sha256(payload_bytes).hexdigest()
-                        if actual_hash != expected_hash:
+                        try:
+                            _verify_payload_hash(expected_hash, payload_bytes, relative_path)
+                        except RuntimeError as exc:
                             from app.security_audit import log_security_event
                             log_security_event("update_install", f"Integrity hash mismatch for '{relative_path}' during update.", "failure")
-                            raise RuntimeError(f"Integrity mismatch: expected {expected_hash}, got {actual_hash}")
+                            raise RuntimeError(str(exc))
                     else:
                         _verify_remote_payload_integrity(remote_info, branch_name, relative_path, payload_bytes, timeout=15)
                 else:

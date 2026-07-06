@@ -785,9 +785,11 @@ class Dispatcher:
 
     def apply_external_override_policy_change(self):
         current_module_name = self.active_module_name or "settings_manager"
-        self.reset_module_import_state(keep_active=False)
-        self._configure_module_import_paths()
-        self.load_module(current_module_name, use_transition=False)
+        def _deferred_policy_change():
+            self.reset_module_import_state(keep_active=False)
+            self._configure_module_import_paths()
+            self.load_module(current_module_name, use_transition=False)
+        self.call_later(10, _deferred_policy_change)
 
     def remove_external_module_overrides(self, module_names=None, include_bytecode=True):
         from app.security_audit import log_security_event
@@ -953,7 +955,7 @@ class Dispatcher:
                             log_exception("session_change_save.layout_manager", exc)
             
             # Refresh if non-persistent, or if it is form_loader/layout_manager
-            should_refresh = not self.is_module_persistent(active_module) or is_form_loader or is_layout_manager
+            should_refresh = (not self.is_module_persistent(active_module) or is_form_loader or is_layout_manager) and active_module != "settings_manager"
             if should_refresh:
                 # Discard persistent instance if it exists to force clean instantiation
                 self.persistent_module_instances.pop(active_module, None)

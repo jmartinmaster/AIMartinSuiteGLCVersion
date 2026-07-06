@@ -28,7 +28,9 @@ import argparse
 import time
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
-from app.app_identity import DEB_PACKAGE_NAME, LEGACY_DEB_NAME, LEGACY_EXE_NAME, format_versioned_deb_name, format_versioned_exe_name, load_version_from_main, normalize_version, parse_version, parse_versioned_exe_name
+from app.app_identity import DEB_PACKAGE_NAME, LEGACY_DEB_NAME, LEGACY_EXE_NAME, format_versioned_deb_name, format_versioned_exe_name, load_version_from_main, normalize_version, parse_version, parse_versioned_deb_name, parse_versioned_exe_name
+from app.external_data_registry import ExternalDataRegistry
+from app.update_integrity import compute_manifest_file_sha256, is_module_manifest_artifact, verify_manifest_artifacts_against_source
 from symbol_index import DEFAULT_OUTPUT_DIR as SYMBOL_INDEX_OUTPUT_DIR, SymbolIndexError, generate_symbol_index
 from ubuntu_deb_packager import InstalledFile, build_default_package_config, build_ubuntu_deb_package, resolve_debian_architecture
 
@@ -42,6 +44,8 @@ SKIP_TASKKILL = os.environ.get("MARTIN_SKIP_TASKKILL", "0") == "1"
 MARTIN_BUILD_TARGET_ENV = "MARTIN_BUILD_TARGET"
 MARTIN_WSL_DISTRO_ENV = "MARTIN_WSL_DISTRO"
 MARTIN_BUILD_PYTHON_ENV = "MARTIN_BUILD_PYTHON"
+MARTIN_MANIFEST_SIGNING_KEY_ENV = "MARTIN_MANIFEST_SIGNING_KEY"
+README_BUILD_SECTION = "README.md -> Ubuntu self-build"
 MAX_OLD_EXE_ARCHIVE = 10
 REQUIRED_BUILD_MODULES = [
     "PIL",
@@ -49,10 +53,13 @@ REQUIRED_BUILD_MODULES = [
     "PyInstaller",
     "openpyxl",
 ]
-WSL_VENV_CANDIDATE_PATHS = [
-    ".venv-linux/bin/python",
-    ".venv/bin/python",
+WSL_BUILD_PIP_PACKAGES = [
+    "Pillow",
+    "PyQt6",
+    "PyInstaller",
+    "openpyxl",
 ]
+WSL_BUILD_VENV_ROOT = ".venv-linux"
 SENSITIVE_RUNTIME_PATHS = [
     ".vault",
     os.path.join("data", "security"),
@@ -130,6 +137,7 @@ EXCLUDED_MODULES = [
 ]
 WINDOWS_TARGET = "windows"
 UBUNTU_TARGET = "ubuntu"
+ALL_TARGET = "all"
 WINDOWS_BUILD_ROOT = REPO_ROOT / "build" / WINDOWS_TARGET
 UBUNTU_BUILD_ROOT = REPO_ROOT / "build" / UBUNTU_TARGET
 WINDOWS_DIST_ROOT = REPO_ROOT / "dist"
@@ -138,6 +146,13 @@ UBUNTU_APP_DIST_ROOT = UBUNTU_DIST_ROOT / "app"
 UBUNTU_PACKAGE_ROOT = UBUNTU_DIST_ROOT / "package-root"
 SANITIZED_RATES_SOURCE = REPO_ROOT / "rates_dummy.json"
 PUBLIC_VARIANT_DIST_ROOT = WINDOWS_DIST_ROOT / "variants" / "public"
+BUILD_MANAGED_DATA_KEYS = (
+    "layout_config",
+    "production_log_calculations",
+    "form_definitions",
+    "settings",
+    "rates",
+)
 PRIVATE_WINDOWS_RUNTIME_SEED_FILES = [
     (REPO_ROOT / "data" / "config" / "layout_config.json", Path("data") / "config" / "layout_config.json"),
     (REPO_ROOT / "data" / "config" / "production_log_calculations.json", Path("data") / "config" / "production_log_calculations.json"),
@@ -156,14 +171,80 @@ WINDOWS_RUNTIME_LEGACY_FILES = [
     "settings.json",
     "rates.json",
 ]
+MANIFEST_FILE_PATHS = (
+    REPO_ROOT / "manifest.json",
+    REPO_ROOT / "manifest_dev.json",
+)
+MAX_OLD_DEB_ARCHIVE = 10
+CHECKSUM_SUFFIX = ".sha256"
 
 
 class BuildError(RuntimeError):
     pass
 
 
+_EXTERNAL_DATA_REGISTRY = None
+
+
 def ensure_repo_root():
     os.chdir(REPO_ROOT)
+
+
+def _get_external_data_registry():
+    global _EXTERNAL_DATA_REGISTRY
+    if _EXTERNAL_DATA_REGISTRY is None:
+        _EXTERNAL_DATA_REGISTRY = ExternalDataRegistry()
+    return _EXTERNAL_DATA_REGISTRY
+
+
+def sync_managed_runtime_seed_files_for_build():
+    data_registry = _get_external_data_registry()
+    synced_paths = []
+    missing_keys = []
+
+    # NOTE: build-time manifest hashing, Windows runtime seeding, and the
+    # runtime registry all need to stay aligned on these managed data files.
+    for key in BUILD_MANAGED_DATA_KEYS:
+        spec = data_registry.get_spec(key)
+        source_path = Path(data_registry.resolve_read_path(key))
+        target_path = REPO_ROOT / Path(spec.external_relative_path)
+
+        if source_path.exists() and source_path.is_file():
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            if source_path.resolve() != target_path.resolve():
+                shutil.copy2(source_path, target_path)
+            synced_paths.append(target_path)
+            continue
+
+        if key in {"settings", "form_definitions"}:
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            default_payload = {}
+            with open(target_path, "w", encoding="utf-8") as handle:
+                json.dump(default_payload, handle, indent=2)
+                handle.write("\n")
+            synced_paths.append(target_path)
+            continue
+
+        missing_keys.append((key, source_path, target_path))
+
+    if missing_keys:
+        missing_details = "; ".join(
+            f"{key}: source '{source_path}' -> target '{target_path}'"
+            for key, source_path, target_path in missing_keys
+        )
+        raise BuildError(
+            "Managed runtime build inputs are missing. "
+            "Open the application once to generate the app-data config files or restore the files before building. "
+            f"Missing inputs: {missing_details}"
+        )
+
+    if synced_paths:
+        print(
+            "--- Synced managed runtime build inputs into repo staging: "
+            + ", ".join(str(path.relative_to(REPO_ROOT)).replace("\\", "/") for path in synced_paths)
+            + " ---"
+        )
+    return synced_paths
 
 
 def detect_host_platform():
@@ -199,8 +280,13 @@ def parse_args():
         help="Refresh the local project librarian snapshot without building an artifact.",
     )
     parser.add_argument(
+        "--module-keys",
+        action="store_true",
+        help="Refresh only module payload checksum keys in manifest files, then exit.",
+    )
+    parser.add_argument(
         "--target",
-        choices=(WINDOWS_TARGET, UBUNTU_TARGET),
+        choices=(WINDOWS_TARGET, UBUNTU_TARGET, ALL_TARGET),
         help="Artifact target to build. Defaults to a prompt in interactive shells and the host-native target otherwise.",
     )
     parser.add_argument(
@@ -220,6 +306,7 @@ def prompt_for_target(host_platform):
         options = [
             (WINDOWS_TARGET, "Windows (.exe)"),
             (UBUNTU_TARGET, "Ubuntu (.deb via WSL)"),
+            (ALL_TARGET, "All supported targets (.exe + .deb via WSL)"),
         ]
     elif host_platform == UBUNTU_TARGET:
         print("Linux host detected. Defaulting to the Ubuntu (.deb) target.")
@@ -237,9 +324,11 @@ def prompt_for_target(host_platform):
             return WINDOWS_TARGET
         if raw_choice in {"2", UBUNTU_TARGET, "linux", "deb"}:
             return UBUNTU_TARGET
+        if raw_choice in {"3", ALL_TARGET, "both"}:
+            return ALL_TARGET
         if raw_choice in {"q", "quit", "exit"}:
             raise BuildError("Build cancelled.")
-        print("Invalid selection. Choose 1 for Windows, 2 for Ubuntu, or q to cancel.")
+        print("Invalid selection. Choose 1 for Windows, 2 for Ubuntu, 3 for all supported targets, or q to cancel.")
 
 
 def resolve_target(args, host_platform):
@@ -304,6 +393,10 @@ def refresh_project_librarian():
 
 
 def validate_target_for_host(target, host_platform):
+    if target == ALL_TARGET:
+        if host_platform != WINDOWS_TARGET:
+            raise BuildError("The combined 'all' target is currently supported only on Windows hosts, where Ubuntu builds run through WSL.")
+        return
     if target == WINDOWS_TARGET and host_platform != WINDOWS_TARGET:
         raise BuildError("Windows .exe builds are only supported when build.py is running on Windows.")
     if target == UBUNTU_TARGET and host_platform not in {WINDOWS_TARGET, UBUNTU_TARGET}:
@@ -433,6 +526,112 @@ def write_sha256_checksum_if_exists(artifact_path):
     if not artifact_path.exists() or not artifact_path.is_file():
         return None
     return write_sha256_checksum_file(artifact_path)
+
+
+def _build_manifest_signature(manifest_payload, signing_key_hex):
+    from app.utils.crypto_utils import sign_data
+
+    canonical_payload = {key: value for key, value in manifest_payload.items() if key != "signature"}
+    canonical_bytes = json.dumps(canonical_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return sign_data(signing_key_hex, canonical_bytes)
+def refresh_manifest_hashes_for_build(module_only=False):
+    signing_key_hex = os.environ.get(MARTIN_MANIFEST_SIGNING_KEY_ENV, "").strip()
+    signing_enabled = bool(signing_key_hex)
+    updated_manifest_paths = []
+    unsigned_manifest_paths = []
+    updated_artifact_count = 0
+
+    for manifest_path in MANIFEST_FILE_PATHS:
+        if not manifest_path.exists():
+            continue
+
+        with manifest_path.open("r", encoding="utf-8") as handle:
+            manifest_payload = json.load(handle)
+
+        artifacts = manifest_payload.get("artifacts")
+        if not isinstance(artifacts, dict):
+            raise BuildError(f"Manifest at {manifest_path} is missing a valid 'artifacts' object.")
+
+        updated_artifacts = {}
+        for relative_path, artifact_meta in artifacts.items():
+            if module_only and not is_module_manifest_artifact(relative_path):
+                updated_artifacts[relative_path] = dict(artifact_meta) if isinstance(artifact_meta, dict) else {}
+                continue
+
+            artifact_path = REPO_ROOT / PurePosixPath(str(relative_path).replace("\\", "/"))
+            if not artifact_path.exists() or not artifact_path.is_file():
+                raise BuildError(
+                    f"Manifest artifact path is missing from the repo: {relative_path} (referenced by {manifest_path.name})."
+                )
+
+            artifact_entry = dict(artifact_meta) if isinstance(artifact_meta, dict) else {}
+            # NOTE: runtime verification in app/models/update_manager_model.py
+            # uses the same app.update_integrity helper path as this build step.
+            artifact_entry["sha256"] = compute_manifest_file_sha256(artifact_path, relative_path=relative_path)
+            updated_artifacts[relative_path] = artifact_entry
+            updated_artifact_count += 1
+
+        manifest_payload["artifacts"] = updated_artifacts
+        if signing_enabled:
+            manifest_payload["signature"] = _build_manifest_signature(manifest_payload, signing_key_hex)
+        elif "signature" in manifest_payload:
+            unsigned_manifest_paths.append(manifest_path)
+
+        temp_manifest_path = manifest_path.with_name(f"{manifest_path.name}.tmp")
+        with open(temp_manifest_path, "w", encoding="utf-8") as handle:
+            json.dump(manifest_payload, handle, indent=4)
+            handle.write("\n")
+        os.replace(temp_manifest_path, manifest_path)
+        updated_manifest_paths.append(manifest_path)
+
+    if updated_manifest_paths:
+        print(
+            "--- Refreshed manifest artifact hashes: "
+            + ", ".join(path.name for path in updated_manifest_paths)
+            + f" ({updated_artifact_count} entries) ---"
+        )
+    if signing_enabled and updated_manifest_paths:
+        print(f"--- Re-signed manifest files with ${MARTIN_MANIFEST_SIGNING_KEY_ENV}. ---")
+    elif unsigned_manifest_paths:
+        print(
+            "--- Manifest signatures were not refreshed "
+            f"(set ${MARTIN_MANIFEST_SIGNING_KEY_ENV} to re-sign). "
+            "Use unsigned dev updates for local override-only workflows. ---"
+        )
+
+
+def verify_manifest_hashes_for_build(module_only=False):
+    validated_manifest_paths = []
+    validated_artifact_count = 0
+    for manifest_path in MANIFEST_FILE_PATHS:
+        if not manifest_path.exists():
+            continue
+        with manifest_path.open("r", encoding="utf-8") as handle:
+            manifest_payload = json.load(handle)
+        validated_artifact_count += verify_manifest_artifacts_against_source(
+            manifest_payload,
+            REPO_ROOT,
+            module_only=module_only,
+        )
+        validated_manifest_paths.append(manifest_path.name)
+    if validated_manifest_paths:
+        print(
+            "--- Verified manifest hashes against source paths: "
+            + ", ".join(validated_manifest_paths)
+            + f" ({validated_artifact_count} entries) ---"
+        )
+
+
+def refresh_and_verify_manifest_hashes_for_build(module_only=False):
+    # Keep build-time hash generation and runtime integrity verification on the
+    # same helper path. If one side changes, this pre-build check should fail.
+    if not module_only:
+        sync_managed_runtime_seed_files_for_build()
+    refresh_manifest_hashes_for_build(module_only=module_only)
+    try:
+        verify_manifest_hashes_for_build(module_only=module_only)
+    except RuntimeError as exc:
+        raise BuildError(f"Manifest/source verification failed after hash refresh: {exc}") from exc
 
 
 def _reset_windows_runtime_seed_targets(target_root):
@@ -663,10 +862,14 @@ def clean_previous_builds(target):
         if not PRESERVE_DIST:
             target_paths.append(WINDOWS_DIST_ROOT)
     elif target == UBUNTU_TARGET:
-        target_paths.extend([
-            UBUNTU_BUILD_ROOT,
-            UBUNTU_DIST_ROOT,
-        ])
+        target_paths.append(UBUNTU_BUILD_ROOT)
+        if PRESERVE_DIST:
+            target_paths.extend([
+                UBUNTU_APP_DIST_ROOT,
+                UBUNTU_PACKAGE_ROOT,
+            ])
+        else:
+            target_paths.append(UBUNTU_DIST_ROOT)
     else:
         raise BuildError(f"Unsupported cleanup target: {target}")
 
@@ -677,44 +880,98 @@ def clean_previous_builds(target):
         scrub_preserved_runtime_state(os.path.abspath(WINDOWS_DIST_ROOT), remove_readonly)
 
 
-def archive_previous_builds():
+def _archive_companion_checksum(source_path, target_path):
+    checksum_source_path = f"{source_path}{CHECKSUM_SUFFIX}"
+    if not os.path.exists(checksum_source_path):
+        return
+    checksum_target_path = f"{target_path}{CHECKSUM_SUFFIX}"
+    os.makedirs(os.path.dirname(checksum_target_path), exist_ok=True)
+    if os.path.exists(checksum_target_path):
+        os.remove(checksum_target_path)
+    shutil.move(checksum_source_path, checksum_target_path)
+
+
+def _remove_archived_artifact_with_checksum(archive_path):
+    if os.path.exists(archive_path):
+        os.remove(archive_path)
+    checksum_archive_path = f"{archive_path}{CHECKSUM_SUFFIX}"
+    if os.path.exists(checksum_archive_path):
+        os.remove(checksum_archive_path)
+
+
+def _archive_versioned_artifacts(dist_dir, archive_dir_name, current_file_name, parse_version_name, max_archive_count):
     if not PRESERVE_DIST:
         return
 
-    dist_dir = os.path.abspath(WINDOWS_DIST_ROOT)
-    archive_dir = os.path.join(dist_dir, "Old_exe")
+    dist_dir = os.path.abspath(dist_dir)
+    archive_dir = os.path.join(dist_dir, archive_dir_name)
     os.makedirs(archive_dir, exist_ok=True)
 
     for file_name in os.listdir(dist_dir):
         source_path = os.path.join(dist_dir, file_name)
         if not os.path.isfile(source_path):
             continue
-        if file_name == EXE_NAME:
+        if file_name == current_file_name:
             continue
-        if parse_versioned_exe_name(file_name) is None:
+        version_text = parse_version_name(file_name)
+        if version_text is None:
             continue
 
         target_path = os.path.join(archive_dir, file_name)
         if os.path.abspath(source_path) == os.path.abspath(target_path):
             continue
-        if os.path.exists(target_path):
-            os.remove(target_path)
+        _remove_archived_artifact_with_checksum(target_path)
         shutil.move(source_path, target_path)
+        _archive_companion_checksum(source_path, target_path)
 
     archived_entries = []
     for file_name in os.listdir(archive_dir):
         archive_path = os.path.join(archive_dir, file_name)
         if not os.path.isfile(archive_path):
             continue
-        version_text = parse_versioned_exe_name(file_name)
+        version_text = parse_version_name(file_name)
         version_key = normalize_version(parse_version(version_text)) if version_text else None
         if version_key is None:
             continue
         archived_entries.append((version_key, file_name, archive_path))
 
     archived_entries.sort(key=lambda entry: entry[0], reverse=True)
-    for _version_key, _file_name, archive_path in archived_entries[MAX_OLD_EXE_ARCHIVE:]:
-        os.remove(archive_path)
+    for _version_key, _file_name, archive_path in archived_entries[max_archive_count:]:
+        _remove_archived_artifact_with_checksum(archive_path)
+
+
+def archive_previous_windows_builds():
+    _archive_versioned_artifacts(
+        WINDOWS_DIST_ROOT,
+        "Old_exe",
+        EXE_NAME,
+        parse_versioned_exe_name,
+        MAX_OLD_EXE_ARCHIVE,
+    )
+    _archive_versioned_artifacts(
+        PUBLIC_VARIANT_DIST_ROOT,
+        "Old_exe",
+        EXE_NAME,
+        parse_versioned_exe_name,
+        MAX_OLD_EXE_ARCHIVE,
+    )
+
+
+def archive_previous_ubuntu_builds(current_deb_name):
+    _archive_versioned_artifacts(
+        UBUNTU_DIST_ROOT,
+        "Old_deb",
+        current_deb_name,
+        parse_versioned_deb_name,
+        MAX_OLD_DEB_ARCHIVE,
+    )
+    _archive_versioned_artifacts(
+        PUBLIC_VARIANT_DIST_ROOT,
+        "Old_deb",
+        current_deb_name,
+        parse_versioned_deb_name,
+        MAX_OLD_DEB_ARCHIVE,
+    )
 
 
 def resolve_desktop_icon_source_path():
@@ -814,23 +1071,56 @@ def resolve_wsl_path(wsl_distro=None):
 
 def invoke_ubuntu_build_via_wsl(wsl_distro=None):
     linux_repo_root = resolve_wsl_path(wsl_distro)
-    linux_venv_selection = " ".join(
-        f"elif [ -x {shlex.quote(candidate_path)} ]; then BUILD_PYTHON={shlex.quote(candidate_path)}; "
-        for candidate_path in WSL_VENV_CANDIDATE_PATHS
+    pip_packages = " ".join(shlex.quote(package_name) for package_name in WSL_BUILD_PIP_PACKAGES)
+    readme_hint = (
+        f"See {README_BUILD_SECTION} for the supported native Ubuntu and Windows+WSL setup steps."
     )
+    build_venv_root = shlex.quote(WSL_BUILD_VENV_ROOT)
+    build_venv_python = shlex.quote(f"{WSL_BUILD_VENV_ROOT}/bin/python")
+    build_venv_activate = shlex.quote(f"{WSL_BUILD_VENV_ROOT}/bin/activate")
     bash_script = (
         "set -euo pipefail; "
         f"cd {shlex.quote(linux_repo_root)}; "
-        f"if [ -n \"${{{MARTIN_BUILD_PYTHON_ENV}:-}}\" ] && [ -x \"${{{MARTIN_BUILD_PYTHON_ENV}}}\" ]; then BUILD_PYTHON=\"${{{MARTIN_BUILD_PYTHON_ENV}}}\"; "
-        f"{linux_venv_selection}"
-        "elif command -v python3 >/dev/null 2>&1; then BUILD_PYTHON=$(command -v python3); "
-        "else echo 'No python3 runtime was found in the selected WSL distribution.' >&2; exit 1; fi; "
-        "if ! \"$BUILD_PYTHON\" -c 'import PIL, PyQt6, PyInstaller, openpyxl' >/dev/null 2>&1; then "
-        "echo 'The selected WSL Python runtime is missing one or more required build modules: Pillow, PyQt6, PyInstaller, openpyxl.' >&2; "
-        "echo 'Create .venv-linux inside WSL or install the modules into the selected WSL Python runtime before building.' >&2; exit 1; fi; "
+        f"if [ -n \"${{{MARTIN_BUILD_PYTHON_ENV}:-}}\" ] && [ -x \"${{{MARTIN_BUILD_PYTHON_ENV}}}\" ]; then "
+        "BUILD_PYTHON=\"${" + MARTIN_BUILD_PYTHON_ENV + "}\"; "
+        "BUILD_ACTIVATE=$(dirname \"$BUILD_PYTHON\")/activate; "
+        "if [ ! -f \"$BUILD_ACTIVATE\" ]; then "
+        f"echo 'Could not locate an activation script next to the explicit MARTIN_BUILD_PYTHON path. {readme_hint}' >&2; exit 1; "
+        "fi; "
+        "echo \"Activating WSL build environment: $BUILD_ACTIVATE\"; "
+        ". \"$BUILD_ACTIVATE\"; "
+        "elif [ -x " + build_venv_python + " ]; then "
+        f"echo 'Activating WSL build environment: {WSL_BUILD_VENV_ROOT}/bin/activate'; "
+        ". " + build_venv_activate + "; "
+        "elif command -v python3 >/dev/null 2>&1; then "
+        "if ! python3 -m venv --help >/dev/null 2>&1; then "
+        f"echo 'python3-venv is required to bootstrap the Ubuntu build environment. {readme_hint}' >&2; exit 1; "
+        "fi; "
+        "echo 'Creating WSL build virtual environment at .venv-linux ...'; "
+        "\"$(command -v python3)\" -m venv " + build_venv_root + "; "
+        f"echo 'Activating WSL build environment: {WSL_BUILD_VENV_ROOT}/bin/activate'; "
+        ". " + build_venv_activate + "; "
+        "else "
+        f"echo 'No python3 runtime was found in the selected WSL distribution. {readme_hint}' >&2; exit 1; "
+        "fi; "
+        "if ! command -v python >/dev/null 2>&1; then "
+        f"echo 'The WSL virtual environment did not expose a python command after activation. {readme_hint}' >&2; exit 1; "
+        "fi; "
+        "if ! python -c 'import PIL, PyQt6, PyInstaller, openpyxl' >/dev/null 2>&1; then "
+        "echo 'Installing missing Ubuntu build Python packages into the selected WSL environment ...'; "
+        "if ! python -m pip --version >/dev/null 2>&1; then "
+        f"echo 'pip is not available in the selected WSL Python environment. {readme_hint}' >&2; exit 1; "
+        "fi; "
+        "if ! python -m pip install --upgrade pip setuptools wheel; then "
+        f"echo 'Could not upgrade pip/setuptools/wheel in the selected WSL Python environment. {readme_hint}' >&2; exit 1; "
+        "fi; "
+        f"if ! python -m pip install {pip_packages}; then "
+        f"echo 'Could not install the required Ubuntu build Python packages. {readme_hint}' >&2; exit 1; "
+        "fi; "
+        "fi; "
         "if ! command -v dpkg-deb >/dev/null 2>&1; then "
-        "echo 'dpkg-deb is required inside WSL to build the Ubuntu package.' >&2; exit 1; fi; "
-        "exec \"$BUILD_PYTHON\" build.py --target ubuntu --non-interactive"
+        f"echo 'dpkg-deb is required inside WSL to build the Ubuntu package. {readme_hint}' >&2; exit 1; fi; "
+        "exec python build.py --target ubuntu --non-interactive"
     )
     command = resolve_wsl_command_prefix(wsl_distro) + ["bash", "-lc", bash_script]
     result = run_command(command, capture_output=True, cwd=resolve_wsl_invocation_cwd())
@@ -840,11 +1130,12 @@ def invoke_ubuntu_build_via_wsl(wsl_distro=None):
         detail_suffix = f" Details: {failure_detail}" if failure_detail else ""
         raise BuildError(
             "The Ubuntu build failed"
-            f"{distro_suffix}. Confirm that the distro can access this repo and has Python, Pillow, PyQt6, PyInstaller, openpyxl, and dpkg-deb installed.{detail_suffix}"
+            f"{distro_suffix}. Confirm that the distro can access this repo and review {README_BUILD_SECTION} for the supported WSL/native Ubuntu setup steps.{detail_suffix}"
         )
 
 
 def run_windows_build():
+    refresh_and_verify_manifest_hashes_for_build(module_only=False)
     refresh_symbol_index()
     ensure_python_modules(REQUIRED_BUILD_MODULES)
     pyinstaller_main = importlib.import_module("PyInstaller.__main__")
@@ -865,7 +1156,7 @@ def run_windows_build():
     private_checksum_path = write_sha256_checksum_file(built_executable_path)
     public_checksum_path = write_sha256_checksum_file(public_variant_executable_path)
 
-    archive_previous_builds()
+    archive_previous_windows_builds()
 
     print(f"\n--- Windows build complete with real runtime data seeded at {WINDOWS_DIST_ROOT / 'data' / 'config'} ---")
     print(f"--- Public variant copy with dummy runtime data: {public_variant_executable_path} ---")
@@ -874,6 +1165,7 @@ def run_windows_build():
 
 
 def run_ubuntu_build_direct():
+    refresh_and_verify_manifest_hashes_for_build(module_only=False)
     refresh_symbol_index()
     ensure_command_available("dpkg-deb")
     ensure_python_modules(REQUIRED_BUILD_MODULES)
@@ -913,6 +1205,7 @@ def run_ubuntu_build_direct():
     private_checksum_path = write_sha256_checksum_file(output_path)
     public_checksum_path = write_sha256_checksum_file(public_variant_deb_path)
     legacy_checksum_path = write_sha256_checksum_if_exists(legacy_deb_path)
+    archive_previous_ubuntu_builds(deb_name)
 
     print(f"\n--- Ubuntu package complete. Check {output_path} ---")
     print(f"--- Public variant copy: {public_variant_deb_path} ---")
@@ -924,6 +1217,13 @@ def run_ubuntu_build_direct():
 
 def run_target_build(target, host_platform, args):
     validate_target_for_host(target, host_platform)
+
+    if target == ALL_TARGET:
+        print("\n=== Building Windows artifact ===")
+        run_windows_build()
+        print("\n=== Building Ubuntu artifact ===")
+        invoke_ubuntu_build_via_wsl(resolve_wsl_distro(args))
+        return
 
     if target == WINDOWS_TARGET:
         run_windows_build()
@@ -948,6 +1248,9 @@ def main():
         return
     if args.librarian_only:
         refresh_project_librarian()
+        return
+    if args.module_keys:
+        refresh_and_verify_manifest_hashes_for_build(module_only=True)
         return
 
     host_platform = detect_host_platform()

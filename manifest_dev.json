@@ -1,0 +1,274 @@
+{
+    "version": "2.5.0",
+    "release_channel": "dev",
+    "artifacts": {
+        "app/about.py": {
+            "sha256": "32ca13cf3194d6c30d001386d7d08c3812ac9779f803e0e064f9acfb03b2ca47"
+        },
+        "app/controllers/about_qt_controller.py": {
+            "sha256": "8a9d4f855c4d847914d4a427e813bd635bfa4233aba879322ddbf1f941bda7dc"
+        },
+        "app/views/about_qt_view.py": {
+            "sha256": "d49f9f602b02599a23b5319c00e1a0170904e319a5a0dd4963922791938c3592"
+        },
+        "app/app_identity.py": {
+            "sha256": "020e0bcb00cc6f4899eb4eee4691f6888e650ecc8a73061ec650b963c6d7ad60"
+        },
+        "app/app_logging.py": {
+            "sha256": "80c08782776d971f888cb439952bfd2a6a249413843d623ea085e2510e229cf9"
+        },
+        "app/app_platform.py": {
+            "sha256": "5b171b31e43b298cd316fc9c7a941677e2a38d3ec876a10504ac40b184d99e56"
+        },
+        "app/crash_handler.py": {
+            "sha256": "fa86c1d7157d661d0d36a681fa70a6c786a2799b6f5e0261a3a63291578cec58"
+        },
+        "app/data_handler_service.py": {
+            "sha256": "c2b223aa2ca248e114de09a55199f09e7a585fe3499ce397d9bd19f1b3b5e1ac"
+        },
+        "app/data_request_worker.py": {
+            "sha256": "070eae1b3189be01a74c8937dbb6b741e060019ef206f6f879997afd95c2158e"
+        },
+        "app/dev_logging.py": {
+            "sha256": "847594943d656a6fcb61ee02f8174d4569fa3e8540abc24bb8d752c100b656ec"
+        },
+        "app/developer_admin.py": {
+            "sha256": "8a685b9c65738093012007a33141545df285e445f5e65d61fa1fbde2b4fb25fc"
+        },
+        "app/controllers/developer_admin_qt_controller.py": {
+            "sha256": "8471d07edf83da9990219e3e7b0aab8e39bc08cfac85b162b101036442cc7ff2"
+        },
+        "app/downtime_codes.py": {
+            "sha256": "a312d8d1f8a7da1d0306c61fc6584c89f32fea4a24b559d10fa48e886df328da"
+        },
+        "app/external_data_registry.py": {
+            "sha256": "488785fbb00e5a76ac4cb3a17880777cea62944af646ffb4a6ee94efd1c5c06d"
+        },
+        "app/form_definition_registry.py": {
+            "sha256": "6f9cc227fedd4c2469e925274cf44e05a76fc29e4a666a252cf1c395b0957490"
+        },
+        "app/help_viewer.py": {
+            "sha256": "48644a2a3002ac110e6d1804dfab0900aee9e6e67d5202e34df6b7679369a676"
+        },
+        "app/controllers/help_viewer_qt_controller.py": {
+            "sha256": "343bc5f072dd55c0eb3199aa5470dd5b2d047d30c6f2bd1f2c57d0575b06bda6"
+        },
+        "app/views/help_viewer_qt_view.py": {
+            "sha256": "a728a40f4af7f406f0b3941eff689e7ce79de4dd6965eae884e3dae7c68106c3"
+        },
+        "app/help_viewer_documents.py": {
+            "sha256": "9082a1c0f88f785cae95ff9e1369a51a26435ce3ef809837c85a4dd65eeea352"
+        },
+        "app/host_ui_adapter.py": {
+            "sha256": "d093d2daae667e6a20f601917dae3e0f4628e6280629f20b6ac23bb872847b0e"
+        },
+        "app/internal_code_editor.py": {
+            "sha256": "a8b267afa9ecbe4e33996f75b2a7339c4dadce3bb27c29fdad6694bfeaa15389"
+        },
+        "app/controllers/internal_code_editor_qt_controller.py": {
+            "sha256": "23669d2ee203cb1b2c3044a0ae609fdf687d82d82458ef4a8842ee83bff79e52"
+        },
+        "app/models/internal_code_editor_model.py": {
+            "sha256": "cf5b4e619f527c54911455dab80dd6c9b4257d0bd99fef9b203fb04f2dbae0cb"
+        },
+        "app/views/internal_code_editor_qt_view.py": {
+            "sha256": "917fd436e16710c41f427eb2d91be194419bd6809db791712c8e7ac906caa6ff"
+        },
+        "app/layout_config_service.py": {
+            "sha256": "d2d23d796053a0b40b8b6aab7d6fb2a30243c042d9ecb7d64d9fbd2f37611390"
+        },
+        "app/layout_manager.py": {
+            "sha256": "c81dc4d58226b2b9752f426af84da9a8f69faed022f54effd937a5ec8c93e3de"
+        },
+        "app/controllers/layout_manager_qt_controller.py": {
+            "sha256": "3de60732378a61db70626aa5fd64a62b72a3089b71b6781085a4aaceadd46628"
+        },
+        "app/models/layout_manager_model.py": {
+            "sha256": "c60b3d4ba743a3e4a0ec468d7c422cdf24969998a5ccc67788d1bc1bb3485500"
+        },
+        "app/views/layout_manager_qt_view.py": {
+            "sha256": "5154849c4a1ce1c5093d84399386bb9005485a579422a3684ec3e0c03948be8d"
+        },
+        "app/layout_manager_dispatcher.py": {
+            "sha256": "4b2725bb4e9ca48eabcf0594393ac53cd8e94d81a847b0fadf1501e0c5e7c31b"
+        },
+        "app/module_registry.py": {
+            "sha256": "8f7c442a8964abfe2d6454b3e98f15bc8b8dee5c430ad87c90599244c3426f85"
+        },
+        "app/native_security_verifier.py": {
+            "sha256": "2bf4135b6748628a1e07cf6e97ffcbe782120d6fca99a4d67aa15fd0ceb5bab4"
+        },
+        "app/persistence.py": {
+            "sha256": "f654990eca165e20553e3ec46057d008b6a1182f633e9e9ab0bf51c7abd2b41d"
+        },
+        "app/production_log.py": {
+            "sha256": "3126ca9020901d2f1d5d7a66422fb44057c332ecce0b58e86ab21b9bd9e4459b"
+        },
+        "app/controllers/production_log_qt_controller.py": {
+            "sha256": "8e350223f00139da5fc830d9adbd2d08155e164756e83bfcd27ee02eeb3fbfc4"
+        },
+        "app/models/production_log_model.py": {
+            "sha256": "c166c265698028a200fc1efa49ab9a9f9709d1f81ace1a5ffd98f95e940c4fa5"
+        },
+        "app/views/production_log_qt_view.py": {
+            "sha256": "f958edcfc2ca1ea543c3f2dd7f1ad153c1fa046996b162d303fbee76c3c15be7"
+        },
+        "app/production_log_calculations.py": {
+            "sha256": "247bae4466d824d4815255c4304ea1f234bf6cf8251c2430330f9dbd860dd499"
+        },
+        "app/controllers/production_log_calculations_qt_controller.py": {
+            "sha256": "99f829f3a0e348ec2009549efe7468203deb4589e0b87dfabe512c1485afbe76"
+        },
+        "app/models/production_log_calculations_model.py": {
+            "sha256": "b9f0bb5cf2fd7933afdabe873b4fc1bf680fcd0e799d742ad16a409cb169a004"
+        },
+        "app/views/production_log_calculations_qt_view.py": {
+            "sha256": "c043d48270278c20ca2ee3a687bb7962c8b4a0fae0a7c73bb1d493505ba057c1"
+        },
+        "app/production_log_roles.py": {
+            "sha256": "f0a8fe49cf045dd1a272561aa94c49ff100a298256575667bc21b85f99c3a801"
+        },
+        "app/rate_manager.py": {
+            "sha256": "14314f1c3f541fa6469dc7a3b16dc7264575bba8990e80739366fc57dee9db01"
+        },
+        "app/controllers/rate_manager_qt_controller.py": {
+            "sha256": "bb66bac45db0e6d2dbec2459f1e05da6683f255a2edb9fa1639ceaae30188a88"
+        },
+        "app/models/rate_manager_model.py": {
+            "sha256": "239b21f132a9bca09b4c8c786032898efcaed45c839ac84c25f468b484b4859b"
+        },
+        "app/views/rate_manager_qt_view.py": {
+            "sha256": "c618b5995e5fa5a37d5490757b5939a1ee449290d8b535ae6f34c8875e950086"
+        },
+        "app/recovery_viewer.py": {
+            "sha256": "f4d5fc1f50de00bd611e094a1a040a4e81b3455c2529fa24e22d5820e587d0e6"
+        },
+        "app/controllers/recovery_viewer_qt_controller.py": {
+            "sha256": "46ebbb09cc2275cf076020dd25bf56b939709d99fbb3e2d1af207056a74176ee"
+        },
+        "app/models/recovery_viewer_model.py": {
+            "sha256": "532191c256d41290965436d2935517e76e4e0ca8c75d3f9d8e8e79c21f6ef02b"
+        },
+        "app/views/recovery_viewer_qt_view.py": {
+            "sha256": "d3e4d23ca29af013381ca72c63b4972482842164d999ee8c5e61cf03a6e6dba3"
+        },
+        "app/safe_expression.py": {
+            "sha256": "5f12bb8b5e5a5e8e8616838bbc79b4d74406d47ac2ce8e0aaccf83df9d83dbba"
+        },
+        "app/security.py": {
+            "sha256": "e65ba4fe6c369b60fc503e73ce951552df618028d88813d0ed99e42f15ad1957"
+        },
+        "app/models/security_model.py": {
+            "sha256": "d72857094476b499e943786feb5921910e5ed4062c01d77ad852a669f52e4b02"
+        },
+        "app/security_admin.py": {
+            "sha256": "37e5f866af897819e62d834c831871212023b59cafd9b2b42a4fea0305011b9d"
+        },
+        "app/controllers/security_admin_qt_controller.py": {
+            "sha256": "21828bab816fa0193a783a1918d654069f1a3d45115139033bf25dd15e97a85d"
+        },
+        "app/security_audit.py": {
+            "sha256": "1268b18ba03497d830afb6bd59f5fbfce033e6141ec632f0cb7b9348fbbd999d"
+        },
+        "app/security_service.py": {
+            "sha256": "9cc3c1697a05d328e001dd4c590ecd73357fc8989b4190db2ad09d29bb966f19"
+        },
+        "app/settings_diagnostics.py": {
+            "sha256": "5342b8622b2eab1bbbd9f0a6d4e36e4d9c700d81dfa882d2b902278a55b40360"
+        },
+        "app/settings_manager.py": {
+            "sha256": "382dfbd6b6e8ee67808ebb9b436dba39ff2585ca7ad20afc9c24ccfa658808d5"
+        },
+        "app/controllers/settings_manager_qt_controller.py": {
+            "sha256": "fe77e5e20bf0183ab410c27475e2b49de58c6773d507c55d1e23068a904f8da6"
+        },
+        "app/models/settings_manager_model.py": {
+            "sha256": "0b16f8914dc9dcc8d86b00e4c15ecd2c5b42a0a49b39adec24145cc82d3030f4"
+        },
+        "app/views/settings_manager_qt_view.py": {
+            "sha256": "c18d61a9a6f16c405d62514a05cc92c4b8a4c613c43043756e685d74fdda020d"
+        },
+        "app/sidecar.py": {
+            "sha256": "0c219a41b255c42bb9d9dc91a2616dfdcbdf83511c0d7a33c96c63d004f077c1"
+        },
+        "app/splash.py": {
+            "sha256": "9e9ce34a550351e08bb7b19a4b288b70ca8da0b8313d8ba1c5d69946e37e9443"
+        },
+        "app/theme_manager.py": {
+            "sha256": "9b540c178542e6956808ec8ed0d05301d2c1f8df9ac2b5fd79667b1acf08d4b7"
+        },
+        "app/update_bindings.py": {
+            "sha256": "dfbf1e2b4dfaa9773e34ed6de53fb0852fcd18dad62c55c8aeebc94b2427e437"
+        },
+        "app/update_state.py": {
+            "sha256": "13cf6dd0de9d0c2355ce8321deb6d9c334199ba3d4e40a878a85b0df85f84b11"
+        },
+        "data/config/layout_config.json": {
+            "sha256": "4c8dd29499fbd9b71ee780adaa3b359d5e866d2668c96a655545bc45889f0bc8"
+        },
+        "data/config/rates.json": {
+            "sha256": "0179f715cc2af3c302b20a192c67d10899ec95df4a1840e65860d42db2f83a44"
+        },
+        "data/config/production_log_calculations.json": {
+            "sha256": "43a3a66d76a06791f623a98ce6e2c3f4e2b7bf5a84d747645900556b4f0ca967"
+        },
+        "docs/help/app_icons.md": {
+            "sha256": "273e1e472e17f4f2c9d678555393de0ed30d966c2a4f3cb583e7c6e5e6668881"
+        },
+        "docs/help/draft_json.md": {
+            "sha256": "c912f493798adfd7cc4600d93b8645976d68eec2784de448e954385235c65a67"
+        },
+        "docs/help/form_definitions.md": {
+            "sha256": "87ca168fd614e8815c5fa5fac6308af550d0c56457bf7141452b81c5b8f74589"
+        },
+        "docs/help/hidden_modules.md": {
+            "sha256": "1d7276890ac80901ead960138639c52f87494df247ddbf9bfd55e7cfc3d417f9"
+        },
+        "docs/help/layout_config.md": {
+            "sha256": "58c30a70db4b1c0944464430c04d9f8821cbd4033e7cf261df1ce959431b37b6"
+        },
+        "docs/help/layout_json_and_runtime_reference.md": {
+            "sha256": "914579263e9d9323541fbc48ad611e5f00b684943d0aa8be4f1ec2d926d24205"
+        },
+        "docs/help/production_log_calculations.md": {
+            "sha256": "34a23d47b7f96559a99f6126904ef059fc933d57198d71fb8e1b59ddffe34c62"
+        },
+        "docs/help/rates_json.md": {
+            "sha256": "3c773e094da1f0b747b373325e4777e090db4d8cd647f9232fb6ef603b375ff1"
+        },
+        "docs/help/settings_json.md": {
+            "sha256": "50713dba451815625462025fd2ab3b117f9ff45187f7eb50ccee6027eb39a8c8"
+        },
+        "docs/help/user_guide.md": {
+            "sha256": "2e9429a400fb79e9e1835090bc6fc6ee8029e58b2020bae838f73178e5a4a77c"
+        },
+        "docs/help/user_guide_layout_manager.md": {
+            "sha256": "03bc2f1020f856a422292b6059f105b1ba5e621c18d1c38619a7493206cac07c"
+        },
+        "docs/help/user_guide_layout_manager_form_authoring.md": {
+            "sha256": "a724ce7e76244879e35cc590a6d84f066084bbcedc92f2754b780f34cf5e34c7"
+        },
+        "docs/help/user_guide_production_log.md": {
+            "sha256": "fdfba481dce717dc6fa3d2d961495deace45b07f8591fb83e5c5f2e03bb7cc7b"
+        },
+        "docs/help/user_guide_rate_manager.md": {
+            "sha256": "583650c8feaf755db60bf9828300bc93db8ce026a69b09da62643d3f22b48e37"
+        },
+        "docs/help/user_guide_recovery_viewer.md": {
+            "sha256": "bc572e8598629336b485ba6be34230b932d7d421ba80edbda578919c5af9764b"
+        },
+        "docs/help/user_guide_settings_manager.md": {
+            "sha256": "d0791cac082e0d35088e9cddc245adc8625a8f87497093cf896fdec79e04f365"
+        },
+        "docs/help/user_guide_update_manager.md": {
+            "sha256": "a7a7f6c66eaf5bcf2212079f4c4ba0dc0bad1fbe5d59e6e3fc493143b90deca5"
+        },
+        "docs/legal/LICENSE.txt": {
+            "sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
+        },
+        "docs/production_log_json_architecture.md": {
+            "sha256": "18e536b0e6f84fc080981cdc5a43072ad809360d3e0d5c648644aebbe22b4e78"
+        }
+    },
+    "signature": "107ba346abfe1d2654057771add752baa3ca0ae1cbfee65dfdb2c82970296211d62d4f993c7b94d5d755ac438f498e26475c67f1ef93dc87c8eae37d9dcff106"
+}

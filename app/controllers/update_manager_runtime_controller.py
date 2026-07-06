@@ -62,7 +62,7 @@ class UpdateManagerRuntimeController:
         self._runtime_listener_registered = False
         self.model = UpdateManagerModel(data_registry=getattr(dispatcher, "external_data_registry", None))
         self.coordinator = self.dispatcher.update_coordinator
-        self.branch_name = self.coordinator.branch_name or self.model.detect_branch_name()
+        self.branch_name = self.model.detect_branch_name()
         configured_repo_url = self.dispatcher.get_setting("update_repository_url", None)
         self.remote_info = self.coordinator.remote_info if self.coordinator.remote_info.get("display") != "Unknown repository" else self.model.detect_remote_info(preferred_url=configured_repo_url)
         self.local_manifest = self.coordinator.local_manifest

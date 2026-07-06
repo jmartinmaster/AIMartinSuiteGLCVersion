@@ -2,6 +2,7 @@ import json
 import os
 import tempfile
 import unittest
+from unittest import mock
 
 from app.security import Gatekeeper
 from app.security_service import SecurityService
@@ -11,20 +12,35 @@ class TestVaultEncryption(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.vault_dir = os.path.join(self.temp_dir.name, "vaults")
+        self.security_backup_dir = os.path.join(self.temp_dir.name, "backups", "settings")
         os.makedirs(self.vault_dir, exist_ok=True)
         self.key_path = os.path.join(self.temp_dir.name, "vaults.key")
         self.security_settings_path = os.path.join(self.temp_dir.name, "security_settings.json")
+        self.backup_policy_patcher = mock.patch(
+            "app.persistence._load_backup_policy",
+            return_value={
+                "enabled": True,
+                "interval_min": 30,
+                "keep_count": 12,
+                "draft_auto_save_interval_min": 5,
+                "draft_history_keep_count": 20,
+                "target_overrides": {},
+            },
+        )
+        self.backup_policy_patcher.start()
 
         Gatekeeper._instance = None
         self.gatekeeper = Gatekeeper()
         self.gatekeeper._vault_directory = lambda: self.vault_dir
         self.gatekeeper._vault_key_path = lambda: self.key_path
         self.gatekeeper._security_settings_path = self.security_settings_path
+        self.gatekeeper._security_settings_backup_directory = lambda: self.security_backup_dir
         self.gatekeeper._security_settings = self.gatekeeper._load_security_settings()
 
     def tearDown(self):
         self.gatekeeper.logout()
         Gatekeeper._instance = None
+        self.backup_policy_patcher.stop()
         self.temp_dir.cleanup()
 
     def test_new_vault_is_written_encrypted(self):
@@ -81,6 +97,47 @@ class TestVaultEncryption(unittest.TestCase):
         self.assertEqual(migrated_payload.get("encoding"), "fernet-json-v1")
         self.assertTrue(str(migrated_payload.get("ciphertext") or "").strip())
         self.assertNotIn("vault_name", migrated_payload)
+
+    def test_security_settings_are_written_encrypted(self):
+        self.gatekeeper._save_security_settings(
+            {
+                "non_secure_mode": False,
+                "external_module_override_trust": True,
+                "non_secure_bypass_modules": ["settings_manager"],
+                "role_default_rights": {"developer": ["developer:update_configuration"]},
+            }
+        )
+
+        with open(self.security_settings_path, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+
+        self.assertEqual(payload.get("encoding"), "fernet-json-v1")
+        self.assertTrue(str(payload.get("ciphertext") or "").strip())
+        self.assertNotIn("non_secure_mode", payload)
+
+    def test_plaintext_security_settings_are_migrated_to_encrypted_storage(self):
+        with open(self.security_settings_path, "w", encoding="utf-8") as handle:
+            json.dump(
+                {
+                    "non_secure_mode": False,
+                    "external_module_override_trust": True,
+                    "non_secure_bypass_modules": ["settings_manager"],
+                    "role_default_rights": {"developer": ["developer:update_configuration"]},
+                },
+                handle,
+                indent=2,
+            )
+
+        settings = self.gatekeeper._load_security_settings()
+        self.assertFalse(settings["non_secure_mode"])
+        self.assertTrue(settings["external_module_override_trust"])
+        self.assertEqual(settings["non_secure_bypass_modules"], ["settings_manager"])
+
+        with open(self.security_settings_path, "r", encoding="utf-8") as handle:
+            migrated_payload = json.load(handle)
+        self.assertEqual(migrated_payload.get("encoding"), "fernet-json-v1")
+        self.assertTrue(str(migrated_payload.get("ciphertext") or "").strip())
+        self.assertNotIn("non_secure_mode", migrated_payload)
 
     def test_security_defaults_to_non_secure_mode(self):
         self.assertTrue(self.gatekeeper.is_non_secure_mode_enabled())
