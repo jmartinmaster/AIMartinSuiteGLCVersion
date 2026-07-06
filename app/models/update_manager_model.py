@@ -57,6 +57,18 @@ MODULE_PAYLOAD_MVC_PATH_SPECS = [
     ("models", "{module_key}_model.py"),
     ("views", "{module_key}_qt_view.py"),
 ]
+TEXTUAL_PAYLOAD_EXTENSIONS = {
+    ".cfg",
+    ".csv",
+    ".ini",
+    ".json",
+    ".md",
+    ".py",
+    ".toml",
+    ".txt",
+    ".yaml",
+    ".yml",
+}
 UBUNTU_PACKAGE_VERSION_PATTERN = re.compile(r"(?P<version>\d+\.\d+(?:\.\d+)?)")
 
 
@@ -194,6 +206,35 @@ def _compute_sha256_hex(payload_bytes):
     return hashlib.sha256(payload_bytes).hexdigest()
 
 
+def _is_textual_payload(relative_path):
+    extension = os.path.splitext(str(relative_path or "").strip().lower())[1]
+    return extension in TEXTUAL_PAYLOAD_EXTENSIONS
+
+
+def _compute_integrity_hashes(payload_bytes, relative_path):
+    hashes = {_compute_sha256_hex(payload_bytes)}
+    if not _is_textual_payload(relative_path):
+        return hashes
+    try:
+        payload_text = payload_bytes.decode("utf-8")
+    except UnicodeDecodeError:
+        return hashes
+    normalized_lf = payload_text.replace("\r\n", "\n").replace("\r", "\n")
+    hashes.add(_compute_sha256_hex(normalized_lf.encode("utf-8")))
+    hashes.add(_compute_sha256_hex(normalized_lf.replace("\n", "\r\n").encode("utf-8")))
+    return hashes
+
+
+def _verify_payload_hash(expected_hash, payload_bytes, relative_path):
+    normalized_expected = str(expected_hash or "").strip().lower()
+    actual_hash = _compute_sha256_hex(payload_bytes)
+    if normalized_expected in _compute_integrity_hashes(payload_bytes, relative_path):
+        return actual_hash
+    raise RuntimeError(
+        f"Integrity check failed for {relative_path}. Expected {normalized_expected}, got {actual_hash}."
+    )
+
+
 def _parse_sha256_text(payload_text, relative_path):
     raw_text = str(payload_text or "").strip()
     if not raw_text:
@@ -228,12 +269,7 @@ def _verify_remote_payload_integrity(remote_info, branch_name, relative_path, pa
         relative_path,
         timeout=timeout,
     )
-    actual_hash = _compute_sha256_hex(payload_bytes)
-    if actual_hash != expected_hash:
-        raise RuntimeError(
-            f"Integrity check failed for {relative_path}. Expected {expected_hash}, got {actual_hash}."
-        )
-    return actual_hash
+    return _verify_payload_hash(expected_hash, payload_bytes, relative_path)
 
 
 def _resolve_checksum_governance(remote_info, branch_name, relative_path, payload_bytes, timeout=15):
@@ -256,8 +292,9 @@ def _resolve_checksum_governance(remote_info, branch_name, relative_path, payloa
     except Exception as exc:
         return ("Checksum unavailable", f"Could not read {checksum_path}: {exc}")
 
+    expected_hash = str(expected_hash or "").strip().lower()
     actual_hash = _compute_sha256_hex(payload_bytes)
-    if actual_hash != expected_hash:
+    if expected_hash not in _compute_integrity_hashes(payload_bytes, relative_path):
         return (
             "Checksum mismatch",
             (
@@ -1649,12 +1686,12 @@ class UpdateManagerModel:
                     artifact_meta = manifest["artifacts"].get(norm_path)
                     if artifact_meta and "sha256" in artifact_meta:
                         expected_hash = artifact_meta["sha256"]
-                        import hashlib
-                        actual_hash = hashlib.sha256(payload_bytes).hexdigest()
-                        if actual_hash != expected_hash:
+                        try:
+                            _verify_payload_hash(expected_hash, payload_bytes, relative_path)
+                        except RuntimeError as exc:
                             from app.security_audit import log_security_event
                             log_security_event("update_install", f"Integrity hash mismatch for '{relative_path}' during update.", "failure")
-                            raise RuntimeError(f"Integrity mismatch: expected {expected_hash}, got {actual_hash}")
+                            raise RuntimeError(str(exc))
                     else:
                         _verify_remote_payload_integrity(remote_info, branch_name, relative_path, payload_bytes, timeout=15)
                 else:

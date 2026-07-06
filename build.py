@@ -42,6 +42,7 @@ SKIP_TASKKILL = os.environ.get("MARTIN_SKIP_TASKKILL", "0") == "1"
 MARTIN_BUILD_TARGET_ENV = "MARTIN_BUILD_TARGET"
 MARTIN_WSL_DISTRO_ENV = "MARTIN_WSL_DISTRO"
 MARTIN_BUILD_PYTHON_ENV = "MARTIN_BUILD_PYTHON"
+MARTIN_MANIFEST_SIGNING_KEY_ENV = "MARTIN_MANIFEST_SIGNING_KEY"
 MAX_OLD_EXE_ARCHIVE = 10
 REQUIRED_BUILD_MODULES = [
     "PIL",
@@ -156,6 +157,22 @@ WINDOWS_RUNTIME_LEGACY_FILES = [
     "settings.json",
     "rates.json",
 ]
+MANIFEST_FILE_PATHS = (
+    REPO_ROOT / "manifest.json",
+    REPO_ROOT / "manifest_dev.json",
+)
+TEXTUAL_MANIFEST_HASH_EXTENSIONS = {
+    ".cfg",
+    ".csv",
+    ".ini",
+    ".json",
+    ".md",
+    ".py",
+    ".toml",
+    ".txt",
+    ".yaml",
+    ".yml",
+}
 
 
 class BuildError(RuntimeError):
@@ -197,6 +214,11 @@ def parse_args():
         "--librarian-only",
         action="store_true",
         help="Refresh the local project librarian snapshot without building an artifact.",
+    )
+    parser.add_argument(
+        "--module-keys",
+        action="store_true",
+        help="Refresh only module payload checksum keys in manifest files, then exit.",
     )
     parser.add_argument(
         "--target",
@@ -433,6 +455,95 @@ def write_sha256_checksum_if_exists(artifact_path):
     if not artifact_path.exists() or not artifact_path.is_file():
         return None
     return write_sha256_checksum_file(artifact_path)
+
+
+def _compute_manifest_artifact_sha256(artifact_path):
+    artifact_path = Path(artifact_path)
+    payload_bytes = artifact_path.read_bytes()
+    if artifact_path.suffix.lower() in TEXTUAL_MANIFEST_HASH_EXTENSIONS:
+        try:
+            payload_text = payload_bytes.decode("utf-8")
+        except UnicodeDecodeError:
+            pass
+        else:
+            normalized_text = payload_text.replace("\r\n", "\n").replace("\r", "\n")
+            payload_bytes = normalized_text.encode("utf-8")
+    return hashlib.sha256(payload_bytes).hexdigest()
+
+
+def _build_manifest_signature(manifest_payload, signing_key_hex):
+    from app.utils.crypto_utils import sign_data
+
+    canonical_payload = {key: value for key, value in manifest_payload.items() if key != "signature"}
+    canonical_bytes = json.dumps(canonical_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return sign_data(signing_key_hex, canonical_bytes)
+
+
+def _is_module_manifest_artifact(relative_path):
+    normalized_path = str(relative_path or "").replace("\\", "/").lstrip("/")
+    return normalized_path.startswith("app/")
+
+
+def refresh_manifest_hashes_for_build(module_only=False):
+    signing_key_hex = os.environ.get(MARTIN_MANIFEST_SIGNING_KEY_ENV, "").strip()
+    signing_enabled = bool(signing_key_hex)
+    updated_manifest_paths = []
+    unsigned_manifest_paths = []
+    updated_artifact_count = 0
+
+    for manifest_path in MANIFEST_FILE_PATHS:
+        if not manifest_path.exists():
+            continue
+
+        with manifest_path.open("r", encoding="utf-8") as handle:
+            manifest_payload = json.load(handle)
+
+        artifacts = manifest_payload.get("artifacts")
+        if not isinstance(artifacts, dict):
+            raise BuildError(f"Manifest at {manifest_path} is missing a valid 'artifacts' object.")
+
+        updated_artifacts = {}
+        for relative_path, artifact_meta in artifacts.items():
+            if module_only and not _is_module_manifest_artifact(relative_path):
+                updated_artifacts[relative_path] = dict(artifact_meta) if isinstance(artifact_meta, dict) else {}
+                continue
+
+            artifact_path = REPO_ROOT / PurePosixPath(str(relative_path).replace("\\", "/"))
+            if not artifact_path.exists() or not artifact_path.is_file():
+                raise BuildError(
+                    f"Manifest artifact path is missing from the repo: {relative_path} (referenced by {manifest_path.name})."
+                )
+
+            artifact_entry = dict(artifact_meta) if isinstance(artifact_meta, dict) else {}
+            artifact_entry["sha256"] = _compute_manifest_artifact_sha256(artifact_path)
+            updated_artifacts[relative_path] = artifact_entry
+            updated_artifact_count += 1
+
+        manifest_payload["artifacts"] = updated_artifacts
+        if signing_enabled:
+            manifest_payload["signature"] = _build_manifest_signature(manifest_payload, signing_key_hex)
+        elif "signature" in manifest_payload:
+            unsigned_manifest_paths.append(manifest_path)
+
+        with manifest_path.open("w", encoding="utf-8", newline="\n") as handle:
+            json.dump(manifest_payload, handle, indent=4)
+            handle.write("\n")
+        updated_manifest_paths.append(manifest_path)
+
+    if updated_manifest_paths:
+        print(
+            "--- Refreshed manifest artifact hashes: "
+            + ", ".join(path.name for path in updated_manifest_paths)
+            + f" ({updated_artifact_count} entries) ---"
+        )
+    if signing_enabled and updated_manifest_paths:
+        print(f"--- Re-signed manifest files with ${MARTIN_MANIFEST_SIGNING_KEY_ENV}. ---")
+    elif unsigned_manifest_paths:
+        print(
+            "--- Manifest signatures were not refreshed "
+            f"(set ${MARTIN_MANIFEST_SIGNING_KEY_ENV} to re-sign). "
+            "Use unsigned dev updates for local override-only workflows. ---"
+        )
 
 
 def _reset_windows_runtime_seed_targets(target_root):
@@ -845,6 +956,7 @@ def invoke_ubuntu_build_via_wsl(wsl_distro=None):
 
 
 def run_windows_build():
+    refresh_manifest_hashes_for_build(module_only=False)
     refresh_symbol_index()
     ensure_python_modules(REQUIRED_BUILD_MODULES)
     pyinstaller_main = importlib.import_module("PyInstaller.__main__")
@@ -874,6 +986,7 @@ def run_windows_build():
 
 
 def run_ubuntu_build_direct():
+    refresh_manifest_hashes_for_build(module_only=False)
     refresh_symbol_index()
     ensure_command_available("dpkg-deb")
     ensure_python_modules(REQUIRED_BUILD_MODULES)
@@ -948,6 +1061,9 @@ def main():
         return
     if args.librarian_only:
         refresh_project_librarian()
+        return
+    if args.module_keys:
+        refresh_manifest_hashes_for_build(module_only=True)
         return
 
     host_platform = detect_host_platform()
