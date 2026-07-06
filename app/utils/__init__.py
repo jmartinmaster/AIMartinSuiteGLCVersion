@@ -25,7 +25,7 @@ DATA_ROOT_RELATIVE_PATH = "data"
 
 
 def source_root_path():
-    return os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
+    return os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir, os.pardir))
 
 
 def bundled_base_path():

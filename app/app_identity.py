@@ -28,7 +28,7 @@ DEB_PACKAGE_NAME = "production-logging-center-glc"
 LEGACY_DEB_NAME = f"{DEB_PACKAGE_NAME}.deb"
 MAIN_FILE_NAME = "main.py"
 DEFAULT_UPDATE_REPOSITORY_URL = "https://github.com/jmartinmaster/AIMartinSuiteGLCVersion.git"
-PUBLISHER_PUBLIC_KEY = "92387f9a868fe7550ad8ff8984024e69104986418963f34a1f9f3b49424f5762"
+PUBLISHER_PUBLIC_KEY = "de7f5ec1c84e76a930b476df44f310c585274a17af4371a23fc9cf3ce9b618f7"
 VERSION_PATTERN = re.compile(r"__version__\s*=\s*[\"']([^\"']+)[\"']")
 VERSIONED_EXE_PATTERN = re.compile(
     rf"^{re.escape(APP_NAME)}_v(?P<version>\d+\.\d+(?:\.\d+)?)\.exe$",
