@@ -24,7 +24,7 @@ from app.models.layout_manager_model import LayoutManagerModel
 from app.views.layout_manager_qt_view import LayoutManagerQtView
 
 __module_name__ = "Layout Manager Qt Controller"
-__version__ = "2.5.0"
+__version__ = "2.5.1"
 
 
 class LayoutManagerQtController:
@@ -1610,10 +1610,18 @@ class LayoutManagerQtController:
             deleted_form = (result or {}).get("deleted_form") or {}
             active_form = (result or {}).get("active_form") or {}
             deleted_form_id = str(deleted_form.get("id") or form_id).strip()
+            load_error = None
             if deleted_form_id == self.loaded_form_id() or active_changed:
-                config, source_path, loaded_form_info = self.model.load_current_config()
-                editor_text = self.model.load_current_text()
-                self.set_loaded_form_state(config, source_path, loaded_form_info)
+                try:
+                    config, source_path, loaded_form_info = self.model.load_current_config()
+                    editor_text = self.model.load_current_text()
+                    self.set_loaded_form_state(config, source_path, loaded_form_info)
+                except ValueError as exc:
+                    load_error = str(exc)
+                    try:
+                        editor_text = self.model.load_current_text()
+                    except Exception:
+                        editor_text = None
             elif active_form:
                 self.set_selected_form_id(active_form.get("id"))
                 editor_text = None
@@ -1624,14 +1632,22 @@ class LayoutManagerQtController:
                 editor_text = None
             self.refresh_forms()
             action_message = f"Deleted form '{form_name}'."
-            if deleted_form_id == self.loaded_form_id() or active_changed:
+            if load_error:
+                self.refresh_view(reason="Deleted form; active form has invalid config", editor_text_override=editor_text)
+                self.set_status_message(
+                    f"{action_message} Warning: active form config is invalid — {load_error}",
+                    error=True,
+                )
+                self._emit_host_toast(action_message, bootstyle="warning")
+            elif deleted_form_id == self.loaded_form_id() or active_changed:
                 self.mark_clean(action_message)
                 if self.embedded and self.dispatcher is not None:
                     self.dispatcher.notify_active_form_changed(source_instance=self, active_form_info=self.current_form_info)
+                self._emit_host_toast(action_message, bootstyle="success")
             else:
                 self.refresh_view(reason="Deleted selected stored form", editor_text_override=editor_text)
                 self.set_status_message(action_message)
-            self._emit_host_toast(action_message, bootstyle="success")
+                self._emit_host_toast(action_message, bootstyle="success")
 
         self._run_busy_action(f"Deleting form '{form_name}'...", _execute)
 
