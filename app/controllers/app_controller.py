@@ -785,9 +785,11 @@ class Dispatcher:
 
     def apply_external_override_policy_change(self):
         current_module_name = self.active_module_name or "settings_manager"
-        self.reset_module_import_state(keep_active=False)
-        self._configure_module_import_paths()
-        self.load_module(current_module_name, use_transition=False)
+        def _deferred_policy_change():
+            self.reset_module_import_state(keep_active=False)
+            self._configure_module_import_paths()
+            self.load_module(current_module_name, use_transition=False)
+        self.call_later(10, _deferred_policy_change)
 
     def remove_external_module_overrides(self, module_names=None, include_bytecode=True):
         from app.security_audit import log_security_event
