@@ -897,7 +897,7 @@ class SettingsManagerQtController:
 
         metadata = {
             "applied_theme": str(self.model.saved_theme or ""),
-            "refresh_runtime_settings": True,
+            "refresh_runtime_settings": False,
             "refresh_downtime_codes": False,
             "apply_external_override_policy_change": bool(trust_changed),
         }
@@ -909,6 +909,7 @@ class SettingsManagerQtController:
                 else "External override trust is disabled. Bundled modules are now preferred again."
             )
             self.show_toast("Developer Tools", trust_message)
+            return
         self.refresh_snapshot(initial=False)
 
     def _apply_saved_runtime_effects(self, metadata):

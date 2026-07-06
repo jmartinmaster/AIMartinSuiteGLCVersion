@@ -21,7 +21,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 
 from app.persistence import write_json_with_backup
-from app.utils import external_path, resource_path
+from app.utils import external_path, legacy_external_path_candidates, resource_path
 
 __module_name__ = "External Data Registry"
 __version__ = "1.0.1"
@@ -154,9 +154,10 @@ class ExternalDataRegistry:
         write_path = os.path.abspath(self.resolve_write_path(key))
         legacy_paths = []
         for relative_path in self.get_spec(key).legacy_relative_paths:
-            candidate_path = os.path.abspath(external_path(relative_path))
-            if candidate_path not in legacy_paths and candidate_path != write_path:
-                legacy_paths.append(candidate_path)
+            for candidate_path in legacy_external_path_candidates(relative_path):
+                normalized_candidate_path = os.path.abspath(candidate_path)
+                if normalized_candidate_path not in legacy_paths and normalized_candidate_path != write_path:
+                    legacy_paths.append(normalized_candidate_path)
         return legacy_paths
 
     def _migrate_adjacent_backup(self, source_path, target_path):

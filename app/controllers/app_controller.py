@@ -955,7 +955,7 @@ class Dispatcher:
                             log_exception("session_change_save.layout_manager", exc)
             
             # Refresh if non-persistent, or if it is form_loader/layout_manager
-            should_refresh = not self.is_module_persistent(active_module) or is_form_loader or is_layout_manager
+            should_refresh = (not self.is_module_persistent(active_module) or is_form_loader or is_layout_manager) and active_module != "settings_manager"
             if should_refresh:
                 # Discard persistent instance if it exists to force clean instantiation
                 self.persistent_module_instances.pop(active_module, None)

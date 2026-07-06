@@ -12,7 +12,7 @@
             "sha256": "d49f9f602b02599a23b5319c00e1a0170904e319a5a0dd4963922791938c3592"
         },
         "app/app_identity.py": {
-            "sha256": "41f611d0cfe51e6fe878431f208d2f4a0e4c43da7969ae5e02f66197d27bc763"
+            "sha256": "020e0bcb00cc6f4899eb4eee4691f6888e650ecc8a73061ec650b963c6d7ad60"
         },
         "app/app_logging.py": {
             "sha256": "80c08782776d971f888cb439952bfd2a6a249413843d623ea085e2510e229cf9"
@@ -42,7 +42,7 @@
             "sha256": "a312d8d1f8a7da1d0306c61fc6584c89f32fea4a24b559d10fa48e886df328da"
         },
         "app/external_data_registry.py": {
-            "sha256": "35e73acd2daa79a08e8d77525930bf0b89515b80966ac4ab14c88d2336d71a2f"
+            "sha256": "488785fbb00e5a76ac4cb3a17880777cea62944af646ffb4a6ee94efd1c5c06d"
         },
         "app/form_definition_registry.py": {
             "sha256": "6f9cc227fedd4c2469e925274cf44e05a76fc29e4a666a252cf1c395b0957490"
@@ -156,7 +156,7 @@
             "sha256": "5f12bb8b5e5a5e8e8616838bbc79b4d74406d47ac2ce8e0aaccf83df9d83dbba"
         },
         "app/security.py": {
-            "sha256": "b325a26cdd14158ef3e8b5d0256f4ff80f0f1c943bfdb047ab58e9d54d03f088"
+            "sha256": "e65ba4fe6c369b60fc503e73ce951552df618028d88813d0ed99e42f15ad1957"
         },
         "app/models/security_model.py": {
             "sha256": "d72857094476b499e943786feb5921910e5ed4062c01d77ad852a669f52e4b02"
@@ -180,7 +180,7 @@
             "sha256": "382dfbd6b6e8ee67808ebb9b436dba39ff2585ca7ad20afc9c24ccfa658808d5"
         },
         "app/controllers/settings_manager_qt_controller.py": {
-            "sha256": "3e7241944378c897918dbc9d484274b60b0edf90a3b1160ddf7f0cce5df0d357"
+            "sha256": "fe77e5e20bf0183ab410c27475e2b49de58c6773d507c55d1e23068a904f8da6"
         },
         "app/models/settings_manager_model.py": {
             "sha256": "0b16f8914dc9dcc8d86b00e4c15ecd2c5b42a0a49b39adec24145cc82d3030f4"

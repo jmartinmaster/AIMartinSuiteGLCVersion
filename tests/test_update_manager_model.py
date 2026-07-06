@@ -29,6 +29,18 @@ class _MockContextManagerResponse:
 
 
 class TestUpdateManagerModel(unittest.TestCase):
+    def test_detect_branch_name_defaults_to_main_for_stable_channel(self):
+        with patch.object(update_manager_model, "_load_external_settings_payload", return_value={"release_channel": "stable"}):
+            self.assertEqual(update_manager_model._detect_branch_name(), "main")
+
+    def test_detect_branch_name_uses_development_branch_for_dev_channel(self):
+        with patch.object(update_manager_model, "_load_external_settings_payload", return_value={"release_channel": "dev"}):
+            self.assertEqual(update_manager_model._detect_branch_name(), "Development")
+
+    def test_detect_branch_name_falls_back_to_stable_for_unknown_channel(self):
+        with patch.object(update_manager_model, "_load_external_settings_payload", return_value={"release_channel": "preview"}):
+            self.assertEqual(update_manager_model._detect_branch_name(), "main")
+
     def test_build_raw_github_url_percent_encodes_spaced_artifact(self):
         url = update_manager_model._build_raw_github_url(
             "jmartinmaster",
