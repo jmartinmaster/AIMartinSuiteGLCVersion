@@ -6,10 +6,10 @@
             "sha256": "32ca13cf3194d6c30d001386d7d08c3812ac9779f803e0e064f9acfb03b2ca47"
         },
         "app/controllers/about_qt_controller.py": {
-            "sha256": "f721f7a21d9bcb3a5ea799f2aa017fe1e601f39f431144ef025d62e5570ee925"
+            "sha256": "8a9d4f855c4d847914d4a427e813bd635bfa4233aba879322ddbf1f941bda7dc"
         },
         "app/views/about_qt_view.py": {
-            "sha256": "42ceafebfa234577cfdae3dc3ce0b5167b37e34e214b19e90932269f79d8ebe5"
+            "sha256": "d49f9f602b02599a23b5319c00e1a0170904e319a5a0dd4963922791938c3592"
         },
         "app/app_identity.py": {
             "sha256": "41f611d0cfe51e6fe878431f208d2f4a0e4c43da7969ae5e02f66197d27bc763"
@@ -24,7 +24,7 @@
             "sha256": "fa86c1d7157d661d0d36a681fa70a6c786a2799b6f5e0261a3a63291578cec58"
         },
         "app/data_handler_service.py": {
-            "sha256": "0ece3062b9cca10c2c40d4a57df8db41d0c9d28a61dd0d1b9ff86ca6cb5afdf4"
+            "sha256": "c2b223aa2ca248e114de09a55199f09e7a585fe3499ce397d9bd19f1b3b5e1ac"
         },
         "app/data_request_worker.py": {
             "sha256": "070eae1b3189be01a74c8937dbb6b741e060019ef206f6f879997afd95c2158e"
@@ -45,7 +45,7 @@
             "sha256": "35e73acd2daa79a08e8d77525930bf0b89515b80966ac4ab14c88d2336d71a2f"
         },
         "app/form_definition_registry.py": {
-            "sha256": "e62b990109a09a8e65c2594cbefb346026fb25e112bf4363ab2d243373ff233c"
+            "sha256": "6f9cc227fedd4c2469e925274cf44e05a76fc29e4a666a252cf1c395b0957490"
         },
         "app/help_viewer.py": {
             "sha256": "48644a2a3002ac110e6d1804dfab0900aee9e6e67d5202e34df6b7679369a676"
@@ -54,7 +54,7 @@
             "sha256": "343bc5f072dd55c0eb3199aa5470dd5b2d047d30c6f2bd1f2c57d0575b06bda6"
         },
         "app/views/help_viewer_qt_view.py": {
-            "sha256": "173854d453c7847b6c8c11fec9d87edaa96351082a25559cd86bdc2b60a97fa9"
+            "sha256": "a728a40f4af7f406f0b3941eff689e7ce79de4dd6965eae884e3dae7c68106c3"
         },
         "app/help_viewer_documents.py": {
             "sha256": "9082a1c0f88f785cae95ff9e1369a51a26435ce3ef809837c85a4dd65eeea352"
@@ -78,16 +78,16 @@
             "sha256": "d2d23d796053a0b40b8b6aab7d6fb2a30243c042d9ecb7d64d9fbd2f37611390"
         },
         "app/layout_manager.py": {
-            "sha256": "a392a80917449d465ae74d18958fd774019016e3ed779a065882fab7332d1a93"
+            "sha256": "c81dc4d58226b2b9752f426af84da9a8f69faed022f54effd937a5ec8c93e3de"
         },
         "app/controllers/layout_manager_qt_controller.py": {
-            "sha256": "202e9e8112e19066f7ae34617296cacc852925c643ba924a218ae47d6750c8dc"
+            "sha256": "3de60732378a61db70626aa5fd64a62b72a3089b71b6781085a4aaceadd46628"
         },
         "app/models/layout_manager_model.py": {
             "sha256": "c60b3d4ba743a3e4a0ec468d7c422cdf24969998a5ccc67788d1bc1bb3485500"
         },
         "app/views/layout_manager_qt_view.py": {
-            "sha256": "c7570ae0ade643e9be3a2ff44c47831f73834c9fe97883fe559cedd48c256d16"
+            "sha256": "5154849c4a1ce1c5093d84399386bb9005485a579422a3684ec3e0c03948be8d"
         },
         "app/layout_manager_dispatcher.py": {
             "sha256": "4b2725bb4e9ca48eabcf0594393ac53cd8e94d81a847b0fadf1501e0c5e7c31b"
@@ -111,7 +111,7 @@
             "sha256": "c166c265698028a200fc1efa49ab9a9f9709d1f81ace1a5ffd98f95e940c4fa5"
         },
         "app/views/production_log_qt_view.py": {
-            "sha256": "547f0d5acc4da62d1eaf439ee1e4b587ed9e1b14dcc42f24e4cc9b9c7aef1a07"
+            "sha256": "f958edcfc2ca1ea543c3f2dd7f1ad153c1fa046996b162d303fbee76c3c15be7"
         },
         "app/production_log_calculations.py": {
             "sha256": "247bae4466d824d4815255c4304ea1f234bf6cf8251c2430330f9dbd860dd499"
@@ -138,7 +138,7 @@
             "sha256": "239b21f132a9bca09b4c8c786032898efcaed45c839ac84c25f468b484b4859b"
         },
         "app/views/rate_manager_qt_view.py": {
-            "sha256": "3466d75b12861dce6c352d2b3e1cf95a1d6ec8715d0a40740ed9bcc098581905"
+            "sha256": "c618b5995e5fa5a37d5490757b5939a1ee449290d8b535ae6f34c8875e950086"
         },
         "app/recovery_viewer.py": {
             "sha256": "f4d5fc1f50de00bd611e094a1a040a4e81b3455c2529fa24e22d5820e587d0e6"
@@ -150,7 +150,7 @@
             "sha256": "532191c256d41290965436d2935517e76e4e0ca8c75d3f9d8e8e79c21f6ef02b"
         },
         "app/views/recovery_viewer_qt_view.py": {
-            "sha256": "5ea2c21d86cfc1ae50fd91a7ecc3f92425d38af44ab714f3d89a1eaa85e17cf1"
+            "sha256": "d3e4d23ca29af013381ca72c63b4972482842164d999ee8c5e61cf03a6e6dba3"
         },
         "app/safe_expression.py": {
             "sha256": "5f12bb8b5e5a5e8e8616838bbc79b4d74406d47ac2ce8e0aaccf83df9d83dbba"
@@ -174,19 +174,19 @@
             "sha256": "9cc3c1697a05d328e001dd4c590ecd73357fc8989b4190db2ad09d29bb966f19"
         },
         "app/settings_diagnostics.py": {
-            "sha256": "e668b69d0fc4452022a0156747518546ad755a4128f92fdbc5024dc6a70ae102"
+            "sha256": "5342b8622b2eab1bbbd9f0a6d4e36e4d9c700d81dfa882d2b902278a55b40360"
         },
         "app/settings_manager.py": {
             "sha256": "382dfbd6b6e8ee67808ebb9b436dba39ff2585ca7ad20afc9c24ccfa658808d5"
         },
         "app/controllers/settings_manager_qt_controller.py": {
-            "sha256": "407759bdaf5fcfbd483c0ff598a2ca2c863e20a0c64262f17afeba40b0d7a856"
+            "sha256": "3e7241944378c897918dbc9d484274b60b0edf90a3b1160ddf7f0cce5df0d357"
         },
         "app/models/settings_manager_model.py": {
-            "sha256": "275f56fbb3b8bad32629ae2d9de8887ea5877d20872e5b1a9ce7ace07fa1567f"
+            "sha256": "0b16f8914dc9dcc8d86b00e4c15ecd2c5b42a0a49b39adec24145cc82d3030f4"
         },
         "app/views/settings_manager_qt_view.py": {
-            "sha256": "a01d066e687623d170cddf2b294782335ae76cd9d9b5b32f144a049aee97bb2e"
+            "sha256": "c18d61a9a6f16c405d62514a05cc92c4b8a4c613c43043756e685d74fdda020d"
         },
         "app/sidecar.py": {
             "sha256": "0c219a41b255c42bb9d9dc91a2616dfdcbdf83511c0d7a33c96c63d004f077c1"
@@ -204,7 +204,7 @@
             "sha256": "13cf6dd0de9d0c2355ce8321deb6d9c334199ba3d4e40a878a85b0df85f84b11"
         },
         "data/config/layout_config.json": {
-            "sha256": "4c366806bbacaed299c31142ef1e334a9dcbfebcc54be9d193cc8c210f84c961"
+            "sha256": "4c8dd29499fbd9b71ee780adaa3b359d5e866d2668c96a655545bc45889f0bc8"
         },
         "data/config/rates.json": {
             "sha256": "0179f715cc2af3c302b20a192c67d10899ec95df4a1840e65860d42db2f83a44"
@@ -243,13 +243,13 @@
             "sha256": "2e9429a400fb79e9e1835090bc6fc6ee8029e58b2020bae838f73178e5a4a77c"
         },
         "docs/help/user_guide_layout_manager.md": {
-            "sha256": "ba077424f714def19f7bb0f23398ade74696923ba1c57bad9472efee88414ae6"
+            "sha256": "03bc2f1020f856a422292b6059f105b1ba5e621c18d1c38619a7493206cac07c"
         },
         "docs/help/user_guide_layout_manager_form_authoring.md": {
             "sha256": "a724ce7e76244879e35cc590a6d84f066084bbcedc92f2754b780f34cf5e34c7"
         },
         "docs/help/user_guide_production_log.md": {
-            "sha256": "66bf3ab491d8a4e68be5dec280b6660102f191da403139257ea801e3bcc08d79"
+            "sha256": "fdfba481dce717dc6fa3d2d961495deace45b07f8591fb83e5c5f2e03bb7cc7b"
         },
         "docs/help/user_guide_rate_manager.md": {
             "sha256": "583650c8feaf755db60bf9828300bc93db8ce026a69b09da62643d3f22b48e37"
@@ -261,7 +261,7 @@
             "sha256": "d0791cac082e0d35088e9cddc245adc8625a8f87497093cf896fdec79e04f365"
         },
         "docs/help/user_guide_update_manager.md": {
-            "sha256": "b3c1f001938e68e548b1e7197a42e2384b4f5c47c6798bd84b4b63a9eb0e0801"
+            "sha256": "a7a7f6c66eaf5bcf2212079f4c4ba0dc0bad1fbe5d59e6e3fc493143b90deca5"
         },
         "docs/legal/LICENSE.txt": {
             "sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
@@ -270,5 +270,5 @@
             "sha256": "18e536b0e6f84fc080981cdc5a43072ad809360d3e0d5c648644aebbe22b4e78"
         }
     },
-    "signature": "973708c6e98f7f00c68306b377e634736845eefb74268deb1d95ab226dcf0a2545fa5f4ccd699710345b3e48393886e978f587d1ea4c2cc26b8f8f23eb6fc608"
+    "signature": "d34ee8b0efdfc471de5fa2308a9c52bcb846aa506f88668c4db6de43415abdab41f8c57cf8d17d560bd9927aed29526c40d4cc037354e13348b142861d385d0e"
 }
