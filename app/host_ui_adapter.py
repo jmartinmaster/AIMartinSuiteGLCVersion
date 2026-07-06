@@ -70,7 +70,7 @@ class _QtMainThreadInvoker(QObject if QObject is not None else object):
         if QObject is not None:
             super().__init__(parent)
         if pyqtSignal is not None:
-            self.invoke_callback.connect(self._invoke_callback)
+            self.invoke_callback.connect(self._invoke_callback, type=Qt.ConnectionType.QueuedConnection)
             self.invoke_delayed_callback.connect(self._invoke_delayed_callback)
 
     def _invoke_callback(self, callback):

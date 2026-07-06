@@ -27,11 +27,13 @@ Use the **Settings Manager** to configure application defaults and manage securi
 
 ## Security Settings
 
-Under **Manage Security**, authenticated administrators can manage access:
+Under **Manage Security**:
 
 - **Vault Management**: Rotate password keys and manage encrypted data.
-- **Non-secure Mode**: A setting to bypass authentication checks (intended
-  only for controlled administrative environments).
+- **Non-secure Mode**: **Enabled by default** and grants full app access
+  without authentication prompts.
+- **Secure Mode**: Turn non-secure mode off to enforce vault authentication
+  and rights checks.
 - **Reset Security Storage**: A destructive operation that deletes all security
   vault data. To execute, you must type `RESET` and re-enter your password.
 

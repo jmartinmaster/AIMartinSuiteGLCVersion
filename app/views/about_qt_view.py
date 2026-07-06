@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 __module_name__ = "About Qt View"
-__version__ = "1.0.3"
+__version__ = "2.5.0"
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
@@ -100,12 +100,13 @@ class AboutQtView(QMainWindow):
         open_license_button.setAccessibleDescription("Opens the bundled GNU GPL license document in a text editor.")
         controls_layout.addWidget(open_license_button)
 
-        repack_button = QPushButton("Repack Suite")
-        repack_button.clicked.connect(self.controller.request_repack)
-        repack_button.setEnabled(bool(self.payload.get("can_repack")))
-        repack_button.setAccessibleName("Repack Suite button")
-        repack_button.setAccessibleDescription("Regenerates the versioned suite ZIP archive from the active directory.")
-        controls_layout.addWidget(repack_button)
+        report_github_button = QPushButton("Report to GitHub")
+        report_github_button.clicked.connect(self.controller.open_github_issues)
+        report_github_button.setAccessibleName("Report to GitHub button")
+        report_github_button.setAccessibleDescription("Opens the upstream GitHub repository to report general issues.")
+        report_github_button.setVisible(bool(self.payload.get("has_developer_access", False)))
+        controls_layout.addWidget(report_github_button)
+        
         controls_layout.addStretch(1)
         root_layout.addLayout(controls_layout)
 

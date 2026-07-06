@@ -19,7 +19,7 @@ from app.downtime_codes import get_code_options, get_generic_options
 from app.theme_manager import get_qt_palette, get_qt_stylesheet
 
 __module_name__ = "Form Loader Qt View"
-__version__ = "1.4.2"
+__version__ = "2.5.0"
 
 from PyQt6.QtCore import QTimer, Qt
 from PyQt6.QtWidgets import (
@@ -115,7 +115,7 @@ class ProductionLogQtView(QMainWindow):
         self.action_buttons = []
         self.production_table = None
         self.downtime_table = None
-        self.has_unsaved_changes = False
+        self._has_unsaved_changes_flag = False
         self.last_export_path = None
         self.export_mode = "excel"
         self._suspend_dirty_tracking = False
@@ -1490,6 +1490,26 @@ class ProductionLogQtView(QMainWindow):
     def show_toast(self, title, message, bootstyle=None):
         self.controller.show_toast(title, message, bootstyle)
 
+    @property
+    def has_unsaved_changes(self):
+        if not self._has_unsaved_changes_flag:
+            return False
+        serializer = getattr(self.controller, "serialize_ui_data", None)
+        if callable(serializer):
+            try:
+                current_signature = serializer(self.collect_form_data())
+                last_sig = getattr(self, "last_saved_signature", None)
+                if current_signature == last_sig:
+                    self._has_unsaved_changes_flag = False
+                    return False
+            except Exception:
+                pass
+        return True
+
+    @has_unsaved_changes.setter
+    def has_unsaved_changes(self, value):
+        self._has_unsaved_changes_flag = bool(value)
+
     def mark_dirty(self):
         self.has_unsaved_changes = True
 
@@ -1550,7 +1570,7 @@ class ProductionLogQtView(QMainWindow):
 
         # Responsive stacking of action panel based on viewport width
         if viewport_width > 0:
-            use_vertical = viewport_width < 800
+            use_vertical = viewport_width < 550
             if use_vertical != getattr(self, "_action_panel_vertical", None):
                 self._action_panel_vertical = use_vertical
                 self.action_panel_layout.removeWidget(self.draft_group)
@@ -1580,3 +1600,7 @@ class ProductionLogQtView(QMainWindow):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._apply_responsive_layout()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        QTimer.singleShot(50, self._apply_responsive_layout)

@@ -111,5 +111,6 @@ and options for the application.
 
 - **Best Practice**: Always use the **Settings Manager** visual tool inside the
   app rather than editing this file manually to prevent errors.
-- Admin security options and module trust keys are stored separately and cannot
-  be edited inside `settings.json`.
+- Security mode and vault configuration are stored separately under
+  `data/security/` (not in `settings.json`). Current default behavior is
+  non-secure mode enabled unless changed in Security Admin.

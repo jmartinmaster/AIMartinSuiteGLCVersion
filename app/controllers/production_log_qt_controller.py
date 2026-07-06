@@ -23,7 +23,7 @@ from app.models.production_log_model import BALANCE_DOWNTIME_CAUSE, ProductionLo
 from app.views.production_log_qt_view import ProductionLogQtView
 
 __module_name__ = "Form Loader Qt Controller"
-__version__ = "1.4.1"
+__version__ = "2.5.0"
 
 
 class ProductionLogQtController:
@@ -759,126 +759,139 @@ class ProductionLogQtController:
         )
 
     def calculate_metrics(self, silent=False):
-        data = self.collect_ui_data()
-        header_payload = dict(data.get(self.header_section_id) or data.get("header") or {})
-        production_rows = list(data.get(self.production_section_id) or data.get("production") or [])
-        downtime_rows = list(data.get(self.downtime_section_id) or data.get("downtime") or [])
+        import time
+        start_time = time.perf_counter()
+        try:
+            data = self.collect_ui_data()
+            header_payload = dict(data.get(self.header_section_id) or data.get("header") or {})
+            production_rows = list(data.get(self.production_section_id) or data.get("production") or [])
+            downtime_rows = list(data.get(self.downtime_section_id) or data.get("downtime") or [])
 
-        rates_data = self.model.load_rates_data()
-        goal_value = self.model.get_global_goal_rate(
-            self._header_value_by_role(header_payload, "goal_rate", fallback_id="goal_mph", default="240")
-        )
+            rates_data = self.model.load_rates_data()
+            goal_value = self.model.get_global_goal_rate(
+                self._header_value_by_role(header_payload, "goal_rate", fallback_id="goal_mph", default="240")
+            )
 
-        production_duration_role = self.model.get_display_target("production_minutes_role", "duration_minutes")
-        downtime_duration_role = self.model.get_display_target("downtime_minutes_role", "duration_minutes")
-        efficiency_header_role = self.model.get_display_target("efficiency_header_role", "efficiency_pct")
-        ghost_display_mode = self.model.get_display_target("ghost_display_mode", "metrics_only")
-        ghost_header_role = self.model.get_display_target("ghost_header_role", "target_time")
+            production_duration_role = self.model.get_display_target("production_minutes_role", "duration_minutes")
+            downtime_duration_role = self.model.get_display_target("downtime_minutes_role", "duration_minutes")
+            efficiency_header_role = self.model.get_display_target("efficiency_header_role", "efficiency_pct")
+            ghost_display_mode = self.model.get_display_target("ghost_display_mode", "metrics_only")
+            ghost_header_role = self.model.get_display_target("ghost_header_role", "target_time")
 
-        total_molds = 0
-        production_total_minutes = 0
-        for row_index, row_payload in enumerate(production_rows):
-            part_number = self._row_value_by_role(row_payload, self.production_section_id, "part_number", fallback_id="part_number")
-            molds_value = self._row_value_by_role(row_payload, self.production_section_id, "mold_count", fallback_id="molds")
+            total_molds = 0
+            production_total_minutes = 0
+            for row_index, row_payload in enumerate(production_rows):
+                part_number = self._row_value_by_role(row_payload, self.production_section_id, "part_number", fallback_id="part_number")
+                molds_value = self._row_value_by_role(row_payload, self.production_section_id, "mold_count", fallback_id="molds")
 
-            # Determine if rate override checkbox is enabled/checked
-            override_val = self._row_value_by_role(row_payload, self.production_section_id, "rate_override_toggle", fallback_id="rate_override_enabled")
-            override_enabled = str(override_val).strip().lower() in ("true", "1", "yes", "on")
-
-            rate_value = self._row_value_by_role(row_payload, self.production_section_id, "rate_value", fallback_id="rate_lookup")
-            try:
-                rate = float(str(rate_value).strip()) if str(rate_value).strip() else None
-            except Exception:
-                rate = None
-
-            # Look up rate if override is disabled OR if override is enabled but no custom rate has been entered
-            if not override_enabled or rate is None:
-                lookup_rate = self.model.resolve_lookup_rate(part_number, rates_data, goal_value)
-                if not override_enabled:
-                    # Force overwrite to the lookup rate
-                    rate = lookup_rate
-                else:
-                    # Override is enabled, but rate is None, so default to lookup_rate
-                    if rate is None:
-                        rate = lookup_rate
-
+                # Determine if rate override checkbox is enabled/checked
+                override_val = self._row_value_by_role(row_payload, self.production_section_id, "rate_override_toggle", fallback_id="rate_override_enabled")
                 rate_field_id = self.model.get_section_field_id_by_role(
                     self.production_section_id,
-                    "rate_value",
+                    "cycle_rate",
                     config=self.layout_config,
-                    fallback_id="rate_lookup",
+                    fallback_id="rate",
                 )
-                formatted_lookup = self.model.format_rate_value(rate) if rate is not None else ""
-                if str(rate_value).strip() != formatted_lookup:
-                    self.view.set_table_field_value(
-                        self.production_section_id,
-                        row_index,
-                        rate_field_id,
-                        formatted_lookup,
+                rate_value = self._row_value_by_role(row_payload, self.production_section_id, "cycle_rate", fallback_id="rate")
+                override_checked = False
+                if override_val is not None:
+                    try:
+                        override_checked = str(override_val).strip().lower() in ("true", "1")
+                    except Exception:
+                        override_checked = False
+
+                rate = None
+                if override_checked:
+                    try:
+                        rate = float(rate_value)
+                    except (ValueError, TypeError):
+                        rate = None
+                else:
+                    rate = self.model.lookup_rate(
+                        rates_data,
+                        self._header_value_by_role(header_payload, "machine_number", fallback_id="machine", default=""),
+                        part_number,
                     )
+                    formatted_lookup = self.model.format_rate_value(rate) if rate is not None else ""
+                    if str(rate_value).strip() != formatted_lookup:
+                        self.view.set_table_field_value(
+                            self.production_section_id,
+                            row_index,
+                            rate_field_id,
+                            formatted_lookup,
+                        )
 
-            minutes = self.model.calculate_production_minutes(molds_value, rate)
-            production_total_minutes += minutes
-            duration_field_id = self.model.get_section_field_id_by_role(
-                self.production_section_id,
-                production_duration_role,
+                minutes = self.model.calculate_production_minutes(molds_value, rate)
+                production_total_minutes += minutes
+                duration_field_id = self.model.get_section_field_id_by_role(
+                    self.production_section_id,
+                    production_duration_role,
+                    config=self.layout_config,
+                    fallback_id="time_calc",
+                )
+                self.view.set_table_field_value(self.production_section_id, row_index, duration_field_id, f"{minutes} min")
+                total_molds += self.model.calculate_total_molds([molds_value])
+
+            downtime_total_minutes = 0
+            for row_index, row_payload in enumerate(downtime_rows):
+                start_value = self._row_value_by_role(row_payload, self.downtime_section_id, "start_clock", fallback_id="start")
+                stop_value = self._row_value_by_role(row_payload, self.downtime_section_id, "stop_clock", fallback_id="stop")
+                duration_minutes = self.model.calculate_clock_duration_minutes(start_value, stop_value)
+                duration_text = "--" if duration_minutes is None else f"{duration_minutes} min"
+                if duration_minutes is not None:
+                    downtime_total_minutes += duration_minutes
+                duration_field_id = self.model.get_section_field_id_by_role(
+                    self.downtime_section_id,
+                    downtime_duration_role,
+                    config=self.layout_config,
+                    fallback_id="time_calc",
+                )
+                self.view.set_table_field_value(self.downtime_section_id, row_index, duration_field_id, duration_text)
+
+            total_molds_field_id = self.model.get_header_field_id_by_role(
+                "total_molds",
                 config=self.layout_config,
-                fallback_id="time_calc",
+                fallback_id="total_molds",
             )
-            self.view.set_table_field_value(self.production_section_id, row_index, duration_field_id, f"{minutes} min")
-            total_molds += self.model.calculate_total_molds([molds_value])
+            self.view.set_header_field_value(total_molds_field_id, str(total_molds))
 
-        downtime_total_minutes = 0
-        for row_index, row_payload in enumerate(downtime_rows):
-            start_value = self._row_value_by_role(row_payload, self.downtime_section_id, "start_clock", fallback_id="start")
-            stop_value = self._row_value_by_role(row_payload, self.downtime_section_id, "stop_clock", fallback_id="stop")
-            duration_minutes = self.model.calculate_clock_duration_minutes(start_value, stop_value)
-            duration_text = "--" if duration_minutes is None else f"{duration_minutes} min"
-            if duration_minutes is not None:
-                downtime_total_minutes += duration_minutes
-            duration_field_id = self.model.get_section_field_id_by_role(
-                self.downtime_section_id,
-                downtime_duration_role,
+            hours_value = self._header_value_by_role(header_payload, "shift_hours", fallback_id="hours", default="8")
+            shift_total_minutes = self.model.calculate_shift_total_minutes(hours_value)
+            ghost_minutes = self.model.calculate_ghost_minutes(
+                shift_total_minutes,
+                production_total_minutes,
+                downtime_total_minutes,
+            )
+            self.balance_state["displayed_ghost_minutes"] = int(ghost_minutes)
+            efficiency = self.model.calculate_efficiency(total_molds, hours_value, goal_value)
+            self.view.set_metrics(efficiency, ghost_minutes)
+
+            efficiency_field_id = self.model.get_header_field_id_by_role(
+                efficiency_header_role,
                 config=self.layout_config,
-                fallback_id="time_calc",
+                fallback_id="eff_pct",
             )
-            self.view.set_table_field_value(self.downtime_section_id, row_index, duration_field_id, duration_text)
+            self.view.set_header_field_value(efficiency_field_id, f"{float(efficiency):.2f}")
 
-        total_molds_field_id = self.model.get_header_field_id_by_role(
-            "total_molds",
-            config=self.layout_config,
-            fallback_id="total_molds",
-        )
-        self.view.set_header_field_value(total_molds_field_id, str(total_molds))
+            if ghost_display_mode in {"header_only", "metrics_and_header"}:
+                ghost_field_id = self.model.get_header_field_id_by_role(
+                    ghost_header_role,
+                    config=self.layout_config,
+                    fallback_id="target_time",
+                )
+                self.view.set_header_field_value(ghost_field_id, f"{int(ghost_minutes)} min")
 
-        hours_value = self._header_value_by_role(header_payload, "shift_hours", fallback_id="hours", default="8")
-        shift_total_minutes = self.model.calculate_shift_total_minutes(hours_value)
-        ghost_minutes = self.model.calculate_ghost_minutes(
-            shift_total_minutes,
-            production_total_minutes,
-            downtime_total_minutes,
-        )
-        self.balance_state["displayed_ghost_minutes"] = int(ghost_minutes)
-        efficiency = self.model.calculate_efficiency(total_molds, hours_value, goal_value)
-        self.view.set_metrics(efficiency, ghost_minutes)
-
-        efficiency_field_id = self.model.get_header_field_id_by_role(
-            efficiency_header_role,
-            config=self.layout_config,
-            fallback_id="eff_pct",
-        )
-        self.view.set_header_field_value(efficiency_field_id, f"{float(efficiency):.2f}")
-
-        if ghost_display_mode in {"header_only", "metrics_and_header"}:
-            ghost_field_id = self.model.get_header_field_id_by_role(
-                ghost_header_role,
-                config=self.layout_config,
-                fallback_id="target_time",
-            )
-            self.view.set_header_field_value(ghost_field_id, f"{int(ghost_minutes)} min")
-
-        if not silent:
-            self.view.set_status("Calculated production metrics.")
+            if not silent:
+                self.view.set_status("Calculated production metrics.")
+        finally:
+            recalc_time = time.perf_counter() - start_time
+            if self.dispatcher is not None:
+                if not hasattr(self.dispatcher, "_recalc_timings"):
+                    self.dispatcher._recalc_timings = {}
+                if "calculate_metrics" not in self.dispatcher._recalc_timings:
+                    self.dispatcher._recalc_timings["calculate_metrics"] = {"total_time": 0.0, "count": 0}
+                self.dispatcher._recalc_timings["calculate_metrics"]["total_time"] += recalc_time
+                self.dispatcher._recalc_timings["calculate_metrics"]["count"] += 1
 
     def export_to_excel(self):
         self.calculate_metrics()

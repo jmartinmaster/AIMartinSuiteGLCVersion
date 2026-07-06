@@ -32,7 +32,8 @@ from app.theme_manager import DEFAULT_THEME, normalize_theme
 from app.utils import external_path
 
 __module_name__ = "Application Shell"
-__version__ = "2.1.6"
+__version__ = "2.5.0"
+PROTECTED_OVERRIDE_MODULES = {"layout_manager", "settings_manager", "rate_manager", "update_manager"}
 
 
 @dataclass
@@ -180,6 +181,8 @@ class AppModel:
         hashes_match = bool(stored_hashes) and current_hashes == stored_hashes
         verified = hashes_match
         approved = bool(module_record.get("approved", False)) and verified
+        
+        reason = ""
         if not hashes_match:
             reason = (
                 "External override files changed and no longer match the recorded integrity hashes. "
@@ -188,7 +191,38 @@ class AppModel:
         elif not approved:
             reason = "External override integrity is recorded, but developer approval is still required for loading."
         else:
-            reason = "External override hashes are verified and approved."
+            strict_protected_policy = bool(self.settings.get("strict_protected_override_policy", True))
+            require_dual = bool(self.settings.get("require_dual_override_approval", False))
+            ttl_days = int(self.settings.get("override_ttl_days", 0))
+            if strict_protected_policy and module_key in PROTECTED_OVERRIDE_MODULES:
+                require_dual = True
+                ttl_days = max(1, ttl_days)
+
+            # Check TTL expiry
+            if ttl_days > 0:
+                approved_at_str = module_record.get("approved_at")
+                if approved_at_str:
+                    try:
+                        approved_at = datetime.fromisoformat(approved_at_str.rstrip("Z"))
+                        age = datetime.utcnow() - approved_at
+                        if age.days >= ttl_days:
+                            approved = False
+                            reason = f"Approved override expired (exceeded TTL of {ttl_days} days)."
+                    except Exception:
+                        approved = False
+                        reason = "Approved override has invalid approved_at timestamp."
+            
+            # Check dual-approval
+            if approved:
+                if require_dual:
+                    approvers = module_record.get("approved_by_list") or []
+                    if len(approvers) < 2:
+                        approved = False
+                        reason = f"Approved override requires dual-approval (currently has {len(approvers)} approvals)."
+
+            if approved:
+                reason = "External override hashes are verified and approved."
+
         return {
             "has_override": True,
             "verified": verified,
@@ -198,7 +232,7 @@ class AppModel:
             "reason": reason,
         }
 
-    def approve_override_hashes(self, module_name, file_hashes):
+    def approve_override_hashes(self, module_name, file_hashes, approver=None):
         module_key = str(module_name or "").strip()
         if not module_key:
             raise ValueError("module_name is required to approve override hashes.")
@@ -216,12 +250,21 @@ class AppModel:
         policy = self._load_integrity_policy()
         module_records = policy.setdefault("module_records", {})
         existing_record = dict(module_records.get(module_key) or {})
+        
+        approvers = list(existing_record.get("approved_by_list") or [])
+        if approver:
+            approver_str = str(approver).strip()
+            if approver_str and approver_str not in approvers:
+                approvers.append(approver_str)
+                
         module_records[module_key] = {
             "hashes": normalized_hashes,
             "source": str(existing_record.get("source") or "manual_approval"),
             "repository_url": str(existing_record.get("repository_url") or "").strip(),
             "branch_name": str(existing_record.get("branch_name") or "").strip(),
             "approved": True,
+            "approved_by_list": approvers,
+            "approved_by": ", ".join(approvers),
             "updated_at": self._utc_timestamp(),
             "approved_at": self._utc_timestamp(),
         }
@@ -491,6 +534,15 @@ class AppModel:
 
         settings["enable_screen_transitions"] = bool(settings.get("enable_screen_transitions", True))
         settings["enable_module_update_notifications"] = bool(settings.get("enable_module_update_notifications", True))
+        settings["allow_unsigned_dev_updates"] = bool(settings.get("allow_unsigned_dev_updates", False))
+        settings["require_dual_override_approval"] = bool(settings.get("require_dual_override_approval", False))
+        settings["strict_protected_override_policy"] = bool(settings.get("strict_protected_override_policy", True))
+        release_channel = str(settings.get("release_channel", "stable") or "stable").strip().lower()
+        settings["release_channel"] = release_channel if release_channel in {"stable", "dev"} else "stable"
+        try:
+            settings["override_ttl_days"] = max(0, int(settings.get("override_ttl_days", 0)))
+        except Exception:
+            settings["override_ttl_days"] = 0
         try:
             settings["screen_transition_duration_ms"] = max(0, min(500, int(settings.get("screen_transition_duration_ms", 360))))
         except Exception:

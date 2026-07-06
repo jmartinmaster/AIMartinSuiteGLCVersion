@@ -17,7 +17,7 @@ from app.models.security_model import MODULE_ACCESS_RIGHTS
 from app.security import gatekeeper
 
 __module_name__ = "Security Service"
-__version__ = "2.2.0"
+__version__ = "2.5.0"
 
 
 class SecurityService:
@@ -58,13 +58,12 @@ class SecurityService:
         return gatekeeper.has_right(right_key)
 
     def can_access_module(self, module_name):
+        if self.is_non_secure_mode_enabled():
+            return True
         if not self.requires_authentication(module_name):
             return True
         allowed_roles = self.get_module_allowed_roles(module_name)
         required_right = self.get_module_access_right(module_name)
-        if self.is_non_secure_mode_enabled() and gatekeeper.is_non_secure_module_bypassed(module_name):
-            if not isinstance(required_right, str) or required_right.startswith("module:"):
-                return True
         session = self.get_session()
         if session is None:
             return False
@@ -73,11 +72,11 @@ class SecurityService:
         return gatekeeper.has_right(required_right)
 
     def is_module_visible(self, module_name):
+        if self.is_non_secure_mode_enabled():
+            return True
         if not self.requires_authentication(module_name):
             return True
         allowed_roles = self.get_module_allowed_roles(module_name)
-        if self.is_non_secure_mode_enabled() and not allowed_roles:
-            return True
         if module_name in self.hidden_modules:
             return self.can_access_module(module_name)
         if self.get_session() is None:
@@ -94,13 +93,12 @@ class SecurityService:
         return gatekeeper.is_external_module_override_trust_enabled()
 
     def authenticate_module(self, module_name, parent=None, reason=None, force_reauth=False):
+        if self.is_non_secure_mode_enabled() and not force_reauth:
+            return True
         if not self.requires_authentication(module_name):
             return True
         allowed_roles = self.get_module_allowed_roles(module_name)
         required_right = self.get_module_access_right(module_name)
-        if self.is_non_secure_mode_enabled() and gatekeeper.is_non_secure_module_bypassed(module_name):
-            if not isinstance(required_right, str) or required_right.startswith("module:"):
-                return True
         prompt_reason = reason or f"Unlock {str(module_name).replace('_', ' ').title()} to continue."
         return gatekeeper.authenticate(
             required_right=required_right,

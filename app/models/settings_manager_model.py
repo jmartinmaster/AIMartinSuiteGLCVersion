@@ -32,7 +32,7 @@ from app.utils import external_data_path
 
 
 __module_name__ = "Settings Manager"
-__version__ = "1.0.2"
+__version__ = "2.5.0"
 
 PATH_OVERRIDE_DEFINITIONS = (
     {
@@ -303,9 +303,14 @@ class SettingsManagerModel:
         settings["ui_shell_backend"] = normalized_shell_backend
         settings["backup_policy"] = self.normalize_backup_policy(settings.get("backup_policy"))
         settings["enable_advanced_dev_updates"] = bool(settings.get("enable_advanced_dev_updates", False))
+        settings["allow_unsigned_dev_updates"] = bool(settings.get("allow_unsigned_dev_updates", False))
+        settings["require_dual_override_approval"] = bool(settings.get("require_dual_override_approval", False))
+        settings["strict_protected_override_policy"] = bool(settings.get("strict_protected_override_policy", True))
         settings["enable_screen_transitions"] = bool(settings.get("enable_screen_transitions", True))
         settings["enable_module_update_notifications"] = bool(settings.get("enable_module_update_notifications", True))
         settings["organize_exports_by_date"] = bool(settings.get("organize_exports_by_date", True))
+        release_channel = str(settings.get("release_channel", "stable") or "stable").strip().lower()
+        settings["release_channel"] = release_channel if release_channel in {"stable", "dev"} else "stable"
 
         try:
             settings["screen_transition_duration_ms"] = max(0, min(500, int(settings.get("screen_transition_duration_ms", 360))))
@@ -331,6 +336,11 @@ class SettingsManagerModel:
             settings["default_goal_mph"] = float(settings.get("default_goal_mph", 240))
         except Exception:
             settings["default_goal_mph"] = 240.0
+
+        try:
+            settings["override_ttl_days"] = max(0, int(settings.get("override_ttl_days", 0)))
+        except Exception:
+            settings["override_ttl_days"] = 0
 
         settings["update_repository_url"] = str(settings.get("update_repository_url", DEFAULT_UPDATE_REPOSITORY_URL) or "").strip().strip("'\"")
         default_export_directory = self._default_export_directory_setting()
@@ -422,6 +432,7 @@ class SettingsManagerModel:
             "default_goal_mph",
             "toast_duration_sec",
             "screen_transition_duration_ms",
+            "override_ttl_days",
         ]
         for key in numeric_fields:
             value = settings.get(key)

@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 __module_name__ = "Settings Manager Qt View"
-__version__ = "1.8.4"
+__version__ = "2.5.0"
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
@@ -61,6 +61,8 @@ class SettingsManagerQtView(QMainWindow):
         self.theme_combo = None
         self.theme_status_label = None
         self.export_directory_input = None
+        self.developer_name_input = None
+        self.developer_email_input = None
         self.toast_duration_spin = None
         self.auto_save_spin = None
         self.transition_enabled_checkbox = None
@@ -94,6 +96,10 @@ class SettingsManagerQtView(QMainWindow):
         self.developer_repository_input = None
         self.developer_advanced_checkbox = None
         self.developer_trust_checkbox = None
+        self.developer_release_channel_combo = None
+        self.developer_override_ttl_spin = None
+        self.developer_dual_approval_checkbox = None
+        self.developer_protected_policy_checkbox = None
         self.developer_status_label = None
         self.developer_runtime_settings_path_label = None
         self.developer_runtime_override_inputs = {}
@@ -205,6 +211,18 @@ class SettingsManagerQtView(QMainWindow):
         browse_export_button.setAccessibleDescription("Opens a system directory picker to select the export directory.")
         export_row_layout.addWidget(browse_export_button)
         editable_layout.addRow(QLabel("Export Directory"), export_row)
+        
+        self.developer_name_input = QLineEdit()
+        self.developer_name_input.textChanged.connect(self._on_form_changed)
+        self.developer_name_input.setAccessibleName("Developer Name")
+        self.developer_name_input.setAccessibleDescription("Local developer name displayed in Software Information.")
+        editable_layout.addRow(QLabel("Developer Name"), self.developer_name_input)
+
+        self.developer_email_input = QLineEdit()
+        self.developer_email_input.textChanged.connect(self._on_form_changed)
+        self.developer_email_input.setAccessibleName("Developer Email")
+        self.developer_email_input.setAccessibleDescription("Local developer email used for reporting problems.")
+        editable_layout.addRow(QLabel("Developer Email"), self.developer_email_input)
 
         self.organize_exports_checkbox = QCheckBox("Organize exports by date")
         self.organize_exports_checkbox.stateChanged.connect(self._on_form_changed)
@@ -338,18 +356,18 @@ class SettingsManagerQtView(QMainWindow):
         self.security_rights_container = rights_container
         self.security_rights_layout = rights_layout
 
-        self.security_non_secure_checkbox = QCheckBox("Enable persisted non-secure mode (for selected modules)")
+        self.security_non_secure_checkbox = QCheckBox("Enable persisted non-secure mode (full app access)")
         self.security_non_secure_checkbox.stateChanged.connect(self._on_form_changed)
         self.security_non_secure_checkbox.setAccessibleName("Enable persisted non-secure mode")
-        self.security_non_secure_checkbox.setAccessibleDescription("Allows selected whitelisted modules to bypass password logins.")
+        self.security_non_secure_checkbox.setAccessibleDescription("Disables authentication prompts and grants full app access while enabled.")
         security_form.addRow(QLabel("Security Mode"), self.security_non_secure_checkbox)
 
         self.security_non_secure_modules_list = QListWidget()
         self.security_non_secure_modules_list.setSelectionMode(QListWidget.SelectionMode.MultiSelection)
         self.security_non_secure_modules_list.itemSelectionChanged.connect(self._on_form_changed)
-        self.security_non_secure_modules_list.setAccessibleName("Non-secure bypass modules list")
-        self.security_non_secure_modules_list.setAccessibleDescription("Select modules that bypass security authentication.")
-        security_form.addRow(QLabel("Non-Secure Bypass Modules"), self.security_non_secure_modules_list)
+        self.security_non_secure_modules_list.setAccessibleName("Legacy non-secure bypass modules list")
+        self.security_non_secure_modules_list.setAccessibleDescription("Legacy list retained for compatibility and ignored when full-access non-secure mode is enabled.")
+        security_form.addRow(QLabel("Legacy Bypass Modules (Ignored)"), self.security_non_secure_modules_list)
 
         security_actions_row_1 = QHBoxLayout()
         new_vault_button = QPushButton("New Vault")
@@ -428,6 +446,41 @@ class SettingsManagerQtView(QMainWindow):
         self.developer_trust_checkbox.setAccessibleName("Enable external module override trust")
         self.developer_trust_checkbox.setAccessibleDescription("Enables execution of local override Python files placed beside the application.")
         developer_layout.addRow(QLabel("Override Trust"), self.developer_trust_checkbox)
+
+        self.developer_bypass_gating_checkbox = QCheckBox("Bypass update manifest signature check")
+        self.developer_bypass_gating_checkbox.stateChanged.connect(self._on_form_changed)
+        self.developer_bypass_gating_checkbox.setAccessibleName("Bypass update manifest signature check")
+        self.developer_bypass_gating_checkbox.setAccessibleDescription("Bypasses signature verification gating on update packages for local development.")
+        developer_layout.addRow(QLabel("Bypass Updates Gating"), self.developer_bypass_gating_checkbox)
+
+        self.developer_release_channel_combo = QComboBox()
+        self.developer_release_channel_combo.addItem("Stable", "stable")
+        self.developer_release_channel_combo.addItem("Dev", "dev")
+        self.developer_release_channel_combo.currentIndexChanged.connect(self._on_form_changed)
+        self.developer_release_channel_combo.setAccessibleName("Release channel")
+        self.developer_release_channel_combo.setAccessibleDescription("Select whether update checks should target the stable or dev release channel.")
+        developer_layout.addRow(QLabel("Release Channel"), self.developer_release_channel_combo)
+
+        self.developer_override_ttl_spin = QSpinBox()
+        self.developer_override_ttl_spin.setRange(0, 365)
+        self.developer_override_ttl_spin.setSuffix(" day(s)")
+        self.developer_override_ttl_spin.setSpecialValueText("No expiry")
+        self.developer_override_ttl_spin.valueChanged.connect(self._on_form_changed)
+        self.developer_override_ttl_spin.setAccessibleName("Override approval TTL")
+        self.developer_override_ttl_spin.setAccessibleDescription("Number of days before override approvals expire. Zero means no expiry.")
+        developer_layout.addRow(QLabel("Override Approval TTL"), self.developer_override_ttl_spin)
+
+        self.developer_dual_approval_checkbox = QCheckBox("Require dual-approval for override activation")
+        self.developer_dual_approval_checkbox.stateChanged.connect(self._on_form_changed)
+        self.developer_dual_approval_checkbox.setAccessibleName("Require dual approval")
+        self.developer_dual_approval_checkbox.setAccessibleDescription("Requires two distinct approvers before override payloads are considered approved.")
+        developer_layout.addRow(QLabel("Dual Approval"), self.developer_dual_approval_checkbox)
+
+        self.developer_protected_policy_checkbox = QCheckBox("Enforce stricter policy for protected modules")
+        self.developer_protected_policy_checkbox.stateChanged.connect(self._on_form_changed)
+        self.developer_protected_policy_checkbox.setAccessibleName("Protected module strict policy")
+        self.developer_protected_policy_checkbox.setAccessibleDescription("For protected modules, always require dual approval and enforce at least one day TTL.")
+        developer_layout.addRow(QLabel("Protected Modules Policy"), self.developer_protected_policy_checkbox)
 
         self.developer_trust_note_label = QLabel(
             "Override files can exist beside the app without executing. Enable trust only when you intentionally want the app to load those external Python files."
@@ -509,6 +562,12 @@ class SettingsManagerQtView(QMainWindow):
         open_code_editor_button = QPushButton("Open Internal Code Editor")
         open_code_editor_button.clicked.connect(self.controller.open_internal_code_editor)
         developer_shortcuts_layout.addWidget(open_code_editor_button)
+        
+        self.report_upstream_button = QPushButton("Report Issue to Upstream")
+        self.report_upstream_button.clicked.connect(self.controller.report_upstream_problem)
+        self.report_upstream_button.setEnabled(False)
+        developer_shortcuts_layout.addWidget(self.report_upstream_button)
+        
         developer_shortcuts_layout.addStretch(1)
         developer_layout.addRow(QLabel("Shortcuts"), developer_shortcuts)
 
@@ -546,6 +605,106 @@ class SettingsManagerQtView(QMainWindow):
             "font-family: Consolas, Monaco, monospace; font-size: 9pt;"
         )
         crash_reports_layout.addWidget(self.developer_crash_viewer)
+
+        # Tab 3: Override Approvals
+        override_approvals_tab = QWidget()
+        override_approvals_layout = QVBoxLayout(override_approvals_tab)
+        
+        override_table_hint = QLabel("Select a pending or approved override and select Approve or Reject to manage it.")
+        override_table_hint.setWordWrap(True)
+        override_approvals_layout.addWidget(override_table_hint)
+        
+        self.override_approvals_table = QTableWidget()
+        self.override_approvals_table.setColumnCount(5)
+        self.override_approvals_table.setHorizontalHeaderLabels(["Module", "Source", "Approved?", "Approved At", "Approved By"])
+        self.override_approvals_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.override_approvals_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.override_approvals_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        override_approvals_layout.addWidget(self.override_approvals_table, 1)
+        
+        override_action_layout = QHBoxLayout()
+        override_action_layout.addWidget(QLabel("Approver Name:"))
+        self.override_approver_input = QLineEdit()
+        self.override_approver_input.setPlaceholderText("Developer Name")
+        override_action_layout.addWidget(self.override_approver_input, 1)
+        
+        self.override_approve_btn = QPushButton("Approve Selected")
+        self.override_approve_btn.clicked.connect(self._on_override_approve_clicked)
+        override_action_layout.addWidget(self.override_approve_btn)
+        
+        self.override_reject_btn = QPushButton("Reject & Revert")
+        self.override_reject_btn.clicked.connect(self._on_override_reject_clicked)
+        override_action_layout.addWidget(self.override_reject_btn)
+        
+        self.override_refresh_btn = QPushButton("Refresh List")
+        self.override_refresh_btn.clicked.connect(self._on_override_refresh_clicked)
+        override_action_layout.addWidget(self.override_refresh_btn)
+        
+        override_approvals_layout.addLayout(override_action_layout)
+        self.developer_tab_widget.addTab(override_approvals_tab, "Override Approvals")
+        
+        # Tab 4: Security Audit Log
+        security_log_tab = QWidget()
+        security_log_layout = QVBoxLayout(security_log_tab)
+        
+        security_filter_layout = QHBoxLayout()
+        security_filter_layout.addWidget(QLabel("Filter Type:"))
+        self.security_audit_filter_combo = QComboBox()
+        self.security_audit_filter_combo.addItems(["All", "override_approval", "override_registration", "override_removal", "module_load_blocked", "update_manifest_verify", "manifest_verification_bypass", "update_install", "update_rollback"])
+        self.security_audit_filter_combo.currentIndexChanged.connect(self._on_security_filter_changed)
+        security_filter_layout.addWidget(self.security_audit_filter_combo)
+        
+        security_filter_layout.addWidget(QLabel("Search:"))
+        self.security_audit_search = QLineEdit()
+        self.security_audit_search.setPlaceholderText("Search description/metadata...")
+        self.security_audit_search.textChanged.connect(self._on_security_filter_changed)
+        security_filter_layout.addWidget(self.security_audit_search, 1)
+        
+        self.security_audit_refresh_btn = QPushButton("Refresh Logs")
+        self.security_audit_refresh_btn.clicked.connect(self._on_security_refresh_clicked)
+        security_filter_layout.addWidget(self.security_audit_refresh_btn)
+        
+        security_log_layout.addLayout(security_filter_layout)
+        
+        self.security_audit_table = QTableWidget()
+        self.security_audit_table.setColumnCount(5)
+        self.security_audit_table.setHorizontalHeaderLabels(["Timestamp", "Event Type", "Status", "Description", "Details"])
+        self.security_audit_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        self.security_audit_table.horizontalHeader().setStretchLastSection(True)
+        security_log_layout.addWidget(self.security_audit_table, 1)
+        
+        self.developer_tab_widget.addTab(security_log_tab, "Security Audit Log")
+        
+        # Tab 5: Performance Diagnostics
+        diagnostics_tab = QWidget()
+        diagnostics_layout = QVBoxLayout(diagnostics_tab)
+        
+        diagnostics_layout.addWidget(QLabel("Module Import Load Benchmarks:"))
+        self.diagnostics_load_table = QTableWidget()
+        self.diagnostics_load_table.setColumnCount(2)
+        self.diagnostics_load_table.setHorizontalHeaderLabels(["Module Key / Name", "Import Load Time (seconds)"])
+        self.diagnostics_load_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        diagnostics_layout.addWidget(self.diagnostics_load_table, 1)
+        
+        diagnostics_layout.addWidget(QLabel("Form Calculations Performance Profiles:"))
+        self.diagnostics_recalc_table = QTableWidget()
+        self.diagnostics_recalc_table.setColumnCount(3)
+        self.diagnostics_recalc_table.setHorizontalHeaderLabels(["Operation", "Avg Recalc Time (seconds)", "Trigger Count"])
+        self.diagnostics_recalc_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        diagnostics_layout.addWidget(self.diagnostics_recalc_table, 1)
+        
+        diagnostics_actions = QHBoxLayout()
+        self.diagnostics_copy_btn = QPushButton("Copy Diagnostics Payload")
+        self.diagnostics_copy_btn.clicked.connect(self._on_diagnostics_copy_clicked)
+        diagnostics_actions.addWidget(self.diagnostics_copy_btn)
+        
+        self.diagnostics_refresh_btn = QPushButton("Refresh Timings")
+        self.diagnostics_refresh_btn.clicked.connect(self._on_diagnostics_refresh_clicked)
+        diagnostics_actions.addWidget(self.diagnostics_refresh_btn)
+        diagnostics_actions.addStretch(1)
+        diagnostics_layout.addLayout(diagnostics_actions)
+        
+        self.developer_tab_widget.addTab(diagnostics_tab, "Performance Diagnostics")
 
         content_layout.addWidget(self.developer_admin_group)
 
@@ -681,6 +840,8 @@ class SettingsManagerQtView(QMainWindow):
             self.set_theme_status(f"Current theme: {self.theme_combo.currentText() or '-'}")
 
             self.export_directory_input.setText(str(settings.get("export_directory") or ""))
+            self.developer_name_input.setText(str(settings.get("developer_name") or ""))
+            self.developer_email_input.setText(str(settings.get("developer_email") or ""))
             self.organize_exports_checkbox.setChecked(bool(settings.get("organize_exports_by_date", True)))
             self.toast_duration_spin.setValue(int(settings.get("toast_duration_sec", 5)))
             self.auto_save_spin.setValue(int(settings.get("auto_save_interval_min", 5)))
@@ -697,6 +858,8 @@ class SettingsManagerQtView(QMainWindow):
         return {
             "theme": str(self.theme_combo.currentData() or ""),
             "export_directory": self.export_directory_input.text().strip(),
+            "developer_name": self.developer_name_input.text().strip(),
+            "developer_email": self.developer_email_input.text().strip(),
             "organize_exports_by_date": bool(self.organize_exports_checkbox.isChecked()),
             "toast_duration_sec": int(self.toast_duration_spin.value()),
             "auto_save_interval_min": int(self.auto_save_spin.value()),
@@ -840,10 +1003,13 @@ class SettingsManagerQtView(QMainWindow):
         self._security_state = state
         can_manage_security = bool(state.get("can_manage_security", False))
         can_manage_role_defaults = bool(state.get("can_manage_role_defaults", False))
+        non_secure_mode = bool(state.get("non_secure_mode", False))
         session_vault_name = str(state.get("session_vault_name") or "").strip()
         self.security_role_defaults = dict(state.get("role_defaults") or {})
         self._configure_security_rights(state.get("access_rights") or [])
-        if can_manage_security:
+        if can_manage_security and non_secure_mode:
+            self.security_note_label.setText("Security administration is unlocked because non-secure mode grants full app access.")
+        elif can_manage_security:
             self.security_note_label.setText("Security administration is unlocked for the active admin or developer session.")
         else:
             self.security_note_label.setText(
@@ -854,7 +1020,7 @@ class SettingsManagerQtView(QMainWindow):
         if self.security_vault_list is not None:
             self.security_vault_list.setEnabled(can_manage_security)
         if self.security_non_secure_modules_list is not None:
-            self.security_non_secure_modules_list.setEnabled(can_manage_security)
+            self.security_non_secure_modules_list.setEnabled(False)
         if self.security_save_role_defaults_button is not None:
             self.security_save_role_defaults_button.setEnabled(can_manage_role_defaults)
         if self.security_unlock_button is not None:
@@ -951,9 +1117,31 @@ class SettingsManagerQtView(QMainWindow):
             self.developer_repository_input.setText(str(state.get("update_repository_url") or ""))
             self.developer_advanced_checkbox.setChecked(bool(state.get("enable_advanced_dev_updates", False)))
             self.developer_trust_checkbox.setChecked(bool(state.get("enable_external_override_trust", False)))
+            self.developer_bypass_gating_checkbox.setChecked(bool(state.get("allow_unsigned_dev_updates", False)))
+            release_channel = str(state.get("release_channel") or "stable").strip().lower()
+            self.developer_release_channel_combo.setCurrentIndex(1 if release_channel == "dev" else 0)
+            try:
+                ttl_days = int(state.get("override_ttl_days", 0) or 0)
+            except Exception:
+                ttl_days = 0
+            self.developer_override_ttl_spin.setValue(max(0, ttl_days))
+            self.developer_dual_approval_checkbox.setChecked(bool(state.get("require_dual_override_approval", False)))
+            self.developer_protected_policy_checkbox.setChecked(bool(state.get("strict_protected_override_policy", True)))
             self.developer_status_label.setText(str(state.get("external_modules_status") or "-"))
             self.developer_runtime_settings_path_label.setText(str(state.get("runtime_settings_path") or "-"))
             self._set_runtime_path_override_state(state.get("runtime_path_overrides") or [], can_manage_developer)
+            
+            # Populate our new tabs
+            self.refresh_override_approvals_list(state.get("overrides") or [])
+            self.refresh_security_audit_log(state.get("security_events") or [])
+            self.refresh_diagnostics(
+                state.get("diagnostics_load_timings") or {},
+                state.get("diagnostics_recalc_timings") or {}
+            )
+            
+            if not self.override_approver_input.text().strip():
+                self.override_approver_input.setText(str(state.get("developer_name") or ""))
+
             if section_mode == "developer_admin":
                 note_text = "Privileged update and override settings now live on this dedicated page. Internal Code Editor remains a separate sidebar module."
             elif can_manage_developer:
@@ -966,8 +1154,30 @@ class SettingsManagerQtView(QMainWindow):
         self.developer_repository_input.setEnabled(can_manage_developer)
         self.developer_advanced_checkbox.setEnabled(can_manage_developer)
         self.developer_trust_checkbox.setEnabled(can_manage_developer)
+        self.developer_bypass_gating_checkbox.setEnabled(can_manage_developer)
+        self.developer_release_channel_combo.setEnabled(can_manage_developer)
+        self.developer_override_ttl_spin.setEnabled(can_manage_developer)
+        self.developer_dual_approval_checkbox.setEnabled(can_manage_developer)
+        self.developer_protected_policy_checkbox.setEnabled(can_manage_developer)
+        
+        self.override_approvals_table.setEnabled(can_manage_developer)
+        self.override_approver_input.setEnabled(can_manage_developer)
+        self.override_approve_btn.setEnabled(can_manage_developer)
+        self.override_reject_btn.setEnabled(can_manage_developer)
+        self.override_refresh_btn.setEnabled(can_manage_developer)
+        self.security_audit_table.setEnabled(can_manage_developer)
+        self.security_audit_filter_combo.setEnabled(can_manage_developer)
+        self.security_audit_search.setEnabled(can_manage_developer)
+        self.security_audit_refresh_btn.setEnabled(can_manage_developer)
+        self.diagnostics_load_table.setEnabled(can_manage_developer)
+        self.diagnostics_recalc_table.setEnabled(can_manage_developer)
+        self.diagnostics_copy_btn.setEnabled(can_manage_developer)
+        self.diagnostics_refresh_btn.setEnabled(can_manage_developer)
+
         if self.developer_save_button is not None:
             self.developer_save_button.setEnabled(can_manage_developer)
+        if self.report_upstream_button is not None:
+            self.report_upstream_button.setEnabled(can_manage_developer)
         if self.developer_unlock_button is not None:
             self.developer_unlock_button.setText("Re-authenticate Developer Tools" if can_manage_developer else "Unlock Developer Tools")
 
@@ -1010,6 +1220,11 @@ class SettingsManagerQtView(QMainWindow):
             "update_repository_url": self.developer_repository_input.text().strip(),
             "enable_advanced_dev_updates": bool(self.developer_advanced_checkbox.isChecked()),
             "enable_external_override_trust": bool(self.developer_trust_checkbox.isChecked()),
+            "allow_unsigned_dev_updates": bool(self.developer_bypass_gating_checkbox.isChecked()),
+            "release_channel": str(self.developer_release_channel_combo.currentData() or "stable"),
+            "override_ttl_days": int(self.developer_override_ttl_spin.value()),
+            "require_dual_override_approval": bool(self.developer_dual_approval_checkbox.isChecked()),
+            "strict_protected_override_policy": bool(self.developer_protected_policy_checkbox.isChecked()),
             "runtime_path_overrides": runtime_overrides,
         }
 
@@ -1136,3 +1351,131 @@ class SettingsManagerQtView(QMainWindow):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._apply_responsive_layout()
+
+    def _on_override_approve_clicked(self):
+        selected_ranges = self.override_approvals_table.selectedRanges()
+        if not selected_ranges:
+            self.show_info("Approvals", "Please select an override row to approve.")
+            return
+        row = selected_ranges[0].topRow()
+        module_key = self.override_approvals_table.item(row, 0).data(Qt.ItemDataRole.UserRole)
+        approver = self.override_approver_input.text().strip()
+        if not approver:
+            self.show_error("Approvals", "Approver Name is required.")
+            return
+        self.controller.approve_override(module_key, approver)
+
+    def _on_override_reject_clicked(self):
+        selected_ranges = self.override_approvals_table.selectedRanges()
+        if not selected_ranges:
+            self.show_info("Approvals", "Please select an override row to reject.")
+            return
+        row = selected_ranges[0].topRow()
+        module_key = self.override_approvals_table.item(row, 0).data(Qt.ItemDataRole.UserRole)
+        if self.ask_yes_no("Reject Override", f"Are you sure you want to reject and delete the override for '{module_key}'? This will revert the module to the bundled clean code."):
+            self.controller.reject_override(module_key)
+
+    def _on_override_refresh_clicked(self):
+        self.controller.refresh_snapshot()
+
+    def _on_security_filter_changed(self):
+        filter_type = self.security_audit_filter_combo.currentText()
+        search_query = self.security_audit_search.text().strip().lower()
+        
+        for row in range(self.security_audit_table.rowCount()):
+            type_item = self.security_audit_table.item(row, 1)
+            desc_item = self.security_audit_table.item(row, 3)
+            meta_item = self.security_audit_table.item(row, 4)
+            
+            type_text = type_item.text() if type_item else ""
+            desc_text = desc_item.text().lower() if desc_item else ""
+            meta_text = meta_item.text().lower() if meta_item else ""
+            
+            match_type = (filter_type == "All" or type_text == filter_type)
+            match_search = (not search_query or search_query in desc_text or search_query in meta_text)
+            
+            self.security_audit_table.setRowHidden(row, not (match_type and match_search))
+
+    def _on_security_refresh_clicked(self):
+        self.controller.refresh_snapshot()
+
+    def _on_diagnostics_copy_clicked(self):
+        import json
+        payload = self.controller.copy_diagnostics_payload()
+        if payload:
+            clipboard = QApplication.clipboard()
+            clipboard.setText(payload)
+            self.show_info("Diagnostics", "Performance diagnostics payload copied to clipboard!")
+
+    def _on_diagnostics_refresh_clicked(self):
+        self.controller.refresh_snapshot()
+
+    def refresh_override_approvals_list(self, overrides):
+        self.override_approvals_table.setRowCount(0)
+        self.override_approvals_table.setRowCount(len(overrides))
+        for row_idx, item in enumerate(overrides):
+            module_key = item.get("module_key")
+            module_name = item.get("module_name") or module_key
+            record = item.get("record") or {}
+            
+            module_cell = QTableWidgetItem(module_name)
+            module_cell.setData(Qt.ItemDataRole.UserRole, module_key)
+            self.override_approvals_table.setItem(row_idx, 0, module_cell)
+            
+            source = str(record.get("source") or "internal_code_editor")
+            source_cell = QTableWidgetItem(source)
+            self.override_approvals_table.setItem(row_idx, 1, source_cell)
+            
+            approved = "Yes" if item.get("approved") else "Pending"
+            approved_cell = QTableWidgetItem(approved)
+            self.override_approvals_table.setItem(row_idx, 2, approved_cell)
+            
+            approved_at = str(record.get("approved_at") or "-")
+            approved_at_cell = QTableWidgetItem(approved_at)
+            self.override_approvals_table.setItem(row_idx, 3, approved_at_cell)
+            
+            approved_by = str(record.get("approved_by") or "-")
+            approved_by_cell = QTableWidgetItem(approved_by)
+            self.override_approvals_table.setItem(row_idx, 4, approved_by_cell)
+
+    def refresh_security_audit_log(self, events):
+        import json
+        self.security_audit_table.setRowCount(0)
+        self.security_audit_table.setRowCount(len(events))
+        for row_idx, event in enumerate(events):
+            timestamp_cell = QTableWidgetItem(str(event.get("timestamp")))
+            type_cell = QTableWidgetItem(str(event.get("event_type")))
+            status_cell = QTableWidgetItem(str(event.get("status")).upper())
+            desc_cell = QTableWidgetItem(str(event.get("description")))
+            
+            meta = event.get("metadata") or {}
+            meta_str = json.dumps(meta) if meta else "-"
+            details_cell = QTableWidgetItem(meta_str)
+            
+            self.security_audit_table.setItem(row_idx, 0, timestamp_cell)
+            self.security_audit_table.setItem(row_idx, 1, type_cell)
+            self.security_audit_table.setItem(row_idx, 2, status_cell)
+            self.security_audit_table.setItem(row_idx, 3, desc_cell)
+            self.security_audit_table.setItem(row_idx, 4, details_cell)
+            
+        self._on_security_filter_changed()
+
+    def refresh_diagnostics(self, load_timings, recalc_timings):
+        # 1. Load timings
+        self.diagnostics_load_table.setRowCount(0)
+        self.diagnostics_load_table.setRowCount(len(load_timings))
+        for row_idx, (mod_key, seconds) in enumerate(load_timings.items()):
+            self.diagnostics_load_table.setItem(row_idx, 0, QTableWidgetItem(str(mod_key)))
+            self.diagnostics_load_table.setItem(row_idx, 1, QTableWidgetItem(f"{seconds:.4f} s"))
+            
+        # 2. Recalc timings
+        self.diagnostics_recalc_table.setRowCount(0)
+        self.diagnostics_recalc_table.setRowCount(len(recalc_timings))
+        for row_idx, (op_name, profile) in enumerate(recalc_timings.items()):
+            total_time = profile.get("total_time", 0.0)
+            count = profile.get("count", 1)
+            avg_time = total_time / max(1, count)
+            
+            self.diagnostics_recalc_table.setItem(row_idx, 0, QTableWidgetItem(str(op_name)))
+            self.diagnostics_recalc_table.setItem(row_idx, 1, QTableWidgetItem(f"{avg_time:.4f} s"))
+            self.diagnostics_recalc_table.setItem(row_idx, 2, QTableWidgetItem(str(count)))

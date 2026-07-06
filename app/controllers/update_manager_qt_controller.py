@@ -20,7 +20,7 @@ from app.models.update_manager_model import UpdateManagerModel
 from app.views.update_manager_qt_view import UpdateManagerQtView
 
 __module_name__ = "Update Manager Qt Controller"
-__version__ = "1.4.3"
+__version__ = "2.5.0"
 
 
 class SimpleVar:
@@ -83,6 +83,8 @@ class UpdateManagerQtController:
         self.module_payload_local_version_var = self._create_var("Unknown")
         self.module_payload_remote_version_var = self._create_var("Not checked")
         self.module_payload_status_var = self._create_var("Pending")
+        self.module_payload_governance_var = self._create_var("Not checked")
+        self.module_payload_checksum_var = self._create_var("Not checked")
         self.module_payload_note_var = self._create_var(self._payload_boundary_note("Select a payload to compare against the repository."))
         self.module_payload_in_progress = False
         self.documentation_payload_tracked_var = self._create_var(f"{len(self.documentation_payload_options)} tracked file(s)")
@@ -171,6 +173,8 @@ class UpdateManagerQtController:
             "module_payload_local_version": self.module_payload_local_version_var.get() or "Unknown",
             "module_payload_remote_version": self.module_payload_remote_version_var.get() or "Not checked",
             "module_payload_status": self.module_payload_status_var.get() or "Pending",
+            "module_payload_governance": self.module_payload_governance_var.get() or "Not checked",
+            "module_payload_checksum_status": self.module_payload_checksum_var.get() or "Not checked",
             "module_payload_note": self.module_payload_note_var.get() or self._payload_boundary_note("Select a payload to compare against the repository."),
             "documentation_payloads": self.documentation_payload_tracked_var.get() or "0 tracked file(s)",
             "documentation_remote_state": self.documentation_payload_remote_state_var.get() or "Not checked",
@@ -185,6 +189,10 @@ class UpdateManagerQtController:
         }
         self.view.render_snapshot(snapshot)
         self.view.set_module_payload_options(self.module_payload_options, selected_key)
+        try:
+            self.view.refresh_rollback_list(self.model.list_rollback_backups())
+        except Exception:
+            pass
 
     def _build_view_payload(self):
         theme_tokens = dict(getattr(getattr(self.dispatcher, "view", None), "theme_tokens", {}) or {})
@@ -202,10 +210,17 @@ class UpdateManagerQtController:
         return self.coordinator.stable_artifact_label if hasattr(self.coordinator, "stable_artifact_label") and self.coordinator.stable_artifact_label else __import__("app.app_platform", fromlist=["get_platform_update_artifact_label"]).get_platform_update_artifact_label()
 
     def _show_error_dialog(self, title, message):
-        self.view.show_error(title, message)
+        view = self.view
+        if view is not None:
+            view.show_error(title, message)
+            return
+        self.dispatcher.host_ui_adapter.show_error(str(title), str(message))
 
     def _ask_yes_no_dialog(self, title, message):
-        return self.view.ask_yes_no(title, message)
+        view = self.view
+        if view is not None:
+            return view.ask_yes_no(title, message)
+        return bool(self.dispatcher.host_ui_adapter.ask_yes_no(str(title), str(message)))
 
     def on_payload_selection_changed(self, payload_key):
         payload_key = str(payload_key or "").strip().lower()
@@ -222,10 +237,17 @@ class UpdateManagerQtController:
         self._render_from_state()
         return None
 
+    def setup_ui(self):
+        self._render_from_state()
+        return None
+
     def apply_theme(self):
-        self.view.apply_theme(theme_tokens=self._build_view_payload().get("theme_tokens") or {})
+        if self.view is not None:
+            self.view.apply_theme(theme_tokens=self._build_view_payload().get("theme_tokens") or {})
 
     def show(self):
+        if self.view is None:
+            return
         self.view.show()
         self.view.raise_()
         self.view.activateWindow()
@@ -261,3 +283,22 @@ class UpdateManagerQtController:
             self.view = None
         self.dispatcher = None
         self.parent = None
+
+    def restore_rollback(self, backup_dir):
+        try:
+            self.model.restore_rollback_backup(backup_dir)
+            self.view.show_info("Rollback Complete", "Revert completed successfully! Restarting the suite...")
+            if self.dispatcher is not None and hasattr(self.dispatcher, "shutdown"):
+                # Attempt silent/clean restart if platform supports it, or simply shutdown
+                import sys
+                import subprocess
+                try:
+                    subprocess.Popen([sys.executable] + sys.argv)
+                except Exception:
+                    pass
+                self.dispatcher.shutdown()
+        except Exception as exc:
+            self.view.show_error("Rollback Error", f"Failed to restore rollback payload: {exc}")
+
+    def refresh_rollback_list(self):
+        self.refresh_snapshot()

@@ -21,7 +21,7 @@ from app.models.settings_manager_model import PATH_OVERRIDE_DEFINITIONS, Setting
 from app.views.settings_manager_qt_view import SettingsManagerQtView
 
 __module_name__ = "Settings Manager Qt Controller"
-__version__ = "1.9.3"
+__version__ = "2.5.0"
 
 
 class SettingsManagerQtController:
@@ -123,9 +123,13 @@ class SettingsManagerQtController:
         return normalize_role(session.role) if session is not None else "general"
 
     def _has_security_access(self):
+        if gatekeeper.is_non_secure_mode_enabled():
+            return True
         return gatekeeper.get_session() is not None and gatekeeper.has_right("security:manage_vaults") and self._get_session_role() in {"admin", "developer"}
 
     def _has_developer_access(self):
+        if gatekeeper.is_non_secure_mode_enabled():
+            return True
         return (
             gatekeeper.get_session() is not None
             and gatekeeper.has_right("developer:update_configuration")
@@ -133,6 +137,8 @@ class SettingsManagerQtController:
         )
 
     def _has_role_default_edit_access(self):
+        if gatekeeper.is_non_secure_mode_enabled():
+            return True
         return (
             gatekeeper.get_session() is not None
             and gatekeeper.has_right("developer:update_configuration")
@@ -220,7 +226,8 @@ class SettingsManagerQtController:
         show_toast = getattr(dispatcher, "show_toast", None)
         if callable(show_toast):
             show_toast(title, message, bootstyle)
-        self.view.set_status(f"{title}: {message_text}" if title else message_text)
+        if self.view is not None:
+            self.view.set_status(f"{title}: {message_text}" if title else message_text)
 
     def preview_selected_theme(self, _event=None):
         if self.dispatcher is None or getattr(self.view, "_suspend_change_signal", False):
@@ -252,6 +259,13 @@ class SettingsManagerQtController:
         if self.dispatcher is None or not hasattr(self.dispatcher, "secure_load"):
             return
         self.dispatcher.secure_load("internal_code_editor")
+
+    def report_upstream_problem(self):
+        import webbrowser
+        try:
+            webbrowser.open("https://github.com/jmartinmaster/AIMartinSuiteGLCVersion/issues/new/choose")
+        except Exception as exc:
+            self.view.show_error("Report Upstream", f"Could not open GitHub:\n{exc}")
 
     def _apply_runtime_path_overrides(self, settings, runtime_path_overrides):
         current_overrides = dict(self.model.settings.get("path_overrides", {}))
@@ -300,6 +314,11 @@ class SettingsManagerQtController:
             developer_values = self.view.get_developer_admin_settings_values()
             form_values["update_repository_url"] = str(developer_values.get("update_repository_url") or "").strip().strip("'\"")
             form_values["enable_advanced_dev_updates"] = bool(developer_values.get("enable_advanced_dev_updates", False))
+            form_values["allow_unsigned_dev_updates"] = bool(developer_values.get("allow_unsigned_dev_updates", False))
+            form_values["release_channel"] = str(developer_values.get("release_channel") or "stable").strip().lower()
+            form_values["override_ttl_days"] = int(developer_values.get("override_ttl_days", 0) or 0)
+            form_values["require_dual_override_approval"] = bool(developer_values.get("require_dual_override_approval", False))
+            form_values["strict_protected_override_policy"] = bool(developer_values.get("strict_protected_override_policy", True))
         try:
             settings = self.model.build_settings_from_form(form_values)
             settings["module_whitelist"] = self.model.normalize_module_names(
@@ -506,13 +525,16 @@ class SettingsManagerQtController:
     def save_current_security_vault(self, reset_password=False):
         if not self._ensure_security_access():
             return
+        if self.view is None:
+            return
         payload = self.view.get_security_vault_payload(reset_password=reset_password)
         try:
             new_state = self.save_security_vault(payload)
         except Exception as exc:
-            self.view.show_error("Security", str(exc))
+            if self.view is not None:
+                self.view.show_error("Security", str(exc))
             return
-        if new_state is None:
+        if new_state is None or self.view is None:
             return
         preferred_name = payload.get("vault_name") or payload.get("existing_name")
         self.view.configure_security_admin_panel(new_state, preferred_name=preferred_name)
@@ -530,6 +552,8 @@ class SettingsManagerQtController:
 
         password = None
         if password_required and (existing_name is None or reset_password):
+            if self.view is None:
+                raise RuntimeError("Settings security view is unavailable for password entry.")
             password = self.view.ask_for_password_pair(
                 "Vault Password",
                 f"Set the password for {vault_name or 'this vault'}.",
@@ -552,16 +576,20 @@ class SettingsManagerQtController:
     def delete_selected_security_vault(self):
         if not self._ensure_security_access():
             return
+        if self.view is None:
+            return
         vault_name = self.view.get_selected_security_vault_name()
         if not vault_name:
-            self.view.show_error("Security", "Select an existing vault before deleting it.")
+            if self.view is not None:
+                self.view.show_error("Security", "Select an existing vault before deleting it.")
             return
         try:
             new_state = self.delete_security_vault(vault_name)
         except Exception as exc:
-            self.view.show_error("Security", str(exc))
+            if self.view is not None:
+                self.view.show_error("Security", str(exc))
             return
-        if new_state is None:
+        if new_state is None or self.view is None:
             return
         self.view.configure_security_admin_panel(new_state)
 
@@ -578,16 +606,20 @@ class SettingsManagerQtController:
     def rotate_selected_security_vault_password(self):
         if not self._ensure_security_access():
             return
+        if self.view is None:
+            return
         vault_name = self.view.get_selected_security_vault_name()
         if not vault_name:
-            self.view.show_error("Security", "Select an existing vault before rotating its password.")
+            if self.view is not None:
+                self.view.show_error("Security", "Select an existing vault before rotating its password.")
             return
         try:
             new_state = self.rotate_security_vault_password(vault_name)
         except Exception as exc:
-            self.view.show_error("Security", str(exc))
+            if self.view is not None:
+                self.view.show_error("Security", str(exc))
             return
-        if new_state is None:
+        if new_state is None or self.view is None:
             return
         self.view.configure_security_admin_panel(new_state, preferred_name=vault_name)
 
@@ -605,36 +637,39 @@ class SettingsManagerQtController:
     def save_current_security_mode(self):
         if not self._ensure_security_access():
             return
+        if self.view is None:
+            return
         desired_state = self.view.get_security_non_secure_mode()
-        bypassed_modules = self.view.get_security_non_secure_bypass_modules()
         current_state = gatekeeper.is_non_secure_mode_enabled()
-        current_bypass = gatekeeper.get_non_secure_bypass_modules()
-        if desired_state == current_state and sorted(bypassed_modules) == sorted(current_bypass):
+        if desired_state == current_state:
             return
         action_text = "enable" if desired_state else "disable"
         if not self.view.ask_yes_no(
             "Confirm Security Change",
             f"Are you sure you want to {action_text} persisted non-secure mode?",
         ):
-            self.view.configure_security_admin_panel(
-                self.get_security_admin_state(),
-                preferred_name=self.view.get_selected_security_vault_name(),
-            )
+            if self.view is not None:
+                self.view.configure_security_admin_panel(
+                    self.get_security_admin_state(),
+                    preferred_name=self.view.get_selected_security_vault_name(),
+                )
             return
         try:
-            new_state = self.set_security_non_secure_mode(desired_state, bypassed_modules)
+            new_state = self.set_security_non_secure_mode(desired_state, [])
         except Exception as exc:
-            self.view.show_error("Security", str(exc))
+            if self.view is not None:
+                self.view.show_error("Security", str(exc))
             return
-        self.view.configure_security_admin_panel(new_state, preferred_name=self.view.get_selected_security_vault_name())
+        if self.view is not None:
+            self.view.configure_security_admin_panel(new_state, preferred_name=self.view.get_selected_security_vault_name())
 
     def set_security_non_secure_mode(self, enabled, bypass_modules):
         gatekeeper.set_non_secure_mode(bool(enabled))
         gatekeeper.set_non_secure_bypass_modules(bypass_modules)
         message = (
-            "Non-secure mode is enabled. Authentication is bypassed only for the selected modules."
+            "Non-secure mode is enabled. Full app access is active without authentication prompts."
             if enabled
-            else "Non-secure mode is disabled. Module authentication is active again."
+            else "Non-secure mode is disabled. Security and module authentication are active again."
         )
         self.show_toast("Security", message)
         return self.get_security_admin_state()
@@ -666,9 +701,10 @@ class SettingsManagerQtController:
         try:
             new_state = self.reset_security_storage()
         except Exception as exc:
-            self.view.show_error("Security", str(exc))
+            if self.view is not None:
+                self.view.show_error("Security", str(exc))
             return
-        if new_state is None:
+        if new_state is None or self.view is None:
             return
         self.view.configure_security_admin_panel(new_state)
 
@@ -691,6 +727,36 @@ class SettingsManagerQtController:
             from app.crash_handler import list_crash_reports
             crash_reports = list_crash_reports()
 
+        overrides = []
+        security_events = []
+        diagnostics_load_timings = {}
+        diagnostics_recalc_timings = {}
+        developer_name = self.model.settings.get("developer_name", "jmartinmaster")
+        try:
+            override_ttl_days = int(self.model.settings.get("override_ttl_days", 0) or 0)
+        except Exception:
+            override_ttl_days = 0
+
+        if can_manage_developer:
+            if self.dispatcher is not None:
+                names = self.dispatcher.get_external_module_override_names()
+                for name in names:
+                    vstate = self.dispatcher.model.get_override_verification_state(name)
+                    overrides.append({
+                        "module_key": name,
+                        "module_name": self.dispatcher.get_module_display_name(name),
+                        "has_override": vstate.get("has_override"),
+                        "verified": vstate.get("verified"),
+                        "approved": vstate.get("approved"),
+                        "current_hashes": vstate.get("current_hashes"),
+                        "record": vstate.get("record") or {}
+                    })
+            from app.security_audit import get_recent_security_events
+            security_events = get_recent_security_events()
+            if self.dispatcher is not None:
+                diagnostics_load_timings = getattr(self.dispatcher, "_module_load_timings", {})
+                diagnostics_recalc_timings = getattr(self.dispatcher, "_recalc_timings", {})
+
         return {
             "can_manage_developer": can_manage_developer,
             "session_summary": gatekeeper.get_session_summary(),
@@ -698,10 +764,20 @@ class SettingsManagerQtController:
             "update_repository_url": self.model.settings.get("update_repository_url", ""),
             "enable_advanced_dev_updates": bool(self.model.settings.get("enable_advanced_dev_updates", False)),
             "enable_external_override_trust": gatekeeper.is_external_module_override_trust_enabled(),
+            "allow_unsigned_dev_updates": bool(self.model.settings.get("allow_unsigned_dev_updates", False)),
+            "release_channel": str(self.model.settings.get("release_channel", "stable")).strip().lower(),
+            "override_ttl_days": max(0, override_ttl_days),
+            "require_dual_override_approval": bool(self.model.settings.get("require_dual_override_approval", False)),
+            "strict_protected_override_policy": bool(self.model.settings.get("strict_protected_override_policy", True)),
             "external_modules_status": self.external_modules_status or "External override status is provided by the host dispatcher.",
             "runtime_path_overrides": path_overrides,
             "runtime_settings_path": runtime_path_state.get("settings_path"),
             "crash_reports": crash_reports,
+            "overrides": overrides,
+            "security_events": security_events,
+            "diagnostics_load_timings": diagnostics_load_timings,
+            "diagnostics_recalc_timings": diagnostics_recalc_timings,
+            "developer_name": developer_name,
         }
 
     def load_crash_report(self, filename):
@@ -735,13 +811,39 @@ class SettingsManagerQtController:
             values["enable_advanced_dev_updates"],
             values["enable_external_override_trust"],
             values.get("runtime_path_overrides", {}),
+            values.get("allow_unsigned_dev_updates", False),
+            values.get("release_channel", "stable"),
+            values.get("override_ttl_days", 0),
+            values.get("require_dual_override_approval", False),
+            values.get("strict_protected_override_policy", True),
         )
 
-    def save_developer_admin_settings(self, update_repository_url, enable_advanced_dev_updates, enable_external_override_trust, runtime_path_overrides=None):
+    def save_developer_admin_settings(
+        self,
+        update_repository_url,
+        enable_advanced_dev_updates,
+        enable_external_override_trust,
+        runtime_path_overrides=None,
+        allow_unsigned_dev_updates=False,
+        release_channel="stable",
+        override_ttl_days=0,
+        require_dual_override_approval=False,
+        strict_protected_override_policy=True,
+    ):
         desired_trust_state = bool(enable_external_override_trust)
         trust_changed = gatekeeper.is_external_module_override_trust_enabled() != desired_trust_state
         self.model.settings["update_repository_url"] = str(update_repository_url or "").strip().strip("'\"")
         self.model.settings["enable_advanced_dev_updates"] = bool(enable_advanced_dev_updates)
+        self.model.settings["allow_unsigned_dev_updates"] = bool(allow_unsigned_dev_updates)
+        normalized_channel = str(release_channel or "stable").strip().lower()
+        self.model.settings["release_channel"] = normalized_channel if normalized_channel in {"stable", "dev"} else "stable"
+        try:
+            ttl_days = int(override_ttl_days or 0)
+        except Exception:
+            ttl_days = 0
+        self.model.settings["override_ttl_days"] = max(0, ttl_days)
+        self.model.settings["require_dual_override_approval"] = bool(require_dual_override_approval)
+        self.model.settings["strict_protected_override_policy"] = bool(strict_protected_override_policy)
         try:
             current_overrides = dict(self.model.settings.get("path_overrides", {}))
             if isinstance(runtime_path_overrides, dict):
@@ -868,3 +970,58 @@ class SettingsManagerQtController:
             self.view = None
         self.dispatcher = None
         self.parent = None
+
+    def approve_override(self, module_key, approver):
+        if self.dispatcher is None:
+            return
+        # Get verification state to extract current hashes
+        vstate = self.dispatcher.model.get_override_verification_state(module_key)
+        hashes = vstate.get("current_hashes") or {}
+        if not hashes:
+            self.view.show_error("Override Approvals", f"No current hashes found to approve for module '{module_key}'.")
+            return
+        
+        # Approve hashes
+        self.dispatcher.model.approve_override_hashes(module_key, hashes)
+        
+        # Log security event
+        from app.security_audit import log_security_event
+        log_security_event("override_approval", f"Approved override hashes for module '{module_key}' (Approver: {approver})", "success", {"module_name": module_key, "approved_by": approver})
+        
+        self.show_toast("Override Approved", f"Module '{module_key}' override approved successfully.")
+        
+        # Refresh dispatcher policy
+        try:
+            self.dispatcher.apply_external_override_policy_change()
+        except Exception:
+            pass
+        self.refresh_snapshot(initial=False)
+
+    def reject_override(self, module_key):
+        if self.dispatcher is None:
+            return
+        # Revert overrides by deleting files
+        self.dispatcher.remove_external_module_overrides([module_key])
+        
+        # Log security event
+        from app.security_audit import log_security_event
+        log_security_event("override_removal", f"Rejected and deleted override files for module '{module_key}'", "success", {"module_name": module_key})
+        
+        self.show_toast("Override Rejected", f"Reverted module '{module_key}' to clean bundled code.")
+        
+        # Refresh dispatcher policy
+        try:
+            self.dispatcher.apply_external_override_policy_change()
+        except Exception:
+            pass
+        self.refresh_snapshot(initial=False)
+
+    def copy_diagnostics_payload(self) -> str:
+        if self.dispatcher is None:
+            return ""
+        import json
+        payload = {
+            "load_timings": getattr(self.dispatcher, "_module_load_timings", {}),
+            "recalc_timings": getattr(self.dispatcher, "_recalc_timings", {})
+        }
+        return json.dumps(payload, indent=2)

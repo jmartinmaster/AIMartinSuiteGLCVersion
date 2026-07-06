@@ -18,6 +18,12 @@ The application is built around four daily tasks:
 You can also check for application updates using the **Update Manager** and view
 license information on the **About** screen.
 
+### Security Default
+
+By default, the app starts in **non-secure mode**, which allows full access
+without authentication prompts. Security Admin can disable non-secure mode in
+Settings Manager to enforce vault authentication and rights.
+
 ---
 
 ## Accessibility (ADA Compliance)

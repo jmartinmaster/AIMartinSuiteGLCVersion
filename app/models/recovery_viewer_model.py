@@ -24,7 +24,7 @@ from app.utils import external_path
 
 
 __module_name__ = "Recovery Viewer"
-__version__ = "1.0.0"
+__version__ = "2.5.0"
 
 BACKUP_TARGET_DEFINITIONS = (
     {
@@ -247,19 +247,51 @@ class RecoveryViewerModel:
     def collect_draft_records(self):
         pending_dir = external_path("data/pending")
         os.makedirs(pending_dir, exist_ok=True)
+        
+        # Load the recovery index cache
+        index_path = os.path.join(pending_dir, ".recovery_index.json")
+        cache = {}
+        if os.path.exists(index_path):
+            try:
+                with open(index_path, "r", encoding="utf-8") as handle:
+                    cache = json.load(handle)
+            except Exception:
+                cache = {}
+                
+        index_dirty = False
         records = []
+        
         for filename in os.listdir(pending_dir):
-            if not filename.endswith(".json"):
+            if filename.startswith(".") or not filename.endswith(".json"):
                 continue
             path = os.path.join(pending_dir, filename)
             if os.path.isdir(path):
                 continue
-            saved_at = self.read_saved_at(path)
+                
+            try:
+                current_mtime = os.path.getmtime(path)
+            except OSError:
+                current_mtime = 0.0
+                
+            cached_entry = cache.get(filename)
+            if isinstance(cached_entry, dict) and cached_entry.get("mtime") == current_mtime:
+                saved_at = cached_entry.get("saved_at")
+                form_name = cached_entry.get("form_name")
+            else:
+                saved_at = self.read_saved_at(path)
+                form_name = self._read_payload_form_name(path)
+                cache[filename] = {
+                    "mtime": current_mtime,
+                    "saved_at": saved_at,
+                    "form_name": form_name
+                }
+                index_dirty = True
+                
             records.append(
                 {
                     "record_type": "draft",
                     "kind": "Pending Draft",
-                    "form_name": self._read_payload_form_name(path),
+                    "form_name": form_name,
                     "name": filename,
                     "path": path,
                     "saved_at": saved_at,
@@ -268,6 +300,14 @@ class RecoveryViewerModel:
                     "target_path": path,
                 }
             )
+            
+        if index_dirty:
+            try:
+                with open(index_path, "w", encoding="utf-8") as handle:
+                    json.dump(cache, handle, indent=2)
+            except Exception:
+                pass
+                
         return records
 
     def collect_snapshot_records(self):

@@ -23,7 +23,7 @@ from pathlib import Path
 from app.views.about_qt_view import AboutQtView
 
 __module_name__ = "About Qt Controller"
-__version__ = "1.1.2"
+__version__ = "2.5.0"
 
 
 class AboutQtController:
@@ -41,12 +41,18 @@ class AboutQtController:
         return getattr(view, attribute_name)
 
     def get_info_text(self):
+        dev_name = "Jamie Martin"
+        dev_email = "jamie_martin333@live.com"
+        if self.dispatcher is not None and hasattr(self.dispatcher, "runtime_settings"):
+            dev_name = self.dispatcher.runtime_settings.get("developer_name", dev_name)
+            dev_email = self.dispatcher.runtime_settings.get("developer_email", dev_email)
         return (
             "Author: Jamie Martin\n"
+            "Your Developer: {} ({})\n"
             "License: GNU General Public License v3.0\n"
             "Location: Ludington, MI\n"
             "Environment: Windows / Portable Python 3.12"
-        )
+        ).format(dev_name, dev_email)
 
     def get_pyqt6_notice_text(self):
         return (
@@ -240,6 +246,16 @@ class AboutQtController:
     def _build_view_payload(self):
         dispatcher = self.dispatcher
         theme_tokens = dict(getattr(getattr(dispatcher, "view", None), "theme_tokens", {}) or {})
+        
+        from app.security import gatekeeper
+        session = gatekeeper.get_session()
+        role = str(getattr(session, "role", "") or "").strip().lower()
+        has_developer_access = (
+            session is not None
+            and gatekeeper.has_right("developer:update_configuration")
+            and role in {"admin", "developer"}
+        )
+        
         return {
             "window_title": "About - Production Logging Center",
             "title": "PRODUCTION LOGGING CENTER",
@@ -247,13 +263,12 @@ class AboutQtController:
             "info_text": self.get_info_text(),
             "pyqt6_notice_text": self.get_pyqt6_notice_text(),
             "module_manifest": self.get_manifest_rows(),
-            "can_repack": self.can_repack(),
+            "can_repack": False,
+            "has_developer_access": has_developer_access,
             "footer_text": "Copyright © 2026 Jamie Martin",
             "theme_tokens": theme_tokens,
         }
 
-    def can_repack(self):
-        return bool(getattr(sys, "frozen", False))
 
     def show(self):
         if hasattr(self.view, "refresh_manifest"):
@@ -268,84 +283,12 @@ class AboutQtController:
             return
         self.view.show_error("License", "Help document dispatch is unavailable.")
 
-    def request_repack(self):
-        if not self.can_repack():
-            self.view.show_info(
-                "Repack Not Available",
-                "Suite repacking is only available from a packaged runtime.",
-            )
-            return
-
-        confirmed = self.view.ask_yes_no(
-            "Confirm Repack",
-            "This will compile a new executable with your current settings.\n\n"
-            "The app will close, build, and restart automatically.\n\nProceed?",
-        )
-        if not confirmed:
-            return
-
-        self._self_repack()
-
-    def _self_repack(self):
+    def open_github_issues(self):
+        import webbrowser
         try:
-            exe_path = os.path.abspath(sys.executable)
-            exe_dir = os.path.dirname(exe_path)
-            runtime_bundle_dir = getattr(sys, "_MEIPASS", "")
-            python_exe = os.path.join(runtime_bundle_dir, "python.exe") if runtime_bundle_dir else ""
-            if not python_exe or not os.path.exists(python_exe):
-                raise RuntimeError("Packaged Python runtime was not found.")
-
-            cmd = [
-                python_exe,
-                "-m",
-                "PyInstaller",
-                "--noconfirm",
-                "--onefile",
-                "--windowed",
-                "--add-data",
-                f"app{os.pathsep}app",
-                "--add-data",
-                f"assets{os.pathsep}assets",
-                "--add-data",
-                f"docs{os.pathsep}docs",
-                "--add-data",
-                f"templates{os.pathsep}templates",
-                "--add-data",
-                f"rates.json{os.pathsep}.",
-                "--add-data",
-                f"layout_config.json{os.pathsep}.",
-                "--collect-submodules",
-                "openpyxl",
-                "--collect-submodules",
-                "app",
-                os.path.join(runtime_bundle_dir, "main.py"),
-            ]
-
-            subprocess.run(cmd, check=True, cwd=exe_dir)
-
-            new_exe = os.path.join(exe_dir, "dist", os.path.basename(exe_path))
-            batch_path = os.path.join(exe_dir, "cleanup.bat")
-
-            with open(batch_path, "w", encoding="utf-8") as handle:
-                handle.write(
-                    f"@echo off\n"
-                    f"timeout /t 3 /nobreak > nul\n"
-                    f"del \"{exe_path}\"\n"
-                    f"move \"{new_exe}\" \"{exe_path}\"\n"
-                    f"rd /s /q \"{os.path.join(exe_dir, 'build')}\"\n"
-                    f"rd /s /q \"{os.path.join(exe_dir, 'dist')}\"\n"
-                    f"del \"{os.path.join(exe_dir, os.path.basename(exe_path) + '.spec')}\"\n"
-                    f"start \"\" \"{exe_path}\"\n"
-                    f"del \"%~f0\"\n"
-                )
-
-            os.startfile(batch_path)
-            if self.dispatcher is not None:
-                self.dispatcher.request_shutdown(delay_ms=0)
-            else:
-                raise SystemExit()
+            webbrowser.open("https://github.com/jmartinmaster/AIMartinSuiteGLCVersion/issues")
         except Exception as exc:
-            self.view.show_error("Repack Error", f"Failed to repack suite:\n{exc}")
+            self.view.show_error("GitHub Issues", f"Could not open browser:\n{exc}")
 
     def apply_theme(self):
         if self.dispatcher is not None:

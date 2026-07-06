@@ -36,7 +36,7 @@ from app.persistence import write_json_with_backup, write_text_with_backup
 from app.utils import ensure_external_directory, external_path, local_or_resource_path, resolve_local_venv_python
 
 __module_name__ = "Update Manager"
-__version__ = "2.1.8"
+__version__ = "2.5.0"
 
 
 GITHUB_REMOTE_PATTERN = re.compile(r"github\.com[:/](?P<owner>[^/]+)/(?P<repo>[^/.]+?)(?:\.git)?$")
@@ -234,6 +234,38 @@ def _verify_remote_payload_integrity(remote_info, branch_name, relative_path, pa
             f"Integrity check failed for {relative_path}. Expected {expected_hash}, got {actual_hash}."
         )
     return actual_hash
+
+
+def _resolve_checksum_governance(remote_info, branch_name, relative_path, payload_bytes, timeout=15):
+    checksum_path = f"{relative_path}.sha256"
+    try:
+        expected_hash = _fetch_remote_sha256_hex(remote_info, branch_name, relative_path, timeout=timeout)
+    except RuntimeError as exc:
+        message = str(exc)
+        if "Missing repository checksum" in message:
+            return (
+                "Missing checksum file",
+                f"Missing {checksum_path}. Create this checksum file in the update repository so installs can proceed.",
+            )
+        if "invalid" in message.lower():
+            return (
+                "Invalid checksum file",
+                f"{checksum_path} is malformed. Regenerate the checksum file using SHA-256 and commit it.",
+            )
+        return ("Checksum unavailable", message)
+    except Exception as exc:
+        return ("Checksum unavailable", f"Could not read {checksum_path}: {exc}")
+
+    actual_hash = _compute_sha256_hex(payload_bytes)
+    if actual_hash != expected_hash:
+        return (
+            "Checksum mismatch",
+            (
+                f"Checksum mismatch for {relative_path}. Expected {expected_hash}, got {actual_hash}. "
+                "Do not install this artifact until repository checksums are corrected."
+            ),
+        )
+    return ("Checksum verified", f"Repository checksum verified for {relative_path}.")
 
 
 def _safe_extract_zip(archive_handle, extract_dir):
@@ -486,8 +518,22 @@ def evaluate_module_payload_option(modules_path, loaded_modules, option, branch_
     local_version = local_metadata.get("version", "Unknown")
     module_name = local_metadata.get("module_name", option.get("module_name", option.get("fallback_name", "Unknown")))
 
+    settings = _load_external_settings_payload()
+    allow_unsigned = bool(settings.get("allow_unsigned_dev_updates", False))
+    gov = "[Bypassed] Unsigned updates allowed" if allow_unsigned else "[Verified] Signed manifest required"
+    checksum_status = "Not checked"
+    checksum_note = "Run a payload check to verify repository checksum governance."
+
     try:
         remote_text = fetch_remote_payload_text(remote_info, branch_name, option["relative_path"])
+        remote_bytes = remote_text.encode("utf-8")
+        checksum_status, checksum_note = _resolve_checksum_governance(
+            remote_info,
+            branch_name,
+            option["relative_path"],
+            remote_bytes,
+            timeout=15,
+        )
     except urllib.error.HTTPError as exc:
         if exc.code == 404:
             return {
@@ -499,6 +545,9 @@ def evaluate_module_payload_option(modules_path, loaded_modules, option, branch_
                 "note": f"The selected {module_name} payload does not exist on the repository branch.",
                 "update_available": False,
                 "remote_text": None,
+                "governance": gov,
+                "checksum_status": "Payload missing",
+                "checksum_note": "The repository payload is missing on this branch, so checksum verification could not run.",
             }
         return {
             "option": option.copy(),
@@ -509,6 +558,9 @@ def evaluate_module_payload_option(modules_path, loaded_modules, option, branch_
             "note": f"Could not read the remote {module_name} payload: {exc}",
             "update_available": False,
             "remote_text": None,
+            "governance": gov,
+            "checksum_status": "Checksum unavailable",
+            "checksum_note": f"Payload check failed before checksum validation: {exc}",
         }
     except Exception as exc:
         return {
@@ -520,6 +572,9 @@ def evaluate_module_payload_option(modules_path, loaded_modules, option, branch_
             "note": f"Could not read the remote {module_name} payload: {exc}",
             "update_available": False,
             "remote_text": None,
+            "governance": gov,
+            "checksum_status": "Checksum unavailable",
+            "checksum_note": f"Payload check failed before checksum validation: {exc}",
         }
 
     current_option = option.copy()
@@ -550,6 +605,25 @@ def evaluate_module_payload_option(modules_path, loaded_modules, option, branch_
     else:
         remote_metadata = _parse_module_metadata(remote_text, option["fallback_name"])
         remote_version = remote_metadata.get("version", "Unknown")
+        
+        # Channel gating
+        settings = _load_external_settings_payload()
+        channel = str(settings.get("release_channel", "stable")).strip().lower()
+        ver_lower = str(remote_version).lower()
+        is_dev = any(tag in ver_lower for tag in ("dev", "alpha", "beta", "rc", "pre"))
+        if channel == "stable" and is_dev:
+            return {
+                "option": current_option,
+                "module_name": module_name,
+                "local_metadata": local_metadata,
+                "remote_version": remote_version,
+                "status": "Dev release filtered",
+                "note": "Dev release was filtered because the stable channel is active.",
+                "update_available": False,
+                "remote_text": None,
+                "governance": gov,
+            }
+            
         module_name = remote_metadata.get("module_name", module_name)
         current_option["module_name"] = module_name
         local_compare = parse_version(local_version)
@@ -590,6 +664,11 @@ def evaluate_module_payload_option(modules_path, loaded_modules, option, branch_
             status = "Module version unreadable"
             note = f"The selected {module_name} payload could not be compared cleanly."
 
+    # Determine governance status
+    settings = _load_external_settings_payload()
+    allow_unsigned = bool(settings.get("allow_unsigned_dev_updates", False))
+    gov = "[Bypassed] Unsigned updates allowed" if allow_unsigned else "[Verified] Signed manifest required"
+
     return {
         "option": current_option,
         "module_name": module_name,
@@ -599,6 +678,9 @@ def evaluate_module_payload_option(modules_path, loaded_modules, option, branch_
         "note": note,
         "update_available": update_available,
         "remote_text": remote_text,
+        "governance": gov,
+        "checksum_status": checksum_status,
+        "checksum_note": checksum_note,
     }
 
 
@@ -1382,16 +1464,209 @@ class UpdateManagerModel:
         payload_text = remote_text if remote_text is not None else fetch_remote_payload_text(remote_info, branch_name, option["relative_path"], timeout=15)
         return install_documentation_payload_option(option, payload_text)
 
+    def load_settings(self):
+        settings_path = self.data_registry.resolve_write_path("settings")
+        try:
+            with open(settings_path, "r", encoding="utf-8") as handle:
+                return json.load(handle)
+        except Exception:
+            return {}
+
+    def verify_remote_manifest(self, remote_info, branch_name):
+        settings = self.load_settings()
+        allow_unsigned = bool(settings.get("allow_unsigned_dev_updates", False))
+        channel = str(settings.get("release_channel", "stable")).strip().lower()
+
+        try:
+            manifest_text = fetch_remote_payload_text(remote_info, branch_name, "manifest.json", timeout=15)
+            manifest = json.loads(manifest_text)
+        except Exception as exc:
+            if allow_unsigned:
+                from app.security_audit import log_security_event
+                log_security_event("update_manifest_verify", "Remote manifest.json missing, but unsigned dev updates are allowed.", "success")
+                return None
+            from app.security_audit import log_security_event
+            log_security_event("update_manifest_verify", f"Failed to load manifest.json: {exc}", "failure")
+            raise RuntimeError(f"Updates require a signed manifest.json. Error: {exc}")
+
+        if not allow_unsigned:
+            from app.utils.crypto_utils import verify_manifest
+            try:
+                if not verify_manifest(manifest):
+                    raise ValueError("Signature check returned False.")
+                from app.security_audit import log_security_event
+                log_security_event("update_manifest_verify", f"Verified manifest signature for version {manifest.get('version')}", "success")
+            except Exception as exc:
+                from app.security_audit import log_security_event
+                log_security_event("update_manifest_verify", f"Manifest signature check failed: {exc}", "failure")
+                raise RuntimeError(f"Fail-closed update block: remote manifest has an invalid signature. {exc}")
+        else:
+            from app.security_audit import log_security_event
+            log_security_event("manifest_verification_bypass", "Bypassed remote manifest signature check (allow_unsigned_dev_updates enabled).", "success")
+
+        manifest_channel = str(manifest.get("release_channel", "stable")).strip().lower()
+        if channel == "stable" and manifest_channel == "dev":
+            raise RuntimeError("Gating check failed: cannot install a 'dev' channel package on the 'stable' update channel.")
+
+        return manifest
+
+    def _compute_file_sha256(self, file_path):
+        digest = hashlib.sha256()
+        with open(file_path, "rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                if not chunk:
+                    break
+                digest.update(chunk)
+        return digest.hexdigest()
+
+    def _create_rollback_backup(self, option, source_verified=False):
+        import shutil
+        from datetime import datetime
+        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        option_key = option.get("key") or "module"
+        
+        rollback_dir = external_path(f"data/backups/rollbacks/{timestamp}_{option_key}")
+        os.makedirs(rollback_dir, exist_ok=True)
+        
+        payload_paths = option.get("payload_paths") or [option["relative_path"]]
+        
+        backup_files = []
+        for rel_path in payload_paths:
+            target_path = option.get("local_target_path") or external_path(rel_path)
+            if os.path.exists(target_path):
+                dest_path = os.path.join(rollback_dir, os.path.basename(target_path))
+                shutil.copy2(target_path, dest_path)
+                backup_files.append({
+                    "original_path": target_path,
+                    "backup_path": dest_path,
+                    "relative_path": rel_path,
+                    "backup_sha256": self._compute_file_sha256(dest_path),
+                })
+                
+        if backup_files:
+            meta = {
+                "timestamp": datetime.utcnow().isoformat() + "Z",
+                "option_key": option_key,
+                "module_name": option.get("module_name"),
+                "version": option.get("local_version", "Unknown"),
+                "files": backup_files,
+                "source_verified": bool(source_verified),
+            }
+            with open(os.path.join(rollback_dir, "rollback_metadata.json"), "w", encoding="utf-8") as handle:
+                json.dump(meta, handle, indent=2)
+
+    def _verify_rollback_metadata(self, metadata):
+        files = list(metadata.get("files") or [])
+        if not files:
+            return False, "Rollback metadata has no tracked backup files."
+        if not bool(metadata.get("source_verified", False)):
+            return False, "Rollback candidate was not created from a verified update source."
+        for file_info in files:
+            backup_path = str(file_info.get("backup_path") or "").strip()
+            expected_hash = str(file_info.get("backup_sha256") or "").strip().lower()
+            if not backup_path or not os.path.exists(backup_path):
+                return False, f"Missing backup file: {backup_path or 'unknown path'}."
+            if not expected_hash:
+                return False, f"Missing backup checksum metadata for {backup_path}."
+            actual_hash = self._compute_file_sha256(backup_path).strip().lower()
+            if actual_hash != expected_hash:
+                return False, f"Backup checksum mismatch for {backup_path}."
+        return True, "Verified"
+
+    def list_rollback_backups(self):
+        rollback_root = external_path("data/backups/rollbacks")
+        if not os.path.exists(rollback_root):
+            return []
+        
+        candidates = []
+        try:
+            for item in os.listdir(rollback_root):
+                item_path = os.path.join(rollback_root, item)
+                if not os.path.isdir(item_path):
+                    continue
+                meta_path = os.path.join(item_path, "rollback_metadata.json")
+                if not os.path.exists(meta_path):
+                    continue
+                try:
+                    with open(meta_path, "r", encoding="utf-8") as handle:
+                        meta = json.load(handle)
+                    verified, verify_note = self._verify_rollback_metadata(meta)
+                    timestamp_str = meta.get("timestamp") or item
+                    candidates.append({
+                        "path": item_path,
+                        "dir_name": item,
+                        "timestamp_str": timestamp_str,
+                        "module_name": meta.get("module_name") or "-",
+                        "version": meta.get("version") or "Unknown",
+                        "verified": bool(verified),
+                        "verify_note": verify_note,
+                    })
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        candidates.sort(key=lambda x: x["timestamp_str"], reverse=True)
+        return candidates
+
+    def restore_rollback_backup(self, backup_dir):
+        meta_path = os.path.join(backup_dir, "rollback_metadata.json")
+        if not os.path.exists(meta_path):
+            raise RuntimeError("Rollback metadata is missing.")
+            
+        with open(meta_path, "r", encoding="utf-8") as handle:
+            meta = json.load(handle)
+        verified, verify_note = self._verify_rollback_metadata(meta)
+        if not verified:
+            raise RuntimeError(f"Rollback blocked: {verify_note}")
+            
+        files = meta.get("files") or []
+        import shutil
+        for file_info in files:
+            src = file_info["backup_path"]
+            dst = file_info["original_path"]
+            if os.path.exists(src):
+                os.makedirs(os.path.dirname(dst), exist_ok=True)
+                shutil.copy2(src, dst)
+                
+        from app.security_audit import log_security_event
+        log_security_event("update_rollback", f"Restored backup files to revert to version {meta.get('version')}", "success", {"module_name": meta.get("module_name")})
+
     def install_module_payload(self, option, remote_info, branch_name, install_module_override, remote_text=None):
+        manifest = self.verify_remote_manifest(remote_info, branch_name)
+        
+        # Create rollback backup of existing files
+        self._create_rollback_backup(option, source_verified=True)
+        
         payload_paths = option.get("payload_paths") or [option["relative_path"]]
         if option.get("kind") == "module":
             payload_text = {}
             for relative_path in payload_paths:
                 payload_bytes = fetch_remote_bytes(remote_info, branch_name, relative_path, timeout=15)
-                _verify_remote_payload_integrity(remote_info, branch_name, relative_path, payload_bytes, timeout=15)
+                
+                # Check manifest hash if manifest is present
+                if manifest and "artifacts" in manifest:
+                    norm_path = relative_path.replace("\\", "/").lstrip("/")
+                    artifact_meta = manifest["artifacts"].get(norm_path)
+                    if artifact_meta and "sha256" in artifact_meta:
+                        expected_hash = artifact_meta["sha256"]
+                        import hashlib
+                        actual_hash = hashlib.sha256(payload_bytes).hexdigest()
+                        if actual_hash != expected_hash:
+                            from app.security_audit import log_security_event
+                            log_security_event("update_install", f"Integrity hash mismatch for '{relative_path}' during update.", "failure")
+                            raise RuntimeError(f"Integrity mismatch: expected {expected_hash}, got {actual_hash}")
+                    else:
+                        _verify_remote_payload_integrity(remote_info, branch_name, relative_path, payload_bytes, timeout=15)
+                else:
+                    _verify_remote_payload_integrity(remote_info, branch_name, relative_path, payload_bytes, timeout=15)
+                    
                 payload_text[relative_path] = payload_bytes.decode("utf-8")
         else:
             payload_text = remote_text if remote_text is not None else fetch_remote_payload_text(remote_info, branch_name, option["relative_path"], timeout=15)
+            
+        from app.security_audit import log_security_event
+        log_security_event("update_install", f"Successfully installed module override payload option '{option.get('module_name')}'", "success", {"module_name": option.get("module_name")})
+        
         return install_module_payload_option(option, payload_text, install_module_override)
 
     def build_local_manifest(self, dispatcher_module):

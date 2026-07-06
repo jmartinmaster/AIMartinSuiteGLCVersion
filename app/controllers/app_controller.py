@@ -33,7 +33,7 @@ from app.security_service import SecurityService
 from app.update_state import UpdateCoordinator
 
 __module_name__ = "Dispatcher Core"
-__version__ = "2.1.8"
+__version__ = "2.5.0"
 
 ISSUE_REPORT_URL = "https://github.com/jmartinmaster/AIMartinSuiteGLCVersion/issues/new/choose"
 MODULE_PRELOAD_POLL_SECONDS = 1.0
@@ -674,6 +674,8 @@ class Dispatcher:
             return True
         record = verification_state.get("record") or {}
         if not (record.get("hashes") and isinstance(record.get("hashes"), dict)):
+            from app.security_audit import log_security_event
+            log_security_event("module_load_blocked", f"Loading module '{module_key}' was blocked: no integrity hash record exists.", "failure", {"module_name": module_key})
             self.host_ui_adapter.show_warning(
                 "External Override Blocked",
                 (
@@ -694,6 +696,8 @@ class Dispatcher:
             force_reauth=True,
             allowed_roles={"admin", "developer"},
         ):
+            from app.security_audit import log_security_event
+            log_security_event("module_load_blocked", f"Loading module '{module_key}' was blocked: developer approval was not granted.", "failure", {"module_name": module_key})
             self.host_ui_adapter.show_warning(
                 "External Override Blocked",
                 (
@@ -719,13 +723,18 @@ class Dispatcher:
             "Approve and allow this override hash set to load now?"
         )
         if not self.host_ui_adapter.ask_yes_no("Approve External Override Load", prompt_message):
+            from app.security_audit import log_security_event
+            log_security_event("module_load_blocked", f"Loading module '{module_key}' was cancelled by operator.", "failure", {"module_name": module_key})
             self.host_ui_adapter.show_warning(
                 "External Override Blocked",
                 f"Loading {self.get_module_display_name(module_key)} was cancelled.",
             )
             return False
 
-        self.model.approve_override_hashes(module_key, verification_state.get("current_hashes") or {})
+        dev_name = self.model.runtime_settings.get("developer_name") or "local_developer"
+        self.model.approve_override_hashes(module_key, verification_state.get("current_hashes") or {}, approver=dev_name)
+        from app.security_audit import log_security_event
+        log_security_event("override_approval", f"Approved external override hashes for module '{module_key}' (Approver: {dev_name})", "success", {"module_name": module_key, "approved_by": dev_name})
         return True
 
     def reset_module_import_state(self, keep_active=True):
@@ -769,6 +778,8 @@ class Dispatcher:
             branch_name=verification_context.get("branch_name"),
             approved=bool(verification_context.get("approved", False)),
         )
+        from app.security_audit import log_security_event
+        log_security_event("override_registration", f"Registered new external override hashes for module '{module_name}' from source '{verification_context.get('source', 'manual_override')}'", "success", {"module_name": module_name})
         module = self.import_managed_module(module_name, force_fresh=True) if self.is_external_module_override_trust_enabled() else None
         return target_path, module, written_paths
 
@@ -779,11 +790,14 @@ class Dispatcher:
         self.load_module(current_module_name, use_transition=False)
 
     def remove_external_module_overrides(self, module_names=None, include_bytecode=True):
-        return self.model.remove_external_module_overrides(
+        from app.security_audit import log_security_event
+        res = self.model.remove_external_module_overrides(
             self.get_managed_module_names(),
             module_names=module_names,
             include_bytecode=include_bytecode,
         )
+        log_security_event("override_removal", f"Removed external module overrides for modules: {module_names or 'all'}", "success", {"module_names": module_names})
+        return res
 
     def _setup_menu(self):
         self.view.configure_menu(
@@ -802,10 +816,11 @@ class Dispatcher:
 
     def open_issue_report_page(self):
         try:
-            webbrowser.open(ISSUE_REPORT_URL)
+            developer_email = self.model.runtime_settings.get("developer_email", "jamie_martin333@live.com")
+            webbrowser.open(f"mailto:{developer_email}?subject=AIMartinSuite%20-%20Report%20A%20Problem")
         except Exception as exc:
             log_exception("open_issue_report_page", exc)
-            self.host_ui_adapter.show_error("Report A Problem", f"Could not open the GitHub issue page:\n\n{exc}")
+            self.host_ui_adapter.show_error("Report A Problem", f"Could not open mail client:\n\n{exc}")
 
     def menu_open(self, event=None):
 #        if self.active_shell_backend == "pyqt6" and hasattr(self.view, "menu_open"):
@@ -913,6 +928,41 @@ class Dispatcher:
         self.refresh_navigation()
         self.refresh_active_module_access_state()
         self._enforce_active_module_access()
+
+        active_module = self.active_module_name
+        if active_module:
+            is_form_loader = (active_module == "production_log")
+            is_layout_manager = (active_module == "layout_manager")
+            
+            # Save first
+            if is_form_loader:
+                if self.active_module_instance is not None and hasattr(self.active_module_instance, "controller"):
+                    ctrl = self.active_module_instance.controller
+                    if hasattr(ctrl, "save_draft"):
+                        try:
+                            ctrl.save_draft()
+                        except Exception as exc:
+                            log_exception("session_change_save.production_log", exc)
+            elif is_layout_manager:
+                if self.active_module_instance is not None and hasattr(self.active_module_instance, "controller"):
+                    ctrl = self.active_module_instance.controller
+                    if hasattr(ctrl, "save_current"):
+                        try:
+                            ctrl.save_current()
+                        except Exception as exc:
+                            log_exception("session_change_save.layout_manager", exc)
+            
+            # Refresh if non-persistent, or if it is form_loader/layout_manager
+            should_refresh = not self.is_module_persistent(active_module) or is_form_loader or is_layout_manager
+            if should_refresh:
+                # Discard persistent instance if it exists to force clean instantiation
+                self.persistent_module_instances.pop(active_module, None)
+                # Load it fresh
+                try:
+                    self.load_module(active_module, use_transition=False)
+                except Exception as exc:
+                    log_exception("session_change_refresh.load_module", exc)
+
         for listener in list(self.security_session_listeners):
             try:
                 listener(event_name)
@@ -1340,7 +1390,14 @@ class Dispatcher:
         return self.active_shell_backend == "pyqt6" and str(module_name or "").strip() in QT_IN_VIEWPORT_PILOT_MODULES
 
     def _instantiate_module_in_container(self, module_name, module_container):
+        import time
+        start_time = time.perf_counter()
         module = self.import_managed_module(module_name, force_fresh=False)
+        load_time = time.perf_counter() - start_time
+        if not hasattr(self, "_module_load_timings"):
+            self._module_load_timings = {}
+        self._module_load_timings[module_name] = load_time
+
         if hasattr(module, "get_ui"):
             return module.get_ui(module_container, self)
         return None

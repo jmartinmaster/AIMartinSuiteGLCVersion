@@ -20,6 +20,7 @@ import platform
 import secrets
 import shutil
 from datetime import datetime
+from cryptography.fernet import Fernet, InvalidToken
 
 from PyQt6.QtWidgets import (
     QApplication,
@@ -57,13 +58,12 @@ from app.models.security_model import (
 from app.utils import ensure_external_data_directory, external_data_path
 
 __module_name__ = "Security Blanket"
-__version__ = "2.2.4"
+__version__ = "2.5.0"
 
 PASSWORD_SPECIAL_CHARACTERS = "!@#$%^&*()."
 MIN_PASSWORD_LENGTH = 8
 MIN_PASSWORD_UPPERCASE = 2
 DEFAULT_NON_SECURE_GENERAL_VAULT_NAME = "general_default"
-DEFAULT_NON_SECURE_GENERAL_VAULT_PASSWORD = "GeneralAA!0001"
 
 
 class Gatekeeper:
@@ -85,6 +85,63 @@ class Gatekeeper:
 
     def _vault_backup_directory(self):
         return ensure_external_data_directory(os.path.join("security", "backups", "vaults"))
+
+    def _vault_key_path(self):
+        ensure_external_data_directory("security")
+        return external_data_path(os.path.join("security", "vaults.key"))
+
+    def _get_or_create_vault_key(self):
+        key_path = self._vault_key_path()
+        if os.path.exists(key_path):
+            with open(key_path, "rb") as handle:
+                key_bytes = handle.read().strip()
+            if not key_bytes:
+                raise ValueError("Vault encryption key file is empty.")
+            Fernet(key_bytes)
+            return key_bytes
+
+        generated_key = Fernet.generate_key()
+        temp_path = f"{key_path}.tmp"
+        with open(temp_path, "wb") as handle:
+            handle.write(generated_key)
+        os.replace(temp_path, key_path)
+        try:
+            os.chmod(key_path, 0o600)
+        except OSError:
+            pass
+        return generated_key
+
+    def _encrypt_vault_payload(self, payload):
+        if not isinstance(payload, dict):
+            raise ValueError("Vault payload must be a dictionary.")
+        key_bytes = self._get_or_create_vault_key()
+        fernet = Fernet(key_bytes)
+        plaintext = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ciphertext = fernet.encrypt(plaintext).decode("utf-8")
+        return {
+            "encoding": "fernet-json-v1",
+            "ciphertext": ciphertext,
+            "issued_at": self._utc_timestamp(),
+        }
+
+    def _decrypt_vault_payload(self, envelope):
+        if not isinstance(envelope, dict):
+            raise ValueError("Vault payload envelope must be a dictionary.")
+        if str(envelope.get("encoding") or "").strip().lower() != "fernet-json-v1":
+            raise ValueError("Unsupported vault payload encoding.")
+        ciphertext = str(envelope.get("ciphertext") or "").strip()
+        if not ciphertext:
+            raise ValueError("Encrypted vault payload is missing ciphertext.")
+        key_bytes = self._get_or_create_vault_key()
+        fernet = Fernet(key_bytes)
+        try:
+            plaintext = fernet.decrypt(ciphertext.encode("utf-8"))
+        except InvalidToken as exc:
+            raise ValueError("Vault payload decryption failed: invalid token.") from exc
+        payload = json.loads(plaintext.decode("utf-8"))
+        if not isinstance(payload, dict):
+            raise ValueError("Vault payload decrypted to an invalid format.")
+        return payload
 
     def _create_temp_root(self):
         raise RuntimeError("Tk security dialogs were removed in Phase 9. Use the PyQt6 shell runtime.")
@@ -203,7 +260,7 @@ class Gatekeeper:
 
     def _load_security_settings(self):
         settings = {
-            "non_secure_mode": False,
+            "non_secure_mode": True,
             "external_module_override_trust": False,
             "non_secure_bypass_modules": [],
             "role_default_rights": {},
@@ -214,7 +271,7 @@ class Gatekeeper:
             with open(self._security_settings_path, "r", encoding="utf-8") as handle:
                 payload = json.load(handle)
             if isinstance(payload, dict):
-                settings["non_secure_mode"] = bool(payload.get("non_secure_mode", False))
+                settings["non_secure_mode"] = bool(payload.get("non_secure_mode", True))
                 settings["external_module_override_trust"] = bool(payload.get("external_module_override_trust", False))
                 raw_bypass_modules = payload.get("non_secure_bypass_modules")
                 if isinstance(raw_bypass_modules, list):
@@ -253,7 +310,7 @@ class Gatekeeper:
                 normalized_role_defaults[role_name] = normalize_rights(raw_rights, role=role_name)
 
         payload = {
-            "non_secure_mode": bool(settings.get("non_secure_mode", False)),
+            "non_secure_mode": bool(settings.get("non_secure_mode", True)),
             "external_module_override_trust": bool(settings.get("external_module_override_trust", False)),
             "non_secure_bypass_modules": normalized_bypass_modules,
             "role_default_rights": normalized_role_defaults,
@@ -343,8 +400,9 @@ class Gatekeeper:
     def _write_vault_record(self, vault_record, existing_path=None):
         target_path = self._vault_path_for_name(vault_record.vault_name)
         temp_path = f"{target_path}.tmp"
+        encrypted_payload = self._encrypt_vault_payload(vault_record.to_payload())
         with open(temp_path, "w", encoding="utf-8") as handle:
-            json.dump(vault_record.to_payload(), handle, indent=4)
+            json.dump(encrypted_payload, handle, indent=2)
         os.replace(temp_path, target_path)
         if existing_path and os.path.abspath(existing_path) != os.path.abspath(target_path) and os.path.exists(existing_path):
             os.remove(existing_path)
@@ -359,7 +417,22 @@ class Gatekeeper:
             return None
         if not isinstance(payload, dict):
             return None
-        return VaultRecord.from_payload(payload, path=path)
+        legacy_plaintext_payload = False
+        try:
+            if str(payload.get("encoding") or "").strip().lower() == "fernet-json-v1":
+                payload = self._decrypt_vault_payload(payload)
+            else:
+                legacy_plaintext_payload = True
+        except Exception as exc:
+            log_exception("gatekeeper._load_vault_record.decrypt", exc)
+            return None
+        vault_record = VaultRecord.from_payload(payload, path=path)
+        if legacy_plaintext_payload and vault_record is not None and vault_record.vault_name:
+            try:
+                self._write_vault_record(vault_record, existing_path=path)
+            except Exception as exc:
+                log_exception("gatekeeper._load_vault_record.migrate_plaintext", exc)
+        return vault_record
 
     def list_vaults(self):
         vaults = []
@@ -563,6 +636,8 @@ class Gatekeeper:
         return self._session_role if self._session else None
 
     def has_right(self, right_key):
+        if self.is_non_secure_mode_enabled():
+            return True
         if not right_key:
             return True
         if not self._session:
@@ -755,6 +830,26 @@ class Gatekeeper:
     def _ensure_non_secure_general_vault(self):
         try:
             existing_vaults = self.list_vaults()
+            default_general_vault = next(
+                (
+                    vault
+                    for vault in existing_vaults
+                    if bool(vault.enabled)
+                    and normalize_role(vault.role) == "general"
+                    and vault.vault_name == DEFAULT_NON_SECURE_GENERAL_VAULT_NAME
+                ),
+                None,
+            )
+            if default_general_vault is not None and bool(default_general_vault.password_required):
+                self.create_or_update_vault(
+                    vault_name=default_general_vault.vault_name,
+                    role="general",
+                    rights=list(default_general_vault.rights or self.get_role_default_rights("general")),
+                    enabled=True,
+                    existing_name=default_general_vault.vault_name,
+                    password_required=False,
+                )
+                existing_vaults = self.list_vaults()
             if any(normalize_role(vault.role) == "general" and bool(vault.enabled) for vault in existing_vaults):
                 return
 
@@ -765,25 +860,32 @@ class Gatekeeper:
                 suffix += 1
                 candidate_name = f"{DEFAULT_NON_SECURE_GENERAL_VAULT_NAME}_{suffix}"
 
-            generated_password = DEFAULT_NON_SECURE_GENERAL_VAULT_PASSWORD
             self.create_or_update_vault(
                 vault_name=candidate_name,
                 role="general",
                 rights=self.get_role_default_rights("general"),
-                password=generated_password,
+                password=None,
                 enabled=True,
+                password_required=False,
             )
-            self._notify_non_secure_general_vault_created(candidate_name, generated_password)
+            self._notify_non_secure_general_vault_created(candidate_name, None)
         except Exception as exc:
             log_exception("gatekeeper.ensure_non_secure_general_vault", exc)
 
-    def _notify_non_secure_general_vault_created(self, vault_name, password):
-        message = (
-            "Non-secure mode created a default General vault.\n\n"
-            f"Vault: {vault_name}\n"
-            f"Password: {password}\n\n"
-            "Sign in with these credentials and rotate the password from Security Admin."
-        )
+    def _notify_non_secure_general_vault_created(self, vault_name, password=None):
+        if password:
+            message = (
+                "Non-secure mode created a default General vault.\n\n"
+                f"Vault: {vault_name}\n"
+                f"Password: {password}\n\n"
+                "Sign in with these credentials and rotate the password from Security Admin."
+            )
+        else:
+            message = (
+                "Non-secure mode created a default passwordless General vault.\n\n"
+                f"Vault: {vault_name}\n\n"
+                "You can sign in without a password or set a password from Security Admin."
+            )
         if self._use_qt_dialogs(None) and QMessageBox is not None:
             QMessageBox.information(self._get_qt_parent(None), "Security Setup", message)
             return
@@ -842,6 +944,33 @@ class Gatekeeper:
             return False
         return str(module_name or "").strip() in set(self.get_non_secure_bypass_modules())
 
+    def _try_auto_login_passwordless_general_vault(self, required_right=None, allowed_roles=None):
+        if self._session is not None:
+            return False
+        normalized_roles = {normalize_role(role) for role in (allowed_roles or set()) if str(role).strip()}
+        if normalized_roles and "general" not in normalized_roles:
+            return False
+
+        available_vaults = [
+            vault
+            for vault in self.list_vaults()
+            if bool(vault.enabled) and normalize_role(vault.role) == "general" and not bool(vault.password_required)
+        ]
+        if not available_vaults:
+            return False
+
+        selected_vault = next(
+            (vault for vault in available_vaults if vault.vault_name == DEFAULT_NON_SECURE_GENERAL_VAULT_NAME),
+            available_vaults[0],
+        )
+        if required_right:
+            effective_rights = self._get_effective_vault_rights(selected_vault)
+            if required_right not in effective_rights:
+                return False
+
+        self._set_session_from_vault(selected_vault)
+        return True
+
     def is_external_module_override_trust_enabled(self):
         return bool(self._load_security_settings().get("external_module_override_trust", False))
 
@@ -853,10 +982,17 @@ class Gatekeeper:
         return settings["external_module_override_trust"]
 
     def authenticate(self, required_right=None, parent=None, reason=None, force_reauth=False, allowed_roles=None):
+        if self.is_non_secure_mode_enabled() and not force_reauth:
+            return True
         normalized_roles = {normalize_role(role) for role in (allowed_roles or set()) if str(role).strip()}
         if not force_reauth and self._session and self.has_right(required_right):
             if not normalized_roles or self._session_role in normalized_roles:
                 return True
+        if not force_reauth and self._try_auto_login_passwordless_general_vault(
+            required_right=required_right,
+            allowed_roles=normalized_roles,
+        ):
+            return True
 
         prompt_parent = parent
         if not self._use_qt_dialogs(prompt_parent):

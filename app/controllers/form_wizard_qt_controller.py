@@ -19,13 +19,23 @@ from PyQt6.QtWidgets import (
     QComboBox,
     QSpinBox,
     QMessageBox,
+    QFileDialog,
 )
 
 from app.models.form_wizard_model import FormWizardModel
 from app.views.form_wizard_qt_view import FormWizardQtView
 
 __module_name__ = "Form Wizard Controller"
-__version__ = "1.0.1"
+__version__ = "2.5.0"
+
+
+def _to_int(val, fallback=0):
+    try:
+        if val is None:
+            return fallback
+        return int(float(val))
+    except (ValueError, TypeError):
+        return fallback
 
 
 class FormWizardQtController:
@@ -54,6 +64,7 @@ class FormWizardQtController:
     def _bind_events(self):
         self.view.next_clicked_hook = self.next_page
         self.view.back_clicked_hook = self.back_page
+        self.view.import_form_btn.clicked.connect(self.import_layout_json)
         
         # Page 2: Sections buttons
         self.view.add_section_btn.clicked.connect(self.add_section_row)
@@ -337,16 +348,16 @@ class FormWizardQtController:
         table.setItem(r, 1, QTableWidgetItem(label))
         
         row_spin = QSpinBox()
-        row_spin.setValue(row)
+        row_spin.setValue(_to_int(row))
         table.setCellWidget(r, 2, row_spin)
         
         col_spin = QSpinBox()
-        col_spin.setValue(col)
+        col_spin.setValue(_to_int(col))
         table.setCellWidget(r, 3, col_spin)
         
         width_spin = QSpinBox()
         width_spin.setMaximum(24)
-        width_spin.setValue(width)
+        width_spin.setValue(_to_int(width))
         table.setCellWidget(r, 4, width_spin)
         
         table.setItem(r, 5, QTableWidgetItem(cell))
@@ -494,7 +505,7 @@ class FormWizardQtController:
         
         width_spin = QSpinBox()
         width_spin.setMaximum(50)
-        width_spin.setValue(width)
+        width_spin.setValue(_to_int(width))
         table.setCellWidget(r, 3, width_spin)
         
         role_combo = QComboBox()
@@ -591,3 +602,75 @@ class FormWizardQtController:
             self.view.accept()
         except Exception as exc:
             self.view.show_warning("Form Creation Failed", f"An error occurred: {exc}")
+
+    def import_layout_json(self):
+        file_path, _ = QFileDialog.getOpenFileName(
+            self.view, "Import Form Layout JSON", "", "JSON Files (*.json)"
+        )
+        if not file_path:
+            return
+            
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                import json
+                config = json.load(f)
+        except Exception as exc:
+            QMessageBox.critical(self.view, "Import Error", f"Failed to parse JSON file:\n{exc}")
+            return
+            
+        try:
+            missing_data = self.model.layout_manager.detect_missing_standard_fields(config)
+            has_missing_header = len(missing_data.get("header", [])) > 0
+            has_missing_prod = len(missing_data.get("production", [])) > 0
+            has_missing_down = len(missing_data.get("downtime", [])) > 0
+            
+            metadata_check = missing_data.get("metadata", {})
+            name_missing = metadata_check.get("name_missing")
+            desc_missing = metadata_check.get("description_missing")
+            
+            if has_missing_header or has_missing_prod or has_missing_down or name_missing or desc_missing:
+                suggestions = self.model.layout_manager.get_missing_fields_suggestions(config, file_path)
+                from app.views.layout_manager_qt_view import InjectMissingFieldsDialog
+                dialog = InjectMissingFieldsDialog(self.view, missing_fields=missing_data, suggestions=suggestions)
+                if dialog.exec():
+                    result = dialog.get_values()
+                    metadata = result.get("metadata", {})
+                    fields_to_inject = result.get("fields", [])
+                    
+                    config = self.model.layout_manager.inject_fields_into_config(config, fields_to_inject)
+                    
+                    if metadata.get("export_prefix"):
+                        config["export_prefix"] = metadata.get("export_prefix")
+                    name = metadata.get("name")
+                    description = metadata.get("description")
+                else:
+                    name = None
+                    description = None
+            else:
+                import os
+                base_name = os.path.splitext(os.path.basename(file_path))[0]
+                clean_name = base_name.replace("_", " ").replace("-", " ").title()
+                name = clean_name
+                description = f"Imported from {os.path.basename(file_path)}"
+        except Exception as exc:
+            QMessageBox.critical(self.view, "Import Error", f"Error checking missing fields:\n{exc}")
+            return
+            
+        self.model.form_name = name or config.get("export_prefix") or ""
+        self.model.description = description or ""
+        self.model.template_path = config.get("template_path", "")
+        self.model.export_prefix = config.get("export_prefix", "")
+        
+        self.model.sections = config.get("sections", [])
+        self.model.single_sections.clear()
+        self.model.repeating_sections.clear()
+        
+        for section in self.model.sections:
+            section_type = section.get("section_type") or "single"
+            fields_key = section.get("fields_key")
+            if section_type == "repeating":
+                self.model.repeating_sections[fields_key] = config.get(fields_key, [])
+            elif section_type == "single":
+                self.model.single_sections[fields_key] = config.get(fields_key, [])
+                
+        self._load_model_to_views()

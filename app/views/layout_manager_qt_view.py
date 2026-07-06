@@ -26,7 +26,7 @@ from app.theme_manager import get_qt_palette, get_qt_stylesheet
 from PyQt6.QtGui import QDesktopServices, QFont, QFontDatabase, QKeySequence, QShortcut, QColor, QPainter, QTextFormat
 
 __module_name__ = "Layout Manager Qt View"
-__version__ = "0.6.16"
+__version__ = "2.5.0"
 LAYOUT_MANAGER_QT_SESSION_ENV = "AIMARTIN_LAYOUT_MANAGER_QT_SESSION"
 REPO_ROOT = Path(__file__).resolve().parents[2]
 HEADER_ROLE_OPTIONS = [""] + sorted(set(HEADER_FIELD_ROLE_DEFAULTS.values()))
@@ -603,7 +603,7 @@ class LayoutManagerQtView(QMainWindow):
         form_row.setContentsMargins(8, 8, 8, 8)
         form_row.addWidget(QLabel("Stored"))
         self.form_combo = QComboBox()
-        self.form_combo.setMinimumWidth(260)
+        self.form_combo.setMinimumWidth(160)
         form_row.addWidget(self.form_combo)
 
         activate_button = QPushButton("Activate")
@@ -640,6 +640,9 @@ class LayoutManagerQtView(QMainWindow):
         form_actions_btn = QPushButton("Form Actions")
         form_actions_btn.setMinimumHeight(26)
         form_actions_menu = QMenu(self)
+        
+        wizard_act = form_actions_menu.addAction("Launch Form Wizard...")
+        wizard_act.triggered.connect(self.controller.create_blank_form)
         
         rename_act = form_actions_menu.addAction("Rename Form...")
         rename_act.triggered.connect(self.controller.rename_form)
@@ -1371,7 +1374,7 @@ class LayoutManagerQtView(QMainWindow):
             self.scroll_content.setMinimumWidth(0)
 
         if viewport_width > 0:
-            use_vertical = viewport_width < 800
+            use_vertical = viewport_width < 500
             if use_vertical != getattr(self, "_ribbon_layout_vertical", None):
                 self._ribbon_layout_vertical = use_vertical
                 self.ribbon_layout.removeWidget(self.form_group)
@@ -1396,6 +1399,10 @@ class LayoutManagerQtView(QMainWindow):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._apply_responsive_layout()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        QTimer.singleShot(50, self._apply_responsive_layout)
 
     def _configure_shortcuts(self):
         save_shortcut = QShortcut(QKeySequence("Ctrl+S"), self)
@@ -1432,6 +1439,7 @@ class LayoutManagerQtView(QMainWindow):
         )
         table_widget.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         table_widget.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectItems)
+        table_widget.itemChanged.connect(self._on_table_item_changed)
 
     def _build_excel_column_choices(self, max_column_number=260):
         choices = []
@@ -1496,6 +1504,7 @@ class LayoutManagerQtView(QMainWindow):
         if not isinstance(combo_widget, QComboBox):
             combo_widget = QComboBox(table_widget)
             table_widget.setCellWidget(row_index, column_index, combo_widget)
+            combo_widget.currentIndexChanged.connect(lambda _, tw=table_widget, cb=combo_widget: self._on_combo_changed(tw, cb))
         options = [str(option) for option in dropdown_spec.get("options", [])]
         with QSignalBlocker(combo_widget):
             combo_widget.setEditable(bool(dropdown_spec.get("editable")))
@@ -1526,6 +1535,31 @@ class LayoutManagerQtView(QMainWindow):
         table_widget.removeCellWidget(row_index, column_index)
         item = QTableWidgetItem(str(value if value is not None else ""))
         table_widget.setItem(row_index, column_index, item)
+
+    def _on_table_item_changed(self, item):
+        if self.header_fields_table.signalsBlocked() or self.row_fields_table.signalsBlocked():
+            return
+        self.controller.sync_block_view_to_editor()
+
+    def _on_combo_changed(self, table_widget, combo_widget):
+        if table_widget.signalsBlocked() or combo_widget.signalsBlocked():
+            return
+        # Copy the text of the combo box into the backing item so it's read by table_values()
+        row_index = -1
+        column_index = -1
+        for r in range(table_widget.rowCount()):
+            for c in range(table_widget.columnCount()):
+                if table_widget.cellWidget(r, c) is combo_widget:
+                    row_index = r
+                    column_index = c
+                    break
+            if row_index >= 0:
+                break
+        if row_index >= 0 and column_index >= 0:
+            backing_item = table_widget.item(row_index, column_index)
+            if backing_item is not None:
+                backing_item.setText(str(combo_widget.currentText()).strip())
+        self.controller.sync_block_view_to_editor()
 
     def eventFilter(self, watched, event):
         if watched in getattr(self, "_navigable_tables", ()) and event.type() == QEvent.Type.KeyPress:
@@ -2543,9 +2577,11 @@ class LayoutManagerQtView(QMainWindow):
         table_key, token_value = self._next_table_render_token(table_widget)
         total_rows = max(int(row_count or 0), 0)
         table_widget.setUpdatesEnabled(False)
+        table_widget.blockSignals(True)
         self._clear_table_cell_widgets(table_widget)
         table_widget.clearContents()
         table_widget.setRowCount(total_rows)
+        table_widget.blockSignals(False)
         if total_rows == 0:
             table_widget.setUpdatesEnabled(True)
             return
@@ -2553,9 +2589,11 @@ class LayoutManagerQtView(QMainWindow):
         def _render_chunk(start_index):
             if self._table_render_tokens.get(table_key) != token_value:
                 return
+            table_widget.blockSignals(True)
             end_index = min(start_index + max(int(chunk_size), 1), total_rows)
             for row_index in range(start_index, end_index):
                 row_renderer(row_index)
+            table_widget.blockSignals(False)
             if end_index < total_rows:
                 QTimer.singleShot(0, lambda: _render_chunk(end_index))
                 return

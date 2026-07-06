@@ -14,14 +14,16 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 __module_name__ = "Update Manager Qt View"
-__version__ = "1.5.3"
+__version__ = "2.5.0"
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QApplication,
     QComboBox,
+    QAbstractItemView,
     QFormLayout,
     QGroupBox,
+    QHeaderView,
     QHBoxLayout,
     QLabel,
     QMainWindow,
@@ -31,6 +33,8 @@ from PyQt6.QtWidgets import (
     QScrollArea,
     QStatusBar,
     QTabWidget,
+    QTableWidget,
+    QTableWidgetItem,
     QTextEdit,
     QTreeWidget,
     QTreeWidgetItem,
@@ -88,6 +92,7 @@ class UpdateManagerQtView(QMainWindow):
         self.payload_local_version_label = None
         self.payload_remote_version_label = None
         self.payload_status_label = None
+        self.payload_checksum_label = None
         self.payload_note_label = None
         self.documentation_tracked_label = None
         self.documentation_remote_state_label = None
@@ -303,6 +308,14 @@ class UpdateManagerQtView(QMainWindow):
         self.payload_status_label.setWordWrap(True)
         payload_layout.addRow(QLabel("Status"), self.payload_status_label)
 
+        self.payload_governance_label = QLabel("-")
+        self.payload_governance_label.setWordWrap(True)
+        payload_layout.addRow(QLabel("Governance"), self.payload_governance_label)
+
+        self.payload_checksum_label = QLabel("Not checked")
+        self.payload_checksum_label.setWordWrap(True)
+        payload_layout.addRow(QLabel("Checksum"), self.payload_checksum_label)
+
         self.payload_note_label = QLabel("Select a payload to compare against the repository.")
         self.payload_note_label.setWordWrap(True)
         payload_layout.addRow(QLabel("Note"), self.payload_note_label)
@@ -412,6 +425,33 @@ class UpdateManagerQtView(QMainWindow):
         advanced_layout.addRow(QLabel("Actions"), advanced_actions)
         content_layout.addWidget(advanced_group)
 
+        # Rollback Manager
+        rollback_group = QGroupBox("Rollback Manager")
+        rollback_layout = QVBoxLayout(rollback_group)
+        
+        rollback_layout.addWidget(QLabel("Select a versioned backup payload to verify and revert to:"))
+        
+        self.rollback_table = QTableWidget()
+        self.rollback_table.setColumnCount(4)
+        self.rollback_table.setHorizontalHeaderLabels(["Backup Time", "Module Name", "Backup Version", "Status"])
+        self.rollback_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.rollback_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.rollback_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        rollback_layout.addWidget(self.rollback_table, 1)
+        
+        rollback_btn_layout = QHBoxLayout()
+        self.rollback_restore_btn = QPushButton("Restore Selected Backup")
+        self.rollback_restore_btn.clicked.connect(self._on_rollback_restore_clicked)
+        rollback_btn_layout.addWidget(self.rollback_restore_btn)
+        
+        self.rollback_refresh_btn = QPushButton("Refresh Backups List")
+        self.rollback_refresh_btn.clicked.connect(self._on_rollback_refresh_clicked)
+        rollback_btn_layout.addWidget(self.rollback_refresh_btn)
+        rollback_btn_layout.addStretch(1)
+        
+        rollback_layout.addLayout(rollback_btn_layout)
+        content_layout.addWidget(rollback_group)
+
         # Runtime Status
         runtime_status_group = QGroupBox("Runtime Status")
         runtime_status_layout = QVBoxLayout(runtime_status_group)
@@ -510,6 +550,7 @@ class UpdateManagerQtView(QMainWindow):
         self.payload_local_version_label.setText(str(snapshot.get("module_payload_local_version") or "Unknown"))
         self.payload_remote_version_label.setText(str(snapshot.get("module_payload_remote_version") or "Not checked"))
         self.payload_status_label.setText(str(snapshot.get("module_payload_status") or "Pending"))
+        self.payload_checksum_label.setText(str(snapshot.get("module_payload_checksum_status") or "Not checked"))
         self.payload_note_label.setText(str(snapshot.get("module_payload_note") or "Select a payload to compare against the repository."))
         self.documentation_tracked_label.setText(str(snapshot.get("documentation_payloads") or "0 tracked file(s)"))
         self.documentation_remote_state_label.setText(str(snapshot.get("documentation_remote_state") or "Not checked"))
@@ -618,6 +659,37 @@ class UpdateManagerQtView(QMainWindow):
 
     def show_info(self, title, message):
         QMessageBox.information(self, title, message)
+
+    def _on_rollback_restore_clicked(self):
+        selected_ranges = self.rollback_table.selectedRanges()
+        if not selected_ranges:
+            self.show_info("Rollback Manager", "Please select a backup to restore.")
+            return
+        row = selected_ranges[0].topRow()
+        backup_dir = self.rollback_table.item(row, 0).data(Qt.ItemDataRole.UserRole)
+        version = self.rollback_table.item(row, 2).text()
+        if self.ask_yes_no("Restore Backup", f"Are you sure you want to revert to the backup version {version}? This will overwrite current files and trigger an app restart."):
+            self.controller.restore_rollback(backup_dir)
+
+    def _on_rollback_refresh_clicked(self):
+        self.controller.refresh_rollback_list()
+
+    def refresh_rollback_list(self, rollback_candidates):
+        self.rollback_table.setRowCount(0)
+        self.rollback_table.setRowCount(len(rollback_candidates))
+        for row_idx, item in enumerate(rollback_candidates):
+            time_str = item.get("timestamp_str") or item.get("dir_name")
+            module_name = item.get("module_name") or "-"
+            version = item.get("version") or "Unknown"
+            status = "Verified" if item.get("verified") else "Mismatch/Unsigned"
+            
+            time_cell = QTableWidgetItem(time_str)
+            time_cell.setData(Qt.ItemDataRole.UserRole, item.get("path"))
+            
+            self.rollback_table.setItem(row_idx, 0, time_cell)
+            self.rollback_table.setItem(row_idx, 1, QTableWidgetItem(module_name))
+            self.rollback_table.setItem(row_idx, 2, QTableWidgetItem(version))
+            self.rollback_table.setItem(row_idx, 3, QTableWidgetItem(status))
 
     def closeEvent(self, event):
         self.controller.handle_close()

@@ -24,7 +24,7 @@ from app.models.update_manager_model import UpdateManagerModel
 from app.update_bindings import ObservableValue
 
 __module_name__ = "Update Manager Runtime Controller"
-__version__ = "1.1.0"
+__version__ = "2.5.0"
 
 INFO = "info"
 SUCCESS = "success"
@@ -90,6 +90,8 @@ class UpdateManagerRuntimeController:
         self.module_payload_local_version_var = self._create_var("Unknown")
         self.module_payload_remote_version_var = self._create_var("Not checked")
         self.module_payload_status_var = self._create_var("Pending")
+        self.module_payload_governance_var = self._create_var("Not checked")
+        self.module_payload_checksum_var = self._create_var("Not checked")
         self.module_payload_note_var = self._create_var(self._payload_boundary_note("Select a payload to compare against the repository."))
         self.module_payload_in_progress = False
         self.documentation_payload_tracked_var = self._create_var(f"{len(self.documentation_payload_options)} tracked file(s)")
@@ -332,7 +334,7 @@ class UpdateManagerRuntimeController:
         option = option or self._get_selected_module_payload_option()
         return self._get_local_module_payload_metadata(option).get("version", "Unknown")
 
-    def refresh_module_payload_summary(self, remote_version=None, status=None, note=None, option=None):
+    def refresh_module_payload_summary(self, remote_version=None, status=None, note=None, option=None, governance=None, checksum_status=None, checksum_note=None):
         option = option or self._get_selected_module_payload_option()
         local_metadata = self._get_local_module_payload_metadata(option)
         if option is not None:
@@ -346,6 +348,25 @@ class UpdateManagerRuntimeController:
             self.module_payload_status_var.set(status)
         if note is not None:
             self.module_payload_note_var.set(note)
+        if governance is not None:
+            self.module_payload_governance_var.set(governance)
+        else:
+            # Dynamically compute governance based on active channel and signature bypass setting
+            settings = self.dispatcher.get_setting if hasattr(self.dispatcher, "get_setting") else None
+            allow_unsigned = False
+            if settings:
+                try:
+                    allow_unsigned = bool(settings("allow_unsigned_dev_updates", False))
+                except Exception:
+                    pass
+            if allow_unsigned:
+                self.module_payload_governance_var.set("[Bypassed] Unsigned updates enabled")
+            else:
+                self.module_payload_governance_var.set("[Verified] Ed25519 signature required")
+        if checksum_status is not None:
+            self.module_payload_checksum_var.set(str(checksum_status))
+        if checksum_note:
+            self.module_payload_note_var.set(str(checksum_note))
 
     def refresh_documentation_payload_summary(self, remote_state=None, status=None, note=None):
         self.documentation_payload_tracked_var.set(f"{len(self.documentation_payload_options)} tracked file(s)")
@@ -382,6 +403,9 @@ class UpdateManagerRuntimeController:
             status=result.get("status", "Module check failed"),
             note=result.get("note", "Could not evaluate the selected payload."),
             option=option,
+            governance=result.get("governance"),
+            checksum_status=result.get("checksum_status"),
+            checksum_note=result.get("checksum_note"),
         )
 
     def check_documentation_payload_updates(self):

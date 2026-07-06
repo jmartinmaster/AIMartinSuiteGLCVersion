@@ -42,9 +42,11 @@ The system evaluates update version numbers automatically:
 
 Updates are installed in separate pieces:
 
-- **Overrides**: Custom files are saved to the `the_golden_standard` folder.
+- **Overrides**: Custom module override files are stored under `data/modules`.
   They remain inactive until an administrator enables **Override Trust**.
 - **Settings & Config**: Updates can safely replace default layouts and settings
   without deleting your existing backup files.
 - **Documentation**: Help documents and licenses are updated as a single bundle
   rather than file-by-file.
+- **Rollback Safety**: Rollback candidates are verified before restore and
+  unverified backups are blocked from restore.

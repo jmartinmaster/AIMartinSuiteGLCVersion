@@ -24,7 +24,7 @@ from app.models.layout_manager_model import LayoutManagerModel
 from app.views.layout_manager_qt_view import LayoutManagerQtView
 
 __module_name__ = "Layout Manager Qt Controller"
-__version__ = "0.7.5"
+__version__ = "2.5.0"
 
 
 class LayoutManagerQtController:
@@ -80,6 +80,7 @@ class LayoutManagerQtController:
         if not self.selected_form_id:
             self.selected_form_id = self.loaded_form_id()
 
+        self._clean_editor_text = self.current_editor_text
         self.forms = []
         self.refresh_forms()
         self.refresh_view(reason="Loaded layout manager session", editor_text_override=self.current_editor_text)
@@ -92,8 +93,7 @@ class LayoutManagerQtController:
         If found, prompts the user via InjectMissingFieldsDialog to inject them.
         Returns (updated_config, form_name, description).
         """
-        # Auto missing field injection has been disabled
-        return config, None, None
+        missing_data = self.model.detect_missing_standard_fields(config)
         
         has_missing_header = len(missing_data.get("header", [])) > 0
         has_missing_prod = len(missing_data.get("production", [])) > 0
@@ -403,11 +403,27 @@ class LayoutManagerQtController:
 
     def mark_clean(self, message):
         self.dirty = False
+        try:
+            self._clean_editor_text = self.view.editor_text()
+        except Exception:
+            self._clean_editor_text = self.current_editor_text
         self.model.mark_clean()
         self.change_token += 1
         self.view.set_dirty(False)
         self.view.set_status(message)
         self.write_state(message=message)
+
+    def has_actual_changes(self):
+        if not self.dirty:
+            return False
+        try:
+            current_text = self.view.editor_text()
+            if current_text == getattr(self, "_clean_editor_text", None):
+                self.mark_clean("No changes detected")
+                return False
+        except Exception:
+            pass
+        return True
 
     def apply_editor_changes(self, message=None):
         config, payload_details = self.model.resolve_editor_text(
@@ -701,7 +717,7 @@ class LayoutManagerQtController:
         if not form_id:
             self.view.set_status("Select a form to load into the editor.", error=True)
             return
-        if self.dirty and not self.view.confirm(
+        if self.has_actual_changes() and not self.view.confirm(
             "Replace Unsaved Changes",
             "Load selected form JSON into editor and replace current unsaved changes?",
         ):
@@ -1373,7 +1389,7 @@ class LayoutManagerQtController:
             self.refresh_forms()
             self.set_status_message("Selected form is already active.")
             return
-        if self.dirty and not self.view.confirm(
+        if self.has_actual_changes() and not self.view.confirm(
             "Unsaved Changes",
             "Activate the selected form and discard unsaved layout changes?",
         ):
@@ -1706,7 +1722,7 @@ class LayoutManagerQtController:
             self.view.close()
 
     def can_close(self):
-        if not self.dirty:
+        if not self.has_actual_changes():
             return True
         return self.view.confirm(
             "Unsaved Changes",

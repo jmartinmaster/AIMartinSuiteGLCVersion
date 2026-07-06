@@ -27,14 +27,21 @@ from app.theme_manager import DEFAULT_THEME, normalize_theme
 from app.utils import ensure_external_data_directory, external_data_path
 
 __module_name__ = "Settings Diagnostics"
-__version__ = "1.0.2"
+__version__ = "2.5.0"
 
 DEFAULT_SETTINGS_PAYLOAD = {
     "export_directory": "data/exports",
     "path_overrides": {},
     "organize_exports_by_date": True,
     "update_repository_url": "https://github.com/jmartinmaster/AIMartinSuiteGLCVersion",
+    "developer_name": "jmartinmaster",
+    "developer_email": "jamie_martin333@live.com",
     "enable_advanced_dev_updates": False,
+    "allow_unsigned_dev_updates": False,
+    "release_channel": "stable",
+    "override_ttl_days": 0,
+    "require_dual_override_approval": False,
+    "strict_protected_override_policy": True,
     "theme": DEFAULT_THEME,
     "ui_shell_backend": "pyqt6",
     "enable_screen_transitions": True,
@@ -233,7 +240,7 @@ def diagnose_and_repair_settings(
         original_backend = "pyqt6"
     effective["ui_shell_backend"] = original_backend
 
-    for key in ("enable_advanced_dev_updates", "enable_screen_transitions", "enable_module_update_notifications", "organize_exports_by_date"):
+    for key in ("enable_advanced_dev_updates", "allow_unsigned_dev_updates", "require_dual_override_approval", "strict_protected_override_policy", "enable_screen_transitions", "enable_module_update_notifications", "organize_exports_by_date"):
         original_value = effective.get(key, defaults.get(key, False))
         coerced_value, changed = _coerce_bool(original_value, bool(defaults.get(key, False)))
         if changed:
@@ -251,6 +258,7 @@ def diagnose_and_repair_settings(
         "screen_transition_duration_ms": (int, 360, 0, 500),
         "toast_duration_sec": (int, 5, 1, None),
         "auto_save_interval_min": (int, 5, 1, None),
+        "override_ttl_days": (int, 0, 0, None),
         "default_shift_hours": (float, 8.0, None, None),
         "default_goal_mph": (float, 240.0, None, None),
     }
@@ -295,6 +303,8 @@ def diagnose_and_repair_settings(
     for key, fallback_value in {
         "update_repository_url": defaults.get("update_repository_url", ""),
         "export_directory": defaults.get("export_directory", "data/exports"),
+        "developer_name": defaults.get("developer_name", "jmartinmaster"),
+        "developer_email": defaults.get("developer_email", "jamie_martin333@live.com"),
     }.items():
         original_value = effective.get(key, fallback_value)
         normalized_value = str(original_value or "").strip()
@@ -311,6 +321,19 @@ def diagnose_and_repair_settings(
                 normalized_value,
             )
         effective[key] = normalized_value
+
+    raw_release_channel = str(effective.get("release_channel", "stable") or "stable").strip().lower()
+    if raw_release_channel not in {"stable", "dev"}:
+        _record_repair(
+            "updates",
+            "release_channel",
+            "invalid_choice",
+            "Release channel was invalid and reset to 'stable'.",
+            raw_release_channel,
+            "stable",
+        )
+        raw_release_channel = "stable"
+    effective["release_channel"] = raw_release_channel
 
     raw_path_overrides = effective.get("path_overrides", {})
     normalized_path_overrides = {}

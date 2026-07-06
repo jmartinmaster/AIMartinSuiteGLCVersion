@@ -37,7 +37,7 @@ from PyQt6.QtWidgets import (
 )
 
 __module_name__ = "Form Wizard View"
-__version__ = "1.0.1"
+__version__ = "2.5.0"
 
 
 class FormWizardQtView(QDialog):
@@ -132,6 +132,10 @@ class FormWizardQtView(QDialog):
         layout = QVBoxLayout(page)
         layout.setSpacing(12)
         layout.setContentsMargins(0, 8, 0, 0)
+        
+        self.import_form_btn = QPushButton("Import Existing Form Layout JSON...", page)
+        self.import_form_btn.setStyleSheet("font-weight: bold; height: 28px;")
+        layout.addWidget(self.import_form_btn)
         
         form_group = QGroupBox("Form Identity")
         form_layout = QFormLayout(form_group)
