@@ -1618,7 +1618,10 @@ class LayoutManagerQtController:
                     self.set_loaded_form_state(config, source_path, loaded_form_info)
                 except ValueError as exc:
                     load_error = str(exc)
-                    editor_text = None
+                    try:
+                        editor_text = self.model.load_current_text()
+                    except Exception:
+                        editor_text = None
             elif active_form:
                 self.set_selected_form_id(active_form.get("id"))
                 editor_text = None
