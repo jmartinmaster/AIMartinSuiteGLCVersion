@@ -1,5 +1,3 @@
-## This branch may be highly unstable. Use at own risk
-
 # Production Logging Center - GLC Edition
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
