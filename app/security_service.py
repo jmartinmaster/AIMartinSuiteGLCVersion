@@ -17,7 +17,7 @@ from app.models.security_model import MODULE_ACCESS_RIGHTS
 from app.security import gatekeeper
 
 __module_name__ = "Security Service"
-__version__ = "2.5.0"
+__version__ = "2.5.1"
 
 
 class SecurityService:

@@ -26,7 +26,7 @@ from app.models.form_wizard_model import FormWizardModel
 from app.views.form_wizard_qt_view import FormWizardQtView
 
 __module_name__ = "Form Wizard Controller"
-__version__ = "2.5.0"
+__version__ = "2.5.1"
 
 
 def _to_int(val, fallback=0):

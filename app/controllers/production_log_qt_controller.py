@@ -23,7 +23,7 @@ from app.models.production_log_model import BALANCE_DOWNTIME_CAUSE, ProductionLo
 from app.views.production_log_qt_view import ProductionLogQtView
 
 __module_name__ = "Form Loader Qt Controller"
-__version__ = "2.5.0"
+__version__ = "2.5.1"
 
 
 class ProductionLogQtController:
@@ -781,37 +781,51 @@ class ProductionLogQtController:
             total_molds = 0
             production_total_minutes = 0
             for row_index, row_payload in enumerate(production_rows):
-                part_number = self._row_value_by_role(row_payload, self.production_section_id, "part_number", fallback_id="part_number")
+                lookup_key_role = self.model.get_rate_lookup_key_role(config=self.layout_config)
+                lookup_key_value = self._row_value_by_role(
+                    row_payload,
+                    self.production_section_id,
+                    lookup_key_role,
+                    fallback_id="part_number",
+                )
                 molds_value = self._row_value_by_role(row_payload, self.production_section_id, "mold_count", fallback_id="molds")
 
-                # Determine if rate override checkbox is enabled/checked
-                override_val = self._row_value_by_role(row_payload, self.production_section_id, "rate_override_toggle", fallback_id="rate_override_enabled")
+                # Determine if rate override checkbox is enabled/checked.
+                rate_value_role = self.model.get_rate_value_role(config=self.layout_config)
+                override_role = self.model.get_rate_override_role(config=self.layout_config)
+                override_val = self._row_value_by_role(
+                    row_payload,
+                    self.production_section_id,
+                    override_role,
+                    fallback_id="rate_override_enabled",
+                )
                 rate_field_id = self.model.get_section_field_id_by_role(
                     self.production_section_id,
-                    "cycle_rate",
+                    rate_value_role,
                     config=self.layout_config,
-                    fallback_id="rate",
+                    fallback_id="rate_lookup",
                 )
-                rate_value = self._row_value_by_role(row_payload, self.production_section_id, "cycle_rate", fallback_id="rate")
-                override_checked = False
-                if override_val is not None:
-                    try:
-                        override_checked = str(override_val).strip().lower() in ("true", "1")
-                    except Exception:
-                        override_checked = False
+                rate_value = self._row_value_by_role(
+                    row_payload,
+                    self.production_section_id,
+                    rate_value_role,
+                    fallback_id="rate_lookup",
+                )
+                override_checked = str(override_val).strip().lower() in ("true", "1", "yes", "on")
 
-                rate = None
-                if override_checked:
-                    try:
-                        rate = float(rate_value)
-                    except (ValueError, TypeError):
-                        rate = None
-                else:
-                    rate = self.model.lookup_rate(
-                        rates_data,
-                        self._header_value_by_role(header_payload, "machine_number", fallback_id="machine", default=""),
-                        part_number,
-                    )
+                try:
+                    rate = float(str(rate_value).strip()) if str(rate_value).strip() else None
+                except Exception:
+                    rate = None
+
+                # Keep 2.4.9 behavior: if override is disabled, always use lookup;
+                # if override is enabled but blank, fall back to lookup.
+                if not override_checked or rate is None:
+                    lookup_rate = self.model.resolve_lookup_rate(lookup_key_value, rates_data, goal_value)
+                    if not override_checked:
+                        rate = lookup_rate
+                    elif rate is None:
+                        rate = lookup_rate
                     formatted_lookup = self.model.format_rate_value(rate) if rate is not None else ""
                     if str(rate_value).strip() != formatted_lookup:
                         self.view.set_table_field_value(

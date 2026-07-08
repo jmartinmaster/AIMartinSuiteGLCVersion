@@ -23,7 +23,7 @@ from pathlib import Path
 from app.views.about_qt_view import AboutQtView
 
 __module_name__ = "About Qt Controller"
-__version__ = "2.5.0"
+__version__ = "2.5.1"
 
 
 class AboutQtController:

@@ -1,18 +1,18 @@
 {
-    "version": "2.5.0",
+    "version": "2.5.1",
     "release_channel": "dev",
     "artifacts": {
         "app/about.py": {
             "sha256": "32ca13cf3194d6c30d001386d7d08c3812ac9779f803e0e064f9acfb03b2ca47"
         },
         "app/controllers/about_qt_controller.py": {
-            "sha256": "8a9d4f855c4d847914d4a427e813bd635bfa4233aba879322ddbf1f941bda7dc"
+            "sha256": "1bfb77450e643ec8b29834a577dcfb2e60ac6d299cad2be5869fa13933785ab0"
         },
         "app/views/about_qt_view.py": {
-            "sha256": "d49f9f602b02599a23b5319c00e1a0170904e319a5a0dd4963922791938c3592"
+            "sha256": "884df127e2402f93577ed54d1bb198616b97d677d6cd8de2ae83771023810c57"
         },
         "app/app_identity.py": {
-            "sha256": "020e0bcb00cc6f4899eb4eee4691f6888e650ecc8a73061ec650b963c6d7ad60"
+            "sha256": "1ac0e7f083c0977ba821ffbaf2c4fc4cfe9aa0219122d455fbad314f052b55e4"
         },
         "app/app_logging.py": {
             "sha256": "80c08782776d971f888cb439952bfd2a6a249413843d623ea085e2510e229cf9"
@@ -87,7 +87,7 @@
             "sha256": "c60b3d4ba743a3e4a0ec468d7c422cdf24969998a5ccc67788d1bc1bb3485500"
         },
         "app/views/layout_manager_qt_view.py": {
-            "sha256": "5154849c4a1ce1c5093d84399386bb9005485a579422a3684ec3e0c03948be8d"
+            "sha256": "ddf368168a0bfb426fa2d3641c410c39720b85946cad1ad68c686d46f05a801f"
         },
         "app/layout_manager_dispatcher.py": {
             "sha256": "4b2725bb4e9ca48eabcf0594393ac53cd8e94d81a847b0fadf1501e0c5e7c31b"
@@ -105,13 +105,13 @@
             "sha256": "3126ca9020901d2f1d5d7a66422fb44057c332ecce0b58e86ab21b9bd9e4459b"
         },
         "app/controllers/production_log_qt_controller.py": {
-            "sha256": "8e350223f00139da5fc830d9adbd2d08155e164756e83bfcd27ee02eeb3fbfc4"
+            "sha256": "c4c71d01e5477dc1e261345405742ae01d67a2b9802cf093eb651057a1be3aa5"
         },
         "app/models/production_log_model.py": {
-            "sha256": "c166c265698028a200fc1efa49ab9a9f9709d1f81ace1a5ffd98f95e940c4fa5"
+            "sha256": "c4d857e2275d9e155ec6f6995ce1e0d8db66310b6d3ee37b52776d10fd16df54"
         },
         "app/views/production_log_qt_view.py": {
-            "sha256": "f958edcfc2ca1ea543c3f2dd7f1ad153c1fa046996b162d303fbee76c3c15be7"
+            "sha256": "17d1a0318b8f7ce4dd47e2733bcdad7a739f0dbd9bbfe1e119b18be105bbd5b2"
         },
         "app/production_log_calculations.py": {
             "sha256": "247bae4466d824d4815255c4304ea1f234bf6cf8251c2430330f9dbd860dd499"
@@ -147,7 +147,7 @@
             "sha256": "46ebbb09cc2275cf076020dd25bf56b939709d99fbb3e2d1af207056a74176ee"
         },
         "app/models/recovery_viewer_model.py": {
-            "sha256": "532191c256d41290965436d2935517e76e4e0ca8c75d3f9d8e8e79c21f6ef02b"
+            "sha256": "f7753b56f50e925359fa4ae0ce94a45a579a22ed67efc782429900cbc724b642"
         },
         "app/views/recovery_viewer_qt_view.py": {
             "sha256": "d3e4d23ca29af013381ca72c63b4972482842164d999ee8c5e61cf03a6e6dba3"
@@ -156,7 +156,7 @@
             "sha256": "5f12bb8b5e5a5e8e8616838bbc79b4d74406d47ac2ce8e0aaccf83df9d83dbba"
         },
         "app/security.py": {
-            "sha256": "e65ba4fe6c369b60fc503e73ce951552df618028d88813d0ed99e42f15ad1957"
+            "sha256": "d8c5e5330424163ea5e385777df5064e2b485b0fb01a7be437c526afe58d33ad"
         },
         "app/models/security_model.py": {
             "sha256": "d72857094476b499e943786feb5921910e5ed4062c01d77ad852a669f52e4b02"
@@ -171,22 +171,22 @@
             "sha256": "1268b18ba03497d830afb6bd59f5fbfce033e6141ec632f0cb7b9348fbbd999d"
         },
         "app/security_service.py": {
-            "sha256": "9cc3c1697a05d328e001dd4c590ecd73357fc8989b4190db2ad09d29bb966f19"
+            "sha256": "2f017c9e4a079faab0709d6df5d4e1ce952fce4fa5d11d2d59f1ba9849b96e6c"
         },
         "app/settings_diagnostics.py": {
-            "sha256": "5342b8622b2eab1bbbd9f0a6d4e36e4d9c700d81dfa882d2b902278a55b40360"
+            "sha256": "44bb409a13cbe538c9d2974fbf7db0d767e38d64bdcc5ab642974e0e693486b6"
         },
         "app/settings_manager.py": {
             "sha256": "382dfbd6b6e8ee67808ebb9b436dba39ff2585ca7ad20afc9c24ccfa658808d5"
         },
         "app/controllers/settings_manager_qt_controller.py": {
-            "sha256": "fe77e5e20bf0183ab410c27475e2b49de58c6773d507c55d1e23068a904f8da6"
+            "sha256": "f43cb7c8045a6152735a5f8079a26ef00f369c071182628ff1620a0637292bc2"
         },
         "app/models/settings_manager_model.py": {
-            "sha256": "0b16f8914dc9dcc8d86b00e4c15ecd2c5b42a0a49b39adec24145cc82d3030f4"
+            "sha256": "838c8694949e6c09947601a5743b1741e5cfc9394f1765fd6b538fb46d11cb37"
         },
         "app/views/settings_manager_qt_view.py": {
-            "sha256": "c18d61a9a6f16c405d62514a05cc92c4b8a4c613c43043756e685d74fdda020d"
+            "sha256": "5a656b1027825fdda2784d66ae47d7461416875b4b84053ea23fc76734a9772b"
         },
         "app/sidecar.py": {
             "sha256": "0c219a41b255c42bb9d9dc91a2616dfdcbdf83511c0d7a33c96c63d004f077c1"

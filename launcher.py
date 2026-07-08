@@ -43,7 +43,7 @@ from app.controllers.app_controller import Dispatcher
 from app.app_platform import SPLASH_LOGO_RELATIVE_PATH, apply_app_icon, apply_windows_app_id
 
 __module_name__ = "Dispatcher Core"
-__version__ = "2.5.0"
+__version__ = "2.5.1"
 LAYOUT_MANAGER_QT_SESSION_ENV = "AIMARTIN_LAYOUT_MANAGER_QT_SESSION"
 
 

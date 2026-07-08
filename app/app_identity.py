@@ -18,7 +18,7 @@ import os
 import re
 
 __module_name__ = "App Identity"
-__version__ = "2.5.0"
+__version__ = "2.5.1"
 
 
 APP_NAME = "Production Logging Center_GLC"

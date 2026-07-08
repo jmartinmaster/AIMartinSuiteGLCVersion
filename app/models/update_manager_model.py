@@ -37,7 +37,7 @@ from app.update_integrity import compute_integrity_hashes, compute_sha256_hex, v
 from app.utils import ensure_external_directory, external_path, local_or_resource_path, resolve_local_venv_python
 
 __module_name__ = "Update Manager"
-__version__ = "2.5.0"
+__version__ = "2.5.1"
 
 
 GITHUB_REMOTE_PATTERN = re.compile(r"github\.com[:/](?P<owner>[^/]+)/(?P<repo>[^/.]+?)(?:\.git)?$")

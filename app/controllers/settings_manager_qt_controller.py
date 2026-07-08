@@ -14,6 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 from app.downtime_codes import DEFAULT_DT_CODE_MAP, clear_downtime_code_cache
+from app.app_identity import DEFAULT_DEV_UPDATE_BRANCH, DEFAULT_STABLE_UPDATE_BRANCH
 from app.models.security_model import ACCESS_RIGHTS, MODULE_ACCESS_RIGHTS, ROLE_LIMITS, normalize_role, role_requires_password
 from app.security import gatekeeper
 from app.theme_manager import get_theme_label, get_theme_names, normalize_theme
@@ -21,7 +22,7 @@ from app.models.settings_manager_model import PATH_OVERRIDE_DEFINITIONS, Setting
 from app.views.settings_manager_qt_view import SettingsManagerQtView
 
 __module_name__ = "Settings Manager Qt Controller"
-__version__ = "2.5.0"
+__version__ = "2.5.1"
 
 
 class SettingsManagerQtController:
@@ -144,6 +145,10 @@ class SettingsManagerQtController:
             and gatekeeper.has_right("developer:update_configuration")
             and self._get_session_role() == "developer"
         )
+
+    def _resolve_update_branch_name(self, release_channel):
+        normalized_channel = str(release_channel or "stable").strip().lower()
+        return DEFAULT_DEV_UPDATE_BRANCH if normalized_channel == "dev" else DEFAULT_STABLE_UPDATE_BRANCH
 
     def refresh_snapshot(self, initial=False):
         self.model.settings = self.model.load_settings()
@@ -363,7 +368,9 @@ class SettingsManagerQtController:
             "applied_theme": str(self.model.saved_theme or ""),
             "refresh_runtime_settings": True,
             "refresh_downtime_codes": True,
-            "apply_external_override_policy_change": bool(trust_changed),
+            # Do not hot-reload module import policy from this save action.
+            # Re-importing while this controller/view is active has caused hard crashes.
+            "apply_external_override_policy_change": False,
         }
         self._write_saved_runtime_state("Saved settings successfully.", metadata=metadata)
 
@@ -766,6 +773,7 @@ class SettingsManagerQtController:
             "enable_external_override_trust": gatekeeper.is_external_module_override_trust_enabled(),
             "allow_unsigned_dev_updates": bool(self.model.settings.get("allow_unsigned_dev_updates", False)),
             "release_channel": str(self.model.settings.get("release_channel", "stable")).strip().lower(),
+            "resolved_update_branch": self._resolve_update_branch_name(self.model.settings.get("release_channel", "stable")),
             "override_ttl_days": max(0, override_ttl_days),
             "require_dual_override_approval": bool(self.model.settings.get("require_dual_override_approval", False)),
             "strict_protected_override_policy": bool(self.model.settings.get("strict_protected_override_policy", True)),
@@ -830,6 +838,11 @@ class SettingsManagerQtController:
         require_dual_override_approval=False,
         strict_protected_override_policy=True,
     ):
+        previous_repository_url = str(self.model.settings.get("update_repository_url", "") or "").strip().strip("'\"")
+        previous_release_channel = str(self.model.settings.get("release_channel", "stable") or "stable").strip().lower()
+        previous_advanced_updates = bool(self.model.settings.get("enable_advanced_dev_updates", False))
+        previous_allow_unsigned = bool(self.model.settings.get("allow_unsigned_dev_updates", False))
+
         desired_trust_state = bool(enable_external_override_trust)
         trust_changed = gatekeeper.is_external_module_override_trust_enabled() != desired_trust_state
         self.model.settings["update_repository_url"] = str(update_repository_url or "").strip().strip("'\"")
@@ -895,18 +908,27 @@ class SettingsManagerQtController:
             backup_note = " A backup copy was stored in data/backups/settings."
         self.view.show_info("Developer Settings", f"Saved developer settings successfully.{backup_note}")
 
+        runtime_refresh_needed = (
+            previous_repository_url != self.model.settings.get("update_repository_url", "")
+            or previous_release_channel != self.model.settings.get("release_channel", "stable")
+            or previous_advanced_updates != bool(self.model.settings.get("enable_advanced_dev_updates", False))
+            or previous_allow_unsigned != bool(self.model.settings.get("allow_unsigned_dev_updates", False))
+        )
+
         metadata = {
             "applied_theme": str(self.model.saved_theme or ""),
-            "refresh_runtime_settings": False,
+            "refresh_runtime_settings": bool(runtime_refresh_needed),
             "refresh_downtime_codes": False,
-            "apply_external_override_policy_change": bool(trust_changed),
+            # Do not hot-reload module import policy from this save action.
+            # Re-importing while this controller/view is active has caused hard crashes.
+            "apply_external_override_policy_change": False,
         }
         self._write_saved_runtime_state("Saved developer settings successfully.", metadata=metadata)
         if trust_changed:
             trust_message = (
-                "External override trust is enabled. Override files can load when modules are reloaded."
+                "External override trust is enabled. Override files will load after restarting the app (or reloading modules)."
                 if enable_external_override_trust
-                else "External override trust is disabled. Bundled modules are now preferred again."
+                else "External override trust is disabled. Bundled modules will be preferred again after restarting the app (or reloading modules)."
             )
             self.show_toast("Developer Tools", trust_message)
             return

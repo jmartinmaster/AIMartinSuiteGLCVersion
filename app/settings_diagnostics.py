@@ -27,7 +27,7 @@ from app.theme_manager import DEFAULT_THEME, normalize_theme
 from app.utils import ensure_external_data_directory, external_data_path
 
 __module_name__ = "Settings Diagnostics"
-__version__ = "2.5.0"
+__version__ = "2.5.1"
 
 DEFAULT_SETTINGS_PAYLOAD = {
     "export_directory": "data/exports",
