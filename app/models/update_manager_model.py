@@ -912,25 +912,28 @@ def evaluate_stable_update_entry(
     remote_version = remote_metadata["version"]
     remote_compare = parse_version(remote_version)
     local_compare = parse_version(entry["local_version"])
+    update_available = False
+    downgrade_available = False
 
     if remote_compare is None:
         status = "Remote version unreadable"
-        update_available = False
     elif len(remote_compare) == 3 and remote_compare[2] % 2 != 0 and not allow_odd_patch:
         status = "Remote odd patch ignored"
-        update_available = False
     elif not _is_supported_update_version(remote_compare, allow_odd_patch=allow_odd_patch):
         status = "Remote version ignored"
-        update_available = False
     elif local_compare is None:
         status = "Local version unreadable"
-        update_available = False
-    elif normalize_version(remote_compare) > normalize_version(local_compare):
-        status = f"{stable_artifact_status_label} update available"
-        update_available = True
     else:
-        status = "Up to date"
-        update_available = False
+        remote_normalized = normalize_version(remote_compare)
+        local_normalized = normalize_version(local_compare)
+        if remote_normalized > local_normalized:
+            status = f"{stable_artifact_status_label} update available"
+            update_available = True
+        elif remote_normalized < local_normalized:
+            status = "Local version is newer than stable"
+            downgrade_available = True
+        else:
+            status = "Up to date"
 
     return {
         **entry,
@@ -939,6 +942,7 @@ def evaluate_stable_update_entry(
         "remote_exe_name": stable_artifact_name_for_version(remote_version) if remote_compare else None,
         "status": status,
         "update_available": update_available,
+        "downgrade_available": downgrade_available,
     }
 
 
@@ -1812,7 +1816,7 @@ class UpdateManagerModel:
                 stable_artifact_name_for_version,
                 allow_odd_patch=allow_odd_patch,
             )
-            if current_row["update_available"]:
+            if current_row.get("update_available") or current_row.get("downgrade_available"):
                 try:
                     remote_path, resolved_name = self.probe_remote_executable(
                         remote_info,
@@ -1825,6 +1829,7 @@ class UpdateManagerModel:
                     current_row["status"] = f"{stable_artifact_status_label} check timed out"
                     current_row["note"] = f"Timed out while probing packaged artifacts on {branch_name}: {exc}"
                     current_row["update_available"] = False
+                    current_row["downgrade_available"] = False
                     comparison_rows.append(current_row)
                     continue
                 if remote_path:
@@ -1833,6 +1838,7 @@ class UpdateManagerModel:
                 else:
                     current_row["status"] = f"{stable_artifact_status_label} artifact missing"
                     current_row["update_available"] = False
+                    current_row["downgrade_available"] = False
             comparison_rows.append(current_row)
         return comparison_rows
 

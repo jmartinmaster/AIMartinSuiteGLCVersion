@@ -162,6 +162,13 @@ class UpdateManagerQtView(QMainWindow):
         apply_button.setAccessibleName("Apply stable updates")
         apply_button.setAccessibleDescription("Downloads and installs the latest stable release updates.")
         controls.addWidget(apply_button)
+        downgrade_button = QPushButton("Downgrade to Stable")
+        downgrade_button.clicked.connect(self.controller.apply_stable_downgrade)
+        downgrade_button.setAccessibleName("Downgrade to stable")
+        downgrade_button.setAccessibleDescription(
+            "Downloads and installs the repository stable release even when it is older than the local build."
+        )
+        controls.addWidget(downgrade_button)
         refresh_button = QPushButton("Refresh Status")
         refresh_button.clicked.connect(self.controller.refresh_snapshot)
         refresh_button.setAccessibleName("Refresh update manager status")
