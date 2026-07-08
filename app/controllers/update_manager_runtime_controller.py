@@ -24,7 +24,7 @@ from app.models.update_manager_model import UpdateManagerModel
 from app.update_bindings import ObservableValue
 
 __module_name__ = "Update Manager Runtime Controller"
-__version__ = "2.5.0"
+__version__ = "2.5.2"
 
 INFO = "info"
 SUCCESS = "success"
@@ -180,6 +180,9 @@ class UpdateManagerRuntimeController:
         return self.model.update_configuration_note(self.remote_info)
 
     def _allow_odd_patch_updates(self):
+        release_channel = str(self.dispatcher.get_setting("release_channel", "stable") or "stable").strip().lower()
+        if release_channel == "dev":
+            return True
         if bool(self.dispatcher.get_setting("enable_advanced_dev_updates", False)):
             return True
         configured_repo_url = str(self.dispatcher.get_setting("update_repository_url", "") or "").strip().strip("'\"")
@@ -660,6 +663,11 @@ class UpdateManagerRuntimeController:
         self.result_var.set(row.get("status", "Pending") if row else "Pending")
         if row and row.get("update_available"):
             self.note_var.set(f"A newer stable {self._stable_artifact_noun()} target is available from the repository branch.")
+        elif row and row.get("downgrade_available"):
+            self.note_var.set(
+                "A downgrade to the repository stable target is available. "
+                "Use the dedicated downgrade action only if you intentionally want to roll back."
+            )
         elif row:
             self.note_var.set(f"No newer stable {self._stable_artifact_noun()} target is available right now.")
         else:
@@ -776,22 +784,47 @@ class UpdateManagerRuntimeController:
         self.coordinator.set_job_phase("checking", f"Checking the repository for newer stable {self._stable_artifact_noun(plural=True)}.", mode="stable")
         self.refresh_local_manifest()
         allow_odd_patch = self._allow_odd_patch_updates()
-        comparison_rows = self.model.build_stable_update_rows(
-            self.local_manifest,
-            self.remote_info,
-            self.branch_name,
-            self.stable_artifact_kind,
-            self._stable_artifact_name_for_version,
-            self._stable_artifact_status_label(),
-            allow_odd_patch=allow_odd_patch,
-        )
+        try:
+            comparison_rows = self.model.build_stable_update_rows(
+                self.local_manifest,
+                self.remote_info,
+                self.branch_name,
+                self.stable_artifact_kind,
+                self._stable_artifact_name_for_version,
+                self._stable_artifact_status_label(),
+                allow_odd_patch=allow_odd_patch,
+            )
+        except Exception as exc:
+            self.comparison_rows[:] = []
+            self.refresh_summary()
+            self.coordinator.set_job_phase("failed", "Repository check failed. See error details.", mode="stable")
+            self.status_var.set(f"Repository check failed on branch '{self.branch_name}': {exc}")
+            self._show_error_dialog("Update Check Failed", f"Could not check for updates:\n\n{exc}")
+            return
 
         self.comparison_rows[:] = comparison_rows
         self.refresh_summary()
         available_count = sum(1 for row in comparison_rows if row["update_available"])
-        self.status_var.set(f"Checked Dispatcher Core on branch '{self.branch_name}'. {available_count} stable {self._stable_artifact_noun(plural=True)} available.")
+        downgrade_count = sum(1 for row in comparison_rows if row.get("downgrade_available"))
+        if downgrade_count:
+            self.status_var.set(
+                f"Checked Dispatcher Core on branch '{self.branch_name}'. "
+                f"{available_count} stable {self._stable_artifact_noun(plural=True)} and "
+                f"{downgrade_count} downgrade target(s) available."
+            )
+        else:
+            self.status_var.set(
+                f"Checked Dispatcher Core on branch '{self.branch_name}'. "
+                f"{available_count} stable {self._stable_artifact_noun(plural=True)} available."
+            )
         if available_count:
             self.coordinator.set_job_phase("ready", f"{available_count} stable {self._stable_artifact_noun(plural=True)} are ready.", mode="stable")
+        elif downgrade_count:
+            self.coordinator.set_job_phase(
+                "ready",
+                f"{downgrade_count} stable downgrade target(s) are available.",
+                mode="stable",
+            )
         else:
             self.coordinator.set_job_phase("idle", f"No stable {self._stable_artifact_noun(plural=True)} are ready.", mode="stable")
 
@@ -1176,6 +1209,31 @@ class UpdateManagerRuntimeController:
             return
 
         self._begin_executable_download(update_rows[0])
+
+    def apply_stable_downgrade(self):
+        if not self.comparison_rows:
+            self.check_for_updates()
+
+        downgrade_rows = [row for row in self.comparison_rows if row.get("downgrade_available")]
+        if not downgrade_rows:
+            self.dispatcher.show_toast(
+                "Update Manager",
+                "No stable downgrade target is currently available.",
+                INFO,
+            )
+            return
+
+        target_row = downgrade_rows[0]
+        warning_message = (
+            f"You are about to downgrade from local version {target_row.get('local_version', 'Unknown')} "
+            f"to repository stable version {target_row.get('remote_version', 'Unknown')} on branch '{self.branch_name}'.\n\n"
+            "Downgrading may break compatibility with newer settings, data, or module payloads.\n\n"
+            "Continue with the downgrade?"
+        )
+        if not self._ask_yes_no_dialog("Confirm Stable Downgrade", warning_message):
+            return
+
+        self._begin_executable_download(target_row)
 
     def setup_ui(self):
         if self.view is not None:

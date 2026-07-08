@@ -14,8 +14,9 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 __module_name__ = "Settings Manager Qt View"
-__version__ = "2.5.0"
+__version__ = "2.5.2"
 
+from app.app_identity import DEFAULT_DEV_UPDATE_BRANCH, DEFAULT_STABLE_UPDATE_BRANCH
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QAbstractItemView,
@@ -97,6 +98,7 @@ class SettingsManagerQtView(QMainWindow):
         self.developer_advanced_checkbox = None
         self.developer_trust_checkbox = None
         self.developer_release_channel_combo = None
+        self.developer_resolved_branch_label = None
         self.developer_override_ttl_spin = None
         self.developer_dual_approval_checkbox = None
         self.developer_protected_policy_checkbox = None
@@ -461,6 +463,11 @@ class SettingsManagerQtView(QMainWindow):
         self.developer_release_channel_combo.setAccessibleDescription("Select whether update checks should target the stable or dev release channel.")
         developer_layout.addRow(QLabel("Release Channel"), self.developer_release_channel_combo)
 
+        self.developer_resolved_branch_label = QLabel("-")
+        self.developer_resolved_branch_label.setWordWrap(True)
+        self.developer_resolved_branch_label.setObjectName("mutedLabel")
+        developer_layout.addRow(QLabel("Resolved Update Branch"), self.developer_resolved_branch_label)
+
         self.developer_override_ttl_spin = QSpinBox()
         self.developer_override_ttl_spin.setRange(0, 365)
         self.developer_override_ttl_spin.setSuffix(" day(s)")
@@ -748,9 +755,22 @@ class SettingsManagerQtView(QMainWindow):
         self.resize(min(int(requested_width), max_width), min(int(requested_height), max_height))
 
     def _on_form_changed(self):
+        self._refresh_resolved_branch_label()
         if self._suspend_change_signal:
             return
         self.controller.on_form_changed()
+
+    def _resolve_selected_update_branch(self):
+        selected_channel = str(self.developer_release_channel_combo.currentData() or "stable").strip().lower()
+        return DEFAULT_DEV_UPDATE_BRANCH if selected_channel == "dev" else DEFAULT_STABLE_UPDATE_BRANCH
+
+    def _refresh_resolved_branch_label(self, explicit_branch=None):
+        if self.developer_resolved_branch_label is None:
+            return
+        branch_name = str(explicit_branch or "").strip() or self._resolve_selected_update_branch()
+        repository_url = self.developer_repository_input.text().strip() if self.developer_repository_input is not None else ""
+        repository_display = repository_url or "default update repository"
+        self.developer_resolved_branch_label.setText(f"{repository_display} @ {branch_name}")
 
     def render_snapshot(self, snapshot):
         snapshot = snapshot if isinstance(snapshot, dict) else {}
@@ -1120,6 +1140,7 @@ class SettingsManagerQtView(QMainWindow):
             self.developer_bypass_gating_checkbox.setChecked(bool(state.get("allow_unsigned_dev_updates", False)))
             release_channel = str(state.get("release_channel") or "stable").strip().lower()
             self.developer_release_channel_combo.setCurrentIndex(1 if release_channel == "dev" else 0)
+            self._refresh_resolved_branch_label(state.get("resolved_update_branch"))
             try:
                 ttl_days = int(state.get("override_ttl_days", 0) or 0)
             except Exception:

@@ -19,7 +19,7 @@ from app.downtime_codes import get_code_options, get_generic_options
 from app.theme_manager import get_qt_palette, get_qt_stylesheet
 
 __module_name__ = "Form Loader Qt View"
-__version__ = "2.5.0"
+__version__ = "2.5.2"
 
 from PyQt6.QtCore import QTimer, Qt
 from PyQt6.QtWidgets import (

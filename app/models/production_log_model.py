@@ -1386,6 +1386,11 @@ class ProductionLogModel:
         except Exception:
             return None
 
+    def lookup_rate(self, rates_data, machine_number, part_number, global_goal=None):
+        _ = machine_number
+        resolved_goal = self.get_global_goal_rate(global_goal)
+        return self.resolve_lookup_rate(part_number, rates_data, resolved_goal)
+
     def is_balance_downtime_cause(self, cause_value):
         return str(cause_value or "").strip() == BALANCE_DOWNTIME_CAUSE
 

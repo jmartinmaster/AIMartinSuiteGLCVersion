@@ -460,7 +460,8 @@ def sync_icon_assets():
             available_ico_sizes.append((256, 256))
 
         icon_ico_path = output_directory / "icon.ico"
-        working_image.save(icon_ico_path, format="ICO", sizes=available_ico_sizes or ICON_ICO_SIZES)
+        with icon_ico_path.open("w+b") as icon_ico_handle:
+            working_image.save(icon_ico_handle, format="ICO", sizes=available_ico_sizes or ICON_ICO_SIZES)
 
 
 def get_existing_build_data_paths():

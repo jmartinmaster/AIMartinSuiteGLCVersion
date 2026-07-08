@@ -130,6 +130,45 @@ class TestUpdateManagerModel(unittest.TestCase):
             requests[1],
         )
 
+    def test_evaluate_stable_update_entry_marks_downgrade_when_local_is_newer(self):
+        entry = {
+            "relative_path": "launcher.py",
+            "module_name": "Dispatcher Core",
+            "local_version": "2.5.1",
+        }
+        remote_text = '__module_name__ = "Dispatcher Core"\n__version__ = "2.5.0"\n'
+
+        row = update_manager_model.evaluate_stable_update_entry(
+            entry,
+            remote_text,
+            "EXE",
+            lambda version_text: f"Production Logging Center_GLC_v{version_text}.exe",
+            allow_odd_patch=True,
+        )
+
+        self.assertEqual(row["status"], "Local version is newer than stable")
+        self.assertFalse(row["update_available"])
+        self.assertTrue(row["downgrade_available"])
+
+    def test_evaluate_stable_update_entry_marks_update_when_remote_is_newer(self):
+        entry = {
+            "relative_path": "launcher.py",
+            "module_name": "Dispatcher Core",
+            "local_version": "2.5.0",
+        }
+        remote_text = '__module_name__ = "Dispatcher Core"\n__version__ = "2.5.1"\n'
+
+        row = update_manager_model.evaluate_stable_update_entry(
+            entry,
+            remote_text,
+            "EXE",
+            lambda version_text: f"Production Logging Center_GLC_v{version_text}.exe",
+            allow_odd_patch=True,
+        )
+
+        self.assertTrue(row["update_available"])
+        self.assertFalse(row["downgrade_available"])
+
 
 if __name__ == "__main__":
     unittest.main()

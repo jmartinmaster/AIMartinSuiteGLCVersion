@@ -26,7 +26,7 @@ from app.theme_manager import get_qt_palette, get_qt_stylesheet
 from PyQt6.QtGui import QDesktopServices, QFont, QFontDatabase, QKeySequence, QShortcut, QColor, QPainter, QTextFormat
 
 __module_name__ = "Layout Manager Qt View"
-__version__ = "2.5.0"
+__version__ = "2.5.2"
 LAYOUT_MANAGER_QT_SESSION_ENV = "AIMARTIN_LAYOUT_MANAGER_QT_SESSION"
 REPO_ROOT = Path(__file__).resolve().parents[2]
 HEADER_ROLE_OPTIONS = [""] + sorted(set(HEADER_FIELD_ROLE_DEFAULTS.values()))

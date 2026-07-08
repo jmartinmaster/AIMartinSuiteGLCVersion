@@ -66,7 +66,7 @@ from app.security_storage import (
 )
 
 __module_name__ = "Security Blanket"
-__version__ = "2.5.0"
+__version__ = "2.5.2"
 
 PASSWORD_SPECIAL_CHARACTERS = "!@#$%^&*()."
 MIN_PASSWORD_LENGTH = 8
@@ -961,7 +961,6 @@ class Gatekeeper:
             return settings.get("external_module_override_trust", False)
         settings["external_module_override_trust"] = desired
         self._save_security_settings(settings)
-        self._notify_session_listeners("session-changed")
         return settings["external_module_override_trust"]
 
     def authenticate(self, required_right=None, parent=None, reason=None, force_reauth=False, allowed_roles=None):

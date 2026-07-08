@@ -37,7 +37,7 @@ from app.update_integrity import compute_integrity_hashes, compute_sha256_hex, v
 from app.utils import ensure_external_directory, external_path, local_or_resource_path, resolve_local_venv_python
 
 __module_name__ = "Update Manager"
-__version__ = "2.5.0"
+__version__ = "2.5.2"
 
 
 GITHUB_REMOTE_PATTERN = re.compile(r"github\.com[:/](?P<owner>[^/]+)/(?P<repo>[^/.]+?)(?:\.git)?$")
@@ -912,25 +912,28 @@ def evaluate_stable_update_entry(
     remote_version = remote_metadata["version"]
     remote_compare = parse_version(remote_version)
     local_compare = parse_version(entry["local_version"])
+    update_available = False
+    downgrade_available = False
 
     if remote_compare is None:
         status = "Remote version unreadable"
-        update_available = False
     elif len(remote_compare) == 3 and remote_compare[2] % 2 != 0 and not allow_odd_patch:
         status = "Remote odd patch ignored"
-        update_available = False
     elif not _is_supported_update_version(remote_compare, allow_odd_patch=allow_odd_patch):
         status = "Remote version ignored"
-        update_available = False
     elif local_compare is None:
         status = "Local version unreadable"
-        update_available = False
-    elif normalize_version(remote_compare) > normalize_version(local_compare):
-        status = f"{stable_artifact_status_label} update available"
-        update_available = True
     else:
-        status = "Up to date"
-        update_available = False
+        remote_normalized = normalize_version(remote_compare)
+        local_normalized = normalize_version(local_compare)
+        if remote_normalized > local_normalized:
+            status = f"{stable_artifact_status_label} update available"
+            update_available = True
+        elif remote_normalized < local_normalized:
+            status = "Local version is newer than stable"
+            downgrade_available = True
+        else:
+            status = "Up to date"
 
     return {
         **entry,
@@ -939,6 +942,7 @@ def evaluate_stable_update_entry(
         "remote_exe_name": stable_artifact_name_for_version(remote_version) if remote_compare else None,
         "status": status,
         "update_available": update_available,
+        "downgrade_available": downgrade_available,
     }
 
 
@@ -993,7 +997,7 @@ def probe_remote_executable(remote_info, branch_name, row, stable_artifact_kind,
         url = _build_raw_github_url(owner, repo, branch_name, remote_path)
         request = urllib.request.Request(url, method="HEAD", headers={"User-Agent": "MartinSuiteUpdater/1.0"})
         try:
-            with urllib.request.urlopen(request, timeout=15):
+            with urllib.request.urlopen(request, timeout=30):
                 return remote_path, target_name
         except urllib.error.HTTPError as exc:
             if exc.code == 404:
@@ -1793,6 +1797,17 @@ class UpdateManagerModel:
                     )
                     continue
                 raise
+            except (urllib.error.URLError, TimeoutError, OSError) as exc:
+                comparison_rows.append(
+                    {
+                        **entry,
+                        "remote_version": "Unavailable",
+                        "status": "Repository check timed out",
+                        "note": f"Could not reach {branch_name} for update metadata: {exc}",
+                        "update_available": False,
+                    }
+                )
+                continue
 
             current_row = self.evaluate_stable_update_entry(
                 entry,
@@ -1801,20 +1816,29 @@ class UpdateManagerModel:
                 stable_artifact_name_for_version,
                 allow_odd_patch=allow_odd_patch,
             )
-            if current_row["update_available"]:
-                remote_path, resolved_name = self.probe_remote_executable(
-                    remote_info,
-                    branch_name,
-                    current_row,
-                    stable_artifact_kind,
-                    stable_artifact_name_for_version,
-                )
+            if current_row.get("update_available") or current_row.get("downgrade_available"):
+                try:
+                    remote_path, resolved_name = self.probe_remote_executable(
+                        remote_info,
+                        branch_name,
+                        current_row,
+                        stable_artifact_kind,
+                        stable_artifact_name_for_version,
+                    )
+                except (urllib.error.URLError, TimeoutError, OSError) as exc:
+                    current_row["status"] = f"{stable_artifact_status_label} check timed out"
+                    current_row["note"] = f"Timed out while probing packaged artifacts on {branch_name}: {exc}"
+                    current_row["update_available"] = False
+                    current_row["downgrade_available"] = False
+                    comparison_rows.append(current_row)
+                    continue
                 if remote_path:
                     current_row["remote_exe_path"] = remote_path
                     current_row["remote_exe_name"] = resolved_name
                 else:
                     current_row["status"] = f"{stable_artifact_status_label} artifact missing"
                     current_row["update_available"] = False
+                    current_row["downgrade_available"] = False
             comparison_rows.append(current_row)
         return comparison_rows
 

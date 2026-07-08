@@ -1,3 +1,5 @@
+## This branch may be highly unstable. Use at own risk
+
 # Production Logging Center - GLC Edition
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
@@ -160,7 +162,7 @@ Key runtime areas include:
 
 - Stable release tracking is based on the Dispatcher version in `launcher.py`.
 - Update Manager supports stable artifacts plus controlled payload restore/update operations.
-- Checksum and rollback verification are enforced in current 2.5.0 update flows.
+- Checksum and rollback verification are enforced in current 2.5.2 update flows.
 
 ## Documentation map
 

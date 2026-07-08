@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 __module_name__ = "Update Manager Qt View"
-__version__ = "2.5.0"
+__version__ = "2.5.2"
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
@@ -162,6 +162,13 @@ class UpdateManagerQtView(QMainWindow):
         apply_button.setAccessibleName("Apply stable updates")
         apply_button.setAccessibleDescription("Downloads and installs the latest stable release updates.")
         controls.addWidget(apply_button)
+        downgrade_button = QPushButton("Downgrade to Stable")
+        downgrade_button.clicked.connect(self.controller.apply_stable_downgrade)
+        downgrade_button.setAccessibleName("Downgrade to stable")
+        downgrade_button.setAccessibleDescription(
+            "Downloads and installs the repository stable release even when it is older than the local build."
+        )
+        controls.addWidget(downgrade_button)
         refresh_button = QPushButton("Refresh Status")
         refresh_button.clicked.connect(self.controller.refresh_snapshot)
         refresh_button.setAccessibleName("Refresh update manager status")
