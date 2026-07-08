@@ -66,7 +66,7 @@ from app.security_storage import (
 )
 
 __module_name__ = "Security Blanket"
-__version__ = "2.5.1"
+__version__ = "2.5.2"
 
 PASSWORD_SPECIAL_CHARACTERS = "!@#$%^&*()."
 MIN_PASSWORD_LENGTH = 8

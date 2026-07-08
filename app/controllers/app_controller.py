@@ -33,7 +33,7 @@ from app.security_service import SecurityService
 from app.update_state import UpdateCoordinator
 
 __module_name__ = "Dispatcher Core"
-__version__ = "2.5.1"
+__version__ = "2.5.2"
 
 ISSUE_REPORT_URL = "https://github.com/jmartinmaster/AIMartinSuiteGLCVersion/issues/new/choose"
 MODULE_PRELOAD_POLL_SECONDS = 1.0

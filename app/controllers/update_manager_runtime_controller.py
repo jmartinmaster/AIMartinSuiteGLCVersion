@@ -24,7 +24,7 @@ from app.models.update_manager_model import UpdateManagerModel
 from app.update_bindings import ObservableValue
 
 __module_name__ = "Update Manager Runtime Controller"
-__version__ = "2.5.1"
+__version__ = "2.5.2"
 
 INFO = "info"
 SUCCESS = "success"

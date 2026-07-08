@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 __module_name__ = "Settings Manager Qt View"
-__version__ = "2.5.1"
+__version__ = "2.5.2"
 
 from app.app_identity import DEFAULT_DEV_UPDATE_BRANCH, DEFAULT_STABLE_UPDATE_BRANCH
 from PyQt6.QtCore import Qt

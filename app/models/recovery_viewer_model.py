@@ -24,7 +24,7 @@ from app.utils import external_path
 
 
 __module_name__ = "Recovery Viewer"
-__version__ = "2.5.1"
+__version__ = "2.5.2"
 
 BACKUP_TARGET_DEFINITIONS = (
     {

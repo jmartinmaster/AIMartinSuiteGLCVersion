@@ -32,7 +32,7 @@ from app.theme_manager import DEFAULT_THEME, normalize_theme
 from app.utils import external_path, legacy_external_path_candidates
 
 __module_name__ = "Application Shell"
-__version__ = "2.5.1"
+__version__ = "2.5.2"
 PROTECTED_OVERRIDE_MODULES = {"layout_manager", "settings_manager", "rate_manager", "update_manager"}
 
 

@@ -162,7 +162,7 @@ Key runtime areas include:
 
 - Stable release tracking is based on the Dispatcher version in `launcher.py`.
 - Update Manager supports stable artifacts plus controlled payload restore/update operations.
-- Checksum and rollback verification are enforced in current 2.5.1 update flows.
+- Checksum and rollback verification are enforced in current 2.5.2 update flows.
 
 ## Documentation map
 

@@ -22,7 +22,7 @@ from app.models.settings_manager_model import PATH_OVERRIDE_DEFINITIONS, Setting
 from app.views.settings_manager_qt_view import SettingsManagerQtView
 
 __module_name__ = "Settings Manager Qt Controller"
-__version__ = "2.5.1"
+__version__ = "2.5.2"
 
 
 class SettingsManagerQtController:

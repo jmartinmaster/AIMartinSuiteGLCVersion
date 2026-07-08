@@ -20,7 +20,7 @@ from app.models.update_manager_model import UpdateManagerModel
 from app.views.update_manager_qt_view import UpdateManagerQtView
 
 __module_name__ = "Update Manager Qt Controller"
-__version__ = "2.5.1"
+__version__ = "2.5.2"
 
 
 class SimpleVar:

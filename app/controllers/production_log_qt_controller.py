@@ -23,7 +23,7 @@ from app.models.production_log_model import BALANCE_DOWNTIME_CAUSE, ProductionLo
 from app.views.production_log_qt_view import ProductionLogQtView
 
 __module_name__ = "Form Loader Qt Controller"
-__version__ = "2.5.1"
+__version__ = "2.5.2"
 
 
 class ProductionLogQtController:
