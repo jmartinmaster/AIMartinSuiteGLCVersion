@@ -993,7 +993,7 @@ def probe_remote_executable(remote_info, branch_name, row, stable_artifact_kind,
         url = _build_raw_github_url(owner, repo, branch_name, remote_path)
         request = urllib.request.Request(url, method="HEAD", headers={"User-Agent": "MartinSuiteUpdater/1.0"})
         try:
-            with urllib.request.urlopen(request, timeout=15):
+            with urllib.request.urlopen(request, timeout=30):
                 return remote_path, target_name
         except urllib.error.HTTPError as exc:
             if exc.code == 404:
@@ -1793,6 +1793,17 @@ class UpdateManagerModel:
                     )
                     continue
                 raise
+            except (urllib.error.URLError, TimeoutError, OSError) as exc:
+                comparison_rows.append(
+                    {
+                        **entry,
+                        "remote_version": "Unavailable",
+                        "status": "Repository check timed out",
+                        "note": f"Could not reach {branch_name} for update metadata: {exc}",
+                        "update_available": False,
+                    }
+                )
+                continue
 
             current_row = self.evaluate_stable_update_entry(
                 entry,
@@ -1802,13 +1813,20 @@ class UpdateManagerModel:
                 allow_odd_patch=allow_odd_patch,
             )
             if current_row["update_available"]:
-                remote_path, resolved_name = self.probe_remote_executable(
-                    remote_info,
-                    branch_name,
-                    current_row,
-                    stable_artifact_kind,
-                    stable_artifact_name_for_version,
-                )
+                try:
+                    remote_path, resolved_name = self.probe_remote_executable(
+                        remote_info,
+                        branch_name,
+                        current_row,
+                        stable_artifact_kind,
+                        stable_artifact_name_for_version,
+                    )
+                except (urllib.error.URLError, TimeoutError, OSError) as exc:
+                    current_row["status"] = f"{stable_artifact_status_label} check timed out"
+                    current_row["note"] = f"Timed out while probing packaged artifacts on {branch_name}: {exc}"
+                    current_row["update_available"] = False
+                    comparison_rows.append(current_row)
+                    continue
                 if remote_path:
                     current_row["remote_exe_path"] = remote_path
                     current_row["remote_exe_name"] = resolved_name

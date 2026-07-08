@@ -180,6 +180,9 @@ class UpdateManagerRuntimeController:
         return self.model.update_configuration_note(self.remote_info)
 
     def _allow_odd_patch_updates(self):
+        release_channel = str(self.dispatcher.get_setting("release_channel", "stable") or "stable").strip().lower()
+        if release_channel == "dev":
+            return True
         if bool(self.dispatcher.get_setting("enable_advanced_dev_updates", False)):
             return True
         configured_repo_url = str(self.dispatcher.get_setting("update_repository_url", "") or "").strip().strip("'\"")
@@ -776,15 +779,23 @@ class UpdateManagerRuntimeController:
         self.coordinator.set_job_phase("checking", f"Checking the repository for newer stable {self._stable_artifact_noun(plural=True)}.", mode="stable")
         self.refresh_local_manifest()
         allow_odd_patch = self._allow_odd_patch_updates()
-        comparison_rows = self.model.build_stable_update_rows(
-            self.local_manifest,
-            self.remote_info,
-            self.branch_name,
-            self.stable_artifact_kind,
-            self._stable_artifact_name_for_version,
-            self._stable_artifact_status_label(),
-            allow_odd_patch=allow_odd_patch,
-        )
+        try:
+            comparison_rows = self.model.build_stable_update_rows(
+                self.local_manifest,
+                self.remote_info,
+                self.branch_name,
+                self.stable_artifact_kind,
+                self._stable_artifact_name_for_version,
+                self._stable_artifact_status_label(),
+                allow_odd_patch=allow_odd_patch,
+            )
+        except Exception as exc:
+            self.comparison_rows[:] = []
+            self.refresh_summary()
+            self.coordinator.set_job_phase("failed", "Repository check failed. See error details.", mode="stable")
+            self.status_var.set(f"Repository check failed on branch '{self.branch_name}': {exc}")
+            self._show_error_dialog("Update Check Failed", f"Could not check for updates:\n\n{exc}")
+            return
 
         self.comparison_rows[:] = comparison_rows
         self.refresh_summary()
