@@ -8,11 +8,14 @@ venv/
 env/
 
 # Application Data & Config
-data/
+data/*
+!data/config/
+data/config/*
+!data/config/*.json
 exports/
 logs/
-settings.json
-rates.json
+/settings.json
+/rates.json
 Sample_Data/
 .vault
 
@@ -53,3 +56,4 @@ dist/variants/*
 !dist/variants/public/**
 dist/variants/public/**/*.deb
 dist/variants/public/data/
+/The_Librarian

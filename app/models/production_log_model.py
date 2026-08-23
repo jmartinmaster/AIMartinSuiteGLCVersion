@@ -597,6 +597,29 @@ class ProductionLogModel:
         lookup_key_role = normalize_role_name(field_config.get("lookup_key_role")) if field_config else ""
         return lookup_key_role or "part_number"
 
+    def get_header_override_field_config(self, config=None):
+        return self.get_section_field_config_by_role("header", "header_override_toggle", config=config)
+
+    def get_header_override_role(self, config=None):
+        field_config = self.get_header_override_field_config(config=config)
+        if field_config:
+            header_sec = self.get_routed_section_by_profile("header", config=config)
+            header_id = header_sec.get("id") or "header"
+            return self._resolve_field_role(header_id, field_config, config=config)
+        return "header_override_toggle"
+
+    def is_header_override_enabled(self, header_data, config=None):
+        if not isinstance(header_data, dict):
+            return False
+        override_val = self.get_header_value_by_role(
+            header_data,
+            "header_override_toggle",
+            config=config,
+            fallback_id="header_override",
+            default=False,
+        )
+        return str(override_val).strip().lower() in ("true", "1", "yes", "on")
+
     def get_header_field_role(self, field_id, config=None):
         header_sec = self.get_routed_section_by_profile("header", config=config)
         header_id = header_sec.get("id") or "header"

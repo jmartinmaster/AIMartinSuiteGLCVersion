@@ -30,7 +30,7 @@ __version__ = "2.5.2"
 LAYOUT_MANAGER_QT_SESSION_ENV = "AIMARTIN_LAYOUT_MANAGER_QT_SESSION"
 REPO_ROOT = Path(__file__).resolve().parents[2]
 HEADER_ROLE_OPTIONS = [""] + sorted(set(HEADER_FIELD_ROLE_DEFAULTS.values()))
-HEADER_WIDGET_OPTIONS = ["entry", "combobox"]
+HEADER_WIDGET_OPTIONS = ["entry", "combobox", "checkbox", "checkbutton"]
 ROW_ROLE_OPTIONS = {
     "production_row_fields": [""] + sorted(set(ROW_FIELD_ROLE_DEFAULTS["production"].values())),
     "downtime_row_fields": [""] + sorted(set(ROW_FIELD_ROLE_DEFAULTS["downtime"].values())),

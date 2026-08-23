@@ -33,6 +33,8 @@ HEADER_FIELD_ROLE_DEFAULTS = {
     "start_time": "shift_start_time",
     "end_time": "shift_end_time",
     "ret_south": "ret_south",
+    "header_override": "header_override_toggle",
+    "header_override_enabled": "header_override_toggle",
 }
 
 ROW_FIELD_ROLE_DEFAULTS = {
@@ -77,7 +79,7 @@ PROTECTED_ROW_ROLES = {
 }
 
 HEADER_DERIVED_ROLES = {"cast_date", "shift_start_time", "shift_end_time", "target_time"}
-HEADER_BLANK_IGNORE_ROLES = {"shift_hours", "goal_rate", "cast_date", "target_time", "total_molds"}
+HEADER_BLANK_IGNORE_ROLES = {"shift_hours", "goal_rate", "cast_date", "target_time", "total_molds", "header_override_toggle"}
 REQUIRED_MAPPING_ROLES = {
     "production": ("job_order", "part_number", "mold_count"),
     "downtime": ("start_clock", "stop_clock", "downtime_code", "cause_text"),

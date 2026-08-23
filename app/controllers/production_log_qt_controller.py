@@ -307,11 +307,23 @@ class ProductionLogQtController:
 
     def apply_header_data(self, header_data, mark_dirty=False):
         normalized_header = self.model.normalize_header_data(header_data)
+        is_override = self.model.is_header_override_enabled(header_data, config=self.layout_config)
+        self.view.apply_header_override_state(is_override)
         for field_id, value in normalized_header.items():
             self.view.set_header_field_value(field_id, value)
         if mark_dirty:
             self.view.mark_dirty()
         return normalized_header
+
+    def on_header_override_toggled(self, is_checked=None):
+        header_payload = self.collect_ui_data().get(self.header_section_id) or self.collect_ui_data().get("header") or {}
+        is_override = self.model.is_header_override_enabled(header_payload, config=self.layout_config)
+        self.view.apply_header_override_state(is_override)
+        if not is_override:
+            self.apply_header_data(header_payload, mark_dirty=False)
+            self.calculate_metrics(silent=True)
+        else:
+            self.view.mark_dirty()
 
     def on_header_field_focus_out(self, _event=None):
         header_payload = self.collect_ui_data().get(self.header_section_id) or self.collect_ui_data().get("header") or {}
@@ -862,12 +874,16 @@ class ProductionLogQtController:
                 )
                 self.view.set_table_field_value(self.downtime_section_id, row_index, duration_field_id, duration_text)
 
+            is_header_override = self.model.is_header_override_enabled(header_payload, config=self.layout_config)
+
             total_molds_field_id = self.model.get_header_field_id_by_role(
                 "total_molds",
                 config=self.layout_config,
                 fallback_id="total_molds",
             )
-            self.view.set_header_field_value(total_molds_field_id, str(total_molds))
+            current_total_molds = header_payload.get(total_molds_field_id)
+            if not is_header_override or not str(current_total_molds).strip():
+                self.view.set_header_field_value(total_molds_field_id, str(total_molds))
 
             hours_value = self._header_value_by_role(header_payload, "shift_hours", fallback_id="hours", default="8")
             shift_total_minutes = self.model.calculate_shift_total_minutes(hours_value)
@@ -885,7 +901,9 @@ class ProductionLogQtController:
                 config=self.layout_config,
                 fallback_id="eff_pct",
             )
-            self.view.set_header_field_value(efficiency_field_id, f"{float(efficiency):.2f}")
+            current_eff = header_payload.get(efficiency_field_id)
+            if not is_header_override or not str(current_eff).strip():
+                self.view.set_header_field_value(efficiency_field_id, f"{float(efficiency):.2f}")
 
             if ghost_display_mode in {"header_only", "metrics_and_header"}:
                 ghost_field_id = self.model.get_header_field_id_by_role(
@@ -893,7 +911,9 @@ class ProductionLogQtController:
                     config=self.layout_config,
                     fallback_id="target_time",
                 )
-                self.view.set_header_field_value(ghost_field_id, f"{int(ghost_minutes)} min")
+                current_ghost = header_payload.get(ghost_field_id)
+                if not is_header_override or not str(current_ghost).strip():
+                    self.view.set_header_field_value(ghost_field_id, f"{int(ghost_minutes)} min")
 
             if not silent:
                 self.view.set_status("Calculated production metrics.")

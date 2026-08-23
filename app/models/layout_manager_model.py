@@ -596,7 +596,7 @@ class LayoutManagerModel:
             normalized_field.pop("role", None)
 
         widget_name = str(normalized_field.get("widget", "entry") or "entry").strip().lower() or "entry"
-        if widget_name not in {"entry", "combobox"}:
+        if widget_name not in {"entry", "combobox", "checkbox", "checkbutton"}:
             widget_name = "entry"
         if widget_name == "entry" and "widget" not in field:
             normalized_field.pop("widget", None)
@@ -1506,7 +1506,7 @@ class LayoutManagerModel:
         if len(header_fields) < 2:
             raise ValueError(f"{field_group_name} must contain at least two fields.")
 
-        allowed_widgets = {"entry", "combobox"}
+        allowed_widgets = {"entry", "combobox", "checkbox", "checkbutton"}
         allowed_states = {"", "normal", "disabled", "readonly"}
         allowed_options_sources = {"", "downtime_codes"}
         seen_ids = set()
@@ -2016,7 +2016,7 @@ class LayoutManagerModel:
         if not label_text:
             raise ValueError("Label cannot be empty.")
         widget_name = str(widget_value or target_field.get("widget", "entry") or "entry").strip().lower() or "entry"
-        if widget_name not in {"entry", "combobox"}:
+        if widget_name not in {"entry", "combobox", "checkbox", "checkbutton"}:
             raise ValueError(f"Unsupported widget type '{widget_name}'.")
 
         state_name = str(state_value or target_field.get("state", "") or "").strip().lower()

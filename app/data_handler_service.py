@@ -789,6 +789,11 @@ class DataHandlerService:
         date_field_id = self.get_header_field_id_by_role("log_date", fallback_id="date")
         shift_field_id = self.get_header_field_id_by_role("shift_number", fallback_id="shift")
         hours_field_id = self.get_header_field_id_by_role("shift_hours", fallback_id="hours")
+        override_field_id = self.get_header_field_id_by_role("header_override_toggle", fallback_id="header_override")
+        is_override = str(header_data.get(override_field_id, "")).strip().lower() in ("true", "1", "yes", "on")
+
+        if field_role == "header_override_toggle":
+            return "True" if is_override else "False"
         if field_role == "log_date":
             return self.normalize_date_text(text)
         if field_role == "shift_hours":
@@ -796,9 +801,13 @@ class DataHandlerService:
         if field_role in {"shift_number", "goal_rate", "ret_south", "ret_north", "total_molds"}:
             return self.format_numeric_text(text, allow_decimal=False)
         if field_role == "cast_date":
+            if is_override and text:
+                return self.format_header_value(field_id, text)
             computed = self.compute_cast_date(header_data.get(date_field_id))
             return computed or self.format_header_value(field_id, text)
         if field_role in {"shift_start_time", "shift_end_time"}:
+            if is_override and text:
+                return self._normalize_clock_formula_result(text)
             shift_window = self.compute_shift_window(
                 header_data.get(shift_field_id),
                 header_data.get(hours_field_id),
@@ -807,6 +816,8 @@ class DataHandlerService:
             result_key = "start_time" if field_role == "shift_start_time" else "end_time"
             return shift_window.get(result_key, "")
         if field_role == "target_time":
+            if is_override and text:
+                return self.normalize_target_time_text(text)
             computed = self.compute_target_time(header_data.get(hours_field_id), calculation_settings=calculation_settings)
             return computed or self.normalize_target_time_text(text)
         return text
@@ -814,7 +825,19 @@ class DataHandlerService:
     def normalize_header_data(self, header_data, calculation_settings=None):
         normalized = {}
         raw_header = {field_id: str(header_data.get(field_id, "") or "").strip() for field_id in self.get_header_field_ids()}
+        
+        override_field_id = self.get_header_field_id_by_role("header_override_toggle", fallback_id="header_override")
+        if override_field_id in raw_header:
+            normalized[override_field_id] = self.normalize_header_field_value(
+                override_field_id,
+                raw_header.get(override_field_id, ""),
+                raw_header,
+                calculation_settings=calculation_settings,
+            )
+
         for field_id in self.get_header_field_ids():
+            if field_id == override_field_id:
+                continue
             if self.get_header_field_role(field_id) in HEADER_DERIVED_ROLES:
                 continue
             normalized[field_id] = self.normalize_header_field_value(

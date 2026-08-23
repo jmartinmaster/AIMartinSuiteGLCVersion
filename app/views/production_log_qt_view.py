@@ -25,6 +25,7 @@ from PyQt6.QtCore import QTimer, Qt
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QApplication,
+    QCheckBox,
     QComboBox,
     QDialog,
     QDialogButtonBox,
@@ -595,6 +596,14 @@ class ProductionLogQtView(QMainWindow):
         state_name = str(field.get("state") or "").strip().lower()
         default_text = str(field.get("default") or "")
 
+        if widget_name in {"checkbox", "checkbutton"}:
+            field_widget = QCheckBox(parent)
+            is_checked = str(default_text).strip().lower() in {"true", "1", "yes", "on"}
+            field_widget.setChecked(is_checked)
+            if bool(field.get("readonly")) or state_name == "readonly" or state_name == "disabled":
+                field_widget.setEnabled(False)
+            return field_widget
+
         if widget_name == "combobox":
             field_widget = QComboBox(parent)
             field_widget.addItems(self._header_field_options(field))
@@ -619,6 +628,10 @@ class ProductionLogQtView(QMainWindow):
         return field_widget
 
     def _set_header_widget_value(self, widget, value):
+        if isinstance(widget, QCheckBox):
+            is_checked = str(value or "").strip().lower() in {"true", "1", "yes", "on"}
+            widget.setChecked(is_checked)
+            return
         text_value = str(value or "")
         if isinstance(widget, QComboBox):
             if widget.isEditable():
@@ -692,6 +705,23 @@ class ProductionLogQtView(QMainWindow):
 
     def _wire_live_edit_handlers(self):
         for field_id, widget in self.header_widgets.items():
+            if isinstance(widget, QCheckBox):
+                try:
+                    widget.checkStateChanged.connect(self._queue_live_recalculate)
+                except Exception:
+                    pass
+                try:
+                    widget.checkStateChanged.connect(
+                        lambda _state, current_field_id=field_id: self._cache_single_section_payload_by_field(current_field_id)
+                    )
+                except Exception:
+                    pass
+                try:
+                    on_toggle = getattr(self.controller, "on_header_override_toggled", self.controller.on_header_field_focus_out)
+                    widget.checkStateChanged.connect(lambda _state: on_toggle())
+                except Exception:
+                    pass
+                continue
             if isinstance(widget, QComboBox):
                 try:
                     widget.currentTextChanged.connect(self._queue_live_recalculate)
@@ -826,6 +856,8 @@ class ProductionLogQtView(QMainWindow):
         for field_id, widget in section_widgets.items():
             if isinstance(widget, QComboBox):
                 section_payload[field_id] = str(widget.currentText())
+            elif isinstance(widget, QCheckBox):
+                section_payload[field_id] = "True" if widget.isChecked() else "False"
             else:
                 section_payload[field_id] = str(widget.text())
         self._form_data_cache[section_key] = section_payload
@@ -1257,6 +1289,33 @@ class ProductionLogQtView(QMainWindow):
             self._refresh_form_data_cache()
         return deepcopy(self._form_data_cache)
 
+    def apply_header_override_state(self, is_override_active):
+        for field in self.header_fields:
+            field_id = str(field.get("id") or "").strip()
+            widget = self.header_widgets.get(field_id)
+            if widget is None:
+                continue
+            field_role = str(field.get("role") or "").strip().lower()
+            if field_role == "header_override_toggle":
+                continue
+
+            state_name = str(field.get("state") or "").strip().lower()
+            base_readonly = bool(field.get("readonly")) or state_name == "readonly"
+
+            if isinstance(widget, QLineEdit):
+                if is_override_active:
+                    widget.setReadOnly(False)
+                else:
+                    widget.setReadOnly(base_readonly)
+            elif isinstance(widget, QComboBox):
+                if is_override_active:
+                    widget.setEditable(True)
+                else:
+                    is_editable = state_name == "normal"
+                    if not state_name and base_readonly:
+                        is_editable = False
+                    widget.setEditable(is_editable)
+
     def set_form_data(self, payload):
         payload = dict(payload or {})
         self._suspend_dirty_tracking = True
@@ -1276,6 +1335,14 @@ class ProductionLogQtView(QMainWindow):
                 section_rows
             )
             
+        override_widget = None
+        for field in self.header_fields:
+            if str(field.get("role") or "").strip().lower() == "header_override_toggle" or str(field.get("id") or "").strip() == "header_override":
+                override_widget = self.header_widgets.get(field.get("id"))
+                break
+        if isinstance(override_widget, QCheckBox):
+            self.apply_header_override_state(override_widget.isChecked())
+
         self._suspend_dirty_tracking = False
         self._refresh_form_data_cache()
 

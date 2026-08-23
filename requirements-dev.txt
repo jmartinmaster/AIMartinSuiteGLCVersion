@@ -1,0 +1,6 @@
+-r requirements.txt
+PyInstaller>=6.0.0
+pytest>=8.0.0
+mcp>=1.0.0
+starlette>=0.30.0
+uvicorn>=0.25.0
