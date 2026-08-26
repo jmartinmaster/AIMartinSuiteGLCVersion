@@ -24,7 +24,7 @@
             "sha256": "fa86c1d7157d661d0d36a681fa70a6c786a2799b6f5e0261a3a63291578cec58"
         },
         "app/data_handler_service.py": {
-            "sha256": "c2b223aa2ca248e114de09a55199f09e7a585fe3499ce397d9bd19f1b3b5e1ac"
+            "sha256": "58802bd30bdbf058bf4f6cfbab8003ce0a60ddc1b480f7171db934d1d1435d7a"
         },
         "app/data_request_worker.py": {
             "sha256": "070eae1b3189be01a74c8937dbb6b741e060019ef206f6f879997afd95c2158e"
@@ -84,10 +84,10 @@
             "sha256": "3de60732378a61db70626aa5fd64a62b72a3089b71b6781085a4aaceadd46628"
         },
         "app/models/layout_manager_model.py": {
-            "sha256": "c60b3d4ba743a3e4a0ec468d7c422cdf24969998a5ccc67788d1bc1bb3485500"
+            "sha256": "c4d67ada4f13240cbf6416c3bebd969fe955bdd4a2903bc8c0e0cc2b4b741a49"
         },
         "app/views/layout_manager_qt_view.py": {
-            "sha256": "ae5d8f6479017c84cb865e26dd4284d0d9a24c9d767842cf1372732eaf69a5a5"
+            "sha256": "3d41c2d10a3295d2df1e4e1955e0602052fe9f703fde3b31b216b70812478d4d"
         },
         "app/layout_manager_dispatcher.py": {
             "sha256": "4b2725bb4e9ca48eabcf0594393ac53cd8e94d81a847b0fadf1501e0c5e7c31b"
@@ -105,13 +105,13 @@
             "sha256": "3126ca9020901d2f1d5d7a66422fb44057c332ecce0b58e86ab21b9bd9e4459b"
         },
         "app/controllers/production_log_qt_controller.py": {
-            "sha256": "4fde53f229d2eeeed34f7d6761f2c4e6e4ff127e7e17ec8af96cc8f4ac760bf3"
+            "sha256": "186b9fe6204876ca49c2be1531faae467f69382bdebdddea6777b22486bfc9ab"
         },
         "app/models/production_log_model.py": {
-            "sha256": "c4d857e2275d9e155ec6f6995ce1e0d8db66310b6d3ee37b52776d10fd16df54"
+            "sha256": "dc0e5cffb0383ad71947f9ad684abb39676b74b28b7b3936c463e4e603d821a9"
         },
         "app/views/production_log_qt_view.py": {
-            "sha256": "ba79e2a321acd6deb39075ef22b5392eacba106fe5b4b1bf05db624ecce496a0"
+            "sha256": "afd0929981c63682116963a5fd78721bbf25c5304af0d470b469fa0f7371b9a1"
         },
         "app/production_log_calculations.py": {
             "sha256": "247bae4466d824d4815255c4304ea1f234bf6cf8251c2430330f9dbd860dd499"
@@ -126,7 +126,7 @@
             "sha256": "c043d48270278c20ca2ee3a687bb7962c8b4a0fae0a7c73bb1d493505ba057c1"
         },
         "app/production_log_roles.py": {
-            "sha256": "f0a8fe49cf045dd1a272561aa94c49ff100a298256575667bc21b85f99c3a801"
+            "sha256": "4aefcdbff53a5253485d5e95a1db58bca211922cdf5aaea556530298bbdd9632"
         },
         "app/rate_manager.py": {
             "sha256": "14314f1c3f541fa6469dc7a3b16dc7264575bba8990e80739366fc57dee9db01"
@@ -204,7 +204,7 @@
             "sha256": "13cf6dd0de9d0c2355ce8321deb6d9c334199ba3d4e40a878a85b0df85f84b11"
         },
         "data/config/layout_config.json": {
-            "sha256": "4c8dd29499fbd9b71ee780adaa3b359d5e866d2668c96a655545bc45889f0bc8"
+            "sha256": "16c4af898210fe7d4d5d735fbee942a3d4308949c54c5dafb4c322f211cee410"
         },
         "data/config/rates.json": {
             "sha256": "0179f715cc2af3c302b20a192c67d10899ec95df4a1840e65860d42db2f83a44"

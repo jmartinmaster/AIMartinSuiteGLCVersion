@@ -15,6 +15,7 @@
 | Migration & Cleanup | Post-Migration Tk Cleanup and Parity Sweep | **Completed** | 1-6 | `docs/Completed Plans/` |
 | Module Enhancements | Layout Manager Future Enhancements | **Completed** | 1-8 | `docs/Completed Plans/` |
 | Module Enhancements | Form Loader (production_log) Upgrade, Layout-System Support, and Preferred Alias Rollout | **Completed** | 1-7 | `docs/Completed Plans/` |
+| Architecture | Decouple Digital Form Engine and Global Registry System | **Active** | 1-8 planned | `docs/Plans in Progress or not started/` |
 | Accessibility | Application-Wide NVDA Accessibility Verification | **Active** | 0-5 planned | `docs/Plans in Progress or not started/` |
 
 ---
@@ -76,6 +77,12 @@
 ---
 
 ## Active Plans (In Progress or Backlog)
+
+### [Decouple Digital Form Engine and Global Registry System](docs/Plans%20in%20Progress%20or%20not%20started/Decouple%20Digital%20Form%20Engine%20and%20Global%20Registry%20System.md)
+- **Status**: Active (Ready for execution)
+- **Scope**: End-to-end decoupling of the Form Engine into a portable Create/Modify/Fill/Export digital form system. Establish self-contained form packages in `data/forms/<form_id>/`, enforce zero-defaults loading, generalize event-driven calculations and shift configurations, evolve Rate Manager into Global Registry Editor, add soft-deletion/restoration for packaged starter forms, and implement graceful 0-form empty states.
+- **Trigger Keyword**: `EXECUTE_DECOUPLE_FORM_ENGINE_PLAN`
+- **Key Constraints**: Preserve full backward compatibility and functional parity for `temp_form_title` (canonical GLC Production Log) via automated migration with backup.
 
 ### [Application-Wide NVDA Accessibility Verification](docs/Plans%20in%20Progress%20or%20not%20started/Application-Wide%20NVDA%20Accessibility%20Verification.md)
 - **Status**: Active (Ready for execution)

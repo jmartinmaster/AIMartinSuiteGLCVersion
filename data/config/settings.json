@@ -1,1 +1,45 @@
-{}
+{
+    "export_directory": "data/exports",
+    "path_overrides": {},
+    "organize_exports_by_date": true,
+    "update_repository_url": "https://github.com/jmartinmaster/AIMartinSuiteGLCVersion.git",
+    "developer_name": "jmartinmaster",
+    "developer_email": "jamie_martin333@live.com",
+    "enable_advanced_dev_updates": false,
+    "allow_unsigned_dev_updates": false,
+    "release_channel": "stable",
+    "override_ttl_days": 0,
+    "require_dual_override_approval": false,
+    "strict_protected_override_policy": true,
+    "theme": "martin_modern_light",
+    "ui_shell_backend": "pyqt6",
+    "enable_screen_transitions": true,
+    "enable_module_update_notifications": true,
+    "screen_transition_duration_ms": 360,
+    "toast_duration_sec": 5,
+    "auto_save_interval_min": 5,
+    "default_shift_hours": 8.0,
+    "default_goal_mph": 240.0,
+    "downtime_codes": {
+        "1": "Misc Reason",
+        "2": "Machine Repairs",
+        "3": "Auto Pour",
+        "4": "Inoculator",
+        "5": "Pattern Repair",
+        "6": "No Iron (Cupola)",
+        "7": "No Iron (Transfer)",
+        "8": "AMC, SBC, Shakeout",
+        "9": "Pattern Change",
+        "10": "No Sand"
+    },
+    "module_whitelist": [],
+    "persistent_modules": [],
+    "backup_policy": {
+        "enabled": true,
+        "interval_min": 30,
+        "keep_count": 12,
+        "draft_auto_save_interval_min": 5,
+        "draft_history_keep_count": 20,
+        "target_overrides": {}
+    }
+}
